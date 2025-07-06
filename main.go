@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/alpacanetworks/alpacon-cli/cmd"
+	"github.com/alpacax/alpacon-cli/cmd"
 )
 
 func main() {

@@ -9,7 +9,7 @@ builds:
   - env:
       - CGO_ENABLED=0
     ldflags:
-      - -X github.com/alpacanetworks/alpacon-cli/utils.Version={{.Version}}
+      - -X github.com/alpacax/alpacon-cli/utils.Version={{.Version}}
     goos:
       - linux
       - darwin
@@ -37,14 +37,14 @@ archives:
 brews:
   - name: alpacon-cli
     repository:
-      owner: alpacanetworks
+      owner: alpacax
       name: alpacon-cli
     commit_author:
       name: alpacaxbot
-      email: bot@alpacax.com
+      email: support@alpacax.com
     directory: Formula
-    homepage: "https://github.com/alpacanetworks/alpacon-cli"
-    description: "CLI for Alpacon"
+    homepage: "https://github.com/alpacax/alpacon-cli"
+    description: "Alpacon CLI"
 
 dockers:
   - goos: linux
@@ -57,11 +57,11 @@ dockers:
     dockerfile: Dockerfile
 
 nfpms:
-  - maintainer: Younghwan Kim <yh.kim@alpacax.com>
-    description: Alpacon-CLI
-    homepage: https://github.com/alpacanetworks/alpacon-cli
+  - maintainer: AlpacaX <support@alpacax.com>
+    description: "Alpacon CLI"
+    homepage: https://github.com/alpacax/alpacon-cli
     license: MIT
-    vendor: Alpaca Networks
+    vendor: AlpacaX
     formats:
       - deb
       - rpm

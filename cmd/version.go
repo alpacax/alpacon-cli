@@ -2,7 +2,8 @@ package cmd
 
 import (
 	"context"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/google/go-github/github"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ func versionCheck() (*github.RepositoryRelease, bool) {
 	client := github.NewClient(nil)
 	ctx := context.Background()
 
-	release, _, err := client.Repositories.GetLatestRelease(ctx, "alpacanetworks", "alpacon-cli")
+	release, _, err := client.Repositories.GetLatestRelease(ctx, "alpacax", "alpacon-cli")
 	if err != nil {
 		utils.CliError("Checking for a newer version failed with: %s. \n", err)
 		return nil, true

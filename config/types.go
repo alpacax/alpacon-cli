@@ -1,6 +1,6 @@
 package config
 
-// Config describes the configuration for Alpacon-CLI
+// Config describes the configuration for Alpacon CLI
 type Config struct {
 	WorkspaceURL         string `json:"workspace_url"`
 	Token                string `json:"token,omitempty"`

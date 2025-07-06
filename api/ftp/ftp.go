@@ -4,11 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/event"
-	"github.com/alpacanetworks/alpacon-cli/api/server"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
-	"github.com/google/uuid"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -16,6 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/google/uuid"
 )
 
 const (

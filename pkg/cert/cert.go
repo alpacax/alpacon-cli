@@ -8,11 +8,12 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/cert"
-	"github.com/alpacanetworks/alpacon-cli/utils"
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/alpacax/alpacon-cli/api/cert"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 func generateKey(keyPath string) (*rsa.PrivateKey, error) {

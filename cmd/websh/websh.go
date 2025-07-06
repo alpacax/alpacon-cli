@@ -2,13 +2,14 @@ package websh
 
 import (
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/event"
-	"github.com/alpacanetworks/alpacon-cli/api/websh"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
-	"github.com/spf13/cobra"
 	"os"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/websh"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 )
 
 var WebshCmd = &cobra.Command{

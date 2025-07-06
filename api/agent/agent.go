@@ -2,10 +2,11 @@ package agent
 
 import (
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/server"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
 	"path"
+
+	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (

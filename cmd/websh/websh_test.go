@@ -1,10 +1,11 @@
 package websh
 
 import (
-	"github.com/alpacanetworks/alpacon-cli/utils"
-	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
+
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCommandParsing(t *testing.T) {
