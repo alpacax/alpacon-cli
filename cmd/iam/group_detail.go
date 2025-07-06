@@ -1,9 +1,9 @@
 package iam
 
 import (
-	"github.com/alpacanetworks/alpacon-cli/api/iam"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 

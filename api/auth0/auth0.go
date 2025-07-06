@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alpacanetworks/alpacon-cli/config"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 var path = struct {

@@ -1,9 +1,9 @@
 package cert
 
 import (
-	"github.com/alpacanetworks/alpacon-cli/api/cert"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/api/cert"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 

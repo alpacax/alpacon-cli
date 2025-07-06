@@ -2,11 +2,12 @@ package ftp
 
 import (
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/ftp"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
-	"github.com/spf13/cobra"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 )
 
 var CpCmd = &cobra.Command{

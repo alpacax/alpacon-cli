@@ -3,14 +3,15 @@ package cmd
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/auth"
-	"github.com/alpacanetworks/alpacon-cli/api/auth0"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/config"
-	"github.com/alpacanetworks/alpacon-cli/utils"
-	"github.com/spf13/cobra"
 	"net/http"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/api/auth"
+	"github.com/alpacax/alpacon-cli/api/auth0"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 )
 
 var (

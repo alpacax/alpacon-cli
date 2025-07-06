@@ -1,15 +1,15 @@
-# Alpacon-CLI
+# Alpacon CLI
 
 `Alpacon CLI` is a powerful command-line tool designed for managing **Alpacon** seamlessly from the terminal. This tool simplifies complex operations, making it easier for developers to interact with Alpacon services.
 
 
 ## Prerequisites
-For the optimal use of `Alpacon CLI`, ensure that both [**Alpacon-Server**](https://github.com/alpacanetworks/alpacon-server) and [**Alpamon**](https://github.com/alpacanetworks/alpamon-go) are operational.
+For the optimal use of `Alpacon CLI`, ensure that both [**Alpacon-Server**](https://github.com/alpacax/alpacon-server) and [**Alpamon**](https://github.com/alpacax/alpamon) are operational.
 These components are integral for the CLI to function effectively.
 
 ## Documentation
 
-[Alpacon-CLI Documentation](https://github.com/alpacanetworks/alpacon-cli/blob/main/docs/alpacon.md)
+[Alpacon CLI Documentation](https://github.com/alpacax/alpacon-cli/blob/main/docs/alpacon.md)
 
 **Note**: Detailed documentation, including usage guides and best practices, is in progress and will be available soon.
 
@@ -26,7 +26,7 @@ docker run --rm -it alpacax/alpacon-cli version
 ### Build the binary
 - Make sure you have go installed:
 ```bash
-git clone https://github.com/alpacanetworks/alpacon-cli.git
+git clone https://github.com/alpacax/alpacon-cli.git
 go build
 sudo mv alpacon-cli /usr/local/bin/alpacon
 ```
@@ -35,14 +35,14 @@ sudo mv alpacon-cli /usr/local/bin/alpacon
 
 #### Homebrew
 ```bash
-brew tap alpacanetworks/cli https://github.com/alpacanetworks/alpacon-cli
+brew tap alpacax/cli https://github.com/alpacax/alpacon-cli
 brew install alpacon-cli
 ```
 
 #### Download from GitHub Releases
 ```bash
 VERSION=<latest-version> # Replace with the actual version
-wget https://github.com/alpacanetworks/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-darwin-arm64.tar.gz
+wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-darwin-arm64.tar.gz
 tar -xvf alpacon-${VERSION}-darwin-arm64.tar.gz
 chmod +x alpacon
 sudo mv alpacon /usr/local/bin
@@ -68,7 +68,7 @@ sudo yum install alpacon
 #### Download from GitHub Releases
 ```bash
 VERSION=<latest-version> # Replace with the actual version
-wget https://github.com/alpacanetworks/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-linux-amd64.tar.gz
+wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-linux-amd64.tar.gz
 tar -xvf alpacon-${VERSION}-linux-amd64.tar.gz
 chmod +x alpacon
 sudo mv alpacon /usr/local/bin
@@ -405,4 +405,4 @@ $ alpacon cert download [CERT ID] --out=/path/to/certificate.crt
 ```
 
 ### Contributing
-We welcome bug reports and pull requests on our GitHub repository at https://github.com/alpacanetworks/alpacon-cli.
+We welcome bug reports and pull requests on our GitHub repository at https://github.com/alpacax/alpacon-cli.

@@ -1,4 +1,4 @@
-module github.com/alpacanetworks/alpacon-cli
+module github.com/alpacax/alpacon-cli
 
 go 1.20
 

@@ -2,11 +2,12 @@ package authority
 
 import (
 	"fmt"
-	"github.com/alpacanetworks/alpacon-cli/api/cert"
-	"github.com/alpacanetworks/alpacon-cli/api/iam"
-	"github.com/alpacanetworks/alpacon-cli/api/server"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+
+	"github.com/alpacax/alpacon-cli/api/cert"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -38,8 +39,8 @@ var authorityCreateCmd = &cobra.Command{
 func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
 	var authorityRequest cert.AuthorityRequest
 
-	authorityRequest.Name = utils.PromptForRequiredInput("Common name for the CA. (e.g., Alapca Networks' Root CA): ")
-	authorityRequest.Organization = utils.PromptForRequiredInput("Organization name that this CA belongs to. (e.g., Alpaca Networks): ")
+	authorityRequest.Name = utils.PromptForRequiredInput("Common name for the CA. (e.g., AlpacaX Root CA): ")
+	authorityRequest.Organization = utils.PromptForRequiredInput("Organization name that this CA belongs to. (e.g., AlpacaX): ")
 	authorityRequest.Domain = utils.PromptForRequiredInput("Domain name of the root certificate: ")
 	authorityRequest.RootValidDays = utils.PromptForIntInput("Root certificate validity in days (default: 3650): ", 365*10)
 	authorityRequest.DefaultValidDays = utils.PromptForIntInput("Child certificate validity in days (default: 365): ", 365)

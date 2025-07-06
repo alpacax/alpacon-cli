@@ -1,10 +1,10 @@
 package token
 
 import (
-	"github.com/alpacanetworks/alpacon-cli/api/auth"
-	"github.com/alpacanetworks/alpacon-cli/api/security"
-	"github.com/alpacanetworks/alpacon-cli/client"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/api/auth"
+	"github.com/alpacax/alpacon-cli/api/security"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 

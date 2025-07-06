@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alpacanetworks/alpacon-cli/api/auth0"
-	"github.com/alpacanetworks/alpacon-cli/config"
-	"github.com/alpacanetworks/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/api/auth0"
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (

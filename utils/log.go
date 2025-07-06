@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	gitIssueURL = "https://github.com/alpacanetworks/alpacon-cli/issues"
+	gitIssueURL = "https://github.com/alpacax/alpacon-cli/issues"
 )
 
 func reportCLIError() {
