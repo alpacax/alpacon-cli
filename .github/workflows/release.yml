@@ -41,18 +41,23 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+      - name: Strip "v" prefix from tag
+        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }} 
 
       - name: Upload AMD64 DEB artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: alpacon_${{ github.ref_name }}_linux_amd64.deb
-          path: dist/alpacon_${{ github.ref_name }}_linux_amd64.deb
+          name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Upload AMD64 RPM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: alpacon_${{ github.ref_name }}_linux_amd64.rpm
-          path: dist/alpacon_${{ github.ref_name }}_linux_amd64.rpm
+          name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
   packagecloud-deploy:
     needs: [goreleaser]
@@ -62,6 +67,7 @@ jobs:
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }} 
+
       - name: Download AMD64 DEB Artifacts
         uses: actions/download-artifact@v4
         with:
