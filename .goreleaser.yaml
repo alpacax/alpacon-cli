@@ -26,10 +26,10 @@ builds:
         goarch: 386
 
 checksum:
-  name_template: "{{ .ProjectName }}-{{ .Version }}-checksums.sha256"
+  name_template: '{{ .ProjectName }}-{{ trimprefix .Version "v" }}-checksums.sha256'
 
 archives:
-  - name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+  - name_template: '{{ .ProjectName }}-{{ trimprefix .Version "v" }}-{{ .Os }}-{{ .Arch }}'
     format_overrides:
       - goos: windows
         format: zip
@@ -53,11 +53,12 @@ dockers:
       - alpacon
     image_templates:
       - "alpacax/alpacon-cli:latest"
-      - "alpacax/alpacon-cli:{{ .Tag }}"
+      - 'alpacax/alpacon-cli:{{ trimprefix .Tag "v" }}'
     dockerfile: Dockerfile
 
 nfpms:
-  - maintainer: AlpacaX <support@alpacax.com>
+  - file_name_template: '{{ .PackageName }}_{{ trimprefix .Version "v" }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}''
+    maintainer: AlpacaX <support@alpacax.com>
     description: "Alpacon CLI"
     homepage: https://github.com/alpacax/alpacon-cli
     license: MIT
