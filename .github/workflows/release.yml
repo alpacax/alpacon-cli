@@ -58,22 +58,26 @@ jobs:
     needs: [goreleaser]
     runs-on: ubuntu-latest
     steps:
+      - name: Strip "v" prefix from tag
+        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }} 
       - name: Download AMD64 DEB Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: alpacon_${{ github.ref_name }}_linux_amd64.deb
+          name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Download AMD64 RPM Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: alpacon_${{ github.ref_name }}_linux_amd64.rpm
+          name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
       - run: ls
 
       - name: Upload AMD64 DEB to PackageCloud
         uses: danielmundi/upload-packagecloud@v1
         with:
-          PACKAGE-NAME: alpacon_${{ github.ref_name }}_linux_amd64.deb
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
           PACKAGECLOUD-USERNAME: alpacax
           PACKAGECLOUD-REPO: alpacon
           PACKAGECLOUD-DISTRIB: any/any
@@ -82,7 +86,7 @@ jobs:
       - name: Upload AMD64 RPM to PackageCloud
         uses: danielmundi/upload-packagecloud@v1
         with:
-          PACKAGE-NAME: alpacon_${{ github.ref_name }}_linux_amd64.rpm
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
           PACKAGECLOUD-USERNAME: alpacax
           PACKAGECLOUD-REPO: alpacon
           PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
