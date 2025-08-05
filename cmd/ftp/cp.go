@@ -47,13 +47,18 @@ var CpCmd = &cobra.Command{
 		}
 
 		for i, arg := range args {
-			if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
-				parts := strings.SplitN(arg, "@", 2)
-				if username == "" {
-					username = parts[0]
+			if strings.Contains(arg, "@") && (strings.Contains(arg, ":") || !utils.IsRemoteTarget(arg)) {
+				// Parse SSH-like target: user@host or user@host:path
+				sshTarget := utils.ParseSSHTarget(arg)
+				if username == "" && sshTarget.User != "" {
+					username = sshTarget.User
 				}
-				// Remove the username@ part from the argument
-				args[i] = parts[1]
+				// Reconstruct the argument without the user part
+				if sshTarget.Path != "" {
+					args[i] = sshTarget.Host + ":" + sshTarget.Path
+				} else {
+					args[i] = sshTarget.Host
+				}
 			}
 		}
 
@@ -86,12 +91,12 @@ func init() {
 
 // isRemotePath determines if the given path is a remote server path.
 func isRemotePath(path string) bool {
-	return strings.Contains(path, ":")
+	return utils.IsRemoteTarget(path)
 }
 
 // isLocalPath determines if the given path is a local file system path.
 func isLocalPath(path string) bool {
-	return !isRemotePath(path)
+	return utils.IsLocalTarget(path)
 }
 
 func isLocalPaths(paths []string) bool {

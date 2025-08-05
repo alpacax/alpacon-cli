@@ -255,6 +255,42 @@ func TestCommandParsing(t *testing.T) {
 			expectServerName:  "server-name",
 			expectCommandArgs: []string{"ls; cat /etc/passwd"},
 		},
+		{
+			testName:          "UserAtHostSyntax",
+			args:              []string{"root@prod-docker"},
+			expectUsername:    "root",
+			expectGroupname:   "",
+			expectEnv:         map[string]string{},
+			expectServerName:  "prod-docker",
+			expectCommandArgs: nil,
+		},
+		{
+			testName:          "UserAtHostWithCommand",
+			args:              []string{"admin@web-server", "docker", "ps"},
+			expectUsername:    "admin",
+			expectGroupname:   "",
+			expectEnv:         map[string]string{},
+			expectServerName:  "web-server",
+			expectCommandArgs: []string{"docker", "ps"},
+		},
+		{
+			testName:          "UserFlagOverridesUserAtHost",
+			args:              []string{"-u", "override", "root@prod-docker", "ls"},
+			expectUsername:    "override",
+			expectGroupname:   "",
+			expectEnv:         map[string]string{},
+			expectServerName:  "prod-docker",
+			expectCommandArgs: []string{"ls"},
+		},
+		{
+			testName:          "ComplexHostnameWithUser",
+			args:              []string{"deploy@web-server-01.example.com", "uptime"},
+			expectUsername:    "deploy",
+			expectGroupname:   "",
+			expectEnv:         map[string]string{},
+			expectServerName:  "web-server-01.example.com",
+			expectCommandArgs: []string{"uptime"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -324,6 +360,15 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 
 	if serverName == "join" {
 		join = true
+	}
+
+	// Parse SSH-like syntax for user@host (same logic as in the main command)
+	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
+		sshTarget := utils.ParseSSHTarget(serverName)
+		if username == "" && sshTarget.User != "" {
+			username = sshTarget.User
+		}
+		serverName = sshTarget.Host
 	}
 
 	return username, groupname, serverName, commandArgs, share, join, readOnly, url, password, env

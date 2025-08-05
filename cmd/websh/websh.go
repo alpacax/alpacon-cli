@@ -117,6 +117,15 @@ var WebshCmd = &cobra.Command{
 			utils.CliError("Server name is required.")
 		}
 
+		// Parse SSH-like syntax for user@host
+		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
+			sshTarget := utils.ParseSSHTarget(serverName)
+			if username == "" && sshTarget.User != "" {
+				username = sshTarget.User
+			}
+			serverName = sshTarget.Host
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
