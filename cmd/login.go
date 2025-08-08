@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -180,16 +181,13 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 	workspaceURL = strings.TrimSuffix(workspaceURL, "/")
 
 	// Transform URL patterns: domain.com/workspace -> workspace.domain.com
-	if strings.Contains(workspaceURL, "://") && strings.Contains(workspaceURL, "/") {
-		parts := strings.Split(workspaceURL, "/")
-		if len(parts) >= 4 {
-			protocol := parts[0]
-			domain := parts[2]
-			workspace := parts[3]
-
-			if domain != "" && workspace != "" {
-				workspaceURL = fmt.Sprintf("%s//%s.%s", protocol, workspace, domain)
-			}
+	parsedURL, err := url.Parse(workspaceURL)
+	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
+		workspace := strings.TrimPrefix(parsedURL.Path, "/")
+		domain := parsedURL.Host
+		protocol := parsedURL.Scheme
+		if domain != "" && workspace != "" {
+			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
 		}
 	}
 
