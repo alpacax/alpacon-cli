@@ -179,18 +179,16 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 
 	workspaceURL = strings.TrimSuffix(workspaceURL, "/")
 
-	// Transform URL patterns: region.alpacon.io/workspace -> workspace.region.alpacon.io
-	if strings.Contains(workspaceURL, ".alpacon.io/") {
+	// Transform URL patterns: domain.com/workspace -> workspace.domain.com
+	if strings.Contains(workspaceURL, "://") && strings.Contains(workspaceURL, "/") {
 		parts := strings.Split(workspaceURL, "/")
-		for i, part := range parts {
-			if strings.HasSuffix(part, ".alpacon.io") && i+1 < len(parts) {
-				workspace := parts[i+1]
-				domainParts := strings.Split(part, ".")
-				if len(domainParts) >= 3 {
-					domain := domainParts[0]
-					workspaceURL = strings.Replace(workspaceURL, part+"/"+workspace, workspace+"."+domain+".alpacon.io", 1)
-				}
-				break
+		if len(parts) >= 4 {
+			protocol := parts[0]
+			domain := parts[2]
+			workspace := parts[3]
+
+			if domain != "" && workspace != "" {
+				workspaceURL = fmt.Sprintf("%s//%s.%s", protocol, workspace, domain)
 			}
 		}
 	}
