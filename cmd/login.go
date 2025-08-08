@@ -91,6 +91,8 @@ var loginCmd = &cobra.Command{
 		token, _ := cmd.Flags().GetString("token")
 
 		fmt.Printf("Logging in to %s\n", workspaceURL)
+		workspaceName := utils.ExtractWorkspaceName(workspaceURL)
+
 		if envInfo.Auth0.Method == "auth0" && token == "" {
 			deviceCode, err := auth0.RequestDeviceCode(workspaceURL, httpClient, envInfo)
 			if err != nil {
@@ -110,7 +112,7 @@ var loginCmd = &cobra.Command{
 				utils.CliError(err.Error())
 			}
 
-			err = config.CreateConfig(workspaceURL, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, tokenRes.ExpiresIn, insecure)
+			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, tokenRes.ExpiresIn, insecure)
 			if err != nil {
 				utils.CliError("Failed to save config: %v", err)
 			}

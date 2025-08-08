@@ -50,6 +50,23 @@ func GetUserAgent() string {
 	return fmt.Sprintf("%s/%s", "alpacon-cli", GetCLIVersion())
 }
 
+// ExtractWorkspaceName extracts workspace name from workspace URL
+func ExtractWorkspaceName(workspaceURL string) string {
+	parsedURL, err := url.Parse(workspaceURL)
+	if err != nil {
+		return ""
+	}
+
+	// Extract subdomain from hostname (e.g., workspace.alpacon.io -> workspace)
+	hostname := parsedURL.Hostname()
+	parts := strings.Split(hostname, ".")
+	if len(parts) > 0 {
+		return parts[0]
+	}
+
+	return ""
+}
+
 func SplitAndParseInt(input string) []int {
 	var intValues []int
 
