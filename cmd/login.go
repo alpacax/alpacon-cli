@@ -177,6 +177,24 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 		workspaceURL = "https://" + workspaceURL
 	}
 
+	workspaceURL = strings.TrimSuffix(workspaceURL, "/")
+
+	// Transform URL patterns: region.alpacon.io/workspace -> workspace.region.alpacon.io
+	if strings.Contains(workspaceURL, ".alpacon.io/") {
+		parts := strings.Split(workspaceURL, "/")
+		for i, part := range parts {
+			if strings.HasSuffix(part, ".alpacon.io") && i+1 < len(parts) {
+				workspace := parts[i+1]
+				domainParts := strings.Split(part, ".")
+				if len(domainParts) >= 3 {
+					domain := domainParts[0]
+					workspaceURL = strings.Replace(workspaceURL, part+"/"+workspace, workspace+"."+domain+".alpacon.io", 1)
+				}
+				break
+			}
+		}
+	}
+
 	resp, err := httpClient.Get(workspaceURL)
 	if err != nil || resp.StatusCode >= 400 {
 		return "", fmt.Errorf("workspace URL is unreachable: %v", workspaceURL)
