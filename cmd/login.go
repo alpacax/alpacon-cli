@@ -27,7 +27,7 @@ var loginCmd = &cobra.Command{
 	alpacon login
 
 	alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
-	alpacon login example.alpacon.io
+	alpacon login [WORKSPACE_URL]
 	
 	# Include http if using localhost.
 	alpacon login http://localhost:8000
