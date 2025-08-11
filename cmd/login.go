@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -26,7 +27,7 @@ var loginCmd = &cobra.Command{
 	alpacon login
 
 	alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
-	alpacon login example.alpacon.io
+	alpacon login [WORKSPACE_URL]
 	
 	# Include http if using localhost.
 	alpacon login http://localhost:8000
@@ -175,6 +176,24 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client) (string, error) {
 	if !strings.HasPrefix(workspaceURL, "http") {
 		workspaceURL = "https://" + workspaceURL
+	}
+
+	workspaceURL = strings.TrimSuffix(workspaceURL, "/")
+
+	// Transform URL patterns: domain.com/workspace -> workspace.domain.com
+	parsedURL, err := url.Parse(workspaceURL)
+	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
+		workspace := strings.TrimPrefix(parsedURL.Path, "/")
+		domain := parsedURL.Host
+		protocol := parsedURL.Scheme
+
+		// ToDo: modify below code after region decision in portal (multiple region)
+		if domain == "alpacon.io" {
+			domain = "ap1." + domain
+		}
+		if domain != "" && workspace != "" {
+			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
+		}
 	}
 
 	resp, err := httpClient.Get(workspaceURL)
