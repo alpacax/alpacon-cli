@@ -2,7 +2,9 @@ package ftp
 
 import (
 	"fmt"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/client"
@@ -72,9 +74,53 @@ var CpCmd = &cobra.Command{
 		}
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
-			uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+			if err != nil {
+				code, _ := utils.ParseErrorResponse(err)
+				if code == utils.CodeAuthMFARequired {
+					serverName, _ := utils.SplitPath(dest)
+					err := mfa.HandleMFAError(alpaconClient, serverName)
+					if err != nil {
+						utils.CliError("MFA authentication failed: %s", err)
+					}
+					for {
+						fmt.Println("Waiting for MFA authentication...")
+						time.Sleep(5 * time.Second)
+
+						err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						if err == nil {
+							fmt.Println("MFA authentication has been completed!")
+							break
+						}
+					}
+				} else {
+					utils.CliError("Failed to upload the file to server: %s.", err)
+				}
+			}
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
-			downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+			err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+			if err != nil {
+				code, _ := utils.ParseErrorResponse(err)
+				if code == utils.CodeAuthMFARequired {
+					serverName, _ := utils.SplitPath(dest)
+					err := mfa.HandleMFAError(alpaconClient, serverName)
+					if err != nil {
+						utils.CliError("MFA authentication failed: %s", err)
+					}
+					for {
+						fmt.Println("Waiting for MFA authentication...")
+						time.Sleep(5 * time.Second)
+
+						err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						if err == nil {
+							fmt.Println("MFA authentication has been completed!")
+							break
+						}
+					}
+				} else {
+					utils.CliError("Failed to download the file from server: %s.", err)
+				}
+			}
 		} else {
 			utils.CliError("Invalid combination of source and destination paths. Use 'local -> remote' (upload) or 'remote -> local' (download). Remote paths should be in format 'server:path'. Example: 'alpacon ftp cp localfile.txt myserver:/tmp/' or 'alpacon ftp cp myserver:/tmp/file.txt ./'")
 		}
@@ -108,7 +154,7 @@ func isLocalPaths(paths []string) bool {
 	return true
 }
 
-func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) {
+func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) error {
 	var result []string
 	var err error
 
@@ -118,19 +164,21 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		result, err = ftp.UploadFile(client, src, dest, username, groupname)
 	}
 	if err != nil {
-		utils.CliError("Failed to upload the file to server: %s.", err)
+		return err
 	}
 	wrappedSrc := fmt.Sprintf("[%s]", strings.Join(src, ", "))
 	utils.CliInfo("Upload request for %s to %s successful.", wrappedSrc, dest)
 	fmt.Printf("Result: %s.\n", result)
+	return nil
 }
 
-func downloadObject(client *client.AlpaconClient, src, dest, username, groupname string, recursive bool) {
+func downloadObject(client *client.AlpaconClient, src, dest, username, groupname string, recursive bool) error {
 	var err error
 	err = ftp.DownloadFile(client, src, dest, username, groupname, recursive)
 
 	if err != nil {
-		utils.CliError("Failed to download the file from server: %s.", err)
+		return err
 	}
 	utils.CliInfo("Download request for %s to server %s successful.", src, dest)
+	return nil
 }

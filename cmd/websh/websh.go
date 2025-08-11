@@ -151,13 +151,13 @@ var WebshCmd = &cobra.Command{
 			fmt.Println(result)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
-			code, _ := utils.ParseErrorResponse(err)
 
 			if err != nil {
+				code, _ := utils.ParseErrorResponse(err)
 				if code == utils.CodeAuthMFARequired {
 					err := mfa.HandleMFAError(alpaconClient, serverName)
 					if err != nil {
-						utils.CliError("Failed to mfa required for %s server: %s.", serverName, err)
+						utils.CliError("MFA authentication failed: %s", err)
 					}
 					for {
 						fmt.Println("Waiting for MFA authentication...")
