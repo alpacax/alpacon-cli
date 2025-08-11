@@ -102,7 +102,7 @@ var CpCmd = &cobra.Command{
 			if err != nil {
 				code, _ := utils.ParseErrorResponse(err)
 				if code == utils.CodeAuthMFARequired {
-					serverName, _ := utils.SplitPath(dest)
+					serverName, _ := utils.SplitPath(sources[0])
 					err := mfa.HandleMFAError(alpaconClient, serverName)
 					if err != nil {
 						utils.CliError("MFA authentication failed: %s", err)
@@ -111,7 +111,7 @@ var CpCmd = &cobra.Command{
 						fmt.Println("Waiting for MFA authentication...")
 						time.Sleep(5 * time.Second)
 
-						err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
 						if err == nil {
 							fmt.Println("MFA authentication has been completed!")
 							break
