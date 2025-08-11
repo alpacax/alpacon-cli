@@ -286,13 +286,15 @@ func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname strin
 		if err != nil {
 			return err
 		}
-		err = utils.Unzip(filepath.Join(dest, fileName), dest)
-		if err != nil {
-			return err
-		}
-		err = utils.DeleteFile(filepath.Join(dest, fileName))
-		if err != nil {
-			return err
+		if recursive {
+			err = utils.Unzip(filepath.Join(dest, fileName), dest)
+			if err != nil {
+				return err
+			}
+			err = utils.DeleteFile(filepath.Join(dest, fileName))
+			if err != nil {
+				return err
+			}
 		}
 	}
 
