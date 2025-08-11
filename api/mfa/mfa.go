@@ -17,7 +17,7 @@ type mfaResponse struct {
 
 func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
 	params := map[string]string{
-		"location":  "command",
+		"location":  "cli",
 		"server":    serverID,
 		"workspace": workspaceName,
 	}

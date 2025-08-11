@@ -7,6 +7,7 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -165,8 +166,21 @@ var WebshCmd = &cobra.Command{
 
 					fmt.Println("\n==================== AUTHENTICATION REQUIRED ====================")
 					fmt.Println("\nPlease authenticate by visiting the following URL:")
-					fmt.Println(mfaURL)
-					fmt.Print("\n=================================================================\n\n")
+					fmt.Printf("%s\n\n", mfaURL)
+					fmt.Print("===============================================================\n\n")
+
+					for {
+						fmt.Println("Waiting for MFA authentication...")
+						time.Sleep(5 * time.Second)
+
+						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
+						if err == nil {
+							fmt.Println("MFA authentication has been completed!")
+							break
+						}
+					}
+				} else {
+					utils.CliError("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
