@@ -3,8 +3,6 @@ package websh
 import (
 	"fmt"
 	"github.com/alpacax/alpacon-cli/api/mfa"
-	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/config"
 	"os"
 	"strings"
 	"time"
@@ -134,10 +132,6 @@ var WebshCmd = &cobra.Command{
 		if err != nil {
 			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			utils.CliError("Failed to load configuration: %s.", err)
-		}
 
 		if serverName == "join" {
 			if url == "" || password == "" {
@@ -161,14 +155,10 @@ var WebshCmd = &cobra.Command{
 
 			if err != nil {
 				if code == utils.CodeAuthMFARequired {
-					serverID, _ := server.GetServerIDByName(alpaconClient, serverName)
-					mfaURL, _ := mfa.GetMFALink(alpaconClient, serverID, cfg.WorkspaceName)
-
-					fmt.Println("\n==================== AUTHENTICATION REQUIRED ====================")
-					fmt.Println("\nPlease authenticate by visiting the following URL:")
-					fmt.Printf("%s\n\n", mfaURL)
-					fmt.Print("===============================================================\n\n")
-
+					err := mfa.HandleMFAError(alpaconClient, serverName)
+					if err != nil {
+						utils.CliError("Failed to mfa required for %s server: %s.", serverName, err)
+					}
 					for {
 						fmt.Println("Waiting for MFA authentication...")
 						time.Sleep(5 * time.Second)

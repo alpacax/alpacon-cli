@@ -2,12 +2,13 @@ package exec
 
 import (
 	"fmt"
-	"strings"
-
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
+	"strings"
+	"time"
 )
 
 var ExecCmd = &cobra.Command{
@@ -58,10 +59,28 @@ var ExecCmd = &cobra.Command{
 
 		result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 		if err != nil {
-			utils.CliError("Failed to execute command on '%s' server: %s.", serverName, err)
-			return
-		}
+			code, _ := utils.ParseErrorResponse(err)
+			if code == utils.CodeAuthMFARequired {
+				err := mfa.HandleMFAError(alpaconClient, serverName)
+				if err != nil {
+					utils.CliError("Failed to mfa required for %s server: %s.", serverName, err)
+				}
 
+				for {
+					fmt.Println("Waiting for MFA authentication...")
+					time.Sleep(5 * time.Second)
+
+					result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
+					if err == nil {
+						fmt.Println("MFA authentication has been completed!")
+						break
+					}
+				}
+			} else {
+				utils.CliError("Failed to execute command on '%s' server: %s.", serverName, err)
+				return
+			}
+		}
 		fmt.Println(result)
 	},
 }
