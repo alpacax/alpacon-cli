@@ -198,7 +198,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 
 	resp, err := httpClient.Get(workspaceURL)
 	if err != nil || resp.StatusCode >= 400 {
-		return "", fmt.Errorf("workspace URL '%s' is unreachable or invalid. Please check the URL and your internet connection. If using a custom domain, ensure it includes the protocol (https://)", workspaceURL)
+		return "", fmt.Errorf("workspace URL '%s' is unreachable or invalid. Please check the URL and your internet connection", workspaceURL)
 	}
 	defer resp.Body.Close()
 
