@@ -71,7 +71,7 @@ var CpCmd = &cobra.Command{
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
 		} else {
-			utils.CliError("Invalid combination of source and destination paths.")
+			utils.CliError("Invalid combination of source and destination paths. Use 'local -> remote' (upload) or 'remote -> local' (download). Remote paths should be in format 'server:path'. Example: 'alpacon ftp cp localfile.txt myserver:/tmp/' or 'alpacon ftp cp myserver:/tmp/file.txt ./'")
 		}
 	},
 }

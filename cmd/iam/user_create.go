@@ -27,7 +27,7 @@ var userCreateCmd = &cobra.Command{
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliError("You do not have the permission to create users.")
+			utils.CliError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
 		userRequest := promptForUser(alpaconClient)
