@@ -14,7 +14,7 @@ var ServerCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon server list', 'alpacon server create', 'alpacon server detail', or 'alpacon server delete'. Run 'alpacon server --help' for more information")
 	},
 }
 
