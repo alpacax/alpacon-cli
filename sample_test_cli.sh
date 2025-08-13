@@ -47,7 +47,6 @@ run_test() {
     echo "Command: $command"
     echo "----------------------------------------"
 
-    # eval 대신 직접 실행하여 syntax error 방지
     if bash -c "$command"; then
         log_success "Test passed: $test_name"
     else
