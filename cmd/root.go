@@ -8,6 +8,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/cert"
 	"github.com/alpacax/alpacon-cli/cmd/csr"
 	"github.com/alpacax/alpacon-cli/cmd/event"
+	"github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/ftp"
 	"github.com/alpacax/alpacon-cli/cmd/iam"
 	"github.com/alpacax/alpacon-cli/cmd/log"
@@ -59,6 +60,9 @@ func init() {
 
 	// websh
 	RootCmd.AddCommand(websh.WebshCmd)
+
+	// exec
+	RootCmd.AddCommand(exec.ExecCmd)
 
 	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)

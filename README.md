@@ -404,5 +404,56 @@ $ alpacon cert describe [CERT ID]
 $ alpacon cert download [CERT ID] --out=/path/to/certificate.crt
 ```
 
+### Test
+
+To test the Alpacon CLI functionality, you can use the provided test script:
+
+1. **Copy the sample test script:**
+   ```bash
+   cp sample_test_cli.sh test_cli.sh
+   ```
+
+2. **Edit the configuration variables to match your environment:**
+   ```bash
+   vi test_cli.sh
+   ```
+   
+   Update the following variables in the Configuration section:
+   ```bash
+   # Configuration
+   SERVER_NAME="your-server-name"           # e.g., "amazon-linux-1"
+   LOCAL_PATH="/your/local/path"            # e.g., "/Users/username/Documents"
+   REMOTE_ROOT_PATH="/root"                 # Usually "/root"
+   REMOTE_USER_PATH="/your/remote/path"     # e.g., "/home/username"
+   WORKSPACE_URL="your-workspace-url"       # e.g., "https://yourworkspace.alpacon.io"
+   ```
+
+3. **Make the script executable and run the tests:**
+   ```bash
+   chmod +x test_cli.sh
+   ./test_cli.sh
+   ```
+
+The test script will automatically:
+- Check if you're logged in to Alpacon (and login if necessary)
+- Create test files and folders locally
+- Run comprehensive tests covering:
+  - Basic connectivity and server information
+  - Command execution (regular and root user)
+  - File upload/download operations
+  - Folder upload/download operations (recursive)
+  - WebSH functionality
+  - Advanced operations and error handling
+- Clean up all test files after completion
+
+**Test Coverage:**
+- 32 automated tests covering all major CLI functionality
+- File and folder transfer operations
+- Permission-based operations (user and root)
+- SSH-style command syntax
+- Error handling and edge cases
+
+**Note:** Make sure you have access to the specified server and the necessary permissions for the test operations before running the script.
+
 ### Contributing
 We welcome bug reports and pull requests on our GitHub repository at https://github.com/alpacax/alpacon-cli.

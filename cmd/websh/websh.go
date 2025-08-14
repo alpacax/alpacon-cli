@@ -2,8 +2,10 @@ package websh
 
 import (
 	"fmt"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -117,6 +119,15 @@ var WebshCmd = &cobra.Command{
 			utils.CliError("Server name is required.")
 		}
 
+		// Parse SSH-like syntax for user@host
+		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
+			sshTarget := utils.ParseSSHTarget(serverName)
+			if username == "" && sshTarget.User != "" {
+				username = sshTarget.User
+			}
+			serverName = sshTarget.Host
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -140,8 +151,27 @@ var WebshCmd = &cobra.Command{
 			fmt.Println(result)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
+
 			if err != nil {
-				utils.CliError("Failed to create the websh connection: %s.", err)
+				code, _ := utils.ParseErrorResponse(err)
+				if code == utils.CodeAuthMFARequired {
+					err := mfa.HandleMFAError(alpaconClient, serverName)
+					if err != nil {
+						utils.CliError("MFA authentication failed: %s", err)
+					}
+					for {
+						fmt.Println("Waiting for MFA authentication...")
+						time.Sleep(5 * time.Second)
+
+						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
+						if err == nil {
+							fmt.Println("MFA authentication has been completed!")
+							break
+						}
+					}
+				} else {
+					utils.CliError("Failed to create websh session for '%s' server: %s.", serverName, err)
+				}
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
