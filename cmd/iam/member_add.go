@@ -62,6 +62,6 @@ func promptForRole() string {
 		if strings.ToLower(role) == "owner" || strings.ToLower(role) == "manager" || strings.ToLower(role) == "member" {
 			return role
 		}
-		fmt.Println("Invalid role. Please choose 'owner', 'manager', or 'member'.")
+		fmt.Println("Invalid role. Please choose 'owner', 'manager', or 'member'. Role determines the user's permissions within the group")
 	}
 }

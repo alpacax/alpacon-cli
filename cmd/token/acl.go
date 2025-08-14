@@ -17,7 +17,7 @@ var AclCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon token acl list', 'alpacon token acl add', or 'alpacon token acl delete' to manage access control rules. Run 'alpacon token acl --help' for more information")
 	},
 }
 

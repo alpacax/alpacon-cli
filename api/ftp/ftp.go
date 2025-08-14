@@ -255,7 +255,7 @@ func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname strin
 		for count := 0; count < maxAttempts; count++ {
 			resp, err = http.Get(downloadResponse.DownloadURL)
 			if err != nil {
-				return err
+				return fmt.Errorf("network error while downloading: %w", err)
 			}
 
 			if resp.StatusCode == http.StatusOK {
@@ -273,7 +273,7 @@ func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname strin
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to read download response: %w", err)
 		}
 
 		var fileName string
@@ -284,16 +284,16 @@ func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname strin
 		}
 		err = utils.SaveFile(filepath.Join(dest, fileName), respBody)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to save file locally: %w", err)
 		}
 		if recursive {
 			err = utils.Unzip(filepath.Join(dest, fileName), dest)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to extract downloaded folder: %w", err)
 			}
 			err = utils.DeleteFile(filepath.Join(dest, fileName))
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to clean up temporary zip file: %w", err)
 			}
 		}
 	}

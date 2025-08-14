@@ -17,7 +17,7 @@ var UserCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon user list', 'alpacon user create', 'alpacon user detail', 'alpacon user update', or 'alpacon user delete'. Run 'alpacon user --help' for more information")
 	},
 }
 

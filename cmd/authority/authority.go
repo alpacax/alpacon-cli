@@ -13,7 +13,7 @@ var AuthorityCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon authority create', 'alpacon authority list', 'alpacon authority detail', 'alpacon authority download', or 'alpacon authority delete'. Run 'alpacon authority --help' for more information")
 	},
 }
 

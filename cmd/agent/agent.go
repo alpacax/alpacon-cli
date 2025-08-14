@@ -13,7 +13,7 @@ var AgentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon agent upgrade', 'alpacon agent restart', or 'alpacon agent shutdown' to manage the server agent. Run 'alpacon agent --help' for more information")
 	},
 }
 

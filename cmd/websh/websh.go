@@ -204,7 +204,7 @@ func extractEnvValue(args []string, i int, env map[string]string) int {
 			env[parts[0]] = value
 		}
 	} else {
-		utils.CliError("Invalid format for --env. Expected '--env=KEY=VALUE'.")
+		utils.CliError("Invalid format for --env flag. Expected '--env=KEY=VALUE', but got '%s'. Please use the format: --env=MY_VAR=my_value", args[i])
 	}
 
 	return i

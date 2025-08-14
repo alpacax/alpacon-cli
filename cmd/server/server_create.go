@@ -61,7 +61,7 @@ func promptForPlatform() string {
 		if strings.ToLower(platform) == "debian" || strings.ToLower(platform) == "rhel" {
 			return platform
 		}
-		fmt.Println("Invalid platform. Please choose 'debian' or 'rhel'.")
+		fmt.Println("Invalid platform. Please choose 'debian' or 'rhel'. This determines the package manager and system configuration for the server")
 	}
 }
 
@@ -80,12 +80,12 @@ func selectAndConvertGroups(ac *client.AlpaconClient, groupList []iam.GroupAttri
 
 	for _, groupIndex := range intGroups {
 		if groupIndex < 1 || groupIndex > len(groupList) {
-			utils.CliError("Invalid group index: %d", groupIndex)
+			utils.CliError("Invalid group index: %d. Please choose a number between 1 and %d from the list above", groupIndex, len(groupList))
 		}
 
 		groupID, err := iam.GetGroupIDByName(ac, groupList[groupIndex-1].Name)
 		if err != nil {
-			utils.CliError("No group found with the given name.")
+			utils.CliError("Group '%s' not found. Please verify the group exists and try again", groupList[groupIndex-1].Name)
 		}
 
 		groupIDs = append(groupIDs, groupID)

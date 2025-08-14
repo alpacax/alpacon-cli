@@ -131,7 +131,7 @@ var loginCmd = &cobra.Command{
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
-				utils.CliError("Login failed %v. Please check your credentials and try again.", err)
+				utils.CliError("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
 			}
 
 		}
@@ -200,7 +200,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 
 	resp, err := httpClient.Get(workspaceURL)
 	if err != nil || resp.StatusCode >= 400 {
-		return "", fmt.Errorf("workspace URL is unreachable: %v", workspaceURL)
+		return "", fmt.Errorf("workspace URL '%s' is unreachable or invalid. Please check the URL and your internet connection", workspaceURL)
 	}
 	defer resp.Body.Close()
 

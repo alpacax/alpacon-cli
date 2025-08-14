@@ -18,7 +18,7 @@ var MemberCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon group member add' or 'alpacon group member delete' to manage group membership. Run 'alpacon group member --help' for more information")
 	},
 }
 

@@ -26,7 +26,7 @@ const (
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("configuration file not found or invalid: %v. Please run 'alpacon login' to configure your connection", err)
 	}
 
 	httpClient := &http.Client{
@@ -49,7 +49,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		fmt.Println("Refreshing access token...")
 		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
 		if err != nil {
-			return nil, fmt.Errorf("failed to refresh access token: %v", err)
+			return nil, fmt.Errorf("failed to refresh access token: %v. Your session may have expired completely. Please run 'alpacon login' to authenticate again", err)
 		}
 
 		client.AccessToken = tokenRes.AccessToken
@@ -81,7 +81,7 @@ func (ac *AlpaconClient) checkAuth() error {
 		return err
 	}
 	if !checkAuthResponse.Authenticated {
-		return errors.New("authenticated failed")
+		return errors.New("authentication failed: your login session has expired or is invalid. Please run 'alpacon login' to authenticate again")
 	}
 
 	return nil
