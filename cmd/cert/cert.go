@@ -14,7 +14,7 @@ var CertCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon cert list', 'alpacon cert detail', or 'alpacon cert download' to manage SSL/TLS certificates. Run 'alpacon cert --help' for more information")
 	},
 }
 

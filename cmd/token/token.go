@@ -13,7 +13,7 @@ var TokenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("subcommand error")
+		return errors.New("a subcommand is required. Use 'alpacon token create', 'alpacon token list', 'alpacon token delete', or 'alpacon token acl' to manage API tokens. Run 'alpacon token --help' for more information")
 	},
 }
 

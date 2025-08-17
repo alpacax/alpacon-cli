@@ -25,7 +25,7 @@ var logoutCmd = &cobra.Command{
 
 		err = auth.LogoutAndDeleteCredentials(alpaconClient)
 		if err != nil {
-			utils.CliError("Connection to Alpacon failed: %s. Consider re-logging.", err)
+			utils.CliError("Log out from Alpacon failed: %s.", err)
 		}
 		fmt.Println("Logout succeeded!")
 	},
