@@ -38,7 +38,7 @@ brews:
   - name: alpacon-cli
     repository:
       owner: alpacax
-      name: alpacon-cli
+      name: homebrew-alpacon
     commit_author:
       name: alpacaxbot
       email: support@alpacax.com
