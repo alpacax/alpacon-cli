@@ -35,9 +35,17 @@ sudo mv alpacon-cli /usr/local/bin/alpacon
 
 #### Homebrew
 ```bash
-brew tap alpacax/cli https://github.com/alpacax/alpacon-cli
+brew tap alpacax/alpacon
 brew install alpacon-cli
 ```
+
+> **Note for existing users**: If you encounter any issues for `brew upgrade`, please run:
+> ```bash
+> brew uninstall alpacon-cli
+> brew untap alpacax/cli
+> brew tap alpacax/alpacon
+> brew install alpacon-cli
+> ```
 
 #### Download from GitHub Releases
 ```bash
