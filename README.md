@@ -39,6 +39,14 @@ brew tap alpacax/alpacon
 brew install alpacon-cli
 ```
 
+> **Note for existing users**: If you previously installed using `brew install alpacax/alpacon-cli/alpacon-cli`, you can upgrade normally with `brew upgrade alpacon-cli`. If you encounter any issues, please run:
+> ```bash
+> brew uninstall alpacon-cli
+> brew untap alpacax/cli
+> brew tap alpacax/alpacon
+> brew install alpacon-cli
+> ```
+
 #### Download from GitHub Releases
 ```bash
 VERSION=<latest-version> # Replace with the actual version
