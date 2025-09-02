@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"context"
-
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/google/go-github/github"
 	"github.com/spf13/cobra"
+	"strings"
 )
 
 var versionCmd = &cobra.Command{
@@ -17,7 +17,7 @@ var versionCmd = &cobra.Command{
 		release, skip := versionCheck()
 		if !skip {
 			utils.CliWarning("Upgrade available. Current version: %s. Latest version: %s \n"+
-				"Visit %s for update instructions and release notes.", utils.Version, release.GetTagName(), release.GetHTMLURL())
+				"Visit %s for update instructions and release notes.", utils.Version, strings.TrimPrefix(release.GetTagName(), "v"), release.GetHTMLURL())
 			return
 		} else {
 			utils.CliInfo("You are up to date! %s is the latest version available.", utils.Version)
@@ -34,8 +34,8 @@ func versionCheck() (*github.RepositoryRelease, bool) {
 		utils.CliError("Checking for a newer version failed with: %s. \n", err)
 		return nil, true
 	}
-
-	if release.GetTagName() != utils.Version {
+	releaseVersion := strings.TrimPrefix(release.GetTagName(), "v")
+	if releaseVersion != utils.Version {
 		return release, false
 	}
 
