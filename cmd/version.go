@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"context"
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/google/go-github/github"
 	"github.com/spf13/cobra"
-	"strings"
 )
 
 var versionCmd = &cobra.Command{
