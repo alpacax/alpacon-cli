@@ -151,7 +151,7 @@ var WebshCmd = &cobra.Command{
 				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
 				confirm := utils.CommandConfirmModal()
 				if !confirm {
-					return
+					os.Exit(1)
 				}
 			}
 			command := strings.Join(commandArgs, " ")

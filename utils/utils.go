@@ -397,14 +397,8 @@ func SplitPath(path string) (string, string) {
 	return parts[0], parts[1]
 }
 
-/*
-CommandConfirmModal prompts the user for confirmation to continue with a command.
-It reads a single line from standard input and returns true if the user
-enters "y" or "yes" (case-insensitive), and false otherwise.
-
-Returns:
-  - bool: true if the user confirms, false if they cancel or an error occurs.
-*/
+// CommandConfirmModal prompts the user for confirmation to continue executing a command.
+// It returns true if the user enters "y" or "yes" (case-insensitive), and false otherwise.
 func CommandConfirmModal() bool {
 	fmt.Print("Do you want to continue executing the command? (y/n): ")
 	reader := bufio.NewReader(os.Stdin)
