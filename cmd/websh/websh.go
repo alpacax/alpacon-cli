@@ -20,6 +20,7 @@ var WebshCmd = &cobra.Command{
 	Long: ` 
 	This command either opens a websh terminal for interacting with the specified server or executes a specified command directly on the server.
 	It provides a terminal interface for managing and controlling the server remotely or for executing commands and retrieving their output directly.
+	For executing commands, it is highly recommended to wrap the entire command string in quotes to ensure it is interpreted correctly on the remote server.
 	`,
 	Example: `
 	// Open a websh terminal for a server
@@ -62,6 +63,7 @@ var WebshCmd = &cobra.Command{
 	--url [SHARED_URL]                 Specify the URL of the shared session to join.
 	-p, --password [PASSWORD]          Specify the password required to access the shared session.
 	--read-only [true|false]           Set the shared session to read-only mode (default is false).
+	-y, --yes                          Skip confirmation for unquoted commands.
 
 	Note:
 	- All flags must be placed before the [SERVER_NAME].
@@ -72,7 +74,7 @@ var WebshCmd = &cobra.Command{
 		var (
 			username, groupname, serverName, url, password string
 			commandArgs                                    []string
-			share, readOnly                                bool
+			share, readOnly, skipQuestion                  bool
 		)
 
 		env := make(map[string]string)
@@ -83,6 +85,8 @@ var WebshCmd = &cobra.Command{
 				username = "root"
 			case args[i] == "-s" || args[i] == "--share":
 				share = true
+			case args[i] == "-y" || args[i] == "--yes":
+				skipQuestion = true
 			case args[i] == "-h" || args[i] == "--help":
 				_ = cmd.Help()
 				return
@@ -143,6 +147,13 @@ var WebshCmd = &cobra.Command{
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		} else if len(commandArgs) > 0 {
+			if len(commandArgs) > 1 && !skipQuestion {
+				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
+				confirm := utils.ConfirmModal("Do you want to continue executing the command?")
+				if !confirm {
+					return
+				}
+			}
 			command := strings.Join(commandArgs, " ")
 			result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 			if err != nil {
