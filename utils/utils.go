@@ -2,6 +2,7 @@ package utils
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -394,4 +395,22 @@ func CreateAndEditTempFile(data []byte) (string, error) {
 func SplitPath(path string) (string, string) {
 	parts := strings.SplitN(path, ":", 2)
 	return parts[0], parts[1]
+}
+
+func ConfirmModal(message string) bool {
+	fmt.Print(message + " (y/n): ")
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		CliError("Failed to read user input: %s", err)
+		return false
+	}
+
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input != "y" && input != "yes" {
+		fmt.Println("Command execution cancelled.")
+		return false
+	}
+
+	return true
 }
