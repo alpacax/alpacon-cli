@@ -149,7 +149,7 @@ var WebshCmd = &cobra.Command{
 		} else if len(commandArgs) > 0 {
 			if len(commandArgs) > 1 && !skipQuestion {
 				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
-				confirm := utils.ConfirmModal("Do you want to continue executing the command?")
+				confirm := utils.CommandConfirmModal()
 				if !confirm {
 					return
 				}
