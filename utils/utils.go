@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/ssh/terminal"
 	"io"
 	"net/url"
 	"os"
@@ -397,22 +398,34 @@ func SplitPath(path string) (string, string) {
 	return parts[0], parts[1]
 }
 
-// CommandConfirmModal prompts the user for confirmation to continue executing a command.
+// CommandConfirm prompts the user for confirmation to continue executing a command.
 // It returns true if the user enters "y" or "yes" (case-insensitive), and false otherwise.
-func CommandConfirmModal() bool {
-	fmt.Print("Do you want to continue executing the command? (y/n): ")
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		CliError("Failed to read user input: %s", err)
+func CommandConfirm() bool {
+	if IsInteractiveShell() {
+		fmt.Print("Do you want to continue executing the command? (y/n): ")
+		reader := bufio.NewReader(os.Stdin)
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			CliError("Failed to read user input: %s", err)
+			return false
+		}
+
+		input = strings.TrimSpace(strings.ToLower(input))
+		if input != "y" && input != "yes" {
+			fmt.Println("Command execution cancelled.")
+			return false
+		}
+		return true
+	} else {
+		return true
+	}
+}
+
+// IsInteractiveShell checks if the current program is running in an interactive terminal.
+func IsInteractiveShell() bool {
+	if terminal.IsTerminal(int(os.Stdin.Fd())) {
+		return true
+	} else {
 		return false
 	}
-
-	input = strings.TrimSpace(strings.ToLower(input))
-	if input != "y" && input != "yes" {
-		fmt.Println("Command execution cancelled.")
-		return false
-	}
-
-	return true
 }

@@ -74,7 +74,7 @@ var WebshCmd = &cobra.Command{
 		var (
 			username, groupname, serverName, url, password string
 			commandArgs                                    []string
-			share, readOnly, skipQuestion                  bool
+			share, readOnly                                bool
 		)
 
 		env := make(map[string]string)
@@ -85,8 +85,6 @@ var WebshCmd = &cobra.Command{
 				username = "root"
 			case args[i] == "-s" || args[i] == "--share":
 				share = true
-			case args[i] == "-y" || args[i] == "--yes":
-				skipQuestion = true
 			case args[i] == "-h" || args[i] == "--help":
 				_ = cmd.Help()
 				return
@@ -147,9 +145,9 @@ var WebshCmd = &cobra.Command{
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		} else if len(commandArgs) > 0 {
-			if len(commandArgs) > 1 && !skipQuestion {
+			if len(commandArgs) > 1 {
 				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
-				confirm := utils.CommandConfirmModal()
+				confirm := utils.CommandConfirm()
 				if !confirm {
 					os.Exit(1)
 				}
