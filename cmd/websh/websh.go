@@ -63,7 +63,6 @@ var WebshCmd = &cobra.Command{
 	--url [SHARED_URL]                 Specify the URL of the shared session to join.
 	-p, --password [PASSWORD]          Specify the password required to access the shared session.
 	--read-only [true|false]           Set the shared session to read-only mode (default is false).
-	-y, --yes                          Skip confirmation for unquoted commands.
 
 	Note:
 	- All flags must be placed before the [SERVER_NAME].
