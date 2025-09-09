@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -17,13 +16,7 @@ var logoutCmd = &cobra.Command{
 	alpacon logout
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliError("Connection to Alpacon failed: %s. Consider re-logging.", err)
-		}
-
-		err = auth.LogoutAndDeleteCredentials(alpaconClient)
+		err := auth.LogoutAndDeleteCredentials()
 		if err != nil {
 			utils.CliError("Log out from Alpacon failed: %s.", err)
 		}

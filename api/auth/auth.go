@@ -184,13 +184,8 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 	return nil
 }
 
-func LogoutAndDeleteCredentials(ac *client.AlpaconClient) error {
-	_, err := ac.SendPostRequest(logoutURL, nil)
-	if err != nil {
-		return err
-	}
-
-	err = config.DeleteConfig()
+func LogoutAndDeleteCredentials() error {
+	err := config.DeleteConfig()
 	if err != nil {
 		return err
 	}
