@@ -20,6 +20,7 @@ var WebshCmd = &cobra.Command{
 	Long: ` 
 	This command either opens a websh terminal for interacting with the specified server or executes a specified command directly on the server.
 	It provides a terminal interface for managing and controlling the server remotely or for executing commands and retrieving their output directly.
+	For executing commands, it is highly recommended to wrap the entire command string in quotes to ensure it is interpreted correctly on the remote server.
 	`,
 	Example: `
 	// Open a websh terminal for a server
@@ -143,6 +144,13 @@ var WebshCmd = &cobra.Command{
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		} else if len(commandArgs) > 0 {
+			if len(commandArgs) > 1 {
+				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
+				confirm := utils.CommandConfirm()
+				if !confirm {
+					os.Exit(1)
+				}
+			}
 			command := strings.Join(commandArgs, " ")
 			result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 			if err != nil {
