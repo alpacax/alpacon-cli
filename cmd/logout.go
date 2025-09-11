@@ -32,8 +32,16 @@ var logoutCmd = &cobra.Command{
 				},
 			},
 		}
-		ac, _ := client.NewAlpaconAPIClient()
-		envInfo, _ := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
+		ac, err := client.NewAlpaconAPIClient()
+		if err != nil {
+			utils.CliError("Failed to create Alpacon API client: %s.", err)
+			return
+		}
+		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
+		if err != nil {
+			utils.CliError("Failed to fetch authentication environment: %s.", err)
+			return
+		}
 
 		if envInfo.Auth0.Method == "auth0" {
 			err = auth.LogOutWithAuth0(ac, httpClient, validConfig)
