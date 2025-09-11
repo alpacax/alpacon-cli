@@ -18,10 +18,12 @@ var path = struct {
 	env        string
 	deviceCode string
 	token      string
+	revoke     string
 }{
 	env:        "/api/auth/env",
 	deviceCode: "/oauth/device/code",
 	token:      "/oauth/token",
+	revoke:     "/oauth/revoke",
 }
 
 func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
@@ -180,6 +182,44 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 	}
 
 	return &tokenRes, nil
+}
+
+func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken string) error {
+	envInfo, err := FetchAuthEnv(workspaceURL, httpClient)
+	if err != nil {
+		return err
+	}
+	data := map[string]string{
+		"client_id": envInfo.Auth0.ClientID,
+		"token":     refreshToken,
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, path.revoke, nil)
+
+	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to revoke token. Status: %s, Body: %s", resp.Status, string(bodyBytes))
+	}
+
+	return nil
 }
 
 func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResponse, error) {

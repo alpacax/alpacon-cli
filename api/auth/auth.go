@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"io"
 	"net/http"
 	"strconv"
@@ -18,10 +19,11 @@ import (
 )
 
 const (
-	loginURL  = "/api/auth/login/"
-	logoutURL = "/api/auth/logout/"
-	tokenURL  = "/api/auth/tokens/"
-	statusURL = "/api/status/"
+	loginURL     = "/api/auth/login/"
+	logoutURL    = "/api/auth/logout/"
+	blacklistURL = "/api/auth0/token/blacklist/"
+	tokenURL     = "/api/auth/tokens/"
+	statusURL    = "/api/status/"
 )
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
@@ -184,8 +186,31 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 	return nil
 }
 
-func LogoutAndDeleteCredentials() error {
+func LogOutWithAuth0(ac *client.AlpaconClient, httpClient *http.Client, validConfig config.Config) error {
+	if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
+		_, err := ac.SendPostRequest(blacklistURL, nil)
+		if err != nil {
+			return fmt.Errorf("failed to set black list: %v", err)
+		}
+		err = auth0.RevokeToken(httpClient, validConfig.WorkspaceURL, validConfig.RefreshToken)
+		if err != nil {
+			return fmt.Errorf("failed to revoke token: %v", err)
+		}
+	}
 	err := config.DeleteConfig()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func LogOutWithOnPremise(ac *client.AlpaconClient) error {
+	_, err := ac.SendPostRequest(logoutURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to send post request: %v", err)
+	}
+
+	err = config.DeleteConfig()
 	if err != nil {
 		return err
 	}
