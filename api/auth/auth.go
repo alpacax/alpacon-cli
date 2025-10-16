@@ -18,11 +18,10 @@ import (
 )
 
 const (
-	loginURL     = "/api/auth/login/"
-	logoutURL    = "/api/auth/logout/"
-	blacklistURL = "/api/auth0/token/blacklist/"
-	tokenURL     = "/api/auth/tokens/"
-	statusURL    = "/api/status/"
+	loginURL  = "/api/auth/login/"
+	logoutURL = "/api/auth/logout/"
+	tokenURL  = "/api/auth/tokens/"
+	statusURL = "/api/status/"
 )
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
