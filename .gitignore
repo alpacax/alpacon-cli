@@ -27,3 +27,6 @@ test_cli.sh
 
 # Go workspace file
 go.work
+
+# Claude
+CLAUDE.md
