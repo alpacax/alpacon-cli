@@ -12,6 +12,10 @@ import (
 	"net/http"
 )
 
+const (
+	blacklistURL = "/api/auth0/token/blacklist/"
+)
+
 var logoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Log out of Alpacon",
@@ -44,12 +48,18 @@ var logoutCmd = &cobra.Command{
 		}
 
 		if envInfo.Auth0.Method == "auth0" {
-			err = auth.LogOutWithAuth0(ac, httpClient, validConfig)
+			if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
+				_, err := ac.SendPostRequest(blacklistURL, nil)
+				if err != nil {
+					utils.CliError("Failed to set black list. Please try again later.")
+				}
+			}
+			err = auth0.Logout(httpClient, validConfig)
 			if err != nil {
 				utils.CliError("Log out from Alpacon failed: %s.", err)
 			}
 		} else {
-			err := auth.LogOutWithOnPremise(ac)
+			err := auth.Logout(ac)
 			if err != nil {
 				utils.CliError("Log out from Alpacon failed: %s.", err)
 			}
