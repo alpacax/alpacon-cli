@@ -184,10 +184,10 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 	return nil
 }
 
-func LogoutAndDeleteCredentials(ac *client.AlpaconClient) error {
+func Logout(ac *client.AlpaconClient) error {
 	_, err := ac.SendPostRequest(logoutURL, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send post request: %v", err)
 	}
 
 	err = config.DeleteConfig()
