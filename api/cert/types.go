@@ -47,7 +47,7 @@ type AuthorityCreateResponse struct {
 	DefaultValidDays int       `json:"default_valid_days"`
 	MaxValidDays     int       `json:"max_valid_days"`
 	Agent            string    `json:"agent"`
-	Owner            string    `json:"owner"`
+	Owner            api.Owner `json:"owner"`
 	Instruction      string    `json:"instruction"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
