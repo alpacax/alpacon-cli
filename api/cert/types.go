@@ -127,15 +127,15 @@ type CSRResponse struct {
 }
 
 type CSRAttributes struct {
-	Id              string   `json:"id"`
-	Name            string   `json:"name"` // Derived from the first domain in the CSR domain list
-	Authority       string   `json:"authority"`
-	DomainList      []string `json:"domain_list"`
-	IpList          []string `json:"ip_list"`
-	Status          string   `json:"status"`
-	RequestedIp     string   `json:"requested_ip"`
-	RequestedByName string   `json:"requested_by"`
-	RequestedDate   string   `json:"requested_date"`
+	Id            string   `json:"id"`
+	Name          string   `json:"name"` // Derived from the first domain in the CSR domain list
+	Authority     string   `json:"authority"`
+	DomainList    []string `json:"domain_list"`
+	IpList        []string `json:"ip_list"`
+	Status        string   `json:"status"`
+	RequestedIp   string   `json:"requested_ip"`
+	RequestedBy   string   `json:"requested_by"`
+	RequestedDate string   `json:"requested_date"`
 }
 
 type Certificate struct {

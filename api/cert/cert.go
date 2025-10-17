@@ -85,15 +85,15 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 
 		for _, csr := range response.Results {
 			csrList = append(csrList, CSRAttributes{
-				Id:              csr.Id,
-				Name:            csr.CommonName,
-				Authority:       csr.AuthorityName,
-				DomainList:      csr.DomainList,
-				IpList:          csr.IpList,
-				Status:          csr.Status,
-				RequestedIp:     csr.RequestedIp,
-				RequestedByName: csr.RequestedBy.Name,
-				RequestedDate:   utils.TimeUtils(csr.AddedAt),
+				Id:            csr.Id,
+				Name:          csr.CommonName,
+				Authority:     csr.AuthorityName,
+				DomainList:    csr.DomainList,
+				IpList:        csr.IpList,
+				Status:        csr.Status,
+				RequestedIp:   csr.RequestedIp,
+				RequestedBy:   csr.RequestedBy.Name,
+				RequestedDate: utils.TimeUtils(csr.AddedAt),
 			})
 		}
 
