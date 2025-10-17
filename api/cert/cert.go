@@ -92,7 +92,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 				IpList:        csr.IpList,
 				Status:        csr.Status,
 				RequestedIp:   csr.RequestedIp,
-				RequestedBy:   csr.RequestedByName,
+				RequestedBy:   csr.RequestedBy.Name,
 				RequestedDate: utils.TimeUtils(csr.AddedAt),
 			})
 		}
@@ -137,7 +137,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 				DefaultValidDays: authority.DefaultValidDays,
 				MaxValidDays:     authority.MaxValidDays,
 				Server:           authority.AgentName,
-				Owner:            authority.OwnerName,
+				Owner:            authority.Owner.Name,
 				SignedAt:         utils.TimeUtils(authority.SignedAt),
 			})
 		}
@@ -239,7 +239,7 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 		for _, cert := range response.Results {
 			certList = append(certList, CertificateAttributes{
 				Id:        cert.Id,
-				Authority: cert.Authority,
+				Authority: cert.Authority.Name,
 				Csr:       cert.Csr,
 				ValidDays: cert.ValidDays,
 				SignedAt:  utils.TimeUtils(cert.SignedAt),

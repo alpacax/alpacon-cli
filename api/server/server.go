@@ -41,7 +41,7 @@ func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 				IP:        server.RemoteIP,
 				OS:        fmt.Sprintf("%s %s", server.OSName, server.OSVersion),
 				Connected: server.IsConnected,
-				Owner:     server.OwnerName,
+				Owner:     server.Owner.Name,
 			})
 		}
 

@@ -46,6 +46,12 @@ type UserResponse struct {
 	DateJoined  time.Time `json:"date_joined"`
 }
 
+type UserSummary struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 type UserCreateRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
