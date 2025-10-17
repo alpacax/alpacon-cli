@@ -56,7 +56,7 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 			Command:     event.Line,
 			Result:      utils.TruncateString(event.Result, 70),
 			Status:      utils.BoolPointerToString(event.Success),
-			Operator:    event.RequestedByName,
+			Operator:    event.RequestedBy.Name,
 			RequestedAt: utils.TimeUtils(event.AddedAt),
 		})
 	}

@@ -1,6 +1,9 @@
 package server
 
-import "time"
+import (
+	"github.com/alpacax/alpacon-cli/api"
+	"time"
+)
 
 type ServerAttributes struct {
 	Name      string `json:"name"`
@@ -56,8 +59,7 @@ type ServerDetails struct {
 	OSVersion        string       `json:"os_version"`
 	Load             float64      `json:"load"`
 	BootTime         time.Time    `json:"boot_time"`
-	Owner            string       `json:"owner"`
-	OwnerName        string       `json:"owner_name"`
+	Owner            api.Owner    `json:"owner"`
 	Groups           []string     `json:"groups"`
 	GroupsName       []string     `json:"groups_name"`
 }

@@ -1,6 +1,9 @@
 package cert
 
-import "time"
+import (
+	"github.com/alpacax/alpacon-cli/api"
+	"time"
+)
 
 type SignRequest struct {
 	DomainList  []string `json:"domain_list"`
@@ -11,16 +14,16 @@ type SignRequest struct {
 }
 
 type SignRequestResponse struct {
-	Id           string   `json:"id"`
-	Organization string   `json:"organization"`
-	CommonName   string   `json:"common_name"`
-	DomainList   []string `json:"domain_list"`
-	IpList       []string `json:"ip_list"`
-	ValidDays    int      `json:"valid_days"`
-	Status       string   `json:"status"`
-	RequestedIp  string   `json:"requested_ip"`
-	RequestedBy  string   `json:"requested_by"`
-	SubmitURL    string   `json:"submit_url"`
+	Id           string          `json:"id"`
+	Organization string          `json:"organization"`
+	CommonName   string          `json:"common_name"`
+	DomainList   []string        `json:"domain_list"`
+	IpList       []string        `json:"ip_list"`
+	ValidDays    int             `json:"valid_days"`
+	Status       string          `json:"status"`
+	RequestedIp  string          `json:"requested_ip"`
+	RequestedBy  api.RequestedBy `json:"requested_by"`
+	SubmitURL    string          `json:"submit_url"`
 }
 
 type AuthorityRequest struct {
@@ -59,8 +62,7 @@ type AuthorityResponse struct {
 	MaxValidDays     int       `json:"max_valid_days"`
 	Agent            string    `json:"agent"`
 	AgentName        string    `json:"agent_name"`
-	Owner            string    `json:"owner"`
-	OwnerName        string    `json:"owner_name"`
+	Owner            api.Owner `json:"owner"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	SignedAt         time.Time `json:"signed_at"`
 	ExpiresAt        time.Time `json:"expires_at"`
@@ -94,11 +96,16 @@ type AuthorityDetails struct {
 	Status           string    `json:"status"`
 	Agent            string    `json:"agent"`
 	AgentName        string    `json:"agent_name"`
-	Owner            string    `json:"owner"`
-	OwnerName        string    `json:"owner_name"`
+	Owner            api.Owner `json:"owner"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	SignedAt         time.Time `json:"signed_at"`
 	ExpiresAt        time.Time `json:"expires_at"`
+}
+
+type AuthoritySummary struct {
+	Id    string    `json:"id"`
+	Name  string    `json:"name"`
+	Owner api.Owner `json:"owner"`
 }
 
 type CSRSubmit struct {
@@ -106,42 +113,41 @@ type CSRSubmit struct {
 }
 
 type CSRResponse struct {
-	Id              string    `json:"id"`
-	Authority       string    `json:"authority"`
-	AuthorityName   string    `json:"authority_name"`
-	CommonName      string    `json:"common_name"`
-	DomainList      []string  `json:"domain_list"`
-	IpList          []string  `json:"ip_list"`
-	ValidDays       int       `json:"valid_days"`
-	Status          string    `json:"status"`
-	RequestedIp     string    `json:"requested_ip"`
-	RequestedBy     string    `json:"requested_by"`
-	RequestedByName string    `json:"requested_by_name"`
-	AddedAt         time.Time `json:"added_at"`
+	Id            string          `json:"id"`
+	Authority     string          `json:"authority"`
+	AuthorityName string          `json:"authority_name"`
+	CommonName    string          `json:"common_name"`
+	DomainList    []string        `json:"domain_list"`
+	IpList        []string        `json:"ip_list"`
+	ValidDays     int             `json:"valid_days"`
+	Status        string          `json:"status"`
+	RequestedIp   string          `json:"requested_ip"`
+	RequestedBy   api.RequestedBy `json:"requested_by"`
+	AddedAt       time.Time       `json:"added_at"`
 }
 
 type CSRAttributes struct {
-	Id            string   `json:"id"`
-	Name          string   `json:"name"` // Derived from the first domain in the CSR domain list
-	Authority     string   `json:"authority"`
-	DomainList    []string `json:"domain_list"`
-	IpList        []string `json:"ip_list"`
-	Status        string   `json:"status"`
-	RequestedIp   string   `json:"requested_ip"`
-	RequestedBy   string   `json:"requested_by"`
-	RequestedDate string   `json:"requested_date"`
+	Id              string   `json:"id"`
+	Name            string   `json:"name"` // Derived from the first domain in the CSR domain list
+	Authority       string   `json:"authority"`
+	DomainList      []string `json:"domain_list"`
+	IpList          []string `json:"ip_list"`
+	Status          string   `json:"status"`
+	RequestedIp     string   `json:"requested_ip"`
+	RequestedByName string   `json:"requested_by"`
+	RequestedDate   string   `json:"requested_date"`
 }
 
 type Certificate struct {
-	Id        string    `json:"id"`
-	Authority string    `json:"authority"`
-	Csr       string    `json:"csr"`
-	CrtText   string    `json:"crt_text"`
-	ValidDays int       `json:"valid_days"`
-	SignedAt  time.Time `json:"signed_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	SignedBy  string    `json:"signed_by"`
-	RenewedBy string    `json:"renewed_by"`
+	Id        string           `json:"id"`
+	Authority AuthoritySummary `json:"authority"`
+	Csr       string           `json:"csr"`
+	CrtText   string           `json:"crt_text"`
+	ValidDays int              `json:"valid_days"`
+	SignedAt  time.Time        `json:"signed_at"`
+	ExpiresAt time.Time        `json:"expires_at"`
+	SignedBy  string           `json:"signed_by"`
+	RenewedBy string           `json:"renewed_by"`
 }
 
 type CertificateAttributes struct {
