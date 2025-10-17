@@ -8,15 +8,3 @@ type ListResponse[T any] struct {
 	Last     int    `json:"last"`
 	Results  []T    `json:"results"`
 }
-
-type Owner struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
-type RequestedBy struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}

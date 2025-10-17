@@ -1,7 +1,7 @@
 package cert
 
 import (
-	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"time"
 )
 
@@ -22,7 +22,7 @@ type SignRequestResponse struct {
 	ValidDays    int             `json:"valid_days"`
 	Status       string          `json:"status"`
 	RequestedIp  string          `json:"requested_ip"`
-	RequestedBy  api.RequestedBy `json:"requested_by"`
+	RequestedBy  iam.UserSummary `json:"requested_by"`
 	SubmitURL    string          `json:"submit_url"`
 }
 
@@ -39,33 +39,33 @@ type AuthorityRequest struct {
 }
 
 type AuthorityCreateResponse struct {
-	Id               string    `json:"id"`
-	Name             string    `json:"name"`
-	Organization     string    `json:"organization"`
-	Domain           string    `json:"domain"`
-	RootValidDays    int       `json:"root_valid_days"`
-	DefaultValidDays int       `json:"default_valid_days"`
-	MaxValidDays     int       `json:"max_valid_days"`
-	Agent            string    `json:"agent"`
-	Owner            api.Owner `json:"owner"`
-	Instruction      string    `json:"instruction"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Id               string          `json:"id"`
+	Name             string          `json:"name"`
+	Organization     string          `json:"organization"`
+	Domain           string          `json:"domain"`
+	RootValidDays    int             `json:"root_valid_days"`
+	DefaultValidDays int             `json:"default_valid_days"`
+	MaxValidDays     int             `json:"max_valid_days"`
+	Agent            string          `json:"agent"`
+	Owner            iam.UserSummary `json:"owner"`
+	Instruction      string          `json:"instruction"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 type AuthorityResponse struct {
-	Id               string    `json:"id"`
-	Name             string    `json:"name"`
-	Organization     string    `json:"organization"`
-	Domain           string    `json:"domain"`
-	RootValidDays    int       `json:"root_valid_days"`
-	DefaultValidDays int       `json:"default_valid_days"`
-	MaxValidDays     int       `json:"max_valid_days"`
-	Agent            string    `json:"agent"`
-	AgentName        string    `json:"agent_name"`
-	Owner            api.Owner `json:"owner"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	SignedAt         time.Time `json:"signed_at"`
-	ExpiresAt        time.Time `json:"expires_at"`
+	Id               string          `json:"id"`
+	Name             string          `json:"name"`
+	Organization     string          `json:"organization"`
+	Domain           string          `json:"domain"`
+	RootValidDays    int             `json:"root_valid_days"`
+	DefaultValidDays int             `json:"default_valid_days"`
+	MaxValidDays     int             `json:"max_valid_days"`
+	Agent            string          `json:"agent"`
+	AgentName        string          `json:"agent_name"`
+	Owner            iam.UserSummary `json:"owner"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	SignedAt         time.Time       `json:"signed_at"`
+	ExpiresAt        time.Time       `json:"expires_at"`
 }
 
 type AuthorityAttributes struct {
@@ -82,30 +82,30 @@ type AuthorityAttributes struct {
 }
 
 type AuthorityDetails struct {
-	Id               string    `json:"id"`
-	Name             string    `json:"name"`
-	Organization     string    `json:"organization"`
-	Domain           string    `json:"domain"`
-	Storage          string    `json:"storage"`
-	CrtText          string    `json:"crt_text"`
-	RootValidDays    int       `json:"root_valid_days"`
-	DefaultValidDays int       `json:"default_valid_days"`
-	MaxValidDays     int       `json:"max_valid_days"`
-	RemoteIp         string    `json:"remote_ip"`
-	IsConnected      bool      `json:"is_connected"`
-	Status           string    `json:"status"`
-	Agent            string    `json:"agent"`
-	AgentName        string    `json:"agent_name"`
-	Owner            api.Owner `json:"owner"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	SignedAt         time.Time `json:"signed_at"`
-	ExpiresAt        time.Time `json:"expires_at"`
+	Id               string          `json:"id"`
+	Name             string          `json:"name"`
+	Organization     string          `json:"organization"`
+	Domain           string          `json:"domain"`
+	Storage          string          `json:"storage"`
+	CrtText          string          `json:"crt_text"`
+	RootValidDays    int             `json:"root_valid_days"`
+	DefaultValidDays int             `json:"default_valid_days"`
+	MaxValidDays     int             `json:"max_valid_days"`
+	RemoteIp         string          `json:"remote_ip"`
+	IsConnected      bool            `json:"is_connected"`
+	Status           string          `json:"status"`
+	Agent            string          `json:"agent"`
+	AgentName        string          `json:"agent_name"`
+	Owner            iam.UserSummary `json:"owner"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	SignedAt         time.Time       `json:"signed_at"`
+	ExpiresAt        time.Time       `json:"expires_at"`
 }
 
 type AuthoritySummary struct {
-	Id    string    `json:"id"`
-	Name  string    `json:"name"`
-	Owner api.Owner `json:"owner"`
+	Id    string          `json:"id"`
+	Name  string          `json:"name"`
+	Owner iam.UserSummary `json:"owner"`
 }
 
 type CSRSubmit struct {
@@ -122,7 +122,7 @@ type CSRResponse struct {
 	ValidDays     int             `json:"valid_days"`
 	Status        string          `json:"status"`
 	RequestedIp   string          `json:"requested_ip"`
-	RequestedBy   api.RequestedBy `json:"requested_by"`
+	RequestedBy   iam.UserSummary `json:"requested_by"`
 	AddedAt       time.Time       `json:"added_at"`
 }
 

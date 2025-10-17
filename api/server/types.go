@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"time"
 )
 
@@ -44,22 +44,22 @@ type ServerStatusMeta struct {
 }
 
 type ServerDetails struct {
-	ID               string       `json:"id"`
-	Name             string       `json:"name"`
-	RemoteIP         string       `json:"remote_ip"`
-	Status           ServerStatus `json:"status"`
-	IsConnected      bool         `json:"is_connected"`
-	Commissioned     bool         `json:"commissioned"`
-	Starred          bool         `json:"starred"`
-	CPUPhysicalCores int          `json:"cpu_physical_cores"`
-	CPULogicalCores  int          `json:"cpu_logical_cores"`
-	CPUType          string       `json:"cpu_type"`
-	PhysicalMemory   int64        `json:"physical_memory"`
-	OSName           string       `json:"os_name"`
-	OSVersion        string       `json:"os_version"`
-	Load             float64      `json:"load"`
-	BootTime         time.Time    `json:"boot_time"`
-	Owner            api.Owner    `json:"owner"`
-	Groups           []string     `json:"groups"`
-	GroupsName       []string     `json:"groups_name"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	RemoteIP         string          `json:"remote_ip"`
+	Status           ServerStatus    `json:"status"`
+	IsConnected      bool            `json:"is_connected"`
+	Commissioned     bool            `json:"commissioned"`
+	Starred          bool            `json:"starred"`
+	CPUPhysicalCores int             `json:"cpu_physical_cores"`
+	CPULogicalCores  int             `json:"cpu_logical_cores"`
+	CPUType          string          `json:"cpu_type"`
+	PhysicalMemory   int64           `json:"physical_memory"`
+	OSName           string          `json:"os_name"`
+	OSVersion        string          `json:"os_version"`
+	Load             float64         `json:"load"`
+	BootTime         time.Time       `json:"boot_time"`
+	Owner            iam.UserSummary `json:"owner"`
+	Groups           []string        `json:"groups"`
+	GroupsName       []string        `json:"groups_name"`
 }
