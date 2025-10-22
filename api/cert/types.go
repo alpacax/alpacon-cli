@@ -113,17 +113,16 @@ type CSRSubmit struct {
 }
 
 type CSRResponse struct {
-	Id            string          `json:"id"`
-	Authority     string          `json:"authority"`
-	AuthorityName string          `json:"authority_name"`
-	CommonName    string          `json:"common_name"`
-	DomainList    []string        `json:"domain_list"`
-	IpList        []string        `json:"ip_list"`
-	ValidDays     int             `json:"valid_days"`
-	Status        string          `json:"status"`
-	RequestedIp   string          `json:"requested_ip"`
-	RequestedBy   iam.UserSummary `json:"requested_by"`
-	AddedAt       time.Time       `json:"added_at"`
+	Id          string            `json:"id"`
+	Authority   AuthorityResponse `json:"authority"`
+	CommonName  string            `json:"common_name"`
+	DomainList  []string          `json:"domain_list"`
+	IpList      []string          `json:"ip_list"`
+	ValidDays   int               `json:"valid_days"`
+	Status      string            `json:"status"`
+	RequestedIp string            `json:"requested_ip"`
+	RequestedBy iam.UserSummary   `json:"requested_by"`
+	AddedAt     time.Time         `json:"added_at"`
 }
 
 type CSRAttributes struct {
