@@ -87,7 +87,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 			csrList = append(csrList, CSRAttributes{
 				Id:            csr.Id,
 				Name:          csr.CommonName,
-				Authority:     csr.AuthorityName,
+				Authority:     csr.Authority.Name,
 				DomainList:    csr.DomainList,
 				IpList:        csr.IpList,
 				Status:        csr.Status,
