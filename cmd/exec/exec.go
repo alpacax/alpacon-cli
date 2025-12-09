@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -75,6 +76,11 @@ var ExecCmd = &cobra.Command{
 						fmt.Println("MFA authentication has been completed!")
 						break
 					}
+				}
+			} else if code == utils.UsernameRequired {
+				resp, err := iam.HandleUsernameRequired()
+				if err != nil {
+					fmt.Printf("Username is successfully set to %s. Please try again.", resp.Username)
 				}
 			} else {
 				utils.CliError("Failed to execute command on '%s' server: %s.", serverName, err)
