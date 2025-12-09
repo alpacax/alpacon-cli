@@ -342,7 +342,7 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 func SetUsername(username string) (*SetUsernameResponse, error) {
 	ac, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	request := SetUsernameRequest{

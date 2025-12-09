@@ -42,13 +42,13 @@ func runEvent(cmd *cobra.Command, args []string) {
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		return
 	}
 
 	eventList, err := event.GetEventList(alpaconClient, pageSize, serverName, userName)
 	if err != nil {
-		utils.CliError("Failed to get events: %s.", err)
+		utils.CliErrorWithExit("Failed to get events: %s.", err)
 		return
 	}
 

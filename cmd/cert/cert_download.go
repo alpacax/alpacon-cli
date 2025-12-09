@@ -27,12 +27,12 @@ var certDownloadCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = cert.DownloadCertificate(alpaconClient, certId, filePath)
 		if err != nil {
-			utils.CliError("Failed to download the certificate from authority: %s.", err)
+			utils.CliErrorWithExit("Failed to download the certificate from authority: %s.", err)
 		}
 
 		utils.CliInfo("Certificate downloaded successfully: '%s'.", filePath)

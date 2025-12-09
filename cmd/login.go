@@ -69,7 +69,7 @@ var loginCmd = &cobra.Command{
 		// Validate workspaceURL
 		workspaceURL, err := validateAndFormatWorkspaceURL(workspaceURL, httpClient)
 		if err != nil {
-			utils.CliError(err.Error())
+			utils.CliErrorWithExit(err.Error())
 		}
 
 		// Check login method
@@ -83,7 +83,7 @@ var loginCmd = &cobra.Command{
 					},
 				}
 			} else {
-				utils.CliError("Failed to patch environment variables from workspace. %v", err)
+				utils.CliErrorWithExit("Failed to patch environment variables from workspace. %v", err)
 			}
 		}
 
@@ -97,7 +97,7 @@ var loginCmd = &cobra.Command{
 		if envInfo.Auth0.Method == "auth0" && token == "" {
 			deviceCode, err := auth0.RequestDeviceCode(workspaceURL, httpClient, envInfo)
 			if err != nil {
-				utils.CliError("Device code request failed. %v", err)
+				utils.CliErrorWithExit("Device code request failed. %v", err)
 			}
 
 			highlight := "\033[1;34m" // blue + bold
@@ -110,12 +110,12 @@ var loginCmd = &cobra.Command{
 
 			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
 			if err != nil {
-				utils.CliError(err.Error())
+				utils.CliErrorWithExit(err.Error())
 			}
 
 			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, tokenRes.ExpiresIn, insecure)
 			if err != nil {
-				utils.CliError("Failed to save config: %v", err)
+				utils.CliErrorWithExit("Failed to save config: %v", err)
 			}
 
 		} else {
@@ -131,13 +131,13 @@ var loginCmd = &cobra.Command{
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
-				utils.CliError("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
+				utils.CliErrorWithExit("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
 			}
 
 		}
 		_, err = client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		fmt.Println("Login succeeded!")

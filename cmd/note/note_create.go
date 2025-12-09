@@ -32,17 +32,17 @@ var noteCreateCmd = &cobra.Command{
 		}
 
 		if len(noteRequest.Content) > 512 {
-			utils.CliError("Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again", len(noteRequest.Content))
+			utils.CliErrorWithExit("Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again", len(noteRequest.Content))
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = note.CreateNote(alpaconClient, noteRequest)
 		if err != nil {
-			utils.CliError("Failed to create the new note: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new note: %s.", err)
 		}
 
 		utils.CliInfo("Note successfully created to %s.", noteRequest.Server)
