@@ -2,6 +2,7 @@ package ftp
 
 import (
 	"fmt"
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"path/filepath"
 	"strings"
@@ -111,6 +112,11 @@ var CpCmd = &cobra.Command{
 							fmt.Println("MFA authentication has been completed!")
 							break
 						}
+					}
+				} else if code == utils.UsernameRequired {
+					resp, err := iam.HandleUsernameRequired()
+					if err != nil {
+						fmt.Printf("Username is successfully set to %s. Please try again.", resp.Username)
 					}
 				} else {
 					// Error already handled in uploadObject
