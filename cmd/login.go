@@ -69,7 +69,7 @@ var loginCmd = &cobra.Command{
 		// Validate workspaceURL
 		workspaceURL, err := validateAndFormatWorkspaceURL(workspaceURL, httpClient)
 		if err != nil {
-			utils.CliErrorWithExit(err.Error())
+			utils.CliErrorWithExit("%s", err.Error())
 		}
 
 		// Check login method
@@ -110,7 +110,7 @@ var loginCmd = &cobra.Command{
 
 			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
 			if err != nil {
-				utils.CliErrorWithExit(err.Error())
+				utils.CliErrorWithExit("%s", err.Error())
 			}
 
 			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, tokenRes.ExpiresIn, insecure)
