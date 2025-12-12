@@ -12,7 +12,7 @@ type TunnelSessionRequest struct {
 // TunnelSessionResponse represents the response from creating a tunnel session.
 type TunnelSessionResponse struct {
 	ID            string `json:"id"`
-	WebsocketURL  string `json:"websocket_url"`
+	ConnectURL  string `json:"connect_url"`
 	UserchannelID string `json:"userchannel_id"`
 	Server        string `json:"server"`
 	Protocol      string `json:"protocol"`

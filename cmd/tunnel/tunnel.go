@@ -158,7 +158,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		if err != nil {
 			utils.CliError("Failed to create tunnel session: %s", err)
 		}
-		tunnelProxyURL = session.WebsocketURL
+		tunnelProxyURL = session.ConnectURL
 	}
 
 	// Create TCP listener
