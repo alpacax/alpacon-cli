@@ -6,6 +6,8 @@ type TunnelSessionRequest struct {
 	Server     string `json:"server"`      // Server UUID
 	Protocol   string `json:"protocol"`    // tcp, ssh, vnc, rdp, postgresql, mysql
 	TargetPort int    `json:"target_port"` // Target port on the remote server
+	Username   string `json:"username"`    // Username for the tunnel
+	Groupname  string `json:"groupname"`   // Groupname (default: alpacon)
 	ClientType string `json:"client_type"` // cli, web, proxy (default: cli)
 }
 

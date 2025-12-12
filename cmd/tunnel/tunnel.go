@@ -28,6 +28,8 @@ var (
 	remotePort     string
 	proxyURL       string
 	protocol       string
+	username       string
+	groupname      string
 	maxConnections int
 	rateLimit      int
 )
@@ -123,6 +125,8 @@ func init() {
 	TunnelCmd.Flags().StringVarP(&remotePort, "remote", "r", "", "Remote port to connect to (required)")
 	TunnelCmd.Flags().StringVar(&proxyURL, "proxy", "", "Proxy server WebSocket URL (optional, auto-discovered if not provided)")
 	TunnelCmd.Flags().StringVarP(&protocol, "protocol", "p", "tcp", "Protocol type (tcp, ssh, vnc, rdp, postgresql, mysql)")
+	TunnelCmd.Flags().StringVarP(&username, "username", "u", "root", "Username for the tunnel")
+	TunnelCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Groupname for the tunnel")
 	TunnelCmd.Flags().IntVar(&maxConnections, "max-connections", 100, "Maximum concurrent connections")
 	TunnelCmd.Flags().IntVar(&rateLimit, "rate-limit", 20, "Maximum new connections per second (excess connections are queued)")
 
@@ -154,7 +158,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	tunnelProxyURL := proxyURL
 	if tunnelProxyURL == "" {
 		// Create tunnel session via API
-		session, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, protocol, targetPort)
+		session, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, protocol, username, groupname, targetPort)
 		if err != nil {
 			utils.CliError("Failed to create tunnel session: %s", err)
 		}

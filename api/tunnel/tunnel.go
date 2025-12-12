@@ -14,7 +14,7 @@ const (
 
 // CreateTunnelSession creates a new tunnel session for the specified server.
 // It returns the WebSocket URL to connect to.
-func CreateTunnelSession(ac *client.AlpaconClient, serverName, protocol string, targetPort int) (*TunnelSessionResponse, error) {
+func CreateTunnelSession(ac *client.AlpaconClient, serverName, protocol, username, groupname string, targetPort int) (*TunnelSessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get server ID: %w", err)
@@ -24,6 +24,8 @@ func CreateTunnelSession(ac *client.AlpaconClient, serverName, protocol string, 
 		Server:     serverID,
 		Protocol:   protocol,
 		TargetPort: targetPort,
+		Username:   username,
+		Groupname:  groupname,
 		ClientType: "cli",
 	}
 
