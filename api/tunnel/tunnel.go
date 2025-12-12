@@ -24,6 +24,7 @@ func CreateTunnelSession(ac *client.AlpaconClient, serverName, protocol string, 
 		Server:     serverID,
 		Protocol:   protocol,
 		TargetPort: targetPort,
+		ClientType: "cli",
 	}
 
 	responseBody, err := ac.SendPostRequest(tunnelSessionURL, request)
