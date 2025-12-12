@@ -14,7 +14,7 @@ func PrintTable(slice interface{}) {
 	s := reflect.ValueOf(slice)
 
 	if s.Kind() != reflect.Slice {
-		CliError("Parsing data: Expected a list format.")
+		CliErrorWithExit("Parsing data: Expected a list format.")
 	}
 
 	table := tablewriter.NewWriter(os.Stdout)
@@ -58,7 +58,7 @@ func PrintJson(body []byte) {
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, body, "", "    ")
 	if err != nil {
-		CliError("Parsing data: Expected a json format")
+		CliErrorWithExit("Parsing data: Expected a json format")
 	}
 
 	formattedJson := strings.Replace(prettyJSON.String(), "\\n", "\n", -1)

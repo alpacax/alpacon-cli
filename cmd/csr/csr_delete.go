@@ -25,12 +25,12 @@ var csrDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = cert.DeleteCSR(alpaconClient, csrId)
 		if err != nil {
-			utils.CliError("Failed to delete the CSR: %s. ", err)
+			utils.CliErrorWithExit("Failed to delete the CSR: %s. ", err)
 		}
 
 		utils.CliInfo("CSR successfully deleted: %s.", csrId)

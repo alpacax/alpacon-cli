@@ -26,12 +26,12 @@ var userUpdateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		userDetail, err := iam.UpdateUser(alpaconClient, userName)
 		if err != nil {
-			utils.CliError("Failed to update the user info: %s.", err)
+			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
 		}
 
 		utils.CliInfo("%s user successfully updated to alpacon.", userName)

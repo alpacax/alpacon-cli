@@ -118,3 +118,12 @@ type MemberDeleteRequest struct {
 	Group string `json:"group"`
 	User  string `json:"user"`
 }
+
+type SetUsernameRequest struct {
+	Username string `json:"username"`
+}
+
+type SetUsernameResponse struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+}

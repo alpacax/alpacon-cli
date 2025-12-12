@@ -24,7 +24,7 @@ func PromptForInput(promptText string) string {
 	fmt.Print(promptText)
 	input, err := reader.ReadString('\n')
 	if err != nil {
-		CliError("Invalid input. Please try again.")
+		CliErrorWithExit("Invalid input. Please try again.")
 	}
 	return strings.TrimSpace(input)
 }

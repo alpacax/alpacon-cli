@@ -15,6 +15,7 @@ const (
 	userURL       = "/api/iam/users/"
 	groupURL      = "/api/iam/groups/"
 	membershipURL = "/api/iam/memberships/"
+	usernameURL   = "/api/iam/username/"
 )
 
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
@@ -320,4 +321,44 @@ func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
 	}
 
 	return responseBody, nil
+}
+
+func HandleUsernameRequired() (*SetUsernameResponse, error) {
+	fmt.Println("\nUsername is required for your account.")
+	username := utils.PromptForRequiredInput("Please enter your username: ")
+
+	response, err := SetUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set username: %v", err)
+	}
+
+	fmt.Printf("\n✓ Username successfully set!\n")
+	fmt.Printf("  User ID: %s\n", response.ID)
+	fmt.Printf("  Username: %s\n\n", response.Username)
+
+	return response, nil
+}
+
+func SetUsername(username string) (*SetUsernameResponse, error) {
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+	}
+
+	request := SetUsernameRequest{
+		Username: username,
+	}
+
+	responseBody, err := ac.SendPostRequest(usernameURL, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SetUsernameResponse
+	err = json.Unmarshal(responseBody, &response)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response, nil
 }

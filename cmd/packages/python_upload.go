@@ -24,12 +24,12 @@ var pythonPackageUploadCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = packages.UploadPackage(alpaconClient, file, "python")
 		if err != nil {
-			utils.CliError("Failed to upload the python packages to alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to upload the python packages to alpacon: %s.", err)
 		}
 
 		utils.CliInfo("`%s` successfully uploaded to alpacon.", file)

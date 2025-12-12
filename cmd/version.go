@@ -32,7 +32,7 @@ func versionCheck() (*github.RepositoryRelease, bool) {
 
 	release, _, err := client.Repositories.GetLatestRelease(ctx, "alpacax", "alpacon-cli")
 	if err != nil {
-		utils.CliError("Checking for a newer version failed with: %s. \n", err)
+		utils.CliErrorWithExit("Checking for a newer version failed with: %s. \n", err)
 		return nil, true
 	}
 	releaseVersion := strings.TrimPrefix(release.GetTagName(), "v")

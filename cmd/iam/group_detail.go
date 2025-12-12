@@ -25,16 +25,16 @@ var groupDetailCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupId, err := iam.GetGroupIDByName(alpaconClient, groupName)
 		if err != nil {
-			utils.CliError("Failed to retrieve the group details: %s. Please check if the groupname is correct and try again.", err)
+			utils.CliErrorWithExit("Failed to retrieve the group details: %s. Please check if the groupname is correct and try again.", err)
 		}
 		groupDetail, err := iam.GetGroupDetail(alpaconClient, groupId)
 		if err != nil {
-			utils.CliError("Failed to retrieve the group details: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the group details: %s.", err)
 		}
 
 		utils.PrintJson(groupDetail)

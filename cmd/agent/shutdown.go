@@ -17,12 +17,12 @@ var shutdownAgentCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = agent.RequestAgentAction(alpaconClient, serverName, "shutdown")
 		if err != nil {
-			utils.CliError("Failed to shutdown the agent: %s.", err)
+			utils.CliErrorWithExit("Failed to shutdown the agent: %s.", err)
 		}
 
 		utils.CliInfo("Agent shutdown request successful. Verify in events.(alpacon events)")

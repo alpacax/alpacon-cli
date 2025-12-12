@@ -17,12 +17,12 @@ var upgradeAgentCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = agent.RequestAgentAction(alpaconClient, serverName, "upgrade")
 		if err != nil {
-			utils.CliError("Failed to upgrade the agent: %s.", err)
+			utils.CliErrorWithExit("Failed to upgrade the agent: %s.", err)
 		}
 
 		utils.CliInfo("Agent upgrade request successful. Verify in events.(alpacon events)")

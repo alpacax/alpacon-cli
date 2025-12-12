@@ -2,13 +2,14 @@ package exec
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
-	"strings"
-	"time"
 )
 
 var ExecCmd = &cobra.Command{
@@ -32,7 +33,7 @@ var ExecCmd = &cobra.Command{
 		groupname, _ := cmd.Flags().GetString("groupname")
 
 		if len(args) < 2 {
-			utils.CliError("You must specify at least a server name and a command.")
+			utils.CliErrorWithExit("You must specify at least a server name and a command.")
 			return
 		}
 
@@ -50,7 +51,7 @@ var ExecCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			return
 		}
 
@@ -59,25 +60,22 @@ var ExecCmd = &cobra.Command{
 
 		result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 		if err != nil {
-			code, _ := utils.ParseErrorResponse(err)
-			if code == utils.CodeAuthMFARequired {
-				err := mfa.HandleMFAError(alpaconClient, serverName)
-				if err != nil {
-					utils.CliError("MFA authentication failed: %s", err)
-				}
-
-				for {
-					fmt.Println("Waiting for MFA authentication...")
-					time.Sleep(5 * time.Second)
-
+			err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+				OnMFARequired: func(srv string) error {
+					return mfa.HandleMFAError(alpaconClient, srv)
+				},
+				OnUsernameRequired: func() error {
+					_, err := iam.HandleUsernameRequired()
+					return err
+				},
+				RetryOperation: func() error {
 					result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
-					if err == nil {
-						fmt.Println("MFA authentication has been completed!")
-						break
-					}
-				}
-			} else {
-				utils.CliError("Failed to execute command on '%s' server: %s.", serverName, err)
+					return err
+				},
+			})
+
+			if err != nil {
+				utils.CliErrorWithExit("Failed to execute command on '%s' server: %s.", serverName, err)
 				return
 			}
 		}

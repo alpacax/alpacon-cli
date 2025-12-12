@@ -23,19 +23,19 @@ var serverCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupList, err := iam.GetGroupList(alpaconClient)
 		if err != nil {
-			utils.CliError("Failed to retrieve the group list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the group list: %s.", err)
 		}
 
 		serverRequest := promptForServer(alpaconClient, groupList)
 
 		response, err := server.CreateServer(alpaconClient, serverRequest)
 		if err != nil {
-			utils.CliError("Failed to create the new server: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new server: %s.", err)
 		}
 
 		installServerInfo(response)
@@ -80,12 +80,12 @@ func selectAndConvertGroups(ac *client.AlpaconClient, groupList []iam.GroupAttri
 
 	for _, groupIndex := range intGroups {
 		if groupIndex < 1 || groupIndex > len(groupList) {
-			utils.CliError("Invalid group index: %d. Please choose a number between 1 and %d from the list above", groupIndex, len(groupList))
+			utils.CliErrorWithExit("Invalid group index: %d. Please choose a number between 1 and %d from the list above", groupIndex, len(groupList))
 		}
 
 		groupID, err := iam.GetGroupIDByName(ac, groupList[groupIndex-1].Name)
 		if err != nil {
-			utils.CliError("Group '%s' not found. Please verify the group exists and try again", groupList[groupIndex-1].Name)
+			utils.CliErrorWithExit("Group '%s' not found. Please verify the group exists and try again", groupList[groupIndex-1].Name)
 		}
 
 		groupIDs = append(groupIDs, groupID)

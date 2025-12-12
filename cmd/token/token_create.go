@@ -26,7 +26,7 @@ var tokenCreateCmd = &cobra.Command{
 		if name == "" || (limit && expiresAt == 0) {
 			tokenRequest, err = promptForToken()
 			if err != nil {
-				utils.CliError("During token input: %v. Check your input and try again.", err)
+				utils.CliErrorWithExit("During token input: %v. Check your input and try again.", err)
 			}
 		} else {
 			tokenRequest = auth.APITokenRequest{Name: name}
@@ -38,12 +38,12 @@ var tokenCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		token, err := auth.CreateAPIToken(alpaconClient, tokenRequest)
 		if err != nil {
-			utils.CliError("Failed to create API token %s.", err)
+			utils.CliErrorWithExit("Failed to create API token %s.", err)
 		}
 
 		utils.CliInfo("API Token Created: `%s`", token)

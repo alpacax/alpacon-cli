@@ -112,7 +112,7 @@ func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) 
 	var err error
 	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
 	if err != nil {
-		utils.CliError("websocket connection failed %v", err)
+		utils.CliErrorWithExit("websocket connection failed %v", err)
 	}
 	defer func() { _ = wsClient.conn.Close() }()
 
@@ -127,7 +127,7 @@ func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) 
 func (wsClient *WebsocketClient) runWsClient() error {
 	oldState, err := checkTerminal()
 	if err != nil {
-		utils.CliError("websocket connection faiild %v", err)
+		utils.CliErrorWithExit("websocket connection faiild %v", err)
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 

@@ -7,6 +7,7 @@ import (
 
 const (
 	CodeAuthMFARequired = "auth_mfa_required"
+	UsernameRequired    = "user_username_required"
 )
 
 type ErrorResponse struct {

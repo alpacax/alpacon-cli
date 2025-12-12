@@ -23,12 +23,12 @@ var systemPackageListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		packageList, err := packages.GetSystemPackageEntry(alpaconClient)
 		if err != nil {
-			utils.CliError("Failed to retrieve the system packages: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the system packages: %s.", err)
 		}
 
 		utils.PrintTable(packageList)

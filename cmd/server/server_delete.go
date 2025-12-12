@@ -26,12 +26,12 @@ var serverDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = server.DeleteServer(alpaconClient, serverName)
 		if err != nil {
-			utils.CliError("Failed to delete the server: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the server: %s.", err)
 		}
 
 		utils.CliInfo("Server successfully deleted: %s.", serverName)

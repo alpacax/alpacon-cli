@@ -36,7 +36,7 @@ var csrCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		signRequest, certPath := promptForCert()
@@ -45,17 +45,17 @@ var csrCreateCmd = &cobra.Command{
 
 		response, err := certApi.CreateSignRequest(alpaconClient, signRequest)
 		if err != nil {
-			utils.CliError("Failed to send sign request to server: %s.", err)
+			utils.CliErrorWithExit("Failed to send sign request to server: %s.", err)
 		}
 
 		csr, err := cert.CreateCSR(response, certPath)
 		if err != nil {
-			utils.CliError("Failed to create CSR file: %s.", err)
+			utils.CliErrorWithExit("Failed to create CSR file: %s.", err)
 		}
 
 		err = certApi.SubmitCSR(alpaconClient, csr, response.SubmitURL)
 		if err != nil {
-			utils.CliError("Failed to submit CSR file to server: %s.", err)
+			utils.CliErrorWithExit("Failed to submit CSR file to server: %s.", err)
 		}
 
 		utils.CliInfo("CSR creation request succeeded. Check the generated CSR (alpacon csr ls)")
@@ -65,7 +65,7 @@ var csrCreateCmd = &cobra.Command{
 func init() {
 	usr, err := user.Current()
 	if err != nil {
-		utils.CliError("Failed to obtain the current user information: %v", err)
+		utils.CliErrorWithExit("Failed to obtain the current user information: %v", err)
 	}
 
 	defaultPrivateKeyDir = filepath.Join(usr.HomeDir, "tmp/private/")
@@ -80,7 +80,7 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 	signRequest.IpList = utils.PromptForListInput("ip list (e.g., 192.168.1.1, 10.0.0.1): ")
 
 	if (len(signRequest.DomainList) == 0) && (len(signRequest.IpList) == 0) {
-		utils.CliError("You must enter at least a domain list or an IP list.")
+		utils.CliErrorWithExit("You must enter at least a domain list or an IP list.")
 	}
 
 	signRequest.ValidDays = utils.PromptForIntInput("valid days (default: 365): ", 365)
@@ -115,14 +115,14 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 func EnsureSecureConnection(client *client.AlpaconClient) {
 	isTLS, err := client.IsUsingHTTPS()
 	if err != nil {
-		utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 	if !isTLS {
 		utils.CliWarning("The connection to %s might not be secure.", client.BaseURL)
 
 		proceed := utils.PromptForBool("Do you want to proceed with the CSR submission?:")
 		if !proceed {
-			utils.CliError("CSR submission cancelled by user.")
+			utils.CliErrorWithExit("CSR submission cancelled by user.")
 		}
 
 	}
