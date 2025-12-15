@@ -1,7 +1,6 @@
 package tunnel
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,7 +11,6 @@ import (
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/tunnel"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
@@ -28,21 +26,30 @@ var (
 )
 
 var TunnelCmd = &cobra.Command{
-	Use:   "tunnel [SERVER_NAME]",
+	Use:   "tunnel [SERVER NAME]",
 	Short: "Create a TCP tunnel to a remote server",
 	Long: `
-	Create a TCP tunnel that forwards local port traffic to a remote server's port.
+	This command creates a TCP tunnel that forwards local port traffic to a remote server's port.
 	The tunnel uses WebSocket + smux multiplexing for efficient connection handling.
-
-	Architecture:
-	  [User] -> [localhost:local_port] -> [WS+smux] -> [Proxy Server] -> [WS+smux] -> [Agent:remote_port]
 	`,
 	Example: `
-	# Forward local port 9000 to remote server's port 8082
-	alpacon tunnel my-server --local 9000 --remote 8082
+	// Create a tunnel to a remote server
+	alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT]
 
-	# Forward local port 2222 to remote server's SSH port (22)
-	alpacon tunnel my-server -l 2222 -r 22
+	// Forward local port 9000 to remote server's port 8082
+	alpacon tunnel [SERVER NAME] --local 9000 --remote 8082
+
+	// Forward local port 2222 to remote server's SSH port (22)
+	alpacon tunnel [SERVER NAME] -l 2222 -r 22
+
+	// Specify username and groupname for the tunnel
+	alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT] -u [USER NAME] -g [GROUP NAME]
+
+	Flags:
+	-l, --local [PORT]                 Local port to listen on (required).
+	-r, --remote [PORT]                Remote port to connect to (required).
+	-u, --username [USER NAME]         Username for the tunnel (default: root).
+	-g, --groupname [GROUP NAME]       Groupname for the tunnel.
 	`,
 	Args: cobra.ExactArgs(1),
 	Run:  runTunnel,
@@ -88,22 +95,9 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	defer listener.Close()
 	fmt.Printf("Listening on localhost:%s\n", localPort)
 
-	// Load TLS config
-	cfg, _ := config.LoadConfig()
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: cfg.Insecure,
-	}
-
-	// Create WebSocket dialer
-	dialer := websocket.Dialer{
-		TLSClientConfig: tlsConfig,
-	}
-
-	// Set headers for authentication (use client's header method)
-	headers := alpaconClient.SetWebsocketHeader()
-
 	// Connect to proxy server
-	wsConn, _, err := dialer.Dial(tunnelSession.ConnectURL, headers)
+	headers := alpaconClient.SetWebsocketHeader()
+	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.ConnectURL, headers)
 	if err != nil {
 		utils.CliError("Failed to connect to proxy server: %s", err)
 	}
@@ -171,13 +165,13 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 	// Bidirectional relay using buffer pool
 	errChan := make(chan error, 2)
 
-	// TCP → smux stream
+	// TCP -> smux stream
 	go func() {
 		_, err := tunnel.CopyBuffered(stream, tcpConn)
 		errChan <- err
 	}()
 
-	// smux stream → TCP
+	// smux stream -> TCP
 	go func() {
 		_, err := tunnel.CopyBuffered(tcpConn, stream)
 		errChan <- err
