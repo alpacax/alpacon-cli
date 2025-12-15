@@ -450,7 +450,7 @@ The test script will automatically:
   - Command execution (regular and root user)
   - File upload/download operations
   - Folder upload/download operations (recursive)
-  - WebSH functionality
+  - Websh functionality
   - Advanced operations and error handling
 - Clean up all test files after completion
 
