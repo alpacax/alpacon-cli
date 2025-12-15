@@ -35,7 +35,7 @@ var TunnelCmd = &cobra.Command{
 	The tunnel uses WebSocket + smux multiplexing for efficient connection handling.
 
 	Architecture:
-	  [User] → [localhost:local_port] → [WS+smux] → [Proxy Server] → [WS+smux] → [Agent:remote_port]
+	  [User] -> [localhost:local_port] -> [WS+smux] -> [Proxy Server] -> [WS+smux] -> [Agent:remote_port]
 	`,
 	Example: `
 	# Forward local port 9000 to remote server's port 8082
@@ -61,24 +61,20 @@ func init() {
 func runTunnel(cmd *cobra.Command, args []string) {
 	serverName := args[0]
 
-	// Validate ports
 	if localPort == "" || remotePort == "" {
 		utils.CliError("Both --local and --remote flags are required")
 	}
 
-	// Parse remote port as integer
 	targetPort, err := strconv.Atoi(remotePort)
 	if err != nil {
 		utils.CliError("Invalid remote port: %s", remotePort)
 	}
 
-	// Create API client
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliError("Failed to connect to Alpacon API: %s", err)
 	}
 
-	// Create tunnel session via API
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, username, groupname, targetPort)
 	if err != nil {
 		utils.CliError("Failed to create tunnel session: %s", err)
@@ -90,8 +86,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		utils.CliError("Failed to listen on port %s: %s", localPort, err)
 	}
 	defer listener.Close()
-
-	fmt.Printf("✅ Listening on localhost:%s\n", localPort)
+	fmt.Printf("Listening on localhost:%s\n", localPort)
 
 	// Load TLS config
 	cfg, _ := config.LoadConfig()
@@ -114,7 +109,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 	defer wsConn.Close()
 
-	fmt.Printf("✅ Connected to proxy server\n")
+	fmt.Println("Connected to proxy server")
 
 	// Create smux session over WebSocket
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
@@ -124,9 +119,9 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 	defer session.Close()
 
-	fmt.Println("✅ Multiplexing session established")
-	fmt.Printf("🎯 Tunnel ready: localhost:%s → %s:%s\n", localPort, serverName, remotePort)
-	fmt.Println("🔄 Waiting for connections... (Ctrl+C to exit)")
+	fmt.Println("Multiplexing session established")
+	fmt.Printf("Tunnel ready: localhost:%s -> %s:%s\n", localPort, serverName, remotePort)
+	fmt.Println("Waiting for connections... (Ctrl+C to exit)")
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -145,8 +140,8 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	// Wait for shutdown signal
 	<-sigChan
-	fmt.Println("\n🛑 Shutting down tunnel...")
-	fmt.Println("✅ Tunnel closed.")
+	fmt.Println("\nShutting down tunnel...")
+	fmt.Println("Tunnel closed.")
 }
 
 // handleTCPConnection handles a single TCP connection.
@@ -156,7 +151,7 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 	// Create smux stream
 	stream, err := session.OpenStream()
 	if err != nil {
-		fmt.Printf("❌ Failed to open stream: %s\n", err)
+		fmt.Printf("Failed to open stream: %s\n", err)
 		return
 	}
 	defer stream.Close()
@@ -167,11 +162,11 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 	metadataBytes = append(metadataBytes, '\n')
 
 	if _, err := stream.Write(metadataBytes); err != nil {
-		fmt.Printf("❌ Failed to send metadata: %s\n", err)
+		fmt.Printf("Failed to send metadata: %s\n", err)
 		return
 	}
 
-	fmt.Printf("🔗 New connection from %s\n", tcpConn.RemoteAddr())
+	fmt.Printf("New connection from %s\n", tcpConn.RemoteAddr())
 
 	// Bidirectional relay using buffer pool
 	errChan := make(chan error, 2)
@@ -190,5 +185,5 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 
 	// Wait for one direction to complete
 	<-errChan
-	fmt.Printf("🏁 Connection closed: %s\n", tcpConn.RemoteAddr())
+	fmt.Printf("Connection closed: %s\n", tcpConn.RemoteAddr())
 }
