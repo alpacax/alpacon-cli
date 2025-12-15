@@ -24,6 +24,7 @@ var (
 	remotePort string
 	username   string
 	groupname  string
+	verbose    bool
 )
 
 var TunnelCmd = &cobra.Command{
@@ -51,6 +52,7 @@ var TunnelCmd = &cobra.Command{
 	-r, --remote [PORT]                Remote port to connect to (required).
 	-u, --username [USER NAME]         Username for the tunnel.
 	-g, --groupname [GROUP NAME]       Groupname for the tunnel.
+	-v, --verbose                      Show connection logs.
 	`,
 	Args: cobra.ExactArgs(1),
 	Run:  runTunnel,
@@ -61,6 +63,7 @@ func init() {
 	TunnelCmd.Flags().StringVarP(&remotePort, "remote", "r", "", "Remote port to connect to (required)")
 	TunnelCmd.Flags().StringVarP(&username, "username", "u", "", "Username for the tunnel")
 	TunnelCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Groupname for the tunnel")
+	TunnelCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show connection logs")
 
 	_ = TunnelCmd.MarkFlagRequired("local")
 	_ = TunnelCmd.MarkFlagRequired("remote")
@@ -129,7 +132,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 			if err != nil {
 				return
 			}
-			go handleTCPConnection(tcpConn, session, remotePort)
+			go handleTCPConnection(tcpConn, session, remotePort, verbose)
 		}
 	}()
 
@@ -140,7 +143,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 }
 
 // handleTCPConnection handles a single TCP connection.
-func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string) {
+func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string, verbose bool) {
 	defer tcpConn.Close()
 
 	// Create smux stream
@@ -161,7 +164,9 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 		return
 	}
 
-	fmt.Printf("New connection from %s\n", tcpConn.RemoteAddr())
+	if verbose {
+		fmt.Printf("New connection from %s\n", tcpConn.RemoteAddr())
+	}
 
 	// Bidirectional relay using buffer pool
 	errChan := make(chan error, 2)
@@ -180,5 +185,7 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 
 	// Wait for one direction to complete
 	<-errChan
-	fmt.Printf("Connection closed: %s\n", tcpConn.RemoteAddr())
+	if verbose {
+		fmt.Printf("Connection closed: %s\n", tcpConn.RemoteAddr())
+	}
 }
