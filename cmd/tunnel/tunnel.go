@@ -11,6 +11,7 @@ import (
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/tunnel"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
@@ -107,7 +108,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	// Create smux session over WebSocket
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
-	session, err := smux.Client(wsNetConn, tunnel.GetSmuxConfig())
+	session, err := smux.Client(wsNetConn, config.GetSmuxConfig())
 	if err != nil {
 		utils.CliError("Failed to create smux session: %s", err)
 	}
