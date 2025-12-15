@@ -23,7 +23,6 @@ import (
 var (
 	localPort  string
 	remotePort string
-	protocol   string
 	username   string
 	groupname  string
 )
@@ -52,7 +51,6 @@ var TunnelCmd = &cobra.Command{
 func init() {
 	TunnelCmd.Flags().StringVarP(&localPort, "local", "l", "", "Local port to listen on (required)")
 	TunnelCmd.Flags().StringVarP(&remotePort, "remote", "r", "", "Remote port to connect to (required)")
-	TunnelCmd.Flags().StringVarP(&protocol, "protocol", "p", "tcp", "Protocol type (tcp, ssh, vnc, rdp, postgresql, mysql)")
 	TunnelCmd.Flags().StringVarP(&username, "username", "u", "root", "Username for the tunnel")
 	TunnelCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Groupname for the tunnel")
 
@@ -81,7 +79,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 
 	// Create tunnel session via API
-	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, protocol, username, groupname, targetPort)
+	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, username, groupname, targetPort)
 	if err != nil {
 		utils.CliError("Failed to create tunnel session: %s", err)
 	}
