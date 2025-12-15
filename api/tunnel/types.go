@@ -1,7 +1,5 @@
 package tunnel
 
-// TunnelSessionRequest represents the request to create a tunnel session.
-// Endpoint: POST /api/websh/tunnels/
 type TunnelSessionRequest struct {
 	Server     string `json:"server"`               // Server UUID
 	TargetPort int    `json:"target_port"`          // Target port on the remote server
@@ -10,7 +8,6 @@ type TunnelSessionRequest struct {
 	ClientType string `json:"client_type"`          // cli, web, proxy (default: cli)
 }
 
-// TunnelSessionResponse represents the response from creating a tunnel session.
 type TunnelSessionResponse struct {
 	ID            string `json:"id"`
 	ConnectURL    string `json:"connect_url"`
