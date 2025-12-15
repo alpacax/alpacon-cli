@@ -8,10 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"syscall"
-	"time"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
@@ -24,77 +21,12 @@ import (
 )
 
 var (
-	localPort      string
-	remotePort     string
-	proxyURL       string
-	protocol       string
-	username       string
-	groupname      string
-	maxConnections int
-	rateLimit      int
+	localPort  string
+	remotePort string
+	protocol   string
+	username   string
+	groupname  string
 )
-
-// connectionLimiter manages concurrent connections and rate limiting
-type connectionLimiter struct {
-	maxConns    int
-	ratePerSec  int
-	activeConns int32
-	mu          sync.Mutex
-	tokens      float64
-	lastRefill  time.Time
-}
-
-func newConnectionLimiter(maxConns, ratePerSec int) *connectionLimiter {
-	return &connectionLimiter{
-		maxConns:   maxConns,
-		ratePerSec: ratePerSec,
-		tokens:     float64(ratePerSec),
-		lastRefill: time.Now(),
-	}
-}
-
-// tryAcquire checks max connections, returns false if limit exceeded
-func (l *connectionLimiter) tryAcquire() bool {
-	if int(atomic.LoadInt32(&l.activeConns)) >= l.maxConns {
-		return false
-	}
-	atomic.AddInt32(&l.activeConns, 1)
-	return true
-}
-
-// waitForRateLimit waits until rate limit allows, returns wait duration
-func (l *connectionLimiter) waitForRateLimit() time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	// Refill tokens based on elapsed time
-	now := time.Now()
-	elapsed := now.Sub(l.lastRefill).Seconds()
-	l.tokens += elapsed * float64(l.ratePerSec)
-	if l.tokens > float64(l.ratePerSec) {
-		l.tokens = float64(l.ratePerSec)
-	}
-	l.lastRefill = now
-
-	// If we have tokens, consume one immediately
-	if l.tokens >= 1 {
-		l.tokens--
-		return 0
-	}
-
-	// Calculate wait time until next token
-	waitTime := time.Duration((1-l.tokens)/float64(l.ratePerSec)*1000) * time.Millisecond
-	l.tokens = 0
-	return waitTime
-}
-
-func (l *connectionLimiter) release() {
-	atomic.AddInt32(&l.activeConns, -1)
-}
-
-func (l *connectionLimiter) getActiveCount() int32 {
-	return atomic.LoadInt32(&l.activeConns)
-}
 
 var TunnelCmd = &cobra.Command{
 	Use:   "tunnel [SERVER_NAME]",
@@ -112,9 +44,6 @@ var TunnelCmd = &cobra.Command{
 
 	# Forward local port 2222 to remote server's SSH port (22)
 	alpacon tunnel my-server -l 2222 -r 22
-
-	# Use a specific proxy URL instead of auto-discovery
-	alpacon tunnel my-server -l 9000 -r 8082 --proxy wss://proxy.example.com/tunnel/client/session123/
 	`,
 	Args: cobra.ExactArgs(1),
 	Run:  runTunnel,
@@ -123,12 +52,9 @@ var TunnelCmd = &cobra.Command{
 func init() {
 	TunnelCmd.Flags().StringVarP(&localPort, "local", "l", "", "Local port to listen on (required)")
 	TunnelCmd.Flags().StringVarP(&remotePort, "remote", "r", "", "Remote port to connect to (required)")
-	TunnelCmd.Flags().StringVar(&proxyURL, "proxy", "", "Proxy server WebSocket URL (optional, auto-discovered if not provided)")
 	TunnelCmd.Flags().StringVarP(&protocol, "protocol", "p", "tcp", "Protocol type (tcp, ssh, vnc, rdp, postgresql, mysql)")
 	TunnelCmd.Flags().StringVarP(&username, "username", "u", "root", "Username for the tunnel")
 	TunnelCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Groupname for the tunnel")
-	TunnelCmd.Flags().IntVar(&maxConnections, "max-connections", 100, "Maximum concurrent connections")
-	TunnelCmd.Flags().IntVar(&rateLimit, "rate-limit", 20, "Maximum new connections per second (excess connections are queued)")
 
 	_ = TunnelCmd.MarkFlagRequired("local")
 	_ = TunnelCmd.MarkFlagRequired("remote")
@@ -154,15 +80,10 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		utils.CliError("Failed to connect to Alpacon API: %s", err)
 	}
 
-	// Get proxy URL
-	tunnelProxyURL := proxyURL
-	if tunnelProxyURL == "" {
-		// Create tunnel session via API
-		session, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, protocol, username, groupname, targetPort)
-		if err != nil {
-			utils.CliError("Failed to create tunnel session: %s", err)
-		}
-		tunnelProxyURL = session.ConnectURL
+	// Create tunnel session via API
+	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, protocol, username, groupname, targetPort)
+	if err != nil {
+		utils.CliError("Failed to create tunnel session: %s", err)
 	}
 
 	// Create TCP listener
@@ -189,7 +110,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	headers := alpaconClient.SetWebsocketHeader()
 
 	// Connect to proxy server
-	wsConn, _, err := dialer.Dial(tunnelProxyURL, headers)
+	wsConn, _, err := dialer.Dial(tunnelSession.ConnectURL, headers)
 	if err != nil {
 		utils.CliError("Failed to connect to proxy server: %s", err)
 	}
@@ -207,11 +128,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	fmt.Println("✅ Multiplexing session established")
 	fmt.Printf("🎯 Tunnel ready: localhost:%s → %s:%s\n", localPort, serverName, remotePort)
-	fmt.Printf("⚙️  Limits: max %d connections, %d/sec rate limit\n", maxConnections, rateLimit)
 	fmt.Println("🔄 Waiting for connections... (Ctrl+C to exit)")
-
-	// Initialize connection limiter
-	limiter := newConnectionLimiter(maxConnections, rateLimit)
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -224,21 +141,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 			if err != nil {
 				return
 			}
-
-			// Check max connections limit (reject if exceeded)
-			if !limiter.tryAcquire() {
-				fmt.Printf("⚠️  Connection rejected (active: %d, max: %d)\n", limiter.getActiveCount(), maxConnections)
-				tcpConn.Close()
-				continue
-			}
-
-			// Apply rate limiting (queue/delay if exceeded)
-			if waitTime := limiter.waitForRateLimit(); waitTime > 0 {
-				fmt.Printf("⏳ Connection queued, waiting %v...\n", waitTime)
-				time.Sleep(waitTime)
-			}
-
-			go handleTCPConnectionWithLimiter(tcpConn, session, remotePort, limiter)
+			go handleTCPConnection(tcpConn, session, remotePort)
 		}
 	}()
 
@@ -248,12 +151,9 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	fmt.Println("✅ Tunnel closed.")
 }
 
-// handleTCPConnectionWithLimiter handles a single TCP connection with connection limiting.
-func handleTCPConnectionWithLimiter(tcpConn net.Conn, session *smux.Session, remotePort string, limiter *connectionLimiter) {
-	defer func() {
-		tcpConn.Close()
-		limiter.release()
-	}()
+// handleTCPConnection handles a single TCP connection.
+func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string) {
+	defer tcpConn.Close()
 
 	// Create smux stream
 	stream, err := session.OpenStream()
@@ -273,7 +173,7 @@ func handleTCPConnectionWithLimiter(tcpConn net.Conn, session *smux.Session, rem
 		return
 	}
 
-	fmt.Printf("🔗 New connection from %s (active: %d)\n", tcpConn.RemoteAddr(), limiter.getActiveCount())
+	fmt.Printf("🔗 New connection from %s\n", tcpConn.RemoteAddr())
 
 	// Bidirectional relay using buffer pool
 	errChan := make(chan error, 2)
@@ -292,6 +192,5 @@ func handleTCPConnectionWithLimiter(tcpConn net.Conn, session *smux.Session, rem
 
 	// Wait for one direction to complete
 	<-errChan
-	fmt.Printf("🏁 Connection closed: %s (active: %d)\n", tcpConn.RemoteAddr(), limiter.getActiveCount()-1)
+	fmt.Printf("🏁 Connection closed: %s\n", tcpConn.RemoteAddr())
 }
-
