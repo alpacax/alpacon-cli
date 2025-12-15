@@ -49,7 +49,7 @@ var TunnelCmd = &cobra.Command{
 	Flags:
 	-l, --local [PORT]                 Local port to listen on (required).
 	-r, --remote [PORT]                Remote port to connect to (required).
-	-u, --username [USER NAME]         Username for the tunnel (default: root).
+	-u, --username [USER NAME]         Username for the tunnel.
 	-g, --groupname [GROUP NAME]       Groupname for the tunnel.
 	`,
 	Args: cobra.ExactArgs(1),
@@ -59,7 +59,7 @@ var TunnelCmd = &cobra.Command{
 func init() {
 	TunnelCmd.Flags().StringVarP(&localPort, "local", "l", "", "Local port to listen on (required)")
 	TunnelCmd.Flags().StringVarP(&remotePort, "remote", "r", "", "Remote port to connect to (required)")
-	TunnelCmd.Flags().StringVarP(&username, "username", "u", "root", "Username for the tunnel")
+	TunnelCmd.Flags().StringVarP(&username, "username", "u", "", "Username for the tunnel")
 	TunnelCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Groupname for the tunnel")
 
 	_ = TunnelCmd.MarkFlagRequired("local")
@@ -98,7 +98,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	// Connect to proxy server
 	headers := alpaconClient.SetWebsocketHeader()
-	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.ConnectURL, headers)
+	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		utils.CliError("Failed to connect to proxy server: %s", err)
 	}
