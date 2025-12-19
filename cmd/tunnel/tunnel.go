@@ -132,7 +132,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 			if err != nil {
 				return
 			}
-			go handleTCPConnection(tcpConn, session, remotePort, verbose)
+			go handleTCPConnection(tcpConn, session, remotePort, verbose, listener)
 		}
 	}()
 
@@ -143,13 +143,14 @@ func runTunnel(cmd *cobra.Command, args []string) {
 }
 
 // handleTCPConnection handles a single TCP connection.
-func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string, verbose bool) {
+func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string, verbose bool, listener net.Listener) {
 	defer tcpConn.Close()
 
 	// Create smux stream
 	stream, err := session.OpenStream()
 	if err != nil {
 		fmt.Printf("Failed to open stream: %s\n", err)
+		listener.Close() // Stop accepting new connections
 		return
 	}
 	defer stream.Close()
