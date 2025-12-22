@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"io"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -10,6 +11,7 @@ import (
 type WebSocketConn struct {
 	conn       *websocket.Conn
 	readBuffer []byte
+	writeMu    sync.Mutex
 }
 
 func NewWebSocketConn(conn *websocket.Conn) *WebSocketConn {
@@ -37,6 +39,9 @@ func (w *WebSocketConn) Read(b []byte) (int, error) {
 }
 
 func (w *WebSocketConn) Write(b []byte) (int, error) {
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
+
 	err := w.conn.WriteMessage(websocket.BinaryMessage, b)
 	if err != nil {
 		return 0, err
