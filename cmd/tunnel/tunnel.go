@@ -76,9 +76,20 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		utils.CliError("Both --local and --remote flags are required")
 	}
 
+	localPortNum, err := strconv.Atoi(localPort)
+	if err != nil {
+		utils.CliError("Invalid local port: %s", localPort)
+	}
+	if localPortNum < 1 || localPortNum > 65535 {
+		utils.CliError("Local port must be between 1 and 65535: %d", localPortNum)
+	}
+
 	targetPort, err := strconv.Atoi(remotePort)
 	if err != nil {
 		utils.CliError("Invalid remote port: %s", remotePort)
+	}
+	if targetPort < 1 || targetPort > 65535 {
+		utils.CliError("Remote port must be between 1 and 65535: %d", targetPort)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
