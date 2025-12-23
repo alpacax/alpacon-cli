@@ -24,12 +24,12 @@ var systemPackageDownloadCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = packages.DownloadPackage(alpaconClient, file, dest, "system")
 		if err != nil {
-			utils.CliError("Failed to download the system packages from alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to download the system packages from alpacon: %s.", err)
 		}
 
 		utils.CliInfo("`%s` successfully downloaded from alpacon.", file)

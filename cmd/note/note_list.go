@@ -24,12 +24,12 @@ var noteListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		noteList, err := note.GetNoteList(alpaconClient, serverName, pageSize)
 		if err != nil {
-			utils.CliError("Failed to retrieve the notes: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the notes: %s.", err)
 		}
 
 		utils.PrintTable(noteList)

@@ -25,12 +25,12 @@ var authorityDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = cert.DeleteCA(alpaconClient, authorityId)
 		if err != nil {
-			utils.CliError("Failed to delete the CA: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the CA: %s.", err)
 		}
 
 		utils.CliInfo("CA successfully deleted: %s.", authorityId)

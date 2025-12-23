@@ -24,12 +24,12 @@ var authorityDetailCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityDetail, err := cert.GetAuthorityDetail(alpaconClient, authorityId)
 		if err != nil {
-			utils.CliError("Failed to retrieve the authority details: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the authority details: %s.", err)
 		}
 
 		utils.PrintJson(authorityDetail)

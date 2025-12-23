@@ -79,7 +79,7 @@ func SplitAndParseInt(input string) []int {
 
 		intValue, err := strconv.Atoi(trimmedString)
 		if err != nil {
-			CliError("Invalid input: only integers allowed.")
+			CliErrorWithExit("Invalid input: only integers allowed.")
 		}
 		intValues = append(intValues, intValue)
 	}
@@ -313,7 +313,7 @@ func BoolPointerToString(value *bool) string {
 func BuildURL(basePath, relativePath string, params map[string]string) string {
 	u, err := url.Parse(basePath)
 	if err != nil {
-		CliError("Failed to parse base URL")
+		CliErrorWithExit("Failed to parse base URL")
 	}
 
 	u.Path = path.Join(u.Path, relativePath)
@@ -406,7 +406,7 @@ func CommandConfirm() bool {
 		reader := bufio.NewReader(os.Stdin)
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			CliError("Failed to read user input: %s", err)
+			CliErrorWithExit("Failed to read user input: %s", err)
 			return false
 		}
 

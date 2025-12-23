@@ -23,12 +23,12 @@ var tokenListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		tokenList, err := auth.GetAPITokenList(alpaconClient)
 		if err != nil {
-			utils.CliError("Failed to retrieve the api token list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the api token list: %s.", err)
 		}
 
 		utils.PrintTable(tokenList)

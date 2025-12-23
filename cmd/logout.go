@@ -38,12 +38,12 @@ var logoutCmd = &cobra.Command{
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Failed to create Alpacon API client: %s.", err)
+			utils.CliErrorWithExit("Failed to create Alpacon API client: %s.", err)
 			return
 		}
 		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
 		if err != nil {
-			utils.CliError("Failed to fetch authentication environment: %s.", err)
+			utils.CliErrorWithExit("Failed to fetch authentication environment: %s.", err)
 			return
 		}
 
@@ -51,17 +51,17 @@ var logoutCmd = &cobra.Command{
 			if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
 				_, err := ac.SendPostRequest(blacklistURL, nil)
 				if err != nil {
-					utils.CliError("Failed to set black list. Please try again later.")
+					utils.CliErrorWithExit("Failed to set black list. Please try again later.")
 				}
 			}
 			err = auth0.Logout(httpClient, validConfig)
 			if err != nil {
-				utils.CliError("Log out from Alpacon failed: %s.", err)
+				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
 			}
 		} else {
 			err := auth.Logout(ac)
 			if err != nil {
-				utils.CliError("Log out from Alpacon failed: %s.", err)
+				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
 			}
 		}
 		fmt.Println("Logout succeeded!")

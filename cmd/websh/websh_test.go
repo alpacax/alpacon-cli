@@ -346,7 +346,7 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 			} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
 				readOnly = false
 			} else {
-				utils.CliError("The 'read only' value must be either 'true' or 'false'.")
+				utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
 			}
 		default:
 			if serverName == "" {

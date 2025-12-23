@@ -27,19 +27,19 @@ var aclListCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if !utils.IsUUID(tokenId) {
 			tokenId, err = auth.GetAPITokenIDByName(alpaconClient, tokenId)
 			if err != nil {
-				utils.CliError("Failed to retrieve the command acl: %s.", err)
+				utils.CliErrorWithExit("Failed to retrieve the command acl: %s.", err)
 			}
 		}
 
 		commandAcl, err := security.GetCommandAclList(alpaconClient, tokenId)
 		if err != nil {
-			utils.CliError("Failed to retrieve the command acl: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the command acl: %s.", err)
 		}
 
 		utils.PrintTable(commandAcl)

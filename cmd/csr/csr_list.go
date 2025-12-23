@@ -25,12 +25,12 @@ var csrListCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		csrList, err := cert.GetCSRList(alpaconClient, status)
 		if err != nil {
-			utils.CliError("Failed to retrieve the csr list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the csr list: %s.", err)
 		}
 
 		utils.PrintTable(csrList)

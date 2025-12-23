@@ -21,7 +21,7 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		utils.CliError("Failed to load configuration: %s.", err)
+		utils.CliErrorWithExit("Failed to load configuration: %s.", err)
 	}
 
 	serverID, _ := server.GetServerIDByName(ac, serverName)

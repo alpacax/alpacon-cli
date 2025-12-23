@@ -2,12 +2,12 @@ package websh
 
 import (
 	"fmt"
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -105,7 +105,7 @@ var WebshCmd = &cobra.Command{
 				} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
 					readOnly = false
 				} else {
-					utils.CliError("The 'read only' value must be either 'true' or 'false'.")
+					utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
 				}
 			default:
 				if serverName == "" {
@@ -117,7 +117,7 @@ var WebshCmd = &cobra.Command{
 		}
 
 		if serverName == "" {
-			utils.CliError("Server name is required.")
+			utils.CliErrorWithExit("Server name is required.")
 		}
 
 		// Parse SSH-like syntax for user@host
@@ -131,16 +131,16 @@ var WebshCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if serverName == "join" {
 			if url == "" || password == "" {
-				utils.CliError("Both URL and password are required.")
+				utils.CliErrorWithExit("Both URL and password are required.")
 			}
 			session, err := websh.JoinWebshSession(alpaconClient, url, password)
 			if err != nil {
-				utils.CliError("Failed to join the session: %s.", err)
+				utils.CliErrorWithExit("Failed to join the session: %s.", err)
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		} else if len(commandArgs) > 0 {
@@ -154,31 +154,45 @@ var WebshCmd = &cobra.Command{
 			command := strings.Join(commandArgs, " ")
 			result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 			if err != nil {
-				utils.CliError("Failed to run the command on the '%s' server: %s.", serverName, err)
+				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					RetryOperation: func() error {
+						result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
+						return err
+					},
+				})
+
+				if err != nil {
+					utils.CliErrorWithExit("Failed to run the command on the '%s' server: %s.", serverName, err)
+				}
 			}
 			fmt.Println(result)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
 
 			if err != nil {
-				code, _ := utils.ParseErrorResponse(err)
-				if code == utils.CodeAuthMFARequired {
-					err := mfa.HandleMFAError(alpaconClient, serverName)
-					if err != nil {
-						utils.CliError("MFA authentication failed: %s", err)
-					}
-					for {
-						fmt.Println("Waiting for MFA authentication...")
-						time.Sleep(5 * time.Second)
-
+				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					RetryOperation: func() error {
 						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
-						if err == nil {
-							fmt.Println("MFA authentication has been completed!")
-							break
-						}
-					}
-				} else {
-					utils.CliError("Failed to create websh session for '%s' server: %s.", serverName, err)
+						return err
+					},
+				})
+
+				if err != nil {
+					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}
 			_ = websh.OpenNewTerminal(alpaconClient, session)
@@ -212,7 +226,7 @@ func extractEnvValue(args []string, i int, env map[string]string) int {
 			env[parts[0]] = value
 		}
 	} else {
-		utils.CliError("Invalid format for --env flag. Expected '--env=KEY=VALUE', but got '%s'. Please use the format: --env=MY_VAR=my_value", args[i])
+		utils.CliErrorWithExit("Invalid format for --env flag. Expected '--env=KEY=VALUE', but got '%s'. Please use the format: --env=MY_VAR=my_value", args[i])
 	}
 
 	return i
