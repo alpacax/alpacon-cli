@@ -35,10 +35,18 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
 
+		const maxRetryDuration = 1 * time.Minute
+		const retryInterval = 5 * time.Second
+
+		startTime := time.Now()
 		// Retry loop
 		for {
+			if time.Since(startTime) > maxRetryDuration {
+				return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
+			}
+
 			fmt.Println("Waiting for MFA authentication...")
-			time.Sleep(5 * time.Second)
+			time.Sleep(retryInterval)
 
 			if callbacks.RetryOperation != nil {
 				if err := callbacks.RetryOperation(); err == nil {
