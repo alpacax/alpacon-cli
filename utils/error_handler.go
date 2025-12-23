@@ -25,7 +25,7 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
-	case CodeAuthMFARequired:
+	case AuthMFARequired:
 		if callbacks.OnMFARequired == nil {
 			return err
 		}
