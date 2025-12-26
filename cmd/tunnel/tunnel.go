@@ -72,10 +72,6 @@ func init() {
 func runTunnel(cmd *cobra.Command, args []string) {
 	serverName := args[0]
 
-	if localPort == "" || remotePort == "" {
-		utils.CliError("Both --local and --remote flags are required")
-	}
-
 	localPortNum, err := strconv.Atoi(localPort)
 	if err != nil {
 		utils.CliError("Invalid local port: %s", localPort)
@@ -94,7 +90,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliError("Failed to connect to Alpacon API: %s", err)
+		utils.CliError("Connection to Alpacon API failed: %v", err)
 	}
 
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, username, groupname, targetPort)
