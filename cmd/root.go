@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/packages"
 	"github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/alpacax/alpacon-cli/cmd/token"
+	"github.com/alpacax/alpacon-cli/cmd/tunnel"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -90,4 +91,7 @@ func init() {
 
 	// token
 	RootCmd.AddCommand(token.TokenCmd)
+
+	// tunnel
+	RootCmd.AddCommand(tunnel.TunnelCmd)
 }
