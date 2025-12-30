@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+const (
+	maxRetryDuration = 1 * time.Minute
+	retryInterval    = 5 * time.Second
+)
+
 // ErrorHandlerCallbacks defines callback functions for handling different error types
 type ErrorHandlerCallbacks struct {
 	// OnMFARequired is called when MFA authentication is required
@@ -34,9 +39,6 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 		if err := callbacks.OnMFARequired(serverName); err != nil {
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
-
-		const maxRetryDuration = 1 * time.Minute
-		const retryInterval = 5 * time.Second
 
 		startTime := time.Now()
 		// Retry loop
