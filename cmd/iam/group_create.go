@@ -24,23 +24,23 @@ var groupCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliError("You do not have the permission to create groups.")
+			utils.CliErrorWithExit("You do not have the permission to create groups.")
 		}
 
 		serverList, err := server.GetServerList(alpaconClient)
 		if err != nil {
-			utils.CliError("Failed to retrieve the server list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the server list: %s.", err)
 		}
 
 		groupRequest := promptForGroup(alpaconClient, serverList)
 
 		err = iam.CreateGroup(alpaconClient, groupRequest)
 		if err != nil {
-			utils.CliError("Failed to create the new group: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new group: %s.", err)
 		}
 
 		utils.CliInfo("%s group successfully created to alpacon.", groupRequest.Name)
@@ -78,12 +78,12 @@ func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.Serve
 
 	for _, serverIndex := range intServers {
 		if serverIndex < 1 || serverIndex > len(serverList) {
-			utils.CliError("Invalid server index: %d", serverIndex)
+			utils.CliErrorWithExit("Invalid server index: %d", serverIndex)
 		}
 
 		serverID, err := server.GetServerIDByName(ac, serverList[serverIndex-1].Name)
 		if err != nil {
-			utils.CliError("No server found with the given name")
+			utils.CliErrorWithExit("No server found with the given name")
 		}
 
 		serverIDs = append(serverIDs, serverID)

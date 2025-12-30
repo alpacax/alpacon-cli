@@ -26,12 +26,12 @@ var noteDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		err = note.DeleteNote(alpaconClient, noteID)
 		if err != nil {
-			utils.CliError("Failed to delete the note with ID %s. Error: %s. Please check the note ID and your permissions, and try again.", noteID, err)
+			utils.CliErrorWithExit("Failed to delete the note with ID %s. Error: %s. Please check the note ID and your permissions, and try again.", noteID, err)
 		}
 
 		utils.CliInfo("Note successfully deleted: %s.", noteID)

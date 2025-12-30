@@ -18,6 +18,13 @@ func CliError(msg string, args ...interface{}) {
 	errorMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), errorMessage)
 	reportCLIError()
+}
+
+// CliErrorWithExit handles all error messages in the CLI.
+func CliErrorWithExit(msg string, args ...interface{}) {
+	errorMessage := fmt.Sprintf(msg, args...)
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), errorMessage)
+	reportCLIError()
 	os.Exit(1)
 }
 

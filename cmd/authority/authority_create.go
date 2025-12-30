@@ -22,14 +22,14 @@ var authorityCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		authorityRequest := promptForAuthority(alpaconClient)
 
 		response, err := cert.CreateAuthority(alpaconClient, authorityRequest)
 		if err != nil {
-			utils.CliError("Failed to create the new authority: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new authority: %s.", err)
 		}
 
 		installAuthorityInfo(response)
@@ -49,14 +49,14 @@ func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
 	agent := utils.PromptForRequiredInput("Name of sever to run this CA on: ")
 	agentID, err := server.GetServerIDByName(ac, agent)
 	if err != nil {
-		utils.CliError("Failed to retrieve the server %s", err)
+		utils.CliErrorWithExit("Failed to retrieve the server %s", err)
 	}
 	authorityRequest.Agent = agentID
 
 	owner := utils.PromptForRequiredInput("Owner(username): ")
 	authorityRequest.Owner, err = iam.GetUserIDByName(ac, owner)
 	if err != nil {
-		utils.CliError("Failed to retrieve the user %s", err)
+		utils.CliErrorWithExit("Failed to retrieve the user %s", err)
 	}
 
 	return authorityRequest
