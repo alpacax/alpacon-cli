@@ -221,16 +221,15 @@ func validatePaths(sources []string, dest string) error {
 }
 
 func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) error {
-	var result []string
 	var err error
 
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
-		result, err = ftp.UploadFolder(client, src, dest, username, groupname)
+		err = ftp.UploadFolder(client, src, dest, username, groupname)
 	} else {
-		result, err = ftp.UploadFile(client, src, dest, username, groupname)
+		err = ftp.UploadFile(client, src, dest, username, groupname)
 	}
 	if err != nil {
 		// Parse error and provide specific guidance
@@ -268,7 +267,6 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	}
 	wrappedSrc := fmt.Sprintf("[%s]", strings.Join(src, ", "))
 	utils.CliInfo("Upload request for %s to %s successful.", wrappedSrc, dest)
-	fmt.Printf("Result: %s.\n", result)
 	return nil
 }
 
