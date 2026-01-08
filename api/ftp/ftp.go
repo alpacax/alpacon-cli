@@ -25,7 +25,7 @@ const (
 
 	// Polling configuration for transfer status
 	pollInterval   = 2 * time.Second
-	maxPollRetries = 2
+	maxPollRetries = 15 // 1 minute timeout (pollInterval * maxPollRetries)
 )
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
@@ -62,9 +62,7 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string) (bool
 		time.Sleep(pollInterval)
 	}
 
-	// Timeout reached but transfer request was already sent successfully.
-	// The server may still be processing the transfer in the background.
-	return true, "Transfer request completed. The server is still processing.", nil
+	return false, "", fmt.Errorf("transfer status polling timed out after 1 minute")
 }
 
 func uploadToS3(uploadUrl string, file io.Reader) error {
