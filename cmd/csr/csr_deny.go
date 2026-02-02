@@ -21,12 +21,12 @@ var csrDenyCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		_, err = cert.DenyCSR(alpaconClient, csrId)
 		if err != nil {
-			utils.CliError("Failed to deny the csr: %s.", err)
+			utils.CliErrorWithExit("Failed to deny the csr: %s.", err)
 		}
 
 		utils.CliInfo("CSR denial request successful. Please verify the CSR status.")

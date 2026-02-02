@@ -21,12 +21,12 @@ var csrApproveCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		_, err = cert.ApproveCSR(alpaconClient, csrId)
 		if err != nil {
-			utils.CliError("Failed to approve the csr: %s.", err)
+			utils.CliErrorWithExit("Failed to approve the csr: %s.", err)
 		}
 
 		utils.CliInfo("CSR approval request successful. Please verify the CSR status.")

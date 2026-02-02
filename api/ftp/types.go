@@ -50,3 +50,12 @@ type UploadResponse struct {
 	UploadUrl string    `json:"upload_url"`
 	Command   string    `json:"command"`
 }
+
+type TransferStatusResponse struct {
+	Success *bool  `json:"success"`
+	Message string `json:"message"`
+}
+
+type TransferErrorResponse struct {
+	Code string `json:"code"`
+}

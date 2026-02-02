@@ -35,7 +35,7 @@ var RootCmd = &cobra.Command{
 
 func Execute() {
 	if err := RootCmd.Execute(); err != nil {
-		utils.CliError("While executing the command: %s", err)
+		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
 }
 

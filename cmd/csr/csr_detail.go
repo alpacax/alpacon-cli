@@ -24,12 +24,12 @@ var csrDetailCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		csrDetail, err := cert.GetCSRDetail(alpaconClient, csrId)
 		if err != nil {
-			utils.CliError("Failed to retrieve the csr details: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the csr details: %s.", err)
 		}
 
 		utils.PrintJson(csrDetail)

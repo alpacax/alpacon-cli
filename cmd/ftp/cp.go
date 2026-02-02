@@ -2,12 +2,12 @@ package ftp
 
 import (
 	"fmt"
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -45,7 +45,7 @@ var CpCmd = &cobra.Command{
 		recursive, _ := cmd.Flags().GetBool("recursive")
 
 		if len(args) < 2 {
-			utils.CliError("You must specify at least two arguments.\n\n" +
+			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
 				"  • Upload file to server:\n" +
 				"    alpacon cp /local/file.txt server:/remote/path/\n" +
@@ -78,13 +78,13 @@ var CpCmd = &cobra.Command{
 
 		// Validate source and destination paths
 		if err := validatePaths(sources, dest); err != nil {
-			utils.CliError("%s", err.Error())
+			utils.CliErrorWithExit("%s", err.Error())
 			return
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s.\n\n"+
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s.\n\n"+
 				"Try these solutions:\n"+
 				"  • Re-login with 'alpacon login'\n"+
 				"  • Check your internet connection\n"+
@@ -93,57 +93,51 @@ var CpCmd = &cobra.Command{
 		}
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
+			serverName, _ := utils.SplitPath(dest)
 			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
 			if err != nil {
-				code, _ := utils.ParseErrorResponse(err)
-				if code == utils.CodeAuthMFARequired {
-					serverName, _ := utils.SplitPath(dest)
-					err := mfa.HandleMFAError(alpaconClient, serverName)
-					if err != nil {
-						utils.CliError("MFA authentication failed: %s", err)
-					}
-					for {
-						fmt.Println("Waiting for MFA authentication...")
-						time.Sleep(5 * time.Second)
+				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					RetryOperation: func() error {
+						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+					},
+				})
 
-						err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
-						if err == nil {
-							fmt.Println("MFA authentication has been completed!")
-							break
-						}
-					}
-				} else {
+				if err != nil {
 					// Error already handled in uploadObject
 					return
 				}
 			}
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
+			serverName, _ := utils.SplitPath(sources[0])
 			err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
 			if err != nil {
-				code, _ := utils.ParseErrorResponse(err)
-				if code == utils.CodeAuthMFARequired {
-					serverName, _ := utils.SplitPath(sources[0])
-					err := mfa.HandleMFAError(alpaconClient, serverName)
-					if err != nil {
-						utils.CliError("MFA authentication failed: %s", err)
-					}
-					for {
-						fmt.Println("Waiting for MFA authentication...")
-						time.Sleep(5 * time.Second)
+				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					RetryOperation: func() error {
+						return downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+					},
+				})
 
-						err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
-						if err == nil {
-							fmt.Println("MFA authentication has been completed!")
-							break
-						}
-					}
-				} else {
+				if err != nil {
 					// Error already handled in downloadObject
 					return
 				}
 			}
 		} else {
-			utils.CliError("Invalid combination of source and destination paths.\n\n" +
+			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
 				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
 				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
@@ -227,29 +221,28 @@ func validatePaths(sources []string, dest string) error {
 }
 
 func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) error {
-	var result []string
 	var err error
 
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
-		result, err = ftp.UploadFolder(client, src, dest, username, groupname)
+		err = ftp.UploadFolder(client, src, dest, username, groupname)
 	} else {
-		result, err = ftp.UploadFile(client, src, dest, username, groupname)
+		err = ftp.UploadFile(client, src, dest, username, groupname)
 	}
 	if err != nil {
 		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
-			utils.CliError("Source file(s) not found: %s\n\n"+
+			utils.CliErrorWithExit("Source file(s) not found: %s\n\n"+
 				"Please check:\n"+
 				"  • File paths are correct and files exist\n"+
 				"  • You have read permissions for the source files\n"+
 				"  • For folders, use -r flag: alpacon cp -r /local/folder %s",
 				strings.Join(src, ", "), dest)
 		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
-			utils.CliError("Permission denied uploading to '%s' on server '%s'.\n\n"+
+			utils.CliErrorWithExit("Permission denied uploading to '%s' on server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Upload as root: alpacon cp -u root %s %s\n"+
 				"  • Upload to writable location: alpacon cp %s %s:/tmp/\n"+
@@ -257,7 +250,7 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • Ensure destination directory exists",
 				remotePath, serverName, strings.Join(src, " "), dest, strings.Join(src, " "), serverName)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
-			utils.CliError("Server '%s' not found.\n\n"+
+			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
 				"Please check:\n"+
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
@@ -274,7 +267,6 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	}
 	wrappedSrc := fmt.Sprintf("[%s]", strings.Join(src, ", "))
 	utils.CliInfo("Upload request for %s to %s successful.", wrappedSrc, dest)
-	fmt.Printf("Result: %s.\n", result)
 	return nil
 }
 
@@ -287,7 +279,7 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
-			utils.CliError("Source file not found: '%s' on server '%s'.\n\n"+
+			utils.CliErrorWithExit("Source file not found: '%s' on server '%s'.\n\n"+
 				"Please check:\n"+
 				"  • File path is correct: %s\n"+
 				"  • File exists: alpacon exec %s 'ls -la %s'\n"+
@@ -295,20 +287,20 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
 				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), src, dest)
 		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
-			utils.CliError("Permission denied downloading '%s' from server '%s'.\n\n"+
+			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
 				"  • Download as file owner: alpacon cp -u OWNER %s %s\n"+
 				"  • Check file permissions: alpacon exec %s 'ls -la %s'",
 				remotePath, serverName, src, dest, src, dest, serverName, remotePath)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
-			utils.CliError("Server '%s' not found.\n\n"+
+			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
 				"Please check:\n"+
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
 		} else if strings.Contains(errStr, "download failed") {
-			utils.CliError("Download failed from server '%s': %s\n\n"+
+			utils.CliErrorWithExit("Download failed from server '%s': %s\n\n"+
 				"This might be due to:\n"+
 				"  • Network connectivity issues\n"+
 				"  • Server timeout (file too large)\n"+

@@ -28,12 +28,12 @@ var LogCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		logList, err := log.GetSystemLogList(alpaconClient, serverName, pageSize)
 		if err != nil {
-			utils.CliError("Failed to get logs: %s.", err)
+			utils.CliErrorWithExit("Failed to get logs: %s.", err)
 		}
 
 		utils.PrintTable(logList)

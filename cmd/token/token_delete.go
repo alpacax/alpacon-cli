@@ -25,19 +25,19 @@ var tokenDeleteCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if !utils.IsUUID(tokenId) {
 			tokenId, err = auth.GetAPITokenIDByName(alpaconClient, tokenId)
 			if err != nil {
-				utils.CliError("Failed to delete the api token: %s.", err)
+				utils.CliErrorWithExit("Failed to delete the api token: %s.", err)
 			}
 		}
 
 		err = auth.DeleteAPIToken(alpaconClient, tokenId)
 		if err != nil {
-			utils.CliError("Failed to delete the api token: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the api token: %s.", err)
 		}
 
 		utils.CliInfo("API Token successfully deleted: %s", tokenId)

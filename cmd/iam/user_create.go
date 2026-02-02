@@ -23,18 +23,18 @@ var userCreateCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliError("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			utils.CliErrorWithExit("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
 		userRequest := promptForUser(alpaconClient)
 
 		err = iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
-			utils.CliError("Failed to create the new user: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new user: %s.", err)
 		}
 
 		utils.CliInfo("%s user successfully created to alpacon.", userRequest.Username)

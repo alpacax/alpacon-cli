@@ -34,19 +34,19 @@ var aclAddCmd = &cobra.Command{
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliError("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if !utils.IsUUID(commandAclRequest.Token) {
 			commandAclRequest.Token, err = auth.GetAPITokenIDByName(alpaconClient, commandAclRequest.Token)
 			if err != nil {
-				utils.CliError("Failed to add the command ACL to token: %v.", err)
+				utils.CliErrorWithExit("Failed to add the command ACL to token: %v.", err)
 			}
 		}
 
 		err = security.AddCommandAcl(alpaconClient, commandAclRequest)
 		if err != nil {
-			utils.CliError("Failed to add the command ACL to token: %v.", err)
+			utils.CliErrorWithExit("Failed to add the command ACL to token: %v.", err)
 		}
 
 		utils.CliInfo("Command ACL successfully added to token: %s with command: %s", token, command)
