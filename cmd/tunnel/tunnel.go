@@ -2,11 +2,13 @@ package tunnel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
@@ -26,6 +28,16 @@ var (
 	groupname  string
 	verbose    bool
 )
+
+// tunnelContext holds shared resources for TCP connection handling.
+type tunnelContext struct {
+	session      *smux.Session
+	listener     net.Listener
+	remotePort   string
+	verbose      bool
+	done         chan struct{}
+	shutdownOnce *sync.Once
+}
 
 var TunnelCmd = &cobra.Command{
 	Use:   "tunnel [SERVER NAME]",
@@ -74,34 +86,34 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	localPortNum, err := strconv.Atoi(localPort)
 	if err != nil {
-		utils.CliError("Invalid local port: %s", localPort)
+		utils.CliErrorWithExit("Invalid local port: %s", localPort)
 	}
 	if localPortNum < 1 || localPortNum > 65535 {
-		utils.CliError("Local port must be between 1 and 65535: %d", localPortNum)
+		utils.CliErrorWithExit("Local port must be between 1 and 65535: %d", localPortNum)
 	}
 
 	targetPort, err := strconv.Atoi(remotePort)
 	if err != nil {
-		utils.CliError("Invalid remote port: %s", remotePort)
+		utils.CliErrorWithExit("Invalid remote port: %s", remotePort)
 	}
 	if targetPort < 1 || targetPort > 65535 {
-		utils.CliError("Remote port must be between 1 and 65535: %d", targetPort)
+		utils.CliErrorWithExit("Remote port must be between 1 and 65535: %d", targetPort)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliError("Connection to Alpacon API failed: %v", err)
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %v", err)
 	}
 
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, serverName, username, groupname, targetPort)
 	if err != nil {
-		utils.CliError("Failed to create tunnel session: %s", err)
+		utils.CliErrorWithExit("Failed to create tunnel session: %s", err)
 	}
 
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", localPort))
 	if err != nil {
-		utils.CliError("Failed to listen on port %s: %s", localPort, err)
+		utils.CliErrorWithExit("Failed to listen on port %s: %s", localPort, err)
 	}
 	defer listener.Close()
 	fmt.Printf("Listening on localhost:%s\n", localPort)
@@ -110,7 +122,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	headers := alpaconClient.SetWebsocketHeader()
 	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
-		utils.CliError("Failed to connect to proxy server: %s", err)
+		utils.CliErrorWithExit("Failed to connect to proxy server: %s", err)
 	}
 	defer wsConn.Close()
 
@@ -120,7 +132,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
 	session, err := smux.Client(wsNetConn, config.GetSmuxConfig())
 	if err != nil {
-		utils.CliError("Failed to create smux session: %s", err)
+		utils.CliErrorWithExit("Failed to create smux session: %s", err)
 	}
 	defer session.Close()
 
@@ -132,39 +144,69 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
+	// Create tunnel context for connection handling
+	var shutdownOnce sync.Once
+	ctx := &tunnelContext{
+		session:      session,
+		listener:     listener,
+		remotePort:   remotePort,
+		verbose:      verbose,
+		done:         make(chan struct{}),
+		shutdownOnce: &shutdownOnce,
+	}
+
 	// Accept TCP connections
 	go func() {
 		for {
 			tcpConn, err := listener.Accept()
 			if err != nil {
+				if !errors.Is(err, net.ErrClosed) {
+					fmt.Printf("Accept error: %s\n", err)
+				}
 				return
 			}
-			go handleTCPConnection(tcpConn, session, remotePort, verbose, listener)
+			go handleTCPConnection(tcpConn, ctx)
 		}
 	}()
 
-	// Wait for shutdown signal
-	<-sigChan
-	fmt.Println("\nShutting down tunnel...")
+	// Wait for shutdown signal or tunnel failure
+	select {
+	case <-sigChan:
+		fmt.Println("\nShutting down tunnel...")
+	case <-ctx.done:
+		fmt.Println("\nTunnel connection lost, shutting down...")
+	}
 	fmt.Println("Tunnel closed.")
 }
 
 // handleTCPConnection handles a single TCP connection.
-func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort string, verbose bool, listener net.Listener) {
+func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	defer tcpConn.Close()
 
 	// Create smux stream
-	stream, err := session.OpenStream()
+	stream, err := ctx.session.OpenStream()
 	if err != nil {
 		fmt.Printf("Failed to open stream: %s\n", err)
-		listener.Close() // Stop accepting new connections
+		ctx.shutdownOnce.Do(func() {
+			if err := ctx.listener.Close(); err != nil && ctx.verbose {
+				fmt.Printf("Failed to close listener: %s\n", err)
+			}
+			if err := ctx.session.Close(); err != nil && ctx.verbose {
+				fmt.Printf("Failed to close session: %s\n", err)
+			}
+			close(ctx.done)
+		})
 		return
 	}
 	defer stream.Close()
 
 	// Send metadata (target port information)
-	metadata := map[string]string{"remote_port": remotePort}
-	metadataBytes, _ := json.Marshal(metadata)
+	metadata := map[string]string{"remote_port": ctx.remotePort}
+	metadataBytes, err := json.Marshal(metadata)
+	if err != nil {
+		fmt.Printf("Failed to marshal metadata: %s\n", err)
+		return
+	}
 	metadataBytes = append(metadataBytes, '\n')
 
 	if _, err := stream.Write(metadataBytes); err != nil {
@@ -172,7 +214,7 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 		return
 	}
 
-	if verbose {
+	if ctx.verbose {
 		fmt.Printf("New connection from %s\n", tcpConn.RemoteAddr())
 	}
 
@@ -193,7 +235,7 @@ func handleTCPConnection(tcpConn net.Conn, session *smux.Session, remotePort str
 
 	// Wait for one direction to complete
 	<-errChan
-	if verbose {
+	if ctx.verbose {
 		fmt.Printf("Connection closed: %s\n", tcpConn.RemoteAddr())
 	}
 }
