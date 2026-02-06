@@ -31,12 +31,18 @@ var (
 
 // tunnelContext holds shared resources for TCP connection handling.
 type tunnelContext struct {
-	session      *smux.Session
+	session      streamSession
 	listener     net.Listener
 	remotePort   string
 	verbose      bool
 	done         chan struct{}
-	shutdownOnce *sync.Once
+	shutdownErr  chan error
+	shutdownOnce sync.Once
+}
+
+type streamSession interface {
+	OpenStream() (*smux.Stream, error)
+	Close() error
 }
 
 var TunnelCmd = &cobra.Command{
@@ -143,40 +149,72 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 
 	// Create tunnel context for connection handling
-	var shutdownOnce sync.Once
 	ctx := &tunnelContext{
-		session:      session,
-		listener:     listener,
-		remotePort:   remotePort,
-		verbose:      verbose,
-		done:         make(chan struct{}),
-		shutdownOnce: &shutdownOnce,
+		session:     session,
+		listener:    listener,
+		remotePort:  remotePort,
+		verbose:     verbose,
+		done:        make(chan struct{}),
+		shutdownErr: make(chan error, 1),
 	}
 
 	// Accept TCP connections
-	go func() {
-		for {
-			tcpConn, err := listener.Accept()
-			if err != nil {
-				if !errors.Is(err, net.ErrClosed) {
-					fmt.Printf("Accept error: %s\n", err)
-				}
-				return
-			}
-			go handleTCPConnection(tcpConn, ctx)
-		}
-	}()
+	go acceptConnections(ctx)
 
 	// Wait for shutdown signal or tunnel failure
 	select {
 	case <-sigChan:
 		fmt.Println("\nShutting down tunnel...")
+		shutdownTunnel(ctx, nil)
 	case <-ctx.done:
-		fmt.Println("\nTunnel connection lost, shutting down...")
+		select {
+		case err := <-ctx.shutdownErr:
+			utils.CliErrorWithExit("Tunnel connection lost: %s", err)
+		default:
+			fmt.Println("\nTunnel connection lost, shutting down...")
+		}
 	}
 	fmt.Println("Tunnel closed.")
+}
+
+func acceptConnections(ctx *tunnelContext) {
+	for {
+		tcpConn, err := ctx.listener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			fmt.Printf("Accept error: %s\n", err)
+			shutdownTunnel(ctx, fmt.Errorf("accept failed: %w", err))
+			return
+		}
+		go handleTCPConnection(tcpConn, ctx)
+	}
+}
+
+func shutdownTunnel(ctx *tunnelContext, cause error) {
+	ctx.shutdownOnce.Do(func() {
+		if ctx.listener != nil {
+			if err := ctx.listener.Close(); err != nil && ctx.verbose && !errors.Is(err, net.ErrClosed) {
+				fmt.Printf("Failed to close listener: %s\n", err)
+			}
+		}
+		if ctx.session != nil {
+			if err := ctx.session.Close(); err != nil && ctx.verbose {
+				fmt.Printf("Failed to close session: %s\n", err)
+			}
+		}
+		if cause != nil {
+			select {
+			case ctx.shutdownErr <- cause:
+			default:
+			}
+		}
+		close(ctx.done)
+	})
 }
 
 // handleTCPConnection handles a single TCP connection.
@@ -187,15 +225,7 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	stream, err := ctx.session.OpenStream()
 	if err != nil {
 		fmt.Printf("Failed to open stream: %s\n", err)
-		ctx.shutdownOnce.Do(func() {
-			if err := ctx.listener.Close(); err != nil && ctx.verbose {
-				fmt.Printf("Failed to close listener: %s\n", err)
-			}
-			if err := ctx.session.Close(); err != nil && ctx.verbose {
-				fmt.Printf("Failed to close session: %s\n", err)
-			}
-			close(ctx.done)
-		})
+		shutdownTunnel(ctx, fmt.Errorf("open stream failed: %w", err))
 		return
 	}
 	defer stream.Close()
