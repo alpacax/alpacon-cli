@@ -2,10 +2,12 @@ package tunnel
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/xtaci/smux"
 )
@@ -13,6 +15,7 @@ import (
 type mockSession struct {
 	openStreamFn func() (*smux.Stream, error)
 	closeFn      func() error
+	closeChan    chan struct{}
 }
 
 func (m *mockSession) OpenStream() (*smux.Stream, error) {
@@ -27,6 +30,13 @@ func (m *mockSession) Close() error {
 		return m.closeFn()
 	}
 	return nil
+}
+
+func (m *mockSession) CloseChan() <-chan struct{} {
+	if m.closeChan != nil {
+		return m.closeChan
+	}
+	return make(chan struct{})
 }
 
 type mockListener struct {
@@ -145,6 +155,59 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 	case err := <-ctx.shutdownErr:
 		if !errors.Is(err, acceptErr) {
 			t.Fatalf("shutdownErr = %v, want wrapped acceptErr", err)
+		}
+	default:
+		t.Fatal("expected shutdown cause in shutdownErr channel")
+	}
+
+	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+		t.Fatalf("listener Close() called %d times, want 1", got)
+	}
+	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+		t.Fatalf("session Close() called %d times, want 1", got)
+	}
+}
+
+func TestSessionCloseChanTriggersShutdown(t *testing.T) {
+	closeChan := make(chan struct{})
+	var listenerCloseCount int32
+	var sessionCloseCount int32
+
+	ctx := &tunnelContext{
+		listener: &mockListener{
+			closeFn: func() error {
+				atomic.AddInt32(&listenerCloseCount, 1)
+				return nil
+			},
+		},
+		session: &mockSession{
+			closeChan: closeChan,
+			closeFn: func() error {
+				atomic.AddInt32(&sessionCloseCount, 1)
+				return nil
+			},
+		},
+		done:        make(chan struct{}),
+		shutdownErr: make(chan error, 1),
+	}
+
+	go func() {
+		<-ctx.session.CloseChan()
+		shutdownTunnel(ctx, fmt.Errorf("session closed by remote"))
+	}()
+
+	close(closeChan)
+
+	select {
+	case <-ctx.done:
+	case <-time.After(time.Second):
+		t.Fatal("expected done channel to be closed")
+	}
+
+	select {
+	case err := <-ctx.shutdownErr:
+		if err == nil || err.Error() != "session closed by remote" {
+			t.Fatalf("shutdownErr = %v, want 'session closed by remote'", err)
 		}
 	default:
 		t.Fatal("expected shutdown cause in shutdownErr channel")

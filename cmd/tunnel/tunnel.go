@@ -43,6 +43,7 @@ type tunnelContext struct {
 type streamSession interface {
 	OpenStream() (*smux.Stream, error)
 	Close() error
+	CloseChan() <-chan struct{}
 }
 
 var TunnelCmd = &cobra.Command{
@@ -163,6 +164,12 @@ func runTunnel(cmd *cobra.Command, args []string) {
 
 	// Accept TCP connections
 	go acceptConnections(ctx)
+
+	// Monitor session closure (e.g. keepalive failure)
+	go func() {
+		<-session.CloseChan()
+		shutdownTunnel(ctx, fmt.Errorf("session closed by remote"))
+	}()
 
 	// Wait for shutdown signal or tunnel failure
 	select {
