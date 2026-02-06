@@ -147,60 +147,60 @@ func TestIsLocalPaths(t *testing.T) {
 // Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	tests := []struct {
-		name           string
-		args           []string
-		expectedArgs   []string
-		expectedUser   string
-		description    string
+		name         string
+		args         []string
+		expectedArgs []string
+		expectedUser string
+		description  string
 	}{
 		{
-			name:           "Simple local to remote copy",
-			args:           []string{"test.txt", "prod-docker:~/"},
-			expectedArgs:   []string{"test.txt", "prod-docker:~/"},
-			expectedUser:   "",
-			description:    "alpacon cp test.txt prod-docker:~/",
+			name:         "Simple local to remote copy",
+			args:         []string{"test.txt", "prod-docker:~/"},
+			expectedArgs: []string{"test.txt", "prod-docker:~/"},
+			expectedUser: "",
+			description:  "alpacon cp test.txt prod-docker:~/",
 		},
 		{
-			name:           "Local to remote with path",
-			args:           []string{"test.txt", "prod-docker:~/eunyoung/"},
-			expectedArgs:   []string{"test.txt", "prod-docker:~/eunyoung/"},
-			expectedUser:   "",
-			description:    "alpacon cp test.txt prod-docker:~/eunyoung/",
+			name:         "Local to remote with path",
+			args:         []string{"test.txt", "prod-docker:~/eunyoung/"},
+			expectedArgs: []string{"test.txt", "prod-docker:~/eunyoung/"},
+			expectedUser: "",
+			description:  "alpacon cp test.txt prod-docker:~/eunyoung/",
 		},
 		{
-			name:           "Remote to local copy",
-			args:           []string{"prod-docker:~/eunyoung/test.txt", "."},
-			expectedArgs:   []string{"prod-docker:~/eunyoung/test.txt", "."},
-			expectedUser:   "",
-			description:    "alpacon cp prod-docker:~/eunyoung/test.txt .",
+			name:         "Remote to local copy",
+			args:         []string{"prod-docker:~/eunyoung/test.txt", "."},
+			expectedArgs: []string{"prod-docker:~/eunyoung/test.txt", "."},
+			expectedUser: "",
+			description:  "alpacon cp prod-docker:~/eunyoung/test.txt .",
 		},
 		{
-			name:           "Remote with user to local",
-			args:           []string{"root@prod-docker:/var/log/syslog", "."},
-			expectedArgs:   []string{"prod-docker:/var/log/syslog", "."},
-			expectedUser:   "root",
-			description:    "alpacon cp root@prod-docker:/var/log/syslog .",
+			name:         "Remote with user to local",
+			args:         []string{"root@prod-docker:/var/log/syslog", "."},
+			expectedArgs: []string{"prod-docker:/var/log/syslog", "."},
+			expectedUser: "root",
+			description:  "alpacon cp root@prod-docker:/var/log/syslog .",
 		},
 		{
-			name:           "Local to remote with user",
-			args:           []string{"test.txt", "admin@prod-docker:~/uploads/"},
-			expectedArgs:   []string{"test.txt", "prod-docker:~/uploads/"},
-			expectedUser:   "admin",
-			description:    "alpacon cp test.txt admin@prod-docker:~/uploads/",
+			name:         "Local to remote with user",
+			args:         []string{"test.txt", "admin@prod-docker:~/uploads/"},
+			expectedArgs: []string{"test.txt", "prod-docker:~/uploads/"},
+			expectedUser: "admin",
+			description:  "alpacon cp test.txt admin@prod-docker:~/uploads/",
 		},
 		{
-			name:           "Multiple local files to remote with user",
-			args:           []string{"file1.txt", "file2.txt", "deploy@web-server:/opt/app/"},
-			expectedArgs:   []string{"file1.txt", "file2.txt", "web-server:/opt/app/"},
-			expectedUser:   "deploy",
-			description:    "alpacon cp file1.txt file2.txt deploy@web-server:/opt/app/",
+			name:         "Multiple local files to remote with user",
+			args:         []string{"file1.txt", "file2.txt", "deploy@web-server:/opt/app/"},
+			expectedArgs: []string{"file1.txt", "file2.txt", "web-server:/opt/app/"},
+			expectedUser: "deploy",
+			description:  "alpacon cp file1.txt file2.txt deploy@web-server:/opt/app/",
 		},
 		{
-			name:           "User in hostname only without path",
-			args:           []string{"test.txt", "root@prod-docker"},
-			expectedArgs:   []string{"test.txt", "prod-docker"},
-			expectedUser:   "root",
-			description:    "alpacon cp test.txt root@prod-docker (user@host without path)",
+			name:         "User in hostname only without path",
+			args:         []string{"test.txt", "root@prod-docker"},
+			expectedArgs: []string{"test.txt", "prod-docker"},
+			expectedUser: "root",
+			description:  "alpacon cp test.txt root@prod-docker (user@host without path)",
 		},
 	}
 
@@ -217,7 +217,7 @@ func TestCpCommandSSHParsing(t *testing.T) {
 					// This is the enhanced parsing logic we added to cp.go
 					// We need to import the utils package for this to work
 					// For now, let's test the logic manually
-					
+
 					// Simplified version of the parsing logic
 					if arg == "root@prod-docker:/var/log/syslog" {
 						username = "root"
