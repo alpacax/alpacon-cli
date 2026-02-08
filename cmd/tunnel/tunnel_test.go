@@ -118,6 +118,48 @@ func TestShutdownTunnelRunsOnce(t *testing.T) {
 	}
 }
 
+// tempNetError implements net.Error with Timeout() == true for testing retry logic.
+type tempNetError struct{ msg string }
+
+func (e *tempNetError) Error() string   { return e.msg }
+func (e *tempNetError) Timeout() bool   { return true }
+func (e *tempNetError) Temporary() bool { return true }
+
+func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
+	var attempts int32
+	const retryCount = 3
+
+	ctx := &tunnelContext{
+		listener: &mockListener{
+			acceptFn: func() (net.Conn, error) {
+				n := atomic.AddInt32(&attempts, 1)
+				if int(n) <= retryCount {
+					return nil, &tempNetError{msg: "temporary accept error"}
+				}
+				// After retries, return a permanent error to exit the loop
+				return nil, net.ErrClosed
+			},
+		},
+		session: &mockSession{},
+		done:    make(chan struct{}),
+		shutdownErr: make(chan error, 1),
+	}
+
+	acceptConnections(ctx)
+
+	got := atomic.LoadInt32(&attempts)
+	if got <= int32(retryCount) {
+		t.Fatalf("expected more than %d attempts, got %d", retryCount, got)
+	}
+
+	// shutdownTunnel should NOT have been called (exited via net.ErrClosed path)
+	select {
+	case err := <-ctx.shutdownErr:
+		t.Fatalf("unexpected shutdownErr: %v", err)
+	default:
+	}
+}
+
 func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 	acceptErr := errors.New("accept failure")
 	var listenerCloseCount int32

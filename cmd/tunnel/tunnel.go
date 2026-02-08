@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
@@ -122,13 +123,13 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	if err != nil {
 		utils.CliErrorWithExit("Failed to listen on port %s: %s", localPort, err)
 	}
-	defer listener.Close()
 	fmt.Printf("Listening on localhost:%s\n", localPort)
 
 	// Connect to proxy server
 	headers := alpaconClient.SetWebsocketHeader()
 	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
+		listener.Close()
 		utils.CliErrorWithExit("Failed to connect to proxy server: %s", err)
 	}
 	defer wsConn.Close()
@@ -139,9 +140,9 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
 	session, err := smux.Client(wsNetConn, config.GetSmuxConfig())
 	if err != nil {
+		listener.Close()
 		utils.CliErrorWithExit("Failed to create smux session: %s", err)
 	}
-	defer session.Close()
 
 	fmt.Println("Multiplexing session established")
 	fmt.Printf("Tunnel ready: localhost:%s -> %s:%s\n", localPort, serverName, remotePort)
@@ -153,6 +154,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	defer signal.Stop(sigChan)
 
 	// Create tunnel context for connection handling
+	// shutdownTunnel is the single close path for listener and session.
 	ctx := &tunnelContext{
 		session:     session,
 		listener:    listener,
@@ -161,6 +163,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		done:        make(chan struct{}),
 		shutdownErr: make(chan error, 1),
 	}
+	defer shutdownTunnel(ctx, nil)
 
 	// Accept TCP connections
 	go acceptConnections(ctx)
@@ -188,16 +191,36 @@ func runTunnel(cmd *cobra.Command, args []string) {
 }
 
 func acceptConnections(ctx *tunnelContext) {
+	var tempDelay time.Duration
 	for {
 		tcpConn, err := ctx.listener.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			fmt.Printf("Accept error: %s\n", err)
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				if tempDelay == 0 {
+					tempDelay = 5 * time.Millisecond
+				} else {
+					tempDelay *= 2
+				}
+				if tempDelay > 1*time.Second {
+					tempDelay = 1 * time.Second
+				}
+				utils.CliWarning("Accept error (retrying in %v): %s", tempDelay, err)
+				select {
+				case <-time.After(tempDelay):
+					continue
+				case <-ctx.done:
+					return
+				}
+			}
+			utils.CliError("Accept error: %s", err)
 			shutdownTunnel(ctx, fmt.Errorf("accept failed: %w", err))
 			return
 		}
+		tempDelay = 0
 		go handleTCPConnection(tcpConn, ctx)
 	}
 }
@@ -206,12 +229,12 @@ func shutdownTunnel(ctx *tunnelContext, cause error) {
 	ctx.shutdownOnce.Do(func() {
 		if ctx.listener != nil {
 			if err := ctx.listener.Close(); err != nil && ctx.verbose && !errors.Is(err, net.ErrClosed) {
-				fmt.Printf("Failed to close listener: %s\n", err)
+				utils.CliWarning("Failed to close listener: %s", err)
 			}
 		}
 		if ctx.session != nil {
 			if err := ctx.session.Close(); err != nil && ctx.verbose {
-				fmt.Printf("Failed to close session: %s\n", err)
+				utils.CliWarning("Failed to close session: %s", err)
 			}
 		}
 		if cause != nil {
@@ -231,7 +254,7 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	// Create smux stream
 	stream, err := ctx.session.OpenStream()
 	if err != nil {
-		fmt.Printf("Failed to open stream: %s\n", err)
+		utils.CliError("Failed to open stream: %s", err)
 		shutdownTunnel(ctx, fmt.Errorf("open stream failed: %w", err))
 		return
 	}
@@ -241,13 +264,13 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	metadata := map[string]string{"remote_port": ctx.remotePort}
 	metadataBytes, err := json.Marshal(metadata)
 	if err != nil {
-		fmt.Printf("Failed to marshal metadata: %s\n", err)
+		utils.CliError("Failed to marshal metadata: %s", err)
 		return
 	}
 	metadataBytes = append(metadataBytes, '\n')
 
 	if _, err := stream.Write(metadataBytes); err != nil {
-		fmt.Printf("Failed to send metadata: %s\n", err)
+		utils.CliError("Failed to send metadata: %s", err)
 		return
 	}
 
