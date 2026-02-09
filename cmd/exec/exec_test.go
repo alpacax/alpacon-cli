@@ -70,7 +70,7 @@ func TestExecCommandParsing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			username, groupname, serverName, commandArgs := parseExecArgs(tt.args, "", "")
-			
+
 			assert.Equal(t, tt.expectedUsername, username, "Username should match")
 			assert.Equal(t, tt.expectedGroupname, groupname, "Groupname should match")
 			assert.Equal(t, tt.expectedServer, serverName, "Server name should match")
@@ -125,7 +125,7 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			username, groupname, serverName, commandArgs := parseExecArgs(tt.args, tt.initialUsername, tt.initialGroupname)
-			
+
 			assert.Equal(t, tt.expectedUsername, username, "Username should match")
 			assert.Equal(t, tt.expectedGroupname, groupname, "Groupname should match")
 			assert.Equal(t, tt.expectedServer, serverName, "Server name should match")

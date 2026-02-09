@@ -19,14 +19,14 @@ type SSHTarget struct {
 // - user@host:path
 func ParseSSHTarget(target string) SSHTarget {
 	result := SSHTarget{}
-	
+
 	// First, check if there's a user@ prefix
 	if strings.Contains(target, "@") {
 		parts := strings.SplitN(target, "@", 2)
 		result.User = parts[0]
 		target = parts[1] // Continue processing with the remainder
 	}
-	
+
 	// Now check if there's a :path suffix
 	if strings.Contains(target, ":") {
 		parts := strings.SplitN(target, ":", 2)
@@ -35,7 +35,7 @@ func ParseSSHTarget(target string) SSHTarget {
 	} else {
 		result.Host = target
 	}
-	
+
 	return result
 }
 
@@ -58,16 +58,16 @@ func IsLocalTarget(target string) bool {
 // FormatSSHTarget formats an SSHTarget back into a string representation
 func FormatSSHTarget(target SSHTarget) string {
 	result := ""
-	
+
 	if target.User != "" {
 		result = target.User + "@"
 	}
-	
+
 	result += target.Host
-	
+
 	if target.Path != "" {
 		result += ":" + target.Path
 	}
-	
+
 	return result
 }
