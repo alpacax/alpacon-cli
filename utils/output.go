@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/olekukonko/tablewriter"
-	"os"
 	"reflect"
 	"strings"
+
+	"github.com/olekukonko/tablewriter"
 )
 
 func PrintTable(slice interface{}) {
@@ -17,23 +17,20 @@ func PrintTable(slice interface{}) {
 		CliErrorWithExit("Parsing data: Expected a list format.")
 	}
 
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
+	writer, cleanup := WriteToPager()
+	defer cleanup()
+
+	table := tablewriter.NewWriter(writer)
 	table.SetBorder(false)
-	table.SetCenterSeparator(" ")
-	table.SetColumnSeparator(" ")
-	table.SetRowSeparator(" ")
-	table.SetHeaderLine(false)
-	table.SetAutoFormatHeaders(false)
-	table.SetAutoWrapText(false)
 	table.SetAutoFormatHeaders(true)
+	table.SetAutoWrapText(false)
 	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
 	table.SetAlignment(tablewriter.ALIGN_LEFT)
 	table.SetCenterSeparator("")
 	table.SetColumnSeparator("")
 	table.SetRowSeparator("")
 	table.SetHeaderLine(false)
-	table.SetTablePadding("\t")
+	table.SetTablePadding("   ")
 	table.SetNoWhiteSpace(true)
 
 	headers := make([]string, s.Type().Elem().NumField())
