@@ -2,9 +2,9 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -42,8 +42,13 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 			}
 		}
 
+		var next int
+		if page == "1" || page == "" {
+			next = 2
+		}
 		resp := api.ListResponse[APITokenResponse]{
 			Count:   150,
+			Next:    next,
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")

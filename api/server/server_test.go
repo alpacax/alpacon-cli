@@ -2,9 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -50,9 +50,14 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 			}
 		}
 
+		var next int
+		if page == "1" || page == "" {
+			next = 2
+		}
 		resp := api.ListResponse[ServerDetails]{
 			Count:   150,
 			Current: 1,
+			Next:    next,
 			Results: results,
 		}
 

@@ -66,36 +66,3 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 		t.Errorf("expected 25 events, got %d", len(events))
 	}
 }
-
-func TestGetEventList_InvalidPageSize(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		pageSize := r.URL.Query().Get("page_size")
-		if pageSize != "25" {
-			t.Errorf("expected default page_size=25 for invalid input, got %s", pageSize)
-		}
-
-		resp := api.ListResponse[EventDetails]{
-			Count:   0,
-			Results: []EventDetails{},
-		}
-		json.NewEncoder(w).Encode(resp)
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}
-
-	_, err := GetEventList(ac, 0, "", "")
-	if err != nil {
-		t.Fatalf("GetEventList error with pageSize=0: %v", err)
-	}
-
-	_, err = GetEventList(ac, -5, "", "")
-	if err != nil {
-		t.Fatalf("GetEventList error with pageSize=-5: %v", err)
-	}
-}

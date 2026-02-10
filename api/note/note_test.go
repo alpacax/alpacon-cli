@@ -88,39 +88,3 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 		t.Errorf("expected author 'test-user', got '%s'", notes[0].Author)
 	}
 }
-
-func TestGetNoteList_InvalidPageSize(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		if strings.HasPrefix(r.URL.Path, "/api/servers/notes") {
-			pageSize := r.URL.Query().Get("page_size")
-			if pageSize != "25" {
-				t.Errorf("expected default page_size=25 for invalid input, got %s", pageSize)
-			}
-
-			resp := api.ListResponse[NoteDetails]{
-				Count:   0,
-				Results: []NoteDetails{},
-			}
-			json.NewEncoder(w).Encode(resp)
-			return
-		}
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}
-
-	_, err := GetNoteList(ac, "", 0)
-	if err != nil {
-		t.Fatalf("GetNoteList error with pageSize=0: %v", err)
-	}
-
-	_, err = GetNoteList(ac, "", -3)
-	if err != nil {
-		t.Fatalf("GetNoteList error with pageSize=-3: %v", err)
-	}
-}

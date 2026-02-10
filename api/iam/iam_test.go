@@ -2,9 +2,9 @@ package iam
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -42,8 +42,13 @@ func TestGetUserList_Pagination(t *testing.T) {
 			}
 		}
 
+		var next int
+		if page == "1" || page == "" {
+			next = 2
+		}
 		resp := api.ListResponse[UserResponse]{
 			Count:   150,
+			Next:    next,
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -100,8 +105,13 @@ func TestGetGroupList_Pagination(t *testing.T) {
 			}
 		}
 
+		var next int
+		if page == "1" || page == "" {
+			next = 2
+		}
 		resp := api.ListResponse[GroupResponse]{
 			Count:   150,
+			Next:    next,
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
