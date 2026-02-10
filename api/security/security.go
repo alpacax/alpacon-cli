@@ -25,13 +25,13 @@ func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclRe
 		"page":      strconv.Itoa(page),
 		"page_size": strconv.Itoa(pageSize),
 	}
+	var response api.ListResponse[CommandAclResponse]
 	for {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(baseURL, commandAclURL, params))
 		if err != nil {
 			return result, err
 		}
 
-		var response api.ListResponse[CommandAclResponse]
 		if err = json.Unmarshal(responseBody, &response); err != nil {
 			return result, err
 		}
