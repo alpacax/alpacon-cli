@@ -1,9 +1,7 @@
 package security
 
 import (
-	"encoding/json"
 	"path"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -16,36 +14,10 @@ const (
 )
 
 func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclResponse, error) {
-	var result []CommandAclResponse
-	page := 1
-	const pageSize = 100
-
 	params := map[string]string{
-		"token":     tokenId,
-		"page":      strconv.Itoa(page),
-		"page_size": strconv.Itoa(pageSize),
+		"token": tokenId,
 	}
-	var response api.ListResponse[CommandAclResponse]
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(baseURL, commandAclURL, params))
-		if err != nil {
-			return result, err
-		}
-
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return result, err
-		}
-
-		result = append(result, response.Results...)
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
-	}
-
-	return result, nil
+	return api.FetchAllPages[CommandAclResponse](ac, baseURL+commandAclURL, params)
 }
 
 func AddCommandAcl(ac *client.AlpaconClient, request CommandAclRequest) error {

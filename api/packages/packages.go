@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime/multipart"
 	"path/filepath"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -21,80 +19,40 @@ const (
 )
 
 func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
-	var packageList []SystemPackage
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	packages, err := api.FetchAllPages[SystemPackageDetail](ac, systemPackageEntryURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(systemPackageEntryURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[SystemPackageDetail]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, packages := range response.Results {
-			packageList = append(packageList, SystemPackage{
-				Name:     packages.Name,
-				Version:  packages.Version,
-				Arch:     packages.Arch,
-				Platform: packages.Platform,
-				Owner:    packages.OwnerName,
-			})
-		}
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
+	var packageList []SystemPackage
+	for _, pkg := range packages {
+		packageList = append(packageList, SystemPackage{
+			Name:     pkg.Name,
+			Version:  pkg.Version,
+			Arch:     pkg.Arch,
+			Platform: pkg.Platform,
+			Owner:    pkg.OwnerName,
+		})
 	}
 	return packageList, nil
 }
 
 func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
-	var packageList []PythonPackage
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	packages, err := api.FetchAllPages[PythonPackageDetail](ac, pythonPackageEntryURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(pythonPackageEntryURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[PythonPackageDetail]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, packages := range response.Results {
-			packageList = append(packageList, PythonPackage{
-				Name:         packages.Name,
-				Version:      packages.Version,
-				PythonTarget: packages.Target,
-				ABI:          packages.ABI,
-				Platform:     packages.Platform,
-				Owner:        packages.OwnerName,
-			})
-		}
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
+	var packageList []PythonPackage
+	for _, pkg := range packages {
+		packageList = append(packageList, PythonPackage{
+			Name:         pkg.Name,
+			Version:      pkg.Version,
+			PythonTarget: pkg.Target,
+			ABI:          pkg.ABI,
+			Platform:     pkg.Platform,
+			Owner:        pkg.OwnerName,
+		})
 	}
 	return packageList, nil
 }

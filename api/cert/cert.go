@@ -3,9 +3,7 @@ package cert
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"path"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -62,92 +60,53 @@ func CreateAuthority(ac *client.AlpaconClient, authorityRequest AuthorityRequest
 }
 
 func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error) {
-	var csrList []CSRAttributes
-	page := 1
-	const pageSize = 100
-
 	params := map[string]string{
-		"status":    status,
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+		"status": status,
 	}
 
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(signRequestURL, "", params))
-		if err != nil {
-			return nil, err
-		}
+	csrs, err := api.FetchAllPages[CSRResponse](ac, signRequestURL, params)
+	if err != nil {
+		return nil, err
+	}
 
-		var response api.ListResponse[CSRResponse]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, csr := range response.Results {
-			csrList = append(csrList, CSRAttributes{
-				Id:            csr.Id,
-				Name:          csr.CommonName,
-				Authority:     csr.Authority.Name,
-				DomainList:    csr.DomainList,
-				IpList:        csr.IpList,
-				Status:        csr.Status,
-				RequestedIp:   csr.RequestedIp,
-				RequestedBy:   csr.RequestedBy.Name,
-				RequestedDate: utils.TimeUtils(csr.AddedAt),
-			})
-		}
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
+	var csrList []CSRAttributes
+	for _, csr := range csrs {
+		csrList = append(csrList, CSRAttributes{
+			Id:            csr.Id,
+			Name:          csr.CommonName,
+			Authority:     csr.Authority.Name,
+			DomainList:    csr.DomainList,
+			IpList:        csr.IpList,
+			Status:        csr.Status,
+			RequestedIp:   csr.RequestedIp,
+			RequestedBy:   csr.RequestedBy.Name,
+			RequestedDate: utils.TimeUtils(csr.AddedAt),
+		})
 	}
 
 	return csrList, nil
 }
 
 func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
-	var authorityList []AuthorityAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	authorities, err := api.FetchAllPages[AuthorityResponse](ac, authorityURL, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(authorityURL, "", params))
-		if err != nil {
-			return nil, err
-		}
-
-		var response api.ListResponse[AuthorityResponse]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, authority := range response.Results {
-			authorityList = append(authorityList, AuthorityAttributes{
-				Id:               authority.Id,
-				Name:             authority.Name,
-				Organization:     authority.Organization,
-				Domain:           authority.Domain,
-				RootValidDays:    authority.RootValidDays,
-				DefaultValidDays: authority.DefaultValidDays,
-				MaxValidDays:     authority.MaxValidDays,
-				Server:           authority.AgentName,
-				Owner:            authority.Owner.Name,
-				SignedAt:         utils.TimeUtils(authority.SignedAt),
-			})
-		}
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
+	var authorityList []AuthorityAttributes
+	for _, authority := range authorities {
+		authorityList = append(authorityList, AuthorityAttributes{
+			Id:               authority.Id,
+			Name:             authority.Name,
+			Organization:     authority.Organization,
+			Domain:           authority.Domain,
+			RootValidDays:    authority.RootValidDays,
+			DefaultValidDays: authority.DefaultValidDays,
+			MaxValidDays:     authority.MaxValidDays,
+			Server:           authority.AgentName,
+			Owner:            authority.Owner.Name,
+			SignedAt:         utils.TimeUtils(authority.SignedAt),
+		})
 	}
 
 	return authorityList, nil
@@ -219,43 +178,23 @@ func DeleteCA(ac *client.AlpaconClient, authorityId string) error {
 }
 
 func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, error) {
-	var certList []CertificateAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	certs, err := api.FetchAllPages[Certificate](ac, certURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(certURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[Certificate]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, cert := range response.Results {
-			certList = append(certList, CertificateAttributes{
-				Id:        cert.Id,
-				Authority: cert.Authority.Name,
-				Csr:       cert.Csr,
-				ValidDays: cert.ValidDays,
-				SignedAt:  utils.TimeUtils(cert.SignedAt),
-				ExpiresAt: utils.TimeUtils(cert.ExpiresAt),
-				SignedBy:  cert.SignedBy,
-				RenewedBy: cert.RenewedBy,
-			})
-		}
-
-		if response.Next == 0 {
-			break
-		}
-		page++
-		params["page"] = strconv.Itoa(page)
+	var certList []CertificateAttributes
+	for _, cert := range certs {
+		certList = append(certList, CertificateAttributes{
+			Id:        cert.Id,
+			Authority: cert.Authority.Name,
+			Csr:       cert.Csr,
+			ValidDays: cert.ValidDays,
+			SignedAt:  utils.TimeUtils(cert.SignedAt),
+			ExpiresAt: utils.TimeUtils(cert.ExpiresAt),
+			SignedBy:  cert.SignedBy,
+			RenewedBy: cert.RenewedBy,
+		})
 	}
 
 	return certList, nil
