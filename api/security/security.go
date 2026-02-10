@@ -3,6 +3,7 @@ package security
 import (
 	"encoding/json"
 	"path"
+	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -15,28 +16,33 @@ const (
 )
 
 func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclResponse, error) {
-	var response api.ListResponse[CommandAclResponse]
 	var result []CommandAclResponse
+	page := 1
+	const pageSize = 100
 
 	params := map[string]string{
-		"token": tokenId,
+		"token":     tokenId,
+		"page":      strconv.Itoa(page),
+		"page_size": strconv.Itoa(pageSize),
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(baseURL, commandAclURL, params))
-	if err != nil {
-		return result, err
-	}
+	for {
+		responseBody, err := ac.SendGetRequest(utils.BuildURL(baseURL, commandAclURL, params))
+		if err != nil {
+			return result, err
+		}
 
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return result, err
-	}
+		var response api.ListResponse[CommandAclResponse]
+		if err = json.Unmarshal(responseBody, &response); err != nil {
+			return result, err
+		}
 
-	for _, commandAcl := range response.Results {
-		result = append(result, CommandAclResponse{
-			Id:        commandAcl.Id,
-			Token:     commandAcl.Token,
-			TokenName: commandAcl.TokenName,
-			Command:   commandAcl.Command,
-		})
+		result = append(result, response.Results...)
+
+		if len(response.Results) < pageSize {
+			break
+		}
+		page++
+		params["page"] = strconv.Itoa(page)
 	}
 
 	return result, nil

@@ -101,6 +101,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 
 	return csrList, nil
@@ -146,6 +147,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 
 	return authorityList, nil
@@ -253,6 +255,7 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 
 	return certList, nil

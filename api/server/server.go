@@ -49,6 +49,7 @@ func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 
 	return serverList, nil

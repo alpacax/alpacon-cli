@@ -149,6 +149,7 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 	return tokenList, nil
 }

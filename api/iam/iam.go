@@ -55,6 +55,7 @@ func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 	return userList, nil
 }
@@ -95,6 +96,7 @@ func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 	return groupList, nil
 }

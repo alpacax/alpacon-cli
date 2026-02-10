@@ -21,8 +21,10 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, pageSize int)
 	}
 
 	params := map[string]string{
-		"server":    serverID,
-		"page_size": fmt.Sprintf("%d", pageSize),
+		"server": serverID,
+	}
+	if pageSize > 0 {
+		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(getSystemLogURL, "", params))
 	if err != nil {
@@ -40,8 +42,7 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, pageSize int)
 			Program: log.Program,
 			Level:   getLogLevel(log.Level),
 			Message: fmt.Sprintf("[%s] %s", log.Process, log.Msg),
-			//	Date:    log.Date.Format("2006-01-02 15:04:05 MST"),
-			Date: utils.TimeUtils(log.Date),
+			Date:    utils.TimeUtils(log.Date),
 		})
 	}
 

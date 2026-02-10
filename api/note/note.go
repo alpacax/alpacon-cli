@@ -28,8 +28,10 @@ func GetNoteList(ac *client.AlpaconClient, serverName string, pageSize int) ([]N
 	}
 
 	params := map[string]string{
-		"serverID":  serverID,
-		"page_size": fmt.Sprintf("%d", pageSize),
+		"serverID": serverID,
+	}
+	if pageSize > 0 {
+		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(noteURL, "", params))
 	if err != nil {
@@ -42,7 +44,7 @@ func GetNoteList(ac *client.AlpaconClient, serverName string, pageSize int) ([]N
 	}
 
 	for _, note := range response.Results {
-		serverName, err = server.GetServerNameByID(ac, note.Server)
+		sName, err := server.GetServerNameByID(ac, note.Server)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +56,7 @@ func GetNoteList(ac *client.AlpaconClient, serverName string, pageSize int) ([]N
 
 		noteList = append(noteList, NoteDetails{
 			ID:      note.ID,
-			Server:  serverName,
+			Server:  sName,
 			Author:  userName,
 			Content: note.Content,
 			Private: note.Private,

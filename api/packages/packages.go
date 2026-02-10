@@ -54,6 +54,7 @@ func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 	return packageList, nil
 }
@@ -93,6 +94,7 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 			break
 		}
 		page++
+		params["page"] = strconv.Itoa(page)
 	}
 	return packageList, nil
 }
