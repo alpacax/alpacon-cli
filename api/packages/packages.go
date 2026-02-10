@@ -50,7 +50,7 @@ func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++
@@ -90,7 +90,7 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++

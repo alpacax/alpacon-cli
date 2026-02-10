@@ -45,7 +45,7 @@ func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++

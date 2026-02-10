@@ -38,7 +38,7 @@ func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclRe
 
 		result = append(result, response.Results...)
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++

@@ -97,7 +97,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++
@@ -143,7 +143,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++
@@ -251,7 +251,7 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++

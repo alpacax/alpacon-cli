@@ -51,7 +51,7 @@ func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++
@@ -92,7 +92,7 @@ func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
 			})
 		}
 
-		if len(response.Results) < pageSize {
+		if response.Next == 0 {
 			break
 		}
 		page++
