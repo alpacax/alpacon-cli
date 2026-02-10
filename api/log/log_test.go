@@ -34,7 +34,8 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/api/history/logs") {
 			count := logRequestCount.Add(1)
 			if count > 1 {
-				t.Fatalf("extra log request detected: request #%d (should be single request)", count)
+				t.Errorf("extra log request detected: request #%d (should be single request)", count)
+				return
 			}
 
 			pageSize := r.URL.Query().Get("page_size")
@@ -60,7 +61,7 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 			return
 		}
 
-		t.Fatalf("unexpected request: %s", r.URL.String())
+		t.Errorf("unexpected request: %s", r.URL.String())
 	}))
 	defer ts.Close()
 

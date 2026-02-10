@@ -38,7 +38,8 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 		if strings.HasPrefix(r.URL.Path, "/api/servers/notes") {
 			count := noteRequestCount.Add(1)
 			if count > 1 {
-				t.Fatalf("extra note request detected: request #%d (should be single request)", count)
+				t.Errorf("extra note request detected: request #%d (should be single request)", count)
+				return
 			}
 
 			pageSize := r.URL.Query().Get("page_size")
@@ -59,7 +60,7 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 			return
 		}
 
-		t.Fatalf("unexpected request: %s", r.URL.String())
+		t.Errorf("unexpected request: %s", r.URL.String())
 	}))
 	defer ts.Close()
 

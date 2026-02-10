@@ -22,7 +22,8 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 
 		// more than 3 requests means infinite loop
 		if count > 3 {
-			t.Fatalf("infinite loop detected: request #%d (page param: %s)", count, r.URL.Query().Get("page"))
+			t.Errorf("infinite loop detected: request #%d (page param: %s)", count, r.URL.Query().Get("page"))
+			return
 		}
 
 		page := r.URL.Query().Get("page")

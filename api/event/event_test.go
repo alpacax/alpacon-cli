@@ -21,7 +21,8 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 
 		count := eventRequestCount.Add(1)
 		if count > 1 {
-			t.Fatalf("extra request detected: request #%d to %s (should be single request)", count, r.URL.String())
+			t.Errorf("extra request detected: request #%d to %s (should be single request)", count, r.URL.String())
+			return
 		}
 
 		pageSize := r.URL.Query().Get("page_size")

@@ -19,7 +19,8 @@ func TestGetCSRList_Pagination(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := requestCount.Add(1)
 		if count > 3 {
-			t.Fatalf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			t.Errorf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			return
 		}
 
 		page := r.URL.Query().Get("page")
@@ -90,7 +91,8 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := requestCount.Add(1)
 		if count > 3 {
-			t.Fatalf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			t.Errorf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			return
 		}
 
 		page := r.URL.Query().Get("page")
@@ -159,7 +161,8 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := requestCount.Add(1)
 		if count > 3 {
-			t.Fatalf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			t.Errorf("infinite loop detected: request #%d (page=%s)", count, r.URL.Query().Get("page"))
+			return
 		}
 
 		page := r.URL.Query().Get("page")
