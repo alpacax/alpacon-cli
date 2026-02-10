@@ -19,8 +19,8 @@ func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[
 	params["page"] = strconv.Itoa(page)
 	params["page_size"] = strconv.Itoa(pageSize)
 
-	var response ListResponse[T]
 	for {
+		var response ListResponse[T]
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
 		if err != nil {
 			return nil, err
