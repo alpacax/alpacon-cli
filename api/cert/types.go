@@ -108,6 +108,13 @@ type AuthoritySummary struct {
 	Owner iam.UserSummary `json:"owner"`
 }
 
+type SignRequestDetail struct {
+	Id         string `json:"id"`
+	CommonName string `json:"common_name"`
+	Status     string `json:"status"`
+	CrtText    string `json:"crt_text"`
+}
+
 type CSRSubmit struct {
 	CsrText string `json:"csr_text"`
 }

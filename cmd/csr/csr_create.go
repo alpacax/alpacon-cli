@@ -58,7 +58,9 @@ var csrCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to submit CSR file to server: %s.", err)
 		}
 
-		utils.CliInfo("CSR creation request succeeded. Check the generated CSR (alpacon csr ls)")
+		utils.CliInfo("CSR creation request succeeded. (CSR ID: %s)", response.Id)
+		utils.CliInfo("After approval, download the certificate with:")
+		utils.CliInfo("  alpacon csr download %s", response.Id)
 	},
 }
 
