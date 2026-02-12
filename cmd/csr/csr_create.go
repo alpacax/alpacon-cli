@@ -59,8 +59,7 @@ var csrCreateCmd = &cobra.Command{
 		}
 
 		utils.CliInfo("CSR creation request succeeded. (CSR ID: %s)", response.Id)
-		utils.CliInfo("After approval, download the certificate with:")
-		utils.CliInfo("  alpacon csr download %s", response.Id)
+		utils.CliInfo("After approval, use 'alpacon csr download-crt %s' to download the certificate", response.Id)
 	},
 }
 
