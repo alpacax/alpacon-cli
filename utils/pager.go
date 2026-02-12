@@ -49,9 +49,9 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		}
 
 		pager := os.Getenv("PAGER")
+		args := strings.Fields(pager)
 		var cmd *exec.Cmd
-		if pager != "" {
-			args := strings.Fields(pager)
+		if len(args) > 0 {
 			cmd = exec.Command(args[0], args[1:]...)
 		} else {
 			lessPath, err := exec.LookPath("less")
