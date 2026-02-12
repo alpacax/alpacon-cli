@@ -8,14 +8,14 @@ import (
 )
 
 var csrDownloadCrtCmd = &cobra.Command{
-	Use:   "download [CSR ID]",
+	Use:   "download-crt [CSR ID]",
 	Short: "Download the certificate for a CSR",
 	Long: `
 	Download the signed certificate associated with a CSR.
 	The CSR must be in 'signed' status for the certificate to be available.
 	Use 'alpacon csr ls' to check the status of your CSRs.`,
 	Example: `
-	alpacon csr download [CSR ID] --out=/path/to/certificate.crt`,
+	alpacon csr download-crt [CSR ID] --out=/path/to/certificate.crt`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		csrId := args[0]

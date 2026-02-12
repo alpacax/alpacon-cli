@@ -47,8 +47,8 @@ func TestCsrSubcommands(t *testing.T) {
 			aliases: []string{"desc"},
 		},
 		{
-			name:    "download subcommand",
-			cmdName: "download",
+			name:    "download-crt subcommand",
+			cmdName: "download-crt",
 		},
 	}
 
@@ -106,7 +106,7 @@ func TestListSubcommandFlags(t *testing.T) {
 }
 
 func TestDownloadSubcommandFlags(t *testing.T) {
-	cmd, _, err := CsrCmd.Find([]string{"download"})
+	cmd, _, err := CsrCmd.Find([]string{"download-crt"})
 	assert.NoError(t, err)
 
 	outFlag := cmd.Flags().Lookup("out")
