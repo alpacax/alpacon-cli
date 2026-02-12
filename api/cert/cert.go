@@ -269,8 +269,12 @@ func DownloadCertificateByCSR(ac *client.AlpaconClient, csrId string, filePath s
 		return err
 	}
 
-	if detail.CrtText == "" {
+	if detail.Status != "signed" {
 		return fmt.Errorf("certificate not yet issued for this CSR (status: %s)", detail.Status)
+	}
+
+	if detail.CrtText == "" {
+		return fmt.Errorf("certificate text is empty for signed CSR (id: %s)", detail.Id)
 	}
 
 	return utils.SaveFile(filePath, []byte(detail.CrtText))

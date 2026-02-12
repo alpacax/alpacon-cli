@@ -54,7 +54,8 @@ func TestSubmitCSR(t *testing.T) {
 		assert.Equal(t, http.MethodPatch, r.Method)
 
 		var body CSRSubmit
-		json.NewDecoder(r.Body).Decode(&body)
+		err := json.NewDecoder(r.Body).Decode(&body)
+		assert.NoError(t, err)
 		assert.NotEmpty(t, body.CsrText)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -167,6 +168,18 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 			statusCode:  http.StatusOK,
 			expectError: true,
 			errorMsg:    "certificate not yet issued for this CSR (status: signing)",
+		},
+		{
+			name: "non-signed CSR with certificate text",
+			response: SignRequestDetail{
+				Id:         "test-csr-id",
+				CommonName: "example.com",
+				Status:     "requested",
+				CrtText:    "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
+			},
+			statusCode:  http.StatusOK,
+			expectError: true,
+			errorMsg:    "certificate not yet issued for this CSR (status: requested)",
 		},
 	}
 
