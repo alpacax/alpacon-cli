@@ -13,7 +13,7 @@ var CsrCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon csr create', 'alpacon csr list', 'alpacon csr approve', 'alpacon csr deny', 'alpacon csr delete', 'alpacon csr detail', or 'alpacon csr download-crt'. Run 'alpacon csr --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon csr create', 'alpacon csr list', 'alpacon csr approve', 'alpacon csr deny', 'alpacon csr delete', 'alpacon csr describe', or 'alpacon csr download-crt'. Run 'alpacon csr --help' for more information")
 	},
 }
 

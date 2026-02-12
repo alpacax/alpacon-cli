@@ -100,9 +100,9 @@ func TestListSubcommandFlags(t *testing.T) {
 	cmd, _, err := CsrCmd.Find([]string{"ls"})
 	assert.NoError(t, err)
 
-	stateFlag := cmd.Flags().Lookup("state")
-	assert.NotNil(t, stateFlag, "--state flag should exist")
-	assert.Equal(t, "s", stateFlag.Shorthand, "short flag should be -s")
+	statusFlag := cmd.Flags().Lookup("status")
+	assert.NotNil(t, statusFlag, "--status flag should exist")
+	assert.Equal(t, "s", statusFlag.Shorthand, "short flag should be -s")
 }
 
 func TestDownloadSubcommandFlags(t *testing.T) {
