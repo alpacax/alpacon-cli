@@ -258,6 +258,28 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 	return certList, nil
 }
 
+func DownloadCertificateByCSR(ac *client.AlpaconClient, csrId string, filePath string) error {
+	body, err := GetCSRDetail(ac, csrId)
+	if err != nil {
+		return err
+	}
+
+	var detail SignRequestDetail
+	if err = json.Unmarshal(body, &detail); err != nil {
+		return err
+	}
+
+	if detail.Status != "signed" {
+		return fmt.Errorf("certificate not yet issued for this CSR (status: %s)", detail.Status)
+	}
+
+	if detail.CrtText == "" {
+		return fmt.Errorf("certificate text is empty for signed CSR (id: %s)", detail.Id)
+	}
+
+	return utils.SaveFile(filePath, []byte(detail.CrtText))
+}
+
 func DownloadCertificate(ac *client.AlpaconClient, certId string, filePath string) error {
 	body, err := GetCertificateDetail(ac, certId)
 	if err != nil {

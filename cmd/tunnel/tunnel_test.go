@@ -140,8 +140,8 @@ func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 				return nil, net.ErrClosed
 			},
 		},
-		session: &mockSession{},
-		done:    make(chan struct{}),
+		session:     &mockSession{},
+		done:        make(chan struct{}),
 		shutdownErr: make(chan error, 1),
 	}
 

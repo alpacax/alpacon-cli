@@ -12,8 +12,8 @@ var csrListCmd = &cobra.Command{
 	Aliases: []string{"list", "all"},
 	Short:   "Display a list of all certificate signing requests",
 	Long: `
-	Display CSRs, optionally filtered by state ('requested', 'processing', 'signed', 
-    'issued', 'canceled', 'denied'). Use the --state flag to specify the status.
+	Display CSRs, optionally filtered by status ('requested', 'processing', 'signed',
+    'issued', 'canceled', 'denied'). Use the --status flag to specify the status.
 	`,
 	Example: `
 	alpacon csr ls
@@ -40,5 +40,5 @@ var csrListCmd = &cobra.Command{
 func init() {
 	var state string
 
-	csrListCmd.Flags().StringVarP(&state, "state", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
+	csrListCmd.Flags().StringVarP(&state, "status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
 }
