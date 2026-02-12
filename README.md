@@ -402,6 +402,9 @@ $ alpacon csr rm [CSR ID]
 # Get detailed information about a specific Signing Request.
 $ alpacon csr describe [CSR ID]
 
+# Download the signed certificate for a CSR
+$ alpacon csr download-crt [CSR ID] --out=/path/to/certificate.crt
+
 # List all certificates
 $ alpacon cert ls
 
