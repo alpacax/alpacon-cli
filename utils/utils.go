@@ -261,7 +261,20 @@ func Unzip(src string, dest string) error {
 	defer r.Close()
 
 	for _, f := range r.File {
+		// Prevent zip slip vulnerability by validating file path
+		// Reject absolute paths
+		if filepath.IsAbs(f.Name) {
+			return fmt.Errorf("invalid file path (absolute path): %s", f.Name)
+		}
+
 		fpath := filepath.Join(dest, f.Name)
+
+		// Use filepath.Rel to safely validate the path is within destination
+		rel, err := filepath.Rel(dest, fpath)
+		if err != nil || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+			return fmt.Errorf("invalid file path: %s", f.Name)
+		}
+
 		if f.FileInfo().IsDir() {
 			err := os.MkdirAll(fpath, os.ModePerm)
 			if err != nil {
