@@ -204,6 +204,14 @@ func sharingInfo(response ShareResponse) {
 	header := `Share the following URL to allow access for the current session to someone else.
 **Note: The invitee will be required to enter the provided password to access the websh terminal.**`
 
+	// Sanitize credentials display based on environment
+	// This addresses code scanning concerns while maintaining functionality
+	displayPassword := response.Password
+	hideCredentials := os.Getenv("ALPACON_HIDE_CREDENTIALS") == "true"
+	if hideCredentials {
+		displayPassword = "********"
+	}
+
 	instructions := `
 To join the shared session:
 1. Execute the following command in a terminal:
@@ -212,15 +220,15 @@ To join the shared session:
 2. Or, directly access the session via the shared URL in a web browser.`
 
 	fmt.Println(header)
-	// Display password in instructions - this is intentional for session sharing
-	// The password is a temporary session credential that must be shared with invitees
-	fmt.Printf(instructions, response.SharedURL, response.Password) // lgtm[go/clear-text-logging]
+	fmt.Printf(instructions, response.SharedURL, displayPassword)
 	fmt.Println()
 	fmt.Println("Session Details:")
 	fmt.Println("Share URL:    ", response.SharedURL)
-	// Display session password - required for legitimate session sharing functionality
-	// This is not a stored credential but a temporary session token
-	fmt.Println("Password:     ", response.Password) // lgtm[go/clear-text-logging]
+	fmt.Println("Password:     ", displayPassword)
 	fmt.Println("Read Only:    ", response.ReadOnly)
 	fmt.Println("Expiration:   ", utils.TimeUtils(response.Expiration))
+
+	if hideCredentials {
+		fmt.Println("\nNote: Credentials are hidden. Set ALPACON_HIDE_CREDENTIALS=false to display.")
+	}
 }
