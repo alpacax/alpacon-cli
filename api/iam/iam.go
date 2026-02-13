@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -19,82 +18,44 @@ const (
 )
 
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
-	var userList []UserAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[UserResponse]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, user := range response.Results {
-			userList = append(userList, UserAttributes{
-				Username:   user.Username,
-				Name:       fmt.Sprintf("%s %s", user.LastName, user.FirstName),
-				Email:      user.Email,
-				Tags:       user.Tags,
-				Groups:     user.NumGroups,
-				UID:        user.UID,
-				Status:     getUserStatus(user.IsActive, user.IsStaff, user.IsSuperuser),
-				LDAPStatus: getLDAPStatus(user.IsLDAPUser),
-			})
-		}
-
-		if len(response.Results) < pageSize {
-			break
-		}
-		page++
+	var userList []UserAttributes
+	for _, user := range users {
+		userList = append(userList, UserAttributes{
+			Username:   user.Username,
+			Name:       fmt.Sprintf("%s %s", user.LastName, user.FirstName),
+			Email:      user.Email,
+			Tags:       user.Tags,
+			Groups:     user.NumGroups,
+			UID:        user.UID,
+			Status:     getUserStatus(user.IsActive, user.IsStaff, user.IsSuperuser),
+			LDAPStatus: getLDAPStatus(user.IsLDAPUser),
+		})
 	}
 	return userList, nil
 }
 
 func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
-	var groupList []GroupAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	groups, err := api.FetchAllPages[GroupResponse](ac, groupURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(groupURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[GroupResponse]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, group := range response.Results {
-			groupList = append(groupList, GroupAttributes{
-				Name:        group.Name,
-				DisplayName: group.DisplayName,
-				Tags:        group.Tags,
-				Members:     group.NumMembers,
-				Servers:     len(group.Servers),
-				GID:         group.GID,
-				LDAPStatus:  getLDAPStatus(group.IsLDAPGroup),
-			})
-		}
-
-		if len(response.Results) < pageSize {
-			break
-		}
-		page++
+	var groupList []GroupAttributes
+	for _, group := range groups {
+		groupList = append(groupList, GroupAttributes{
+			Name:        group.Name,
+			DisplayName: group.DisplayName,
+			Tags:        group.Tags,
+			Members:     group.NumMembers,
+			Servers:     len(group.Servers),
+			GID:         group.GID,
+			LDAPStatus:  getLDAPStatus(group.IsLDAPGroup),
+		})
 	}
 	return groupList, nil
 }

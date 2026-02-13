@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -16,39 +15,20 @@ const (
 )
 
 func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
-	var serverList []ServerAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	servers, err := api.FetchAllPages[ServerDetails](ac, serverURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(serverURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[ServerDetails]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, server := range response.Results {
-			serverList = append(serverList, ServerAttributes{
-				Name:      server.Name,
-				IP:        server.RemoteIP,
-				OS:        fmt.Sprintf("%s %s", server.OSName, server.OSVersion),
-				Connected: server.IsConnected,
-				Owner:     server.Owner.Name,
-			})
-		}
-
-		if len(response.Results) < pageSize {
-			break
-		}
-		page++
+	var serverList []ServerAttributes
+	for _, server := range servers {
+		serverList = append(serverList, ServerAttributes{
+			Name:      server.Name,
+			IP:        server.RemoteIP,
+			OS:        fmt.Sprintf("%s %s", server.OSName, server.OSVersion),
+			Connected: server.IsConnected,
+			Owner:     server.Owner.Name,
+		})
 	}
 
 	return serverList, nil

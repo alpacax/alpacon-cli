@@ -100,7 +100,8 @@ func executeUpload(ac *client.AlpaconClient, uploadRequest *UploadRequest, conte
 		}
 	}
 
-	fullURL := utils.BuildURL(uploadAPIURL, path.Join(response.Id, "upload"), nil)
+	relativePath := path.Join(response.Id, "upload")
+	fullURL := utils.BuildURL(uploadAPIURL, relativePath, nil)
 	if _, err := ac.SendGetRequest(fullURL); err != nil {
 		return err
 	}

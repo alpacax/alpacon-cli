@@ -35,8 +35,9 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 	}
 
 	relativePath := path.Join(serverID, userID)
-	params := map[string]string{
-		"page_size": fmt.Sprintf("%d", pageSize),
+	params := map[string]string{}
+	if pageSize > 0 {
+		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, relativePath, params))
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	baseURL        = "/api/servers/servers/"
+	serverURL      = "/api/servers/servers/"
 	upgradeAction  = "upgrade_agent"
 	restartAction  = "restart_agent"
 	shutdownAction = "shutdown_agent"
@@ -38,6 +38,6 @@ func RequestAgentAction(ac *client.AlpaconClient, serverName string, action stri
 	}
 
 	relativePath := path.Join(serverID, "actions")
-	_, err = ac.SendPostRequest(utils.BuildURL(baseURL, relativePath, nil), request)
+	_, err = ac.SendPostRequest(utils.BuildURL(serverURL, relativePath, nil), request)
 	return err
 }

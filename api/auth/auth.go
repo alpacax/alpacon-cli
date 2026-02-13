@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -116,39 +115,20 @@ func CreateAPIToken(ac *client.AlpaconClient, tokenRequest APITokenRequest) (str
 }
 
 func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
-	var tokenList []APITokenAttributes
-	page := 1
-	const pageSize = 100
-
-	params := map[string]string{
-		"page":      strconv.Itoa(page),
-		"page_size": fmt.Sprintf("%d", pageSize),
+	tokens, err := api.FetchAllPages[APITokenResponse](ac, tokenURL, nil)
+	if err != nil {
+		return nil, err
 	}
-	for {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(tokenURL, "", params))
-		if err != nil {
-			return nil, err
-		}
 
-		var response api.ListResponse[APITokenResponse]
-		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
-		}
-
-		for _, token := range response.Results {
-			tokenList = append(tokenList, APITokenAttributes{
-				ID:        token.ID,
-				Name:      token.Name,
-				Enabled:   token.Enabled,
-				UpdatedAt: utils.TimeUtils(token.UpdatedAt),
-				ExpiresAt: utils.TimeUtils(token.ExpiresAt),
-			})
-		}
-
-		if len(response.Results) < pageSize {
-			break
-		}
-		page++
+	var tokenList []APITokenAttributes
+	for _, token := range tokens {
+		tokenList = append(tokenList, APITokenAttributes{
+			ID:        token.ID,
+			Name:      token.Name,
+			Enabled:   token.Enabled,
+			UpdatedAt: utils.TimeUtils(token.UpdatedAt),
+			ExpiresAt: utils.TimeUtils(token.ExpiresAt),
+		})
 	}
 	return tokenList, nil
 }
