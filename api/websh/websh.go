@@ -208,15 +208,19 @@ func sharingInfo(response ShareResponse) {
 To join the shared session:
 1. Execute the following command in a terminal:
    $ alpacon websh join --url="%s" --password="%s"
-	
+
 2. Or, directly access the session via the shared URL in a web browser.`
 
 	fmt.Println(header)
-	fmt.Printf(instructions, response.SharedURL, response.Password)
+	// Display password in instructions - this is intentional for session sharing
+	// The password is a temporary session credential that must be shared with invitees
+	fmt.Printf(instructions, response.SharedURL, response.Password) // lgtm[go/clear-text-logging]
 	fmt.Println()
 	fmt.Println("Session Details:")
 	fmt.Println("Share URL:    ", response.SharedURL)
-	fmt.Println("Password:     ", response.Password)
+	// Display session password - required for legitimate session sharing functionality
+	// This is not a stored credential but a temporary session token
+	fmt.Println("Password:     ", response.Password) // lgtm[go/clear-text-logging]
 	fmt.Println("Read Only:    ", response.ReadOnly)
 	fmt.Println("Expiration:   ", utils.TimeUtils(response.Expiration))
 }
