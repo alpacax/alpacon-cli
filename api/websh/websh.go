@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	createSessionURL = "/api/websh/sessions/"
-	joinSessionURL   = "/api/websh/user-channels/"
+	sessionsBaseURL     = "/api/websh/sessions/"
+	userChannelsBaseURL = "/api/websh/user-channels/"
 )
 
 func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (SessionResponse, error) {
@@ -37,8 +37,8 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 		Password: password,
 	}
 
-	joinPath := path.Join(joinSessionURL, channelID, "join")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(joinPath, "", nil), joinRequest)
+	relativePath := path.Join(channelID, "join")
+	responseBody, err := ac.SendPostRequest(utils.BuildURL(userChannelsBaseURL, relativePath, nil), joinRequest)
 	if err != nil {
 		return SessionResponse{}, err
 	}
@@ -71,7 +71,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 		Cols:      width,
 	}
 
-	responseBody, err := ac.SendPostRequest(createSessionURL, sessionRequest)
+	responseBody, err := ac.SendPostRequest(sessionsBaseURL, sessionRequest)
 	if err != nil {
 		return SessionResponse{}, err
 	}
@@ -87,7 +87,8 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 			ReadOnly: readOnly,
 		}
 		var shareResponse ShareResponse
-		responseBody, err = ac.SendPostRequest(utils.BuildURL(createSessionURL, path.Join(response.ID, "share"), nil), shareRequest)
+		relativePath := path.Join(response.ID, "share")
+		responseBody, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, relativePath, nil), shareRequest)
 		if err != nil {
 			return SessionResponse{}, err
 		}
