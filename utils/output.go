@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 func PrintTable(slice any) {
@@ -20,24 +22,39 @@ func PrintTable(slice any) {
 	writer, cleanup := WriteToPager()
 	defer cleanup()
 
-	table := tablewriter.NewWriter(writer)
-	table.SetBorder(false)
-	table.SetAutoFormatHeaders(true)
-	table.SetAutoWrapText(false)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
-	table.SetCenterSeparator("")
-	table.SetColumnSeparator("")
-	table.SetRowSeparator("")
-	table.SetHeaderLine(false)
-	table.SetTablePadding("   ")
-	table.SetNoWhiteSpace(true)
+	table := tablewriter.NewTable(writer,
+		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
+			Borders: tw.BorderNone,
+			Settings: tw.Settings{
+				Separators: tw.Separators{
+					BetweenRows:    tw.Off,
+					BetweenColumns: tw.Off,
+				},
+				Lines: tw.Lines{
+					ShowHeaderLine: tw.Off,
+				},
+			},
+		})),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Formatting: tw.CellFormatting{AutoFormat: tw.On},
+				Alignment:  tw.CellAlignment{Global: tw.AlignLeft},
+				Padding:    tw.CellPadding{Global: tw.Padding{Left: "", Right: "   "}},
+			},
+			Row: tw.CellConfig{
+				Formatting: tw.CellFormatting{AutoWrap: tw.WrapNone},
+				Alignment:  tw.CellAlignment{Global: tw.AlignLeft},
+				Padding:    tw.CellPadding{Global: tw.Padding{Left: "", Right: "   "}},
+			},
+			Behavior: tw.Behavior{TrimSpace: tw.On},
+		}),
+	)
 
 	headers := make([]string, s.Type().Elem().NumField())
 	for i := 0; i < s.Type().Elem().NumField(); i++ {
 		headers[i] = s.Type().Elem().Field(i).Name
 	}
-	table.SetHeader(headers)
+	table.Header(headers)
 
 	for i := 0; i < s.Len(); i++ {
 		row := make([]string, s.Type().Elem().NumField())
