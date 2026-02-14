@@ -294,12 +294,16 @@ func Unzip(src string, dest string) error {
 	return nil
 }
 
-func extractFile(fpath string, f *zip.File) error {
+func extractFile(fpath string, f *zip.File) (err error) {
 	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
+	defer func() {
+		if cerr := outFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	rc, err := f.Open()
 	if err != nil {
