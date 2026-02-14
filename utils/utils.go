@@ -394,7 +394,11 @@ func CreateAndEditTempFile(data []byte) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("vi", tmpl.Name())
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, tmpl.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	if err = cmd.Run(); err != nil {

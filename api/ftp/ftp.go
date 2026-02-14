@@ -64,14 +64,13 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string) (bool
 	return false, "", fmt.Errorf("transfer status polling timed out after 1 minute")
 }
 
-func uploadToS3(uploadUrl string, file io.Reader) error {
+func uploadToS3(httpClient *http.Client, uploadUrl string, file io.Reader) error {
 	req, err := http.NewRequest(http.MethodPut, uploadUrl, file)
 	if err != nil {
 		return err
 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -95,7 +94,7 @@ func executeUpload(ac *client.AlpaconClient, uploadRequest *UploadRequest, conte
 	}
 
 	if response.UploadUrl != "" {
-		if err := uploadToS3(response.UploadUrl, bytes.NewReader(content)); err != nil {
+		if err := uploadToS3(ac.HTTPClient, response.UploadUrl, bytes.NewReader(content)); err != nil {
 			return err
 		}
 	}
@@ -198,12 +197,12 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 	return nil
 }
 
-func fetchFromURL(url string, maxAttempts int) ([]byte, error) {
+func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte, error) {
 	var resp *http.Response
 	var err error
 
 	for count := 0; count < maxAttempts; count++ {
-		resp, err = http.Get(url)
+		resp, err = httpClient.Get(url)
 		if err != nil {
 			return nil, fmt.Errorf("network error while downloading: %w", err)
 		}
@@ -288,7 +287,7 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 		utils.CliErrorWithExit("%s", status.Result)
 	}
 
-	content, err := fetchFromURL(downloadResponse.DownloadURL, 100)
+	content, err := fetchFromURL(ac.HTTPClient, downloadResponse.DownloadURL, 100)
 	if err != nil {
 		return err
 	}
