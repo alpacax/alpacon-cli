@@ -76,7 +76,7 @@ func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType s
 		}
 
 		if response.Count == 0 {
-			return "", errors.New("no server found with the given name")
+			return "", errors.New("no package found with the given name")
 		}
 		return response.Results[0].ID, nil
 	} else {
@@ -92,7 +92,7 @@ func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType s
 		}
 
 		if response.Count == 0 {
-			return "", errors.New("no server found with the given name")
+			return "", errors.New("no package found with the given name")
 		}
 		return response.Results[0].ID, nil
 	}

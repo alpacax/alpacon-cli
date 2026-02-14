@@ -21,7 +21,7 @@ type EventDetails struct {
 	Line          string                 `json:"line"`
 	Success       *bool                  `json:"success"`
 	Result        string                 `json:"result"`
-	Status        map[string]interface{} `json:"status"`
+	Status        map[string]any `json:"status"`
 	ResponseDelay float64                `json:"response_delay"`
 	ElapsedTime   float64                `json:"elapsed_time"`
 	AddedAt       time.Time              `json:"added_at"`
@@ -53,5 +53,5 @@ type CommandResponse struct {
 	ScheduledAt time.Time       `json:"scheduled_at"`
 	Server      string          `json:"server"`
 	RequestedBy iam.UserSummary `json:"requested_by"`
-	RunAfter    []interface{}   `json:"run_after"`
+	RunAfter    []any   `json:"run_after"`
 }

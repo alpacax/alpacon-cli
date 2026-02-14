@@ -40,13 +40,15 @@ func PromptForRequiredInput(promptText string) string {
 }
 
 func PromptForRequiredIntInput(promptText string) int {
-	inputStr := PromptForInput(promptText)
-	inputInt, err := strconv.Atoi(inputStr)
-	if err != nil {
-		fmt.Println("Only integers are allowed. Please try again.")
-		return PromptForRequiredIntInput(promptText)
+	for {
+		inputStr := PromptForInput(promptText)
+		inputInt, err := strconv.Atoi(inputStr)
+		if err != nil {
+			fmt.Println("Only integers are allowed. Please try again.")
+			continue
+		}
+		return inputInt
 	}
-	return inputInt
 }
 
 func PromptForIntInput(promptText string, defaultValue int) int {

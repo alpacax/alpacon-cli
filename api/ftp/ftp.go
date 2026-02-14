@@ -78,7 +78,7 @@ func uploadToS3(uploadUrl string, file io.Reader) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return err
+		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -211,11 +211,12 @@ func fetchFromURL(url string, maxAttempts int) ([]byte, error) {
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
-		time.Sleep(time.Second * 1)
+		resp.Body.Close()
 
 		if count == maxAttempts-1 {
 			return nil, fmt.Errorf("download failed after %d attempts", maxAttempts)
 		}
+		time.Sleep(time.Second * 1)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -278,7 +279,10 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 	}
 
 	if status.Status["text"] == "Stuck" || status.Status["text"] == "Error" {
-		utils.CliErrorWithExit("%s", status.Status["message"].(string))
+		if msg, ok := status.Status["message"].(string); ok {
+			utils.CliErrorWithExit("%s", msg)
+		}
+		utils.CliErrorWithExit("command failed with status: %v", status.Status["text"])
 	}
 	if status.Status["text"] == "Failed" {
 		utils.CliErrorWithExit("%s", status.Result)

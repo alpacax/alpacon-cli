@@ -10,7 +10,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-func PrintTable(slice interface{}) {
+func PrintTable(slice any) {
 	s := reflect.ValueOf(slice)
 
 	if s.Kind() != reflect.Slice {

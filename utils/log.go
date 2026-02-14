@@ -14,14 +14,14 @@ func reportCLIError() {
 }
 
 // CliError handles all error messages in the CLI.
-func CliError(msg string, args ...interface{}) {
+func CliError(msg string, args ...any) {
 	errorMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), errorMessage)
 	reportCLIError()
 }
 
 // CliErrorWithExit handles all error messages in the CLI.
-func CliErrorWithExit(msg string, args ...interface{}) {
+func CliErrorWithExit(msg string, args ...any) {
 	errorMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), errorMessage)
 	reportCLIError()
@@ -29,19 +29,19 @@ func CliErrorWithExit(msg string, args ...interface{}) {
 }
 
 // CliInfo handles all informational messages in the CLI.
-func CliInfo(msg string, args ...interface{}) {
+func CliInfo(msg string, args ...any) {
 	infoMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Blue("Info"), infoMessage)
 }
 
 // CliWarning handles all warning messages in the CLI.
-func CliWarning(msg string, args ...interface{}) {
+func CliWarning(msg string, args ...any) {
 	warningMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Yellow("Warning"), warningMessage)
 }
 
 // CliInfoWithExit prints an informational message to stderr and exits the program with a status code of 0
-func CliInfoWithExit(msg string, args ...interface{}) {
+func CliInfoWithExit(msg string, args ...any) {
 	infoMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Blue("Info"), infoMessage)
 	os.Exit(0) // Use exit code 0 to indicate successful completion.

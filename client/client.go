@@ -187,7 +187,7 @@ func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 }
 
 // POST Request to Alpacon Server
-func (ac *AlpaconClient) SendPostRequest(url string, body interface{}) ([]byte, error) {
+func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -208,8 +208,7 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
-// TODO PUT
-func (ac *AlpaconClient) SendPatchRequest(url string, body interface{}) ([]byte, error) {
+func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
 		return nil, err

@@ -45,7 +45,7 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	var response SessionResponse
 	err = json.Unmarshal(responseBody, &response)
 	if err != nil {
-		return SessionResponse{}, nil
+		return SessionResponse{}, err
 	}
 
 	return response, nil
@@ -79,7 +79,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	var response SessionResponse
 	err = json.Unmarshal(responseBody, &response)
 	if err != nil {
-		return SessionResponse{}, nil
+		return SessionResponse{}, err
 	}
 
 	if share {
@@ -94,7 +94,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 		}
 		err = json.Unmarshal(responseBody, &shareResponse)
 		if err != nil {
-			return SessionResponse{}, nil
+			return SessionResponse{}, err
 		}
 		sharingInfo(shareResponse)
 	}
