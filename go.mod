@@ -1,6 +1,6 @@
 module github.com/alpacax/alpacon-cli
 
-go 1.24.0
+go 1.24.13
 
 require (
 	github.com/google/go-github v17.0.0+incompatible
