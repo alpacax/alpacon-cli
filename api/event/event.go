@@ -100,7 +100,10 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	}
 
 	if result.Status["text"] == "Stuck" || result.Status["text"] == "Error" {
-		return result.Status["message"].(string), nil
+		if msg, ok := result.Status["message"].(string); ok {
+			return msg, nil
+		}
+		return fmt.Sprintf("command failed with status: %v", result.Status["text"]), nil
 	}
 
 	return result.Result, nil

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 	"io"
 	"net/url"
 	"os"
@@ -287,30 +287,32 @@ func Unzip(src string, dest string) error {
 			return err
 		}
 
-		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
+		if err := extractFile(fpath, f); err != nil {
 			return err
 		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-
-		_, err = io.Copy(outFile, rc)
-
-		err = outFile.Close()
-		if err != nil {
-			return err
-		}
-
-		err = rc.Close()
-		if err != nil {
-			return err
-		}
-
 	}
 	return nil
+}
+
+func extractFile(fpath string, f *zip.File) (err error) {
+	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := outFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	_, err = io.Copy(outFile, rc)
+	return err
 }
 
 func BoolPointerToString(value *bool) string {
@@ -351,7 +353,7 @@ func IsUUID(str string) bool {
 // ProcessEditedData facilitates user modifications to original data,
 // formats it, supports editing via a temp file, compares the edited data against the original,
 // and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
-func ProcessEditedData(originalData []byte) (interface{}, error) {
+func ProcessEditedData(originalData []byte) (any, error) {
 	prettyJSON, err := PrettyJSON(originalData)
 	if err != nil {
 		return nil, err
@@ -372,7 +374,7 @@ func ProcessEditedData(originalData []byte) (interface{}, error) {
 		CliInfoWithExit("No changes made. Aborting update.")
 	}
 
-	var jsonData interface{}
+	var jsonData any
 	err = json.Unmarshal(editedContent, &jsonData)
 	if err != nil {
 		return nil, err
@@ -396,7 +398,11 @@ func CreateAndEditTempFile(data []byte) (string, error) {
 		return "", err
 	}
 
-	cmd := exec.Command("vi", tmpl.Name())
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vi"
+	}
+	cmd := exec.Command(editor, tmpl.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	if err = cmd.Run(); err != nil {
@@ -436,9 +442,5 @@ func CommandConfirm() bool {
 
 // IsInteractiveShell checks if the current program is running in an interactive terminal.
 func IsInteractiveShell() bool {
-	if terminal.IsTerminal(int(os.Stdin.Fd())) {
-		return true
-	} else {
-		return false
-	}
+	return term.IsTerminal(int(os.Stdin.Fd()))
 }

@@ -113,11 +113,11 @@ func parseNetIP(ipList []string) []net.IP {
 
 func savePrivateKey(fileName string, key *rsa.PrivateKey) error {
 	dir := filepath.Dir(fileName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create directories: %v", err)
 	}
 
-	file, err := os.Create(fileName)
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create private key file: %v", err)
 	}

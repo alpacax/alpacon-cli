@@ -40,12 +40,12 @@ func saveConfig(config *Config) error {
 	}
 
 	configDir := filepath.Join(homeDir, ConfigFileDir)
-	if err = os.MkdirAll(configDir, os.ModePerm); err != nil {
+	if err = os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
 	configFile := filepath.Join(configDir, ConfigFileName)
-	file, err := os.Create(configFile)
+	file, err := os.OpenFile(configFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
 	}

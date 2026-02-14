@@ -8,7 +8,7 @@ import (
 var copyBuffer = &bufferPool{
 	size: 32 * 1024,
 	pool: sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return make([]byte, 32*1024)
 		},
 	},
