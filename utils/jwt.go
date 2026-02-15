@@ -15,17 +15,7 @@ func DecodeJWTPayload(token string) (map[string]any, error) {
 		return nil, fmt.Errorf("invalid JWT format: expected 3 parts, got %d", len(parts))
 	}
 
-	payload := parts[1]
-
-	// Add padding if needed
-	switch len(payload) % 4 {
-	case 2:
-		payload += "=="
-	case 3:
-		payload += "="
-	}
-
-	decoded, err := base64.URLEncoding.DecodeString(payload)
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode JWT payload: %v", err)
 	}
