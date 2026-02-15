@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths-ignore:
       - "docs/**"
+      - "**.md"
+      - "LICENSE"
 
   pull_request:
     types: [opened, ready_for_review, synchronize]
@@ -34,4 +36,4 @@ jobs:
         run: go build -v .
 
       - name: Run Tests
-        run: go test -v ./...
+        run: go test -race -v ./...
