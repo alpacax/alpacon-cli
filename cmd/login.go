@@ -203,7 +203,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 	if err != nil || resp.StatusCode >= 400 {
 		return "", fmt.Errorf("workspace URL '%s' is unreachable or invalid. Please check the URL and your internet connection", workspaceURL)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return workspaceURL, nil
 }

@@ -26,7 +26,7 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 				Count:   1,
 				Results: []server.ServerDetails{{ID: "srv-1", Name: "test-server"}},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -57,7 +57,7 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 				Count:   200, // more items exist on server
 				Results: results,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 

@@ -55,7 +55,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 

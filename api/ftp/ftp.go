@@ -74,7 +74,7 @@ func uploadToS3(httpClient *http.Client, uploadUrl string, file io.Reader) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
@@ -210,7 +210,7 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte,
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if count == maxAttempts-1 {
 			return nil, fmt.Errorf("download failed after %d attempts", maxAttempts)

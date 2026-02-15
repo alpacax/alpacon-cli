@@ -75,7 +75,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusFound {
 		return fmt.Errorf("response status: %s", resp.Status)

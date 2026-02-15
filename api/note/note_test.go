@@ -23,14 +23,14 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 		// server name lookup by ID (for each note)
 		if strings.HasPrefix(r.URL.Path, "/api/servers/servers/srv-") {
 			resp := server.ServerDetails{ID: "srv-1", Name: "test-server"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
 		// user name lookup by ID (for each note)
 		if strings.HasPrefix(r.URL.Path, "/api/iam/users/usr-") {
 			resp := iam.UserDetailAttributes{Username: "test-user"}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 
@@ -56,7 +56,7 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 				Count:   200, // more items exist on server
 				Results: results,
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 

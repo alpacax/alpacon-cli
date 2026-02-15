@@ -212,7 +212,7 @@ func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken stri
 		return err
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -246,7 +246,7 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
