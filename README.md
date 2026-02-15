@@ -103,10 +103,18 @@ To access and utilize all features of `Alpacon CLI`, first authenticate with you
 ```bash
 $ alpacon login
 
-$ alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
+# Cloud login (portal URL or API URL)
+$ alpacon login https://alpacon.io/myworkspace
+$ alpacon login myworkspace.us1.alpacon.io
+
+# Self-hosted
+$ alpacon login alpacon.example.com
 
 # Log in via API token
-$ alpacon login [WORKSPACE_URL] -t [TOKEN_KEY]
+$ alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
+
+# Legacy username/password
+$ alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
 
 # Skip TLS certificate verification
 $ alpacon login [WORKSPACE_URL] --insecure
@@ -483,7 +491,7 @@ To test the Alpacon CLI functionality, you can use the provided test script:
    LOCAL_PATH="/your/local/path"            # e.g., "/Users/username/Documents"
    REMOTE_ROOT_PATH="/root"                 # Usually "/root"
    REMOTE_USER_PATH="/your/remote/path"     # e.g., "/home/username"
-   WORKSPACE_URL="your-workspace-url"       # e.g., "https://yourworkspace.alpacon.io"
+   WORKSPACE_URL="your-workspace-url"       # e.g., "https://myworkspace.us1.alpacon.io"
    ```
 
 3. **Make the script executable and run the tests:**

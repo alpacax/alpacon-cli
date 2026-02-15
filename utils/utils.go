@@ -77,7 +77,7 @@ func ExtractWorkspaceName(workspaceURL string) string {
 		return ""
 	}
 
-	// Extract subdomain from hostname (e.g., workspace.alpacon.io -> workspace)
+	// Extract subdomain from hostname (e.g., myworkspace.us1.alpacon.io -> myworkspace)
 	hostname := parsedURL.Hostname()
 	parts := strings.Split(hostname, ".")
 	if len(parts) > 0 {
