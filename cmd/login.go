@@ -55,7 +55,7 @@ var loginCmd = &cobra.Command{
 		}
 
 		if workspaceURL == "" {
-			workspaceURL = utils.PromptForRequiredInput("workspaceURL: ")
+			workspaceURL = utils.PromptForRequiredInput("Workspace URL (e.g., myworkspace.alpacon.io): ")
 		}
 
 		httpClient := &http.Client{
@@ -198,6 +198,17 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 		}
 		if domain != "" && workspace != "" {
 			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
+		}
+	}
+
+	// Validate that a workspace name is present for cloud domains.
+	// e.g., "dev.alpacon.io" (3 parts) is missing a workspace — need "myws.dev.alpacon.io" (4+ parts).
+	parsedURL, err = url.Parse(workspaceURL)
+	if err == nil {
+		hostname := parsedURL.Hostname()
+		parts := strings.Split(hostname, ".")
+		if len(parts) >= 2 && parts[len(parts)-2]+"."+parts[len(parts)-1] == "alpacon.io" && len(parts) < 4 {
+			return "", fmt.Errorf("workspace name is missing from URL. Use the format: <workspace>.%s (e.g., myworkspace.%s)", hostname, hostname)
 		}
 	}
 
