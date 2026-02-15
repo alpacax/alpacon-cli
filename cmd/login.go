@@ -24,16 +24,21 @@ var loginCmd = &cobra.Command{
 	Short: "Log in to Alpacon",
 	Long:  "Log in to Alpacon. To access Alpacon, workspace url is must specified",
 	Example: `
+	# Re-login to saved workspace
 	alpacon login
 
-	alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
-	alpacon login [WORKSPACE_URL]
-	
-	# Include http if using localhost.
-	alpacon login http://localhost:8000
-	
+	# Cloud login (portal URL or API URL)
+	alpacon login https://alpacon.io/myworkspace
+	alpacon login myworkspace.us1.alpacon.io
+
+	# Self-hosted
+	alpacon login alpacon.example.com
+
 	# Login via API Token
-	alpacon login [WORKSPACE_URL] -t [TOKEN_KEY]
+	alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
+
+	# Legacy username/password
+	alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
 
 	# Skip TLS certificate verification
 	alpacon login [WORKSPACE_URL] --insecure
@@ -55,7 +60,7 @@ var loginCmd = &cobra.Command{
 		}
 
 		if workspaceURL == "" {
-			workspaceURL = utils.PromptForRequiredInput("Workspace URL (e.g., myworkspace.alpacon.io): ")
+			workspaceURL = utils.PromptForRequiredInput("Workspace URL (e.g., alpacon.io/myworkspace or myworkspace.us1.alpacon.io): ")
 		}
 
 		httpClient := &http.Client{
@@ -208,7 +213,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 		hostname := parsedURL.Hostname()
 		parts := strings.Split(hostname, ".")
 		if len(parts) >= 2 && parts[len(parts)-2]+"."+parts[len(parts)-1] == "alpacon.io" && len(parts) < 4 {
-			return "", fmt.Errorf("workspace name is missing from URL. Use the format: <workspace>.%s (e.g., myworkspace.%s)", hostname, hostname)
+			return "", fmt.Errorf("workspace name is missing from URL. Use the format: alpacon.io/<workspace> or <workspace>.%s", hostname)
 		}
 	}
 
