@@ -121,7 +121,7 @@ func savePrivateKey(fileName string, key *rsa.PrivateKey) error {
 	if err != nil {
 		return fmt.Errorf("failed to create private key file: %v", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	var privateKey = &pem.Block{
 		Type:  "RSA PRIVATE KEY",

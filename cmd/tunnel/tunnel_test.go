@@ -290,7 +290,7 @@ func TestHandleTCPConnectionOpenStreamFailureTriggersShutdown(t *testing.T) {
 	}
 
 	clientConn, serverConn := net.Pipe()
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
 	handleTCPConnection(clientConn, ctx)
 

@@ -229,7 +229,7 @@ func Zip(folderPath string) ([]byte, error) {
 			if err != nil {
 				return err
 			}
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 
 			_, err = io.Copy(writer, file)
 			if err != nil {
@@ -241,7 +241,7 @@ func Zip(folderPath string) ([]byte, error) {
 	})
 
 	if err != nil {
-		zipWriter.Close()
+		_ = zipWriter.Close()
 		return nil, err
 	}
 
@@ -258,7 +258,7 @@ func Unzip(src string, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
@@ -309,7 +309,7 @@ func extractFile(fpath string, f *zip.File) (err error) {
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	_, err = io.Copy(outFile, rc)
 	return err
@@ -386,7 +386,7 @@ func ProcessEditedData(originalData []byte) (any, error) {
 func CreateAndEditTempFile(data []byte) (string, error) {
 	tmpl, err := os.CreateTemp("", "example.*.json")
 	if err != nil {
-		return "", errors.New("Failed to create temp file for update")
+		return "", errors.New("failed to create temp file for update")
 	}
 	defer func() { _ = tmpl.Close() }()
 

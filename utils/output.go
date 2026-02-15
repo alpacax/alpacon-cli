@@ -62,10 +62,10 @@ func PrintTable(slice any) {
 			value := s.Index(i).Field(j)
 			row[j] = fmt.Sprintf("%v", value)
 		}
-		table.Append(row)
+		_ = table.Append(row)
 	}
 
-	table.Render()
+	_ = table.Render()
 }
 
 func PrintJson(body []byte) {
@@ -75,8 +75,8 @@ func PrintJson(body []byte) {
 		CliErrorWithExit("Parsing data: Expected a json format")
 	}
 
-	formattedJson := strings.Replace(prettyJSON.String(), "\\n", "\n", -1)
-	formattedJson = strings.Replace(formattedJson, "\\t", "\t", -1)
+	formattedJson := strings.ReplaceAll(prettyJSON.String(), "\\n", "\n")
+	formattedJson = strings.ReplaceAll(formattedJson, "\\t", "\t")
 
 	fmt.Println(formattedJson)
 }

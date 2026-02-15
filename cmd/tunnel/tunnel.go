@@ -129,10 +129,10 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	headers := alpaconClient.SetWebsocketHeader()
 	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		utils.CliErrorWithExit("Failed to connect to proxy server: %s", err)
 	}
-	defer wsConn.Close()
+	defer func() { _ = wsConn.Close() }()
 
 	fmt.Println("Connected to proxy server")
 
@@ -140,7 +140,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
 	session, err := smux.Client(wsNetConn, config.GetSmuxConfig())
 	if err != nil {
-		listener.Close()
+		_ = listener.Close()
 		utils.CliErrorWithExit("Failed to create smux session: %s", err)
 	}
 
@@ -249,7 +249,7 @@ func shutdownTunnel(ctx *tunnelContext, cause error) {
 
 // handleTCPConnection handles a single TCP connection.
 func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
-	defer tcpConn.Close()
+	defer func() { _ = tcpConn.Close() }()
 
 	// Create smux stream
 	stream, err := ctx.session.OpenStream()
@@ -258,7 +258,7 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 		shutdownTunnel(ctx, fmt.Errorf("open stream failed: %w", err))
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	// Send metadata (target port information)
 	metadata := map[string]string{"remote_port": ctx.remotePort}

@@ -9,7 +9,8 @@ var copyBuffer = &bufferPool{
 	size: 32 * 1024,
 	pool: sync.Pool{
 		New: func() any {
-			return make([]byte, 32*1024)
+			b := make([]byte, 32*1024)
+			return &b
 		},
 	},
 }
@@ -20,12 +21,13 @@ type bufferPool struct {
 }
 
 func (p *bufferPool) get() []byte {
-	return p.pool.Get().([]byte)
+	return *p.pool.Get().(*[]byte)
 }
 
 func (p *bufferPool) put(buf []byte) {
 	if cap(buf) == p.size {
-		p.pool.Put(buf[:p.size])
+		buf = buf[:p.size]
+		p.pool.Put(&buf)
 	}
 }
 

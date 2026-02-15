@@ -39,7 +39,7 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusFound {
 		return nil, fmt.Errorf("response status: %s", resp.Status)
@@ -87,7 +87,7 @@ func RequestDeviceCode(workspaceURL string, httpClient *http.Client, envInfo *Au
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("server returned error: %v", resp.StatusCode)
@@ -159,7 +159,7 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

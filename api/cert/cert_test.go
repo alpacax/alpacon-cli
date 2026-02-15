@@ -73,7 +73,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -143,7 +143,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -211,7 +211,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 			Results: results,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -246,7 +246,7 @@ func TestCreateSignRequest(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(expectedResponse)
+		_ = json.NewEncoder(w).Encode(expectedResponse)
 	}))
 	defer server.Close()
 
@@ -290,7 +290,7 @@ func TestApproveCSR(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "approve")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"signing"}`))
+		_, _ = w.Write([]byte(`{"status":"signing"}`))
 	}))
 	defer server.Close()
 
@@ -306,7 +306,7 @@ func TestDenyCSR(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "deny")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"denied"}`))
+		_, _ = w.Write([]byte(`{"status":"denied"}`))
 	}))
 	defer server.Close()
 
@@ -402,7 +402,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
-				json.NewEncoder(w).Encode(tt.response)
+				_ = json.NewEncoder(w).Encode(tt.response)
 			}))
 			defer server.Close()
 
@@ -430,7 +430,7 @@ func TestDownloadCertificateByCSR_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"detail":"Not found."}`))
+		_, _ = w.Write([]byte(`{"detail":"Not found."}`))
 	}))
 	defer server.Close()
 
@@ -447,7 +447,7 @@ func TestDownloadCertificateByCSR_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{invalid json`))
+		_, _ = w.Write([]byte(`{invalid json`))
 	}))
 	defer server.Close()
 
@@ -488,7 +488,7 @@ func TestDownloadCertificate(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				json.NewEncoder(w).Encode(tt.response)
+				_ = json.NewEncoder(w).Encode(tt.response)
 			}))
 			defer server.Close()
 

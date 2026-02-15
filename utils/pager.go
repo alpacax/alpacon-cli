@@ -37,14 +37,14 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		output := buf.Bytes()
 
 		if !isTerminal {
-			stdout.Write(output)
+			_, _ = stdout.Write(output)
 			return
 		}
 
 		height, err := getHeight()
 		lineCount := bytes.Count(output, []byte("\n"))
 		if err != nil || lineCount <= height {
-			stdout.Write(output)
+			_, _ = stdout.Write(output)
 			return
 		}
 
@@ -56,7 +56,7 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		} else {
 			lessPath, err := exec.LookPath("less")
 			if err != nil {
-				stdout.Write(output)
+				_, _ = stdout.Write(output)
 				return
 			}
 			cmd = exec.Command(lessPath, "-RSX")
@@ -67,7 +67,7 @@ func writeToPager(isTerminal bool, getHeight func() (int, error), stdout *os.Fil
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			stdout.Write(output)
+			_, _ = stdout.Write(output)
 		}
 	}
 

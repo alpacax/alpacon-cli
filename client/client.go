@@ -159,7 +159,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
-		return nil, fmt.Errorf("Server error or incorrect request detected")
+		return nil, fmt.Errorf("server error or incorrect request detected")
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
@@ -238,7 +238,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
-		return nil, fmt.Errorf("Server error or incorrect request detected")
+		return nil, fmt.Errorf("server error or incorrect request detected")
 	}
 
 	respBody, err := io.ReadAll(resp.Body)

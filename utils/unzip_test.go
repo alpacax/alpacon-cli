@@ -18,10 +18,10 @@ func TestUnzip_ValidFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer zf.Close()
+	defer func() { _ = zf.Close() }()
 
 	zw := zip.NewWriter(zf)
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 
 	// Add a valid file
 	fw, err := zw.Create("test.txt")
@@ -43,8 +43,8 @@ func TestUnzip_ValidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	zw.Close()
-	zf.Close()
+	_ = zw.Close()
+	_ = zf.Close()
 
 	// Test extraction
 	err = Unzip(zipPath, extractDir)
@@ -115,7 +115,7 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer zf.Close()
+			defer func() { _ = zf.Close() }()
 
 			zw := zip.NewWriter(zf)
 
@@ -133,8 +133,8 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			zw.Close()
-			zf.Close()
+			_ = zw.Close()
+			_ = zf.Close()
 
 			// Test extraction
 			err = Unzip(zipPath, extractDir)
@@ -170,7 +170,7 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer zf.Close()
+	defer func() { _ = zf.Close() }()
 
 	zw := zip.NewWriter(zf)
 
@@ -185,8 +185,8 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	zw.Close()
-	zf.Close()
+	_ = zw.Close()
+	_ = zf.Close()
 
 	// Test extraction should fail
 	err = Unzip(zipPath, extractDir)

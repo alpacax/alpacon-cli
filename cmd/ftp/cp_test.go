@@ -219,16 +219,17 @@ func TestCpCommandSSHParsing(t *testing.T) {
 					// For now, let's test the logic manually
 
 					// Simplified version of the parsing logic
-					if arg == "root@prod-docker:/var/log/syslog" {
+					switch arg {
+					case "root@prod-docker:/var/log/syslog":
 						username = "root"
 						args[i] = "prod-docker:/var/log/syslog"
-					} else if arg == "admin@prod-docker:~/uploads/" {
+					case "admin@prod-docker:~/uploads/":
 						username = "admin"
 						args[i] = "prod-docker:~/uploads/"
-					} else if arg == "deploy@web-server:/opt/app/" {
+					case "deploy@web-server:/opt/app/":
 						username = "deploy"
 						args[i] = "web-server:/opt/app/"
-					} else if arg == "root@prod-docker" {
+					case "root@prod-docker":
 						username = "root"
 						args[i] = "prod-docker"
 					}
