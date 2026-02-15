@@ -15,7 +15,7 @@ const (
 	ConfigFileDir  = ".alpacon"
 )
 
-func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken string, expiresIn int, insecure bool) error {
+func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
 	config := Config{
 		WorkspaceURL:  workspaceURL,
 		WorkspaceName: workspaceName,
@@ -23,6 +23,7 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 		ExpiresAt:     expiresAt,
 		AccessToken:   accessToken,
 		RefreshToken:  refreshToken,
+		BaseDomain:    baseDomain,
 		Insecure:      insecure,
 	}
 
@@ -31,6 +32,19 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	}
 
 	return saveConfig(&config)
+}
+
+// SwitchWorkspace updates the workspace URL and name in the existing config.
+func SwitchWorkspace(newURL, newName string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+
+	cfg.WorkspaceURL = newURL
+	cfg.WorkspaceName = newName
+
+	return saveConfig(&cfg)
 }
 
 func saveConfig(config *Config) error {

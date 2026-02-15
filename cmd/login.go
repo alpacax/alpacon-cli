@@ -114,7 +114,9 @@ var loginCmd = &cobra.Command{
 				utils.CliErrorWithExit("%s", err.Error())
 			}
 
-			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, tokenRes.ExpiresIn, insecure)
+			baseDomain := utils.ExtractBaseDomain(workspaceURL)
+
+			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
 			if err != nil {
 				utils.CliErrorWithExit("Failed to save config: %v", err)
 			}
