@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/google/go-github/github"
+	"github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
 )
 
