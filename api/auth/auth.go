@@ -47,7 +47,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 			return err
 		}
 
-		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", 0, insecure)
+		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", "", 0, insecure)
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		return err
 	}
 
-	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", 0, insecure)
+	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", "", 0, insecure)
 	if err != nil {
 		return err
 	}

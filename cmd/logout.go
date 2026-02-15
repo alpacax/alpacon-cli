@@ -29,6 +29,11 @@ var logoutCmd = &cobra.Command{
 			fmt.Println("You are not logged in.")
 			return
 		}
+
+		if validConfig.IsMultiWorkspaceMode() {
+			fmt.Println("Note: This will log you out from all workspaces associated with this account.")
+		}
+
 		httpClient := &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
