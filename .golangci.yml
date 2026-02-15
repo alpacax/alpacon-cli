@@ -1,3 +1,5 @@
+version: "2"
+
 linters:
   enable:
     - errcheck
@@ -5,15 +7,13 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-
-linters-settings:
-  errcheck:
-    exclude-functions:
-      - fmt.Fprintf
-      - fmt.Printf
-      - fmt.Print
-      - fmt.Println
-
-issues:
-  exclude-dirs:
-    - docs
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Printf
+        - fmt.Print
+        - fmt.Println
+  exclusions:
+    paths:
+      - docs
