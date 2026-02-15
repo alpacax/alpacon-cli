@@ -2,22 +2,19 @@ package config
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 // setupTestConfig overrides the home directory so tests write to a temp dir.
-func setupTestConfig(t *testing.T) (cleanup func()) {
+// t.Setenv automatically restores the original value when the test finishes.
+func setupTestConfig(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", tmpDir)
-	return func() {
-		os.Setenv("HOME", origHome)
-	}
 }
 
 func TestIsMultiWorkspaceMode(t *testing.T) {
@@ -80,8 +77,7 @@ func TestIsMultiWorkspaceMode(t *testing.T) {
 }
 
 func TestCreateConfig_WithBaseDomain(t *testing.T) {
-	cleanup := setupTestConfig(t)
-	defer cleanup()
+	setupTestConfig(t)
 
 	err := CreateConfig(
 		"https://myws.ap1.alpacon.io", "myws",
@@ -101,8 +97,7 @@ func TestCreateConfig_WithBaseDomain(t *testing.T) {
 }
 
 func TestCreateConfig_WithoutBaseDomain(t *testing.T) {
-	cleanup := setupTestConfig(t)
-	defer cleanup()
+	setupTestConfig(t)
 
 	err := CreateConfig(
 		"https://myws.ap1.alpacon.io", "myws",
@@ -118,8 +113,7 @@ func TestCreateConfig_WithoutBaseDomain(t *testing.T) {
 }
 
 func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
-	cleanup := setupTestConfig(t)
-	defer cleanup()
+	setupTestConfig(t)
 
 	err := CreateConfig(
 		"https://myws.ap1.alpacon.io", "myws",
@@ -141,8 +135,7 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 }
 
 func TestSwitchWorkspace(t *testing.T) {
-	cleanup := setupTestConfig(t)
-	defer cleanup()
+	setupTestConfig(t)
 
 	// Create initial config
 	err := CreateConfig(
@@ -167,8 +160,7 @@ func TestSwitchWorkspace(t *testing.T) {
 }
 
 func TestSwitchWorkspace_NoExistingConfig(t *testing.T) {
-	cleanup := setupTestConfig(t)
-	defer cleanup()
+	setupTestConfig(t)
 
 	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
 	assert.Error(t, err)
