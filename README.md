@@ -1,32 +1,42 @@
 # Alpacon CLI
 
-`Alpacon CLI` is a powerful command-line tool designed for managing **Alpacon** seamlessly from the terminal. This tool simplifies complex operations, making it easier for developers to interact with Alpacon services.
+[![Go Version](https://img.shields.io/github/go-mod/go-version/alpacax/alpacon-cli)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/alpacax/alpacon-cli/blob/main/LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/alpacax/alpacon-cli)](https://github.com/alpacax/alpacon-cli/releases)
 
+`Alpacon CLI` is a command-line tool for managing [Alpacon](https://alpacon.io) — a platform for secure remote access, server automation, and certificate management. This CLI lets you interact with your Alpacon workspace directly from the terminal.
 
-## Prerequisites
-For the optimal use of `Alpacon CLI`, ensure that both [**Alpacon-Server**](https://github.com/alpacax/alpacon-server) and [**Alpamon**](https://github.com/alpacax/alpamon) are operational.
-These components are integral for the CLI to function effectively.
+## Architecture
+
+Alpacon consists of the following components:
+
+- **Alpacon Server** — The platform for secure remote access and server automation. Sign up for a workspace at [alpacon.io](https://alpacon.io) to get started.
+- **[Alpamon](https://github.com/alpacax/alpamon)** — An open-source agent installed on managed servers to enable remote access and monitoring.
+- **Alpacon CLI** (this repository) — A command-line client for interacting with your Alpacon workspace.
 
 ## Documentation
 
 [Alpacon CLI Documentation](https://github.com/alpacax/alpacon-cli/blob/main/docs/alpacon.md)
 
-**Note**: Detailed documentation, including usage guides and best practices, is in progress and will be available soon.
-
 ## Installation
-Download the latest `Alpacon CLI` directly from our releases page or install it using package managers on Linux.
+
+Download the latest `Alpacon CLI` directly from our [releases page](https://github.com/alpacax/alpacon-cli/releases) or install it using package managers.
 
 ### Docker
+
 For every release and Release Candidate (RC), we push a corresponding container image to our Docker Hub repository at `alpacax/alpacon-cli`. For example:
 
 ```bash
-docker run --rm -it alpacax/alpacon-cli version  
+docker run --rm -it alpacax/alpacon-cli version
 ```
 
-### Build the binary
-- Make sure you have go installed:
+### Build from source
+
+Make sure you have [Go](https://go.dev/dl/) installed:
+
 ```bash
 git clone https://github.com/alpacax/alpacon-cli.git
+cd alpacon-cli
 go build
 sudo mv alpacon-cli /usr/local/bin/alpacon
 ```
@@ -39,7 +49,7 @@ brew tap alpacax/alpacon
 brew install alpacon-cli
 ```
 
-> **Note for existing users**: If you encounter any issues for `brew upgrade`, please run:
+> **Note for existing users**: If you encounter any issues with `brew upgrade`, please run:
 > ```bash
 > brew uninstall alpacon-cli
 > brew untap alpacax/cli
@@ -83,11 +93,12 @@ sudo mv alpacon /usr/local/bin
 ```
 
 ### Windows
-Installation instructions for Windows will be provided soon.
+
+Download the latest `.zip` archive for Windows from [GitHub Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your PATH.
 
 
 ### Login & Logout
-To access and utilize all features of `Alpacon CLI`, first authenticate with the Alpacon API:
+To access and utilize all features of `Alpacon CLI`, first authenticate with your Alpacon workspace:
 
 ```bash
 $ alpacon login
@@ -96,6 +107,9 @@ $ alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
 
 # Log in via API token
 $ alpacon login [WORKSPACE_URL] -t [TOKEN_KEY]
+
+# Skip TLS certificate verification
+$ alpacon login [WORKSPACE_URL] --insecure
 
 # Logout
 $ alpacon logout
@@ -125,14 +139,17 @@ Available Commands:
   cp          Copy files between local and remote locations
   csr         Generate and manage Certificate Signing Request (CSR) operations
   event       Retrieve and display recent Alpacon events.
+  exec        Execute a command on a remote server
   group       Manage Group resources
   help        Help about any command
   log         Retrieve and display server logs
-  login       Log in to Alpacon Server
+  login       Log in to Alpacon
+  logout      Log out of Alpacon
   note        Manage and view server notes
   package     Commands to manage and interact with packages
   server      Commands to manage and interact with servers
   token       Commands to manage api tokens
+  tunnel      Create a TCP tunnel to a remote server
   user        Manage User resources
   version     Displays the current CLI version.
   websh       Open a websh terminal or execute a command on a server
@@ -155,8 +172,8 @@ $ alpacon server create
 $ alpacon server delete [SERVER NAME]
 $ alpacon server rm [SERVER NAME]
 
-Server Name: 
-Platform(debian, rhel): 
+Server Name:
+Platform(debian, rhel):
 Groups:
 [1] alpacon
 [2] auditors
@@ -180,8 +197,7 @@ $ alpacon websh -r [SERVER NAME]
 $ alpacon websh -u [USER NAME] -g [GROUP NAME] [SERVER NAME]
 ```
 
-
-####  Execute a command
+#### Execute a command via Websh
 Execute a command directly on a server and retrieve the output:
 ```bash
 $ alpacon websh [SERVER NAME] [COMMAND]
@@ -197,6 +213,37 @@ $ alpacon websh --env="KEY" [SERVER NAME] [COMMAND]
 ```
 - Note: All flags must be placed before the `[SERVER NAME]`.
 
+#### Execute a command (SSH-style)
+Execute a command on a remote server using SSH-like `user@host` syntax:
+```bash
+# Execute a command on a server
+$ alpacon exec [SERVER NAME] [COMMAND]
+
+# Use SSH-style user@host syntax
+$ alpacon exec root@prod-docker docker ps
+$ alpacon exec admin@web-server ls -la /var/log
+
+# Specify username and groupname via flags
+$ alpacon exec -u root prod-docker systemctl status nginx
+$ alpacon exec -g docker user@server docker images
+```
+
+#### TCP Tunnel
+Create a TCP tunnel that forwards local port traffic to a remote server's port:
+```bash
+# Forward local port 9000 to remote server's port 8082
+$ alpacon tunnel [SERVER NAME] -l 9000 -r 8082
+
+# Forward local port 2222 to remote server's SSH port (22)
+$ alpacon tunnel [SERVER NAME] -l 2222 -r 22
+
+# Specify username and groupname for the tunnel
+$ alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT] -u [USER NAME] -g [GROUP NAME]
+
+# Enable verbose connection logs
+$ alpacon tunnel [SERVER NAME] -l 9000 -r 8082 -v
+```
+
 
 #### Share your terminal
 You can share the current terminal to others via a temporary link:
@@ -204,7 +251,7 @@ You can share the current terminal to others via a temporary link:
 # Open a websh terminal and share the current terminal
 $ alpacon websh [SERVER NAME] --share
 $ alpacon websh [SERVER NAME] --share --read-only true
-	
+
 # Join an existing shared session
 $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 ```
@@ -262,7 +309,7 @@ $ alpacon token create -n [TOKEN NAME] -l / --limit=true
 $ alpacon token create -n [TOKEN NAME] --expiration-in-days=7
 
 # Display a list of API tokens in the Alpacon
-$ alpacon token ls 
+$ alpacon token ls
 
 # Delete API token
 $ alpacon token delete [TOKEN_ID_OR_NAME]
@@ -276,7 +323,7 @@ $ alpacon login -s [SERVER URL] -t [TOKEN KEY]
 Defines command access for API tokens and enables setting specific commands that each API token can run.
 ```bash
 # Add a new command ACL with specific token and command.
-$ alpacon token acl add [TOKEN_ID_OR_NAME] 
+$ alpacon token acl add [TOKEN_ID_OR_NAME]
 $ alpacon token acl add --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
 
 # Display all command ACLs for an API token.
@@ -428,7 +475,7 @@ To test the Alpacon CLI functionality, you can use the provided test script:
    ```bash
    vi test_cli.sh
    ```
-   
+
    Update the following variables in the Configuration section:
    ```bash
    # Configuration
@@ -466,5 +513,33 @@ The test script will automatically:
 
 **Note:** Make sure you have access to the specified server and the necessary permissions for the test operations before running the script.
 
-### Contributing
-We welcome bug reports and pull requests on our GitHub repository at https://github.com/alpacax/alpacon-cli.
+## Contributing
+
+We welcome contributions! Here's how to get started:
+
+### Build
+
+```bash
+git clone https://github.com/alpacax/alpacon-cli.git
+cd alpacon-cli
+go build
+```
+
+### Run tests
+
+```bash
+go test ./...
+```
+
+### Submitting changes
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Push to the branch and open a Pull Request
+
+Bug reports and feature requests are welcome on our [GitHub Issues](https://github.com/alpacax/alpacon-cli/issues) page.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
