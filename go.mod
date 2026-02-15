@@ -3,7 +3,7 @@ module github.com/alpacax/alpacon-cli
 go 1.25.7
 
 require (
-	github.com/google/go-github v17.0.0+incompatible
+	github.com/google/go-github/v71 v71.0.0
 	github.com/google/uuid v1.6.0
 	github.com/gookit/color v1.6.0
 	github.com/gorilla/websocket v1.5.3
