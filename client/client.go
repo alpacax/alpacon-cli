@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -305,6 +306,10 @@ func isAccessTokenExpired(cfg config.Config) bool {
 func parseAPIError(body []byte) error {
 	raw := string(body)
 
+	if strings.TrimSpace(raw) == "" {
+		return errors.New("server returned an empty error response")
+	}
+
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
@@ -319,9 +324,16 @@ func parseAPIError(body []byte) error {
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
+	// Sort keys for deterministic output order
+	fields := make([]string, 0, len(parsed))
+	for field := range parsed {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
 	var messages []string
-	for field, val := range parsed {
-		switch v := val.(type) {
+	for _, field := range fields {
+		switch v := parsed[field].(type) {
 		case []any:
 			for _, item := range v {
 				if s, ok := item.(string); ok {
