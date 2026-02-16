@@ -12,17 +12,22 @@ var serverDeleteCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified server",
 	Long: `
-	This command is used to permanently delete a specified server from the Alpacon. 
-	It is crucial to ensure that you have the appropriate permissions to delete a server before attempting this operation. 
+	This command is used to permanently delete a specified server from the Alpacon.
+	It is crucial to ensure that you have the appropriate permissions to delete a server before attempting this operation.
 	The command requires the exact server name as an argument.
 	`,
-	Example: ` 
-	alpacon server delete [SERVER NAME]	
+	Example: `
+	alpacon server delete [SERVER NAME]
 	alpacon server rm [SERVER NAME]
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		serverName := args[0]
+
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Delete server '%s'?", serverName)
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -34,6 +39,10 @@ var serverDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to delete the server: %s.", err)
 		}
 
-		utils.CliInfo("Server successfully deleted: %s.", serverName)
+		utils.CliSuccess("Server deleted: %s", serverName)
 	},
+}
+
+func init() {
+	serverDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }

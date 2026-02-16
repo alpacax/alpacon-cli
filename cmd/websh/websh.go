@@ -137,9 +137,8 @@ Note: All flags must be placed before the server name.
 		} else if len(commandArgs) > 0 {
 			if len(commandArgs) > 1 {
 				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
-				confirm := utils.CommandConfirm()
-				if !confirm {
-					os.Exit(1)
+				if !utils.CommandConfirm() {
+					return
 				}
 			}
 			command := strings.Join(commandArgs, " ")

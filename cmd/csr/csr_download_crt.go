@@ -34,7 +34,7 @@ var csrDownloadCrtCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to download the certificate: %s.", err)
 		}
 
-		utils.CliInfo("Certificate downloaded successfully: '%s'.", filePath)
+		utils.CliSuccess("Certificate downloaded: %s", filePath)
 	},
 }
 

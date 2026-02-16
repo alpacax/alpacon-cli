@@ -100,6 +100,10 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
 	startTime := time.Now()
 
+	spinner := utils.NewSpinner("Waiting for authentication...")
+	spinner.Start()
+	defer spinner.Stop()
+
 	for {
 		if time.Since(startTime).Seconds() > float64(deviceCodeRes.ExpiresIn) {
 			return nil, fmt.Errorf("authentication timed out. Please restart the login process")
@@ -108,14 +112,26 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 		tokenResponse, err := requestAccessToken(deviceCodeRes.DeviceCode, envInfo)
 		if err != nil {
 			if strings.Contains(err.Error(), "authorization_pending") {
-				fmt.Println("Waiting for user to complete authentication...")
 				time.Sleep(time.Duration(deviceCodeRes.Interval) * time.Second)
 				continue
 			}
-			return nil, err
+			return nil, mapAuth0Error(err)
 		}
 
 		return tokenResponse, nil
+	}
+}
+
+// mapAuth0Error converts OAuth error codes to user-friendly messages.
+func mapAuth0Error(err error) error {
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "access_denied"):
+		return fmt.Errorf("authentication was denied. You may have cancelled the browser prompt")
+	case strings.Contains(errStr, "expired_token"):
+		return fmt.Errorf("authentication session expired. Please run 'alpacon login' again")
+	default:
+		return err
 	}
 }
 

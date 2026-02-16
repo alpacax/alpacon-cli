@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -57,23 +58,23 @@ func promptForServer(ac *client.AlpaconClient, groupList []iam.GroupAttributes) 
 
 func promptForPlatform() string {
 	for {
-		platform := utils.PromptForInput("Platform(debian, rhel): ")
+		platform := utils.PromptForInput("Platform (debian, rhel): ")
 		if strings.ToLower(platform) == "debian" || strings.ToLower(platform) == "rhel" {
 			return platform
 		}
-		fmt.Println("Invalid platform. Please choose 'debian' or 'rhel'. This determines the package manager and system configuration for the server")
+		utils.CliWarning("Invalid platform. Please choose 'debian' or 'rhel'.")
 	}
 }
 
 func displayGroups(groupList []iam.GroupAttributes) {
-	fmt.Println("Groups:")
+	fmt.Fprintln(os.Stderr, "Groups:")
 	for i, group := range groupList {
-		fmt.Printf("[%d] %s\n", i+1, group.Name)
+		fmt.Fprintf(os.Stderr, "[%d] %s\n", i+1, group.Name)
 	}
 }
 
 func selectAndConvertGroups(ac *client.AlpaconClient, groupList []iam.GroupAttributes) []string {
-	chosenGroups := utils.PromptForRequiredInput("Select groups that are authorized to access this server. (e.g., 1,2):")
+	chosenGroups := utils.PromptForRequiredInput("Select groups (e.g., 1,2): ")
 	intGroups := utils.SplitAndParseInt(chosenGroups)
 
 	var groupIDs []string
@@ -95,18 +96,18 @@ func selectAndConvertGroups(ac *client.AlpaconClient, groupList []iam.GroupAttri
 }
 
 func installServerInfo(response server.ServerCreatedResponse) {
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Connecting server to alpacon")
-	fmt.Println("We provide two ways to connect your server to alpacon.")
-	fmt.Println("Please follow one of the following steps to install the \"alpamon\" agent on your server.")
+	fmt.Fprintln(os.Stderr, "We provide two ways to connect your server to alpacon.")
+	fmt.Fprintln(os.Stderr, "Please follow one of the following steps to install the \"alpamon\" agent on your server.")
 
 	printMethod("Simply use our install script:", response.Instruction1)
 	printMethod("Or, do it manually (If you've followed the script above, this is not required):", response.Instruction2)
-	utils.CliWarning("Please be aware that after leaving this page, you cannot obtain the script again for security.")
+	utils.CliWarning("After leaving this page, you cannot obtain the script again for security.")
 }
 
 func printMethod(header, instruction string) {
-	fmt.Println(utils.Green(header))
-	fmt.Println()
-	fmt.Println(instruction + "\n")
+	fmt.Fprintln(os.Stderr, utils.Green(header))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, instruction)
 }

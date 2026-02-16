@@ -40,23 +40,27 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
 
+		spinner := NewSpinner("Waiting for MFA authentication...")
+		spinner.Start()
+
 		startTime := time.Now()
 		// Retry loop
 		for {
 			if time.Since(startTime) > maxRetryDuration {
+				spinner.Stop()
 				return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 			}
 
-			fmt.Println("Waiting for MFA authentication...")
 			time.Sleep(retryInterval)
 
 			if callbacks.RetryOperation != nil {
 				if err := callbacks.RetryOperation(); err == nil {
-					fmt.Println("MFA authentication has been completed!")
+					spinner.Stop()
+					CliSuccess("MFA authentication completed")
 					return nil
 				}
 			} else {
-				// No retry callback provided, break out
+				spinner.Stop()
 				break
 			}
 		}

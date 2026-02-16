@@ -47,8 +47,10 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	}
 
 	if isAccessTokenExpired(validConfig) {
-		fmt.Println("Refreshing access token...")
+		spinner := utils.NewSpinner("Refreshing access token...")
+		spinner.Start()
 		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
+		spinner.Stop()
 		if err != nil {
 			return nil, fmt.Errorf("failed to refresh access token: %v. Your session may have expired completely. Please run 'alpacon login' to authenticate again", err)
 		}
@@ -159,7 +161,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
-		return nil, fmt.Errorf("server error or incorrect request detected")
+		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, contentType)
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
@@ -168,11 +170,11 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 
 	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
-		return nil, errors.New(string(respBody))
+		return nil, parseAPIError(respBody)
 	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
-		return nil, errors.New(string(respBody))
+		return nil, parseAPIError(respBody)
 	} else if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, errors.New(string(respBody))
+		return nil, parseAPIError(respBody)
 	}
 
 	return respBody, nil
@@ -238,7 +240,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
-		return nil, fmt.Errorf("server error or incorrect request detected")
+		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, contentType)
 	}
 
 	respBody, err := io.ReadAll(resp.Body)
@@ -247,7 +249,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	}
 
 	if resp.StatusCode != http.StatusCreated {
-		return nil, errors.New(string(respBody))
+		return nil, parseAPIError(respBody)
 	}
 
 	return respBody, nil
@@ -296,4 +298,57 @@ func isAccessTokenExpired(cfg config.Config) bool {
 	}
 
 	return time.Now().After(expireTime.Add(-10 * time.Second))
+}
+
+// parseAPIError extracts a human-readable error message from a JSON API error response.
+// Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
+func parseAPIError(body []byte) error {
+	raw := string(body)
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		// Not valid JSON (e.g., HTML error page) — return truncated
+		return errors.New(truncateBody(raw))
+	}
+
+	// Case 1: {"detail": "..."}
+	if detail, ok := parsed["detail"]; ok {
+		if s, ok := detail.(string); ok {
+			return errors.New(s)
+		}
+	}
+
+	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
+	var messages []string
+	for field, val := range parsed {
+		switch v := val.(type) {
+		case []any:
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					if field == "non_field_errors" {
+						messages = append(messages, s)
+					} else {
+						messages = append(messages, fmt.Sprintf("%s: %s", field, s))
+					}
+				}
+			}
+		case string:
+			messages = append(messages, fmt.Sprintf("%s: %s", field, v))
+		}
+	}
+
+	if len(messages) > 0 {
+		return errors.New(strings.Join(messages, "; "))
+	}
+
+	// Fallback: return truncated raw body
+	return errors.New(truncateBody(raw))
+}
+
+func truncateBody(s string) string {
+	const maxLen = 200
+	if len(s) > maxLen {
+		return s[:maxLen] + "... (truncated)"
+	}
+	return s
 }

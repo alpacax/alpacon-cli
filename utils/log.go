@@ -10,7 +10,7 @@ const (
 )
 
 func reportCLIError() {
-	fmt.Println("For issues, check the latest version or report on", gitIssueURL)
+	fmt.Fprintln(os.Stderr, "For issues, check the latest version or report on", gitIssueURL)
 }
 
 // CliError handles all error messages in the CLI.
@@ -38,6 +38,12 @@ func CliInfo(msg string, args ...any) {
 func CliWarning(msg string, args ...any) {
 	warningMessage := fmt.Sprintf(msg, args...)
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Yellow("Warning"), warningMessage)
+}
+
+// CliSuccess handles all success messages in the CLI.
+func CliSuccess(msg string, args ...any) {
+	successMessage := fmt.Sprintf(msg, args...)
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Green("Success"), successMessage)
 }
 
 // CliInfoWithExit prints an informational message to stderr and exits the program with a status code of 0

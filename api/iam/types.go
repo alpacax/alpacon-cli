@@ -8,9 +8,9 @@ type UserAttributes struct {
 	Email      string `json:"email"`
 	Tags       string `json:"tags"`
 	Groups     int    `json:"groups"`
-	UID        int    `json:"uid"`
+	UID        int    `json:"uid" table:"UID"`
 	Status     string `json:"status"`
-	LDAPStatus string `json:"ldap_status"`
+	LDAPStatus string `json:"ldap_status" table:"LDAP"`
 }
 
 type UserDetailAttributes struct {
@@ -70,12 +70,12 @@ type UserCreateRequest struct {
 
 type GroupAttributes struct {
 	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
+	DisplayName string `json:"display_name" table:"Display Name"`
 	Tags        string `json:"tags"`
 	Members     int    `json:"members"`
 	Servers     int    `json:"servers"`
-	GID         int    `json:"gid"`
-	LDAPStatus  string `json:"ldap_status"`
+	GID         int    `json:"gid" table:"GID"`
+	LDAPStatus  string `json:"ldap_status" table:"LDAP"`
 }
 
 type GroupResponse struct {
@@ -106,12 +106,10 @@ type MemberAddRequest struct {
 }
 
 type MemberDetailResponse struct {
-	ID        string `json:"id"`
-	Group     string `json:"group"`
-	GroupName string `json:"group_name"`
-	User      string `json:"user"`
-	UserName  string `json:"user_name"`
-	Role      string `json:"role"`
+	ID    string      `json:"id"`
+	Group string      `json:"group"`
+	User  UserSummary `json:"user"`
+	Role  string      `json:"role"`
 }
 
 type MemberDeleteRequest struct {

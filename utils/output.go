@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
+	"unicode"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
@@ -52,7 +54,12 @@ func PrintTable(slice any) {
 
 	headers := make([]string, s.Type().Elem().NumField())
 	for i := 0; i < s.Type().Elem().NumField(); i++ {
-		headers[i] = s.Type().Elem().Field(i).Name
+		field := s.Type().Elem().Field(i)
+		if tag := field.Tag.Get("table"); tag != "" {
+			headers[i] = tag
+		} else {
+			headers[i] = camelToWords(field.Name)
+		}
 	}
 	table.Header(headers)
 
@@ -82,7 +89,37 @@ func PrintJson(body []byte) {
 }
 
 func PrintHeader(header string) {
-	fmt.Println(Blue(header))
+	fmt.Fprintln(os.Stderr, Blue(header))
+}
+
+// camelToWords converts PascalCase/camelCase to space-separated words.
+// e.g., "RequestedAt" → "Requested At", "IsLdapUser" → "Is Ldap User", "GID" → "GID"
+func camelToWords(s string) string {
+	if s == "" {
+		return s
+	}
+
+	var words []string
+	start := 0
+	runes := []rune(s)
+
+	for i := 1; i < len(runes); i++ {
+		if unicode.IsUpper(runes[i]) {
+			// Check if this is start of a new word
+			if unicode.IsLower(runes[i-1]) {
+				// "requestedAt" → split before "A"
+				words = append(words, string(runes[start:i]))
+				start = i
+			} else if i+1 < len(runes) && unicode.IsLower(runes[i+1]) {
+				// "HTMLParser" → split "HTM" and "L..."
+				words = append(words, string(runes[start:i]))
+				start = i
+			}
+		}
+	}
+	words = append(words, string(runes[start:]))
+
+	return strings.Join(words, " ")
 }
 
 func PrettyJSON(data []byte) (*bytes.Buffer, error) {

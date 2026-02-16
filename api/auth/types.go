@@ -28,9 +28,9 @@ type APITokenResponse struct {
 }
 
 type APITokenAttributes struct {
-	ID        string `json:"id"`
+	ID        string `json:"id" table:"ID"`
 	Name      string `json:"name"`
 	Enabled   bool   `json:"enabled"`
-	UpdatedAt string `json:"updated_at"`
-	ExpiresAt string `json:"expires_at"`
+	UpdatedAt string `json:"updated_at" table:"Updated At"`
+	ExpiresAt string `json:"expires_at" table:"Expires At"`
 }

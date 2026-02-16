@@ -46,7 +46,7 @@ var tokenCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to create API token %s.", err)
 		}
 
-		utils.CliInfo("API Token Created: `%s`", token)
+		utils.CliSuccess("API token created: %s", token)
 		utils.CliWarning("This token cannot be retrieved again after you exit.")
 	},
 }
@@ -63,8 +63,8 @@ func init() {
 
 func promptForToken() (auth.APITokenRequest, error) {
 	var tokenRequest auth.APITokenRequest
-	tokenRequest.Name = utils.PromptForRequiredInput("Token name:")
-	if utils.PromptForBool("Set expiration for token?: ") {
+	tokenRequest.Name = utils.PromptForRequiredInput("Token name: ")
+	if utils.PromptForBool("Set expiration for token?") {
 		tokenRequest.ExpiresAt = utils.TimeFormat(utils.PromptForIntInput("Valid days for the token (default: 30): ", 30))
 	} else {
 		tokenRequest.ExpiresAt = nil

@@ -49,7 +49,7 @@ var aclAddCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to add the command ACL to token: %v.", err)
 		}
 
-		utils.CliInfo("Command ACL successfully added to token: %s with command: %s", token, command)
+		utils.CliSuccess("Command ACL added to token %s: %s", token, command)
 	},
 }
 
@@ -63,8 +63,8 @@ func init() {
 func promptForAcl() security.CommandAclRequest {
 	var commandAclRequest security.CommandAclRequest
 
-	commandAclRequest.Token = utils.PromptForRequiredInput("token id or name: ")
-	commandAclRequest.Command = utils.PromptForRequiredInput("command: ")
+	commandAclRequest.Token = utils.PromptForRequiredInput("Token ID or name: ")
+	commandAclRequest.Command = utils.PromptForRequiredInput("Command: ")
 
 	return commandAclRequest
 }

@@ -3,6 +3,8 @@ package mfa
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -30,10 +32,7 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 		return err
 	}
 
-	fmt.Println("\n==================== AUTHENTICATION REQUIRED ====================")
-	fmt.Println("\nPlease authenticate by visiting the following URL:")
-	fmt.Printf("%s\n\n", mfaURL)
-	fmt.Print("===============================================================\n\n")
+	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n  %s\n\n", mfaURL)
 
 	return nil
 }

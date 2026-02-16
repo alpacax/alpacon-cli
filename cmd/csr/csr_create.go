@@ -58,8 +58,7 @@ var csrCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to submit CSR file to server: %s.", err)
 		}
 
-		utils.CliInfo("CSR creation request succeeded. (CSR ID: %s)", response.Id)
-		utils.CliInfo("After approval, use 'alpacon csr download-crt %s' to download the certificate", response.Id)
+		utils.CliSuccess("CSR created (ID: %s). After approval, run: alpacon csr download-crt %s", response.Id, response.Id)
 	},
 }
 
@@ -77,14 +76,14 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 	var signRequest certApi.SignRequest
 	var certPath cert.CertificatePath
 
-	signRequest.DomainList = utils.PromptForListInput("domain list (e.g., domain1.com, domain2.com): ")
-	signRequest.IpList = utils.PromptForListInput("ip list (e.g., 192.168.1.1, 10.0.0.1): ")
+	signRequest.DomainList = utils.PromptForListInput("Domain list (e.g., domain1.com, domain2.com): ")
+	signRequest.IpList = utils.PromptForListInput("IP list (e.g., 192.168.1.1, 10.0.0.1): ")
 
 	if (len(signRequest.DomainList) == 0) && (len(signRequest.IpList) == 0) {
 		utils.CliErrorWithExit("You must enter at least a domain list or an IP list.")
 	}
 
-	signRequest.ValidDays = utils.PromptForIntInput("valid days (default: 365): ", 365)
+	signRequest.ValidDays = utils.PromptForIntInput("Valid days (default: 365): ", 365)
 
 	var commonName string
 	if len(signRequest.DomainList) > 0 {
@@ -98,12 +97,12 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 
 	utils.CliInfo(infoMessage)
 
-	certPath.PrivateKeyPath = utils.PromptForInput(fmt.Sprintf("Path for the Private Key file (default: `%s`): ", defaultKeyPath))
+	certPath.PrivateKeyPath = utils.PromptForInput(fmt.Sprintf("Path for the Private Key file (default: %s): ", defaultKeyPath))
 	if certPath.PrivateKeyPath == "" {
 		certPath.PrivateKeyPath = defaultKeyPath
 	}
 
-	certPath.CSRPath = utils.PromptForInput(fmt.Sprintf("Path for the CSR file (default: `%s`): ", defaultCSRPath))
+	certPath.CSRPath = utils.PromptForInput(fmt.Sprintf("Path for the CSR file (default: %s): ", defaultCSRPath))
 	if certPath.CSRPath == "" {
 		certPath.CSRPath = defaultCSRPath
 	}
@@ -121,7 +120,7 @@ func EnsureSecureConnection(client *client.AlpaconClient) {
 	if !isTLS {
 		utils.CliWarning("The connection to %s might not be secure.", client.BaseURL)
 
-		proceed := utils.PromptForBool("Do you want to proceed with the CSR submission?:")
+		proceed := utils.PromptForBool("Do you want to proceed with the CSR submission?")
 		if !proceed {
 			utils.CliErrorWithExit("CSR submission cancelled by user.")
 		}

@@ -1,8 +1,6 @@
 package workspace
 
 import (
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -25,8 +23,8 @@ var workspaceListCmd = &cobra.Command{
 		}
 
 		if !cfg.IsMultiWorkspaceMode() {
-			fmt.Printf("Current workspace: %s (%s)\n", cfg.WorkspaceName, cfg.WorkspaceURL)
-			fmt.Println("Workspace listing is available for Auth0-based logins only.")
+			utils.CliInfo("Current workspace: %s (%s)", cfg.WorkspaceName, cfg.WorkspaceURL)
+			utils.CliInfoWithExit("Workspace listing is available for Auth0-based logins only.")
 			return
 		}
 

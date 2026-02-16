@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -125,7 +126,7 @@ var loginCmd = &cobra.Command{
 		password, _ := cmd.Flags().GetString("password")
 		token, _ := cmd.Flags().GetString("token")
 
-		fmt.Printf("Logging in to %s\n", workspaceURL)
+		utils.CliInfo("Logging in to %s", workspaceURL)
 
 		if envInfo.Auth0.Method == "auth0" && token == "" {
 			deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
@@ -133,13 +134,8 @@ var loginCmd = &cobra.Command{
 				utils.CliErrorWithExit("Device code request failed. %v", err)
 			}
 
-			highlight := "\033[1;34m" // blue + bold
-			reset := "\033[0m"
-
-			fmt.Println("\n==================== AUTHENTICATION REQUIRED ====================")
-			fmt.Println("\nPlease authenticate by visiting the following URL:")
-			fmt.Printf("%s%s%s\n\n", highlight, deviceCode.VerificationURIComplete, reset)
-			fmt.Print("===============================================================\n\n")
+			fmt.Fprintf(os.Stderr, "\nPlease authenticate by visiting:\n  %s\n\n", utils.Blue(deviceCode.VerificationURIComplete))
+			fmt.Fprintf(os.Stderr, "Verification code: %s\n\n", utils.Bold(deviceCode.UserCode))
 
 			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
 			if err != nil {
@@ -166,7 +162,7 @@ var loginCmd = &cobra.Command{
 
 				workspaceURL = resolvedURL
 				workspaceName = resolvedName
-				fmt.Printf("Workspace resolved to %s\n", workspaceURL)
+				utils.CliInfo("Workspace resolved to %s", workspaceURL)
 			}
 
 			baseDomain := utils.ExtractBaseDomain(workspaceURL)
@@ -203,7 +199,7 @@ var loginCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		fmt.Println("Login succeeded!")
+		utils.CliSuccess("Login succeeded!")
 	},
 }
 
@@ -221,9 +217,7 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 		configFile, err := config.LoadConfig()
 		if err == nil && configFile.WorkspaceURL != "" {
 			workspaceURL = configFile.WorkspaceURL
-			fmt.Printf("Using Workspace URL %s from config file.\n", configFile.WorkspaceURL)
-			fmt.Println("If you want to change the workspace, specify workspace url: alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]")
-			fmt.Println()
+			utils.CliInfo("Using saved workspace: %s", configFile.WorkspaceURL)
 		}
 	}
 

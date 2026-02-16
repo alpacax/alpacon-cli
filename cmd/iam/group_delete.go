@@ -24,6 +24,11 @@ var groupDeleteCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		groupName := args[0]
 
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Delete group '%s'?", groupName)
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -38,6 +43,10 @@ var groupDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to delete the group: %s.", err)
 		}
 
-		utils.CliInfo("Group successfully deleted: %s", groupName)
+		utils.CliSuccess("Group deleted: %s", groupName)
 	},
+}
+
+func init() {
+	groupDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	"github.com/alpacax/alpacon-cli/cmd/authority"
@@ -30,7 +31,7 @@ var RootCmd = &cobra.Command{
 	Long:    "Use this tool to interact with the alpacon service.",
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.ShowLogo()
-		fmt.Println("Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
+		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
 	},
 }
 

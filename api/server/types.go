@@ -5,10 +5,18 @@ import (
 	"time"
 )
 
+// ServerInfo represents the nested server object returned in API responses.
+// API responses return server as {id, name, os} instead of a UUID string.
+type ServerInfo struct {
+	ID   string  `json:"id"`
+	Name string  `json:"name"`
+	OS   *string `json:"os"`
+}
+
 type ServerAttributes struct {
 	Name      string `json:"name"`
-	IP        string `json:"ip"`
-	OS        string `json:"os"`
+	IP        string `json:"ip" table:"IP"`
+	OS        string `json:"os" table:"OS"`
 	Connected bool   `json:"connected"`
 	Owner     string `json:"owner"`
 }

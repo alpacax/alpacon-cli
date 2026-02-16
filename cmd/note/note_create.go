@@ -45,7 +45,7 @@ var noteCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to create the new note: %s.", err)
 		}
 
-		utils.CliInfo("Note successfully created to %s.", noteRequest.Server)
+		utils.CliSuccess("Note created on server %s", noteRequest.Server)
 	},
 }
 
