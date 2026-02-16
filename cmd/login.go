@@ -245,7 +245,7 @@ func isCloudAppURL(workspaceURL string) bool {
 	if err != nil {
 		return false
 	}
-	return parsedURL.Host == "alpacon.io" && parsedURL.Path != "" && parsedURL.Path != "/"
+	return parsedURL.Hostname() == "alpacon.io" && parsedURL.Path != "" && parsedURL.Path != "/"
 }
 
 func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client) (string, error) {
@@ -259,7 +259,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 	parsedURL, err := url.Parse(workspaceURL)
 	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
 		workspace := strings.TrimPrefix(parsedURL.Path, "/")
-		domain := parsedURL.Host
+		domain := parsedURL.Hostname()
 		protocol := parsedURL.Scheme
 
 		// For alpacon.io app URLs, the region is unknown at login time.
