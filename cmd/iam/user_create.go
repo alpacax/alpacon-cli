@@ -62,7 +62,7 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	userRequest.Description = utils.PromptForInput("Description(optional): ")
 	userRequest.Shell = utils.PromptForInput("Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ")
 
-	userRequest.IsLdapUser = utils.PromptForBool("LDAP status: ")
+	userRequest.IsLdapUser = utils.PromptForBool("LDAP status")
 
 	if ac.Privileges == "superuser" {
 		userRequest.IsStaff = utils.PromptForBool("Staff status")

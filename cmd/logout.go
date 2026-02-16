@@ -27,7 +27,6 @@ var logoutCmd = &cobra.Command{
 		validConfig, err := config.LoadConfig()
 		if err != nil {
 			utils.CliInfoWithExit("You are not logged in.")
-			return
 		}
 
 		if validConfig.IsMultiWorkspaceMode() {
@@ -44,7 +43,6 @@ var logoutCmd = &cobra.Command{
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Failed to create Alpacon API client: %s.", err)
-			return
 		}
 		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
 		if err != nil {
