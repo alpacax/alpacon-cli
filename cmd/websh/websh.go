@@ -15,59 +15,52 @@ import (
 )
 
 var WebshCmd = &cobra.Command{
-	Use:   "websh [SERVER NAME] [COMMAND]",
+	Use:   "websh [flags] [USER@]SERVER [COMMAND]",
 	Short: "Open a websh terminal or execute a command on a server",
-	Long: ` 
-	This command either opens a websh terminal for interacting with the specified server or executes a specified command directly on the server.
-	It provides a terminal interface for managing and controlling the server remotely or for executing commands and retrieving their output directly.
-	For executing commands, it is highly recommended to wrap the entire command string in quotes to ensure it is interpreted correctly on the remote server.
-	`,
-	Example: `
-	// Open a websh terminal for a server
-	alpacon websh [SERVER_NAME]
+	Long: `Open a websh terminal for interacting with a server or execute a command directly on the server.
+Supports SSH-like user@host syntax for specifying the username inline.
+For executing commands, it is highly recommended to wrap the entire command string in quotes
+to ensure it is interpreted correctly on the remote server.`,
+	Example: `  # Open a websh terminal
+  alpacon websh my-server
 
-	// Execute a command directly on a server and retrieve the output
-	alpacon websh [SERVER_NAME] [COMMAND]
-	
-	// Set the environment variable 'KEY' to 'VALUE' for the command.
-	alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" [SERVER NAME] [COMMAND]
+  # Open as root using SSH-like syntax
+  alpacon websh root@my-server
 
-	// Use the current shell's value for the environment variable 'KEY'.
-	alpacon websh --env="KEY" [SERVER NAME] [COMMAND]
+  # Open with specific user and group
+  alpacon websh admin@my-server
+  alpacon websh -u admin -g developers my-server
 
-	// Open a websh terminal as a root user
-	alpacon websh -r [SERVER_NAME]
-	alapcon websh -u root [SERVER_NAME]
-	
-	// Open a websh terminal specifying username and groupname
-	alpacon websh -u [USER_NAME] -g [GROUP_NAME] [SERVER_NAME]
+  # Execute a command on a server
+  alpacon websh my-server "ls -la /var/log"
+  alpacon websh root@my-server "systemctl status nginx"
 
-	// Run a command as [USER_NAME]/[GROUP_NAME]
-	alpacon websh -u [USER_NAME] -g [GROUP_NAME] [SERVER_NAME] [COMMAND]
-	
-	// Open a websh terminal and share the current terminal to others via a temporary link
-	alpacon websh [SERVER NAME] --share
-	alpacon websh [SERVER NAME] --share --read-only true
-	
-	// Join an existing shared session 
-	alpacon websh join --url [SHARED_URL] --password [PASSWORD]
+  # Set environment variables
+  alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
 
-	Flags:
-	-r          					   Run the websh terminal as the root user.
-	-u / --username [USER_NAME]        Specify the username under which the command should be executed.
-	-g / --groupname [GROUP_NAME]      Specify the group name under which the command should be executed.
-	--env="KEY=VALUE"                  Set the environment variable 'KEY' to 'VALUE' for the command.
-	--env="KEY"                        Use the current shell's value for the environment variable 'KEY'.	
-	
-	-s, --share                        Share the current terminal to others via a temporary link.
-	--url [SHARED_URL]                 Specify the URL of the shared session to join.
-	-p, --password [PASSWORD]          Specify the password required to access the shared session.
-	--read-only [true|false]           Set the shared session to read-only mode (default is false).
+  # Share terminal session
+  alpacon websh my-server --share
+  alpacon websh my-server --share --read-only true
 
-	Note:
-	- All flags must be placed before the [SERVER_NAME].
-	- The -u (or --username) and -g (or --groupname) flags require an argument specifying the user or group name, respectively.
-	`,
+  # Join an existing shared session
+  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
+
+Flags:
+  -u, --username [USER_NAME]         Specify the username for command execution.
+  -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
+  --env="KEY=VALUE"                  Set environment variable 'KEY' to 'VALUE'.
+  --env="KEY"                        Use the current shell's value for 'KEY'.
+  -s, --share                        Share the terminal via a temporary link.
+  --url [SHARED_URL]                 URL of the shared session to join.
+  -p, --password [PASSWORD]          Password for the shared session.
+  --read-only [true|false]           Set shared session to read-only (default: false).
+
+Note: All flags must be placed before the server name.
+      Flags placed after the server name are treated as part of the remote command.`,
+	// DisableFlagParsing is required because positional args after the server name
+	// (e.g., "ls -la") would otherwise be consumed by Cobra's flag parser.
+	// As a trade-off, we parse all flags manually in the Run function.
+	// Flags after the server name are intentionally treated as remote command args.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		var (
@@ -80,8 +73,6 @@ var WebshCmd = &cobra.Command{
 
 		for i := 0; i < len(args); i++ {
 			switch {
-			case args[i] == "-r" || args[i] == "--root":
-				username = "root"
 			case args[i] == "-s" || args[i] == "--share":
 				share = true
 			case args[i] == "-h" || args[i] == "--help":

@@ -1,8 +1,10 @@
 package ftp
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -196,11 +198,18 @@ func TestCpCommandSSHParsing(t *testing.T) {
 			description:  "alpacon cp file1.txt file2.txt deploy@web-server:/opt/app/",
 		},
 		{
-			name:         "User in hostname only without path",
+			name:         "User in hostname only without colon — not parsed as SSH",
 			args:         []string{"test.txt", "root@prod-docker"},
-			expectedArgs: []string{"test.txt", "prod-docker"},
-			expectedUser: "root",
-			description:  "alpacon cp test.txt root@prod-docker (user@host without path)",
+			expectedArgs: []string{"test.txt", "root@prod-docker"},
+			expectedUser: "",
+			description:  "alpacon cp test.txt root@prod-docker (no colon, treated as literal arg)",
+		},
+		{
+			name:         "Local file with @ in name — not parsed as SSH",
+			args:         []string{"report@2026.txt", "prod-docker:~/uploads/"},
+			expectedArgs: []string{"report@2026.txt", "prod-docker:~/uploads/"},
+			expectedUser: "",
+			description:  "alpacon cp report@2026.txt prod-docker:~/uploads/ (@ in local filename)",
 		},
 	}
 
@@ -211,27 +220,17 @@ func TestCpCommandSSHParsing(t *testing.T) {
 			copy(args, tt.args)
 			username := ""
 
-			// Apply the same parsing logic as in the cp command
+			// Apply the same parsing logic as in cp.go
 			for i, arg := range args {
-				if true { // Simulate the condition in the original code
-					// This is the enhanced parsing logic we added to cp.go
-					// We need to import the utils package for this to work
-					// For now, let's test the logic manually
-
-					// Simplified version of the parsing logic
-					switch arg {
-					case "root@prod-docker:/var/log/syslog":
-						username = "root"
-						args[i] = "prod-docker:/var/log/syslog"
-					case "admin@prod-docker:~/uploads/":
-						username = "admin"
-						args[i] = "prod-docker:~/uploads/"
-					case "deploy@web-server:/opt/app/":
-						username = "deploy"
-						args[i] = "web-server:/opt/app/"
-					case "root@prod-docker":
-						username = "root"
-						args[i] = "prod-docker"
+				if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
+					sshTarget := utils.ParseSSHTarget(arg)
+					if username == "" && sshTarget.User != "" {
+						username = sshTarget.User
+					}
+					if sshTarget.Path != "" {
+						args[i] = sshTarget.Host + ":" + sshTarget.Path
+					} else {
+						args[i] = sshTarget.Host
 					}
 				}
 			}

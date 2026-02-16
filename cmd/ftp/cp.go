@@ -16,29 +16,28 @@ import (
 var CpCmd = &cobra.Command{
 	Use:   "cp [SOURCE...] [DESTINATION]",
 	Short: "Copy files between local and remote locations",
-	Long: `The cp command allows you to copy files between your local machine and a remote server.
-	Copy files between your local machine and a remote server using the cp command.
-	This command supports uploading, downloading, and specifying authentication details
-	such as username and groupname.
-	
-	Example usages:
-	- To upload multiple files to a remote server:
-	  alpacon cp /local/path/file1.txt /local/path/file2.txt [SERVER_NAME]:/remote/path/
+	Long: `Copy files between your local machine and a remote server.
+Supports SSH-like user@host:path syntax for specifying the username inline with the remote path.
+Remote paths use the format [USER@]SERVER:/path.`,
+	Example: `  # Upload files to a remote server
+  alpacon cp /local/file1.txt /local/file2.txt my-server:/remote/path/
 
-	- To upload or download directory:
-	  alpacon cp -r /local/path/directory [SERVER_NAME]:/remote/path/
-	  alpacon cp -r [SERVER_NAME]:/remote/path/directory /local/path/
+  # Upload or download a directory
+  alpacon cp -r /local/directory my-server:/remote/path/
+  alpacon cp -r my-server:/remote/directory /local/path/
 
-	- To download files from a remote server to a local destination:
-	  alpacon cp [SERVER_NAME]:/remote/path1 /remote/path2 /local/destination/path
+  # Download a file from a remote server
+  alpacon cp my-server:/remote/file.txt /local/path/
 
-	- To specify username:
-	  alpacon cp /local/path/file.txt [USER_NAME]@[SERVER_NAME]:/remote/path/
-	  alpacon cp -u [USER_NAME] /local/path/file.txt [SERVER_NAME]:/remote/path/
+  # Specify username with SSH-like syntax
+  alpacon cp /local/file.txt admin@my-server:/remote/path/
+  alpacon cp -r admin@my-server:/var/log/ /local/logs/
 
-	- To specify groupname:
-	  alpacon cp -g [GROUP_NAME] /local/path/file.txt [SERVER_NAME]:/remote/path/
-	`,
+  # Specify username with flag
+  alpacon cp -u admin /local/file.txt my-server:/remote/path/
+
+  # Specify groupname
+  alpacon cp -g developers /local/file.txt my-server:/remote/path/`,
 	Run: func(cmd *cobra.Command, args []string) {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
@@ -58,8 +57,8 @@ var CpCmd = &cobra.Command{
 		}
 
 		for i, arg := range args {
-			if strings.Contains(arg, "@") && (strings.Contains(arg, ":") || !utils.IsRemoteTarget(arg)) {
-				// Parse SSH-like target: user@host or user@host:path
+			if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
+				// Parse SSH-like target: user@host:path (requires : to distinguish from local files with @)
 				sshTarget := utils.ParseSSHTarget(arg)
 				if username == "" && sshTarget.User != "" {
 					username = sshTarget.User

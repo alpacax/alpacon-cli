@@ -80,7 +80,7 @@ func TestCreateConfig_WithBaseDomain(t *testing.T) {
 	setupTestConfig(t)
 
 	err := CreateConfig(
-		"https://myws.ap1.alpacon.io", "myws",
+		"https://myws.us1.alpacon.io", "myws",
 		"", "", "access-token", "refresh-token",
 		"alpacon.io", 3600, false,
 	)
@@ -90,7 +90,7 @@ func TestCreateConfig_WithBaseDomain(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "alpacon.io", cfg.BaseDomain)
 	assert.Equal(t, "myws", cfg.WorkspaceName)
-	assert.Equal(t, "https://myws.ap1.alpacon.io", cfg.WorkspaceURL)
+	assert.Equal(t, "https://myws.us1.alpacon.io", cfg.WorkspaceURL)
 	assert.Equal(t, "access-token", cfg.AccessToken)
 	assert.Equal(t, "refresh-token", cfg.RefreshToken)
 	assert.NotEmpty(t, cfg.AccessTokenExpiresAt)
@@ -100,7 +100,7 @@ func TestCreateConfig_WithoutBaseDomain(t *testing.T) {
 	setupTestConfig(t)
 
 	err := CreateConfig(
-		"https://myws.ap1.alpacon.io", "myws",
+		"https://myws.us1.alpacon.io", "myws",
 		"legacy-token", "2025-12-31T00:00:00Z", "", "",
 		"", 0, false,
 	)
@@ -116,7 +116,7 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 	setupTestConfig(t)
 
 	err := CreateConfig(
-		"https://myws.ap1.alpacon.io", "myws",
+		"https://myws.us1.alpacon.io", "myws",
 		"token", "", "", "",
 		"", 0, false,
 	)
@@ -139,7 +139,7 @@ func TestSwitchWorkspace(t *testing.T) {
 
 	// Create initial config
 	err := CreateConfig(
-		"https://ws1.ap1.alpacon.io", "ws1",
+		"https://ws1.us1.alpacon.io", "ws1",
 		"", "", "access-token", "refresh-token",
 		"alpacon.io", 3600, false,
 	)

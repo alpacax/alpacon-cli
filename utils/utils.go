@@ -53,7 +53,7 @@ func GetUserAgent() string {
 }
 
 // ExtractBaseDomain extracts the top-level base domain from a workspace URL.
-// For example, "https://myws.ap1.alpacon.io" returns "alpacon.io".
+// For example, "https://myws.us1.alpacon.io" returns "alpacon.io".
 // Returns "" if the hostname has fewer than 3 parts (e.g. self-hosted with no subdomain).
 func ExtractBaseDomain(workspaceURL string) string {
 	parsedURL, err := url.Parse(workspaceURL)
