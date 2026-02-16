@@ -14,7 +14,7 @@ func TestExtractBaseDomain(t *testing.T) {
 	}{
 		{
 			name:     "Standard workspace URL with region",
-			input:    "https://myws.ap1.alpacon.io",
+			input:    "https://myws.us1.alpacon.io",
 			expected: "alpacon.io",
 		},
 		{
@@ -59,12 +59,12 @@ func TestExtractBaseDomain(t *testing.T) {
 		},
 		{
 			name:     "URL with trailing slash",
-			input:    "https://myws.ap1.alpacon.io/",
+			input:    "https://myws.us1.alpacon.io/",
 			expected: "alpacon.io",
 		},
 		{
 			name:     "URL with path",
-			input:    "https://myws.ap1.alpacon.io/some/path",
+			input:    "https://myws.us1.alpacon.io/some/path",
 			expected: "alpacon.io",
 		},
 	}

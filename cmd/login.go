@@ -199,7 +199,7 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 
 		// ToDo: modify below code after region decision in portal (multiple region)
 		if domain == "alpacon.io" {
-			domain = "ap1." + domain
+			domain = "us1." + domain
 		}
 		if domain != "" && workspace != "" {
 			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
