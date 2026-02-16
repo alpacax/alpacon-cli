@@ -82,8 +82,9 @@ var loginCmd = &cobra.Command{
 		// Check if this is a cloud app URL that needs post-login region resolution
 		isAppURL := isCloudAppURL(workspaceURL)
 
-		// Extract workspace name
+		// Extract workspace name and auth env URL
 		var workspaceName string
+		authEnvURL := workspaceURL
 		if isAppURL {
 			parsedURL, parseErr := url.Parse(workspaceURL)
 			if parseErr != nil {
@@ -96,16 +97,11 @@ var loginCmd = &cobra.Command{
 				utils.CliErrorWithExit("Invalid workspace URL: path must contain exactly one workspace name")
 			}
 			workspaceName = segments[0]
+
+			// Use the app base URL for auth env (e.g., https://alpacon.io)
+			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
 		} else {
 			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
-		}
-
-		// Fetch auth environment info
-		// For cloud app URLs, use the app base URL (e.g., https://alpacon.io)
-		authEnvURL := workspaceURL
-		if isAppURL {
-			parsedURL, _ := url.Parse(workspaceURL)
-			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
 		}
 
 		envInfo, err := auth0.FetchAuthEnv(authEnvURL, httpClient)
@@ -242,7 +238,7 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 
 // isCloudAppURL checks if the URL is an alpacon.io app URL with a workspace path.
 // e.g., "https://alpacon.io/myworkspace" → true
-// e.g., "https://dev.alpacon.io/myworkspace" → false (dev has its own region handling)
+// e.g., "https://dev.alpacon.io/myworkspace" → false (dev.alpacon.io is already a region-specific subdomain)
 // e.g., "https://myws.us1.alpacon.io" → false (already a direct API URL)
 func isCloudAppURL(workspaceURL string) bool {
 	parsedURL, err := url.Parse(workspaceURL)
