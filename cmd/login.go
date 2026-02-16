@@ -85,8 +85,17 @@ var loginCmd = &cobra.Command{
 		// Extract workspace name
 		var workspaceName string
 		if isAppURL {
-			parsedURL, _ := url.Parse(workspaceURL)
-			workspaceName = strings.TrimPrefix(parsedURL.Path, "/")
+			parsedURL, parseErr := url.Parse(workspaceURL)
+			if parseErr != nil {
+				utils.CliErrorWithExit("Invalid workspace URL: %s", parseErr.Error())
+			}
+
+			pathSegment := strings.Trim(parsedURL.Path, "/")
+			segments := strings.Split(pathSegment, "/")
+			if len(segments) != 1 || segments[0] == "" {
+				utils.CliErrorWithExit("Invalid workspace URL: path must contain exactly one workspace name")
+			}
+			workspaceName = segments[0]
 		} else {
 			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
 		}
@@ -148,8 +157,12 @@ var loginCmd = &cobra.Command{
 
 				// Verify the resolved URL is reachable
 				resp, httpErr := httpClient.Get(resolvedURL)
-				if httpErr != nil || resp.StatusCode >= 400 {
-					utils.CliErrorWithExit("Resolved workspace URL '%s' is unreachable. Please check your connection", resolvedURL)
+				if httpErr != nil {
+					utils.CliErrorWithExit("Resolved workspace URL '%s' is unreachable: %v", resolvedURL, httpErr)
+				}
+				if resp.StatusCode >= 400 {
+					_ = resp.Body.Close()
+					utils.CliErrorWithExit("Resolved workspace URL '%s' returned HTTP %d. Please check your connection", resolvedURL, resp.StatusCode)
 				}
 				_ = resp.Body.Close()
 
