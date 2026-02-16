@@ -3,7 +3,6 @@ package ftp
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 )
 
@@ -22,7 +21,7 @@ type DownloadResponse struct {
 	Path        string `json:"path"`
 	Size        int               `json:"size"`
 	Server      server.ServerInfo `json:"server"`
-	User        iam.UserSummary  `json:"user"`
+	User        string            `json:"user"`
 	Username    string            `json:"username"`
 	Groupname   string            `json:"groupname"`
 	ExpiresAt   string            `json:"expires_at"`
@@ -48,7 +47,7 @@ type UploadResponse struct {
 	Path      string    `json:"path"`
 	Size      int               `json:"size"`
 	Server    server.ServerInfo `json:"server"`
-	User      iam.UserSummary  `json:"user"`
+	User      string            `json:"user"`
 	Username  string    `json:"username"`
 	Groupname string    `json:"groupname"`
 	ExpiresAt time.Time `json:"expires_at"`
