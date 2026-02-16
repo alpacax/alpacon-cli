@@ -20,9 +20,17 @@ Use: "exec [USER@]SERVER COMMAND... [flags]"
 Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 ```
 
+## Subcommand alias convention
+
+- list → `Aliases: []string{"list", "all"}`
+- delete → `Aliases: []string{"rm"}`
+- describe → `Aliases: []string{"desc"}`
+- Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)
+
 ## Code review guidelines
 
 - Cobra `Short` descriptions should be concise (under 50 chars) and start with a verb
 - Cobra `Long` descriptions should document SSH-like `user@host` syntax where supported
 - Cobra `Example` blocks should use realistic server names (e.g., `my-server`, not `[SERVER_NAME]`)
+- List commands should project API responses into `*Attributes` structs for `utils.PrintTable()`
 - Comments must be written in English
