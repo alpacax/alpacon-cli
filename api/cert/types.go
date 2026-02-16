@@ -1,8 +1,10 @@
 package cert
 
 import (
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
 )
 
 type SignRequest struct {
@@ -46,9 +48,9 @@ type AuthorityCreateResponse struct {
 	RootValidDays    int             `json:"root_valid_days"`
 	DefaultValidDays int             `json:"default_valid_days"`
 	MaxValidDays     int             `json:"max_valid_days"`
-	Agent            string          `json:"agent"`
-	Owner            iam.UserSummary `json:"owner"`
-	Instruction      string          `json:"instruction"`
+	Agent            server.ServerInfo `json:"agent"`
+	Owner            iam.UserSummary   `json:"owner"`
+	Instruction      string            `json:"instruction"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
@@ -60,12 +62,11 @@ type AuthorityResponse struct {
 	RootValidDays    int             `json:"root_valid_days"`
 	DefaultValidDays int             `json:"default_valid_days"`
 	MaxValidDays     int             `json:"max_valid_days"`
-	Agent            string          `json:"agent"`
-	AgentName        string          `json:"agent_name"`
-	Owner            iam.UserSummary `json:"owner"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	SignedAt         time.Time       `json:"signed_at"`
-	ExpiresAt        time.Time       `json:"expires_at"`
+	Agent            server.ServerInfo `json:"agent"`
+	Owner            iam.UserSummary   `json:"owner"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	SignedAt         time.Time         `json:"signed_at"`
+	ExpiresAt        time.Time         `json:"expires_at"`
 }
 
 type AuthorityAttributes struct {
@@ -94,12 +95,11 @@ type AuthorityDetails struct {
 	RemoteIp         string          `json:"remote_ip"`
 	IsConnected      bool            `json:"is_connected"`
 	Status           string          `json:"status"`
-	Agent            string          `json:"agent"`
-	AgentName        string          `json:"agent_name"`
-	Owner            iam.UserSummary `json:"owner"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	SignedAt         time.Time       `json:"signed_at"`
-	ExpiresAt        time.Time       `json:"expires_at"`
+	Agent            server.ServerInfo `json:"agent"`
+	Owner            iam.UserSummary   `json:"owner"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	SignedAt         time.Time         `json:"signed_at"`
+	ExpiresAt        time.Time         `json:"expires_at"`
 }
 
 type AuthoritySummary struct {

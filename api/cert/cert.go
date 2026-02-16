@@ -104,7 +104,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 			RootValidDays:    authority.RootValidDays,
 			DefaultValidDays: authority.DefaultValidDays,
 			MaxValidDays:     authority.MaxValidDays,
-			Server:           authority.AgentName,
+			Server:           authority.Agent.Name,
 			Owner:            authority.Owner.Name,
 			SignedAt:         utils.TimeUtils(authority.SignedAt),
 		})
