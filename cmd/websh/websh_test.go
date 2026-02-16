@@ -24,15 +24,6 @@ func TestCommandParsing(t *testing.T) {
 		expectPassword    string
 	}{
 		{
-			testName:          "RootAccessToServer",
-			args:              []string{"-r", "prod-server", "df", "-h"},
-			expectUsername:    "root",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "prod-server",
-			expectCommandArgs: []string{"df", "-h"},
-		},
-		{
 			testName:          "ExecuteUpdateAsAdminSysadmin",
 			args:              []string{"-u", "admin", "-g", "sysadmin", "update-server", "sudo", "apt-get", "update"},
 			expectUsername:    "admin",
@@ -58,15 +49,6 @@ func TestCommandParsing(t *testing.T) {
 			expectEnv:         map[string]string{},
 			expectServerName:  "file-server",
 			expectCommandArgs: []string{"ls", "-l", "/var/www"},
-		},
-		{
-			testName:          "MisplacedFlagOrderWithRoot",
-			args:              []string{"-r", "df", "-h"},
-			expectUsername:    "root",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "df",
-			expectCommandArgs: []string(nil),
 		},
 		{
 			testName:          "UnrecognizedFlagWithEchoCommand",
@@ -322,8 +304,6 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 
 	for i := 0; i < len(args); i++ {
 		switch {
-		case args[i] == "-r" || args[i] == "--root":
-			username = "root"
 		case args[i] == "-s" || args[i] == "--share":
 			share = true
 		case args[i] == "-h" || args[i] == "--help":

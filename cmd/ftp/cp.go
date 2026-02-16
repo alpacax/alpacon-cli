@@ -57,8 +57,8 @@ Remote paths use the format [USER@]SERVER:/path.`,
 		}
 
 		for i, arg := range args {
-			if strings.Contains(arg, "@") && (strings.Contains(arg, ":") || !utils.IsRemoteTarget(arg)) {
-				// Parse SSH-like target: user@host or user@host:path
+			if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
+				// Parse SSH-like target: user@host:path (requires : to distinguish from local files with @)
 				sshTarget := utils.ParseSSHTarget(arg)
 				if username == "" && sshTarget.User != "" {
 					username = sshTarget.User

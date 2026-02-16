@@ -43,7 +43,7 @@ to ensure it is interpreted correctly on the remote server.`,
   alpacon websh my-server --share --read-only true
 
   # Join an existing shared session
-  alpacon websh join --url [SHARED_URL] --password [PASSWORD]
+  alpacon websh join --url https://myws.ap1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
 
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
@@ -55,7 +55,12 @@ Flags:
   -p, --password [PASSWORD]          Password for the shared session.
   --read-only [true|false]           Set shared session to read-only (default: false).
 
-Note: All flags must be placed before the server name.`,
+Note: All flags must be placed before the server name.
+      Flags placed after the server name are treated as part of the remote command.`,
+	// DisableFlagParsing is required because positional args after the server name
+	// (e.g., "ls -la") would otherwise be consumed by Cobra's flag parser.
+	// As a trade-off, we parse all flags manually in the Run function.
+	// Flags after the server name are intentionally treated as remote command args.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		var (
