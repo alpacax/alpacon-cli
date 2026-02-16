@@ -59,15 +59,10 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 	return &env, nil
 }
 
-func RequestDeviceCode(workspaceURL string, httpClient *http.Client, envInfo *AuthEnvResponse) (*DeviceCodeResponse, error) {
-	subDomain, err := extractSubdomain(workspaceURL)
-	if err != nil {
-		return nil, err
-	}
-
+func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse) (*DeviceCodeResponse, error) {
 	data := map[string]string{
 		"client_id": envInfo.Auth0.ClientID,
-		"scope":     fmt.Sprintf("openid profile email offline_access cli org:%s", subDomain),
+		"scope":     fmt.Sprintf("openid profile email offline_access cli org:%s", workspaceName),
 		"audience":  envInfo.Auth0.Audience,
 	}
 
