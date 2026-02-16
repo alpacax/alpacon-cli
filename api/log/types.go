@@ -1,10 +1,6 @@
 package log
 
-import (
-	"time"
-
-	"github.com/alpacax/alpacon-cli/api/server"
-)
+import "time"
 
 type LogAttributes struct {
 	Program string `json:"program"`
@@ -27,5 +23,6 @@ type LogEntry struct {
 	Process    string    `json:"process"`
 	Thread     string    `json:"thread"`
 	Msg        string    `json:"msg"`
-	Server     server.ServerInfo `json:"server"`
+	Server     string    `json:"server"`
+	ServerName string    `json:"server_name"`
 }
