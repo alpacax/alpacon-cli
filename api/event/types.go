@@ -1,8 +1,10 @@
 package event
 
 import (
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
 )
 
 type EventAttributes struct {
@@ -12,7 +14,7 @@ type EventAttributes struct {
 	Result      string `json:"result"`
 	Status      string `json:"status"`
 	Operator    string `json:"operator"`
-	RequestedAt string `json:"requested_at"`
+	RequestedAt string `json:"requested_at" table:"Requested At"`
 }
 
 type EventDetails struct {
@@ -25,8 +27,7 @@ type EventDetails struct {
 	ResponseDelay float64                `json:"response_delay"`
 	ElapsedTime   float64                `json:"elapsed_time"`
 	AddedAt       time.Time              `json:"added_at"`
-	Server        string                 `json:"server"`
-	ServerName    string                 `json:"server_name"`
+	Server        server.ServerInfo       `json:"server"`
 	RequestedBy   iam.UserSummary        `json:"requested_by"`
 }
 
@@ -51,7 +52,7 @@ type CommandResponse struct {
 	Groupname   string          `json:"groupname"`
 	AddedAt     time.Time       `json:"added_at"`
 	ScheduledAt time.Time       `json:"scheduled_at"`
-	Server      string          `json:"server"`
-	RequestedBy iam.UserSummary `json:"requested_by"`
-	RunAfter    []any   `json:"run_after"`
+	Server      server.ServerInfo `json:"server"`
+	RequestedBy iam.UserSummary   `json:"requested_by"`
+	RunAfter    []any             `json:"run_after"`
 }

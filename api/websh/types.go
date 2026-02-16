@@ -1,10 +1,12 @@
 package websh
 
 import (
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/gorilla/websocket"
 	"net/http"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/gorilla/websocket"
 )
 
 type WebsocketClient struct {
@@ -25,7 +27,7 @@ type SessionResponse struct {
 	ID           string          `json:"id"`
 	Rows         int             `json:"rows"`
 	Cols         int             `json:"cols"`
-	Server       string          `json:"server"`
+	Server       server.ServerInfo `json:"server"`
 	User         iam.UserSummary `json:"user"`
 	UserName     string          `json:"user_name"`
 	GroupName    string          `json:"group_name"`

@@ -142,7 +142,6 @@ func (wsClient *WebsocketClient) runWsClient() error {
 }
 
 func checkTerminal() (*term.State, error) {
-	utils.ShowLogo()
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return nil, errors.New("websh command should be a terminal")
 	}
@@ -201,34 +200,23 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 }
 
 func sharingInfo(response ShareResponse) {
-	header := `Share the following URL to allow access for the current session to someone else.
-**Note: The invitee will be required to enter the provided password to access the websh terminal.**`
-
 	// Sanitize credentials display based on environment
-	// This addresses code scanning concerns while maintaining functionality
 	displayPassword := response.Password
 	hideCredentials := os.Getenv("ALPACON_HIDE_CREDENTIALS") == "true"
 	if hideCredentials {
 		displayPassword = "********"
 	}
 
-	instructions := `
-To join the shared session:
-1. Execute the following command in a terminal:
-   $ alpacon websh join --url="%s" --password="%s"
-
-2. Or, directly access the session via the shared URL in a web browser.`
-
-	fmt.Println(header)
-	fmt.Printf(instructions, response.SharedURL, displayPassword)
-	fmt.Println()
-	fmt.Println("Session Details:")
-	fmt.Println("Share URL:    ", response.SharedURL)
-	fmt.Println("Password:     ", displayPassword)
-	fmt.Println("Read Only:    ", response.ReadOnly)
-	fmt.Println("Expiration:   ", utils.TimeUtils(response.Expiration))
+	fmt.Fprintf(os.Stderr, "\nSession shared. The invitee must enter the password to access the terminal.\n\n")
+	fmt.Fprintf(os.Stderr, "To join, run:\n")
+	fmt.Fprintf(os.Stderr, "  alpacon websh join --url=\"%s\" --password=\"%s\"\n\n", response.SharedURL, displayPassword)
+	fmt.Fprintf(os.Stderr, "Or open the URL in a browser.\n\n")
+	fmt.Fprintf(os.Stderr, "Share URL:   %s\n", response.SharedURL)
+	fmt.Fprintf(os.Stderr, "Password:    %s\n", displayPassword)
+	fmt.Fprintf(os.Stderr, "Read Only:   %v\n", response.ReadOnly)
+	fmt.Fprintf(os.Stderr, "Expiration:  %s\n", utils.TimeUtils(response.Expiration))
 
 	if hideCredentials {
-		fmt.Println("\nNote: Credentials are hidden. Set ALPACON_HIDE_CREDENTIALS=false to display.")
+		fmt.Fprintf(os.Stderr, "\nNote: Credentials are hidden. Set ALPACON_HIDE_CREDENTIALS=false to display.\n")
 	}
 }

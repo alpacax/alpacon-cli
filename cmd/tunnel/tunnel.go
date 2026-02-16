@@ -123,7 +123,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	if err != nil {
 		utils.CliErrorWithExit("Failed to listen on port %s: %s", localPort, err)
 	}
-	fmt.Printf("Listening on localhost:%s\n", localPort)
+	utils.CliInfo("Listening on localhost:%s", localPort)
 
 	// Connect to proxy server
 	headers := alpaconClient.SetWebsocketHeader()
@@ -134,7 +134,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 	defer func() { _ = wsConn.Close() }()
 
-	fmt.Println("Connected to proxy server")
+	utils.CliInfo("Connected to proxy server")
 
 	// Create smux session over WebSocket
 	wsNetConn := tunnel.NewWebSocketConn(wsConn)
@@ -144,9 +144,8 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Failed to create smux session: %s", err)
 	}
 
-	fmt.Println("Multiplexing session established")
-	fmt.Printf("Tunnel ready: localhost:%s -> %s:%s\n", localPort, serverName, remotePort)
-	fmt.Println("Waiting for connections... (Ctrl+C to exit)")
+	utils.CliInfo("Tunnel ready: localhost:%s -> %s:%s", localPort, serverName, remotePort)
+	utils.CliInfo("Waiting for connections... (Ctrl+C to exit)")
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -177,17 +176,17 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	// Wait for shutdown signal or tunnel failure
 	select {
 	case <-sigChan:
-		fmt.Println("\nShutting down tunnel...")
+		utils.CliInfo("Shutting down tunnel...")
 		shutdownTunnel(ctx, nil)
 	case <-ctx.done:
 		select {
 		case err := <-ctx.shutdownErr:
 			utils.CliErrorWithExit("Tunnel connection lost: %s", err)
 		default:
-			fmt.Println("\nTunnel connection lost, shutting down...")
+			utils.CliWarning("Tunnel connection lost, shutting down...")
 		}
 	}
-	fmt.Println("Tunnel closed.")
+	utils.CliInfo("Tunnel closed.")
 }
 
 func acceptConnections(ctx *tunnelContext) {
@@ -275,7 +274,7 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	}
 
 	if ctx.verbose {
-		fmt.Printf("New connection from %s\n", tcpConn.RemoteAddr())
+		utils.CliInfo("New connection from %s", tcpConn.RemoteAddr())
 	}
 
 	// Bidirectional relay using buffer pool
@@ -296,6 +295,6 @@ func handleTCPConnection(tcpConn net.Conn, ctx *tunnelContext) {
 	// Wait for one direction to complete
 	<-errChan
 	if ctx.verbose {
-		fmt.Printf("Connection closed: %s\n", tcpConn.RemoteAddr())
+		utils.CliInfo("Connection closed: %s", tcpConn.RemoteAddr())
 	}
 }

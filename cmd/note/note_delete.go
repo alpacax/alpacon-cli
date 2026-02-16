@@ -24,6 +24,11 @@ var noteDeleteCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		noteID := args[0]
 
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Delete note '%s'?", noteID)
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -31,9 +36,13 @@ var noteDeleteCmd = &cobra.Command{
 
 		err = note.DeleteNote(alpaconClient, noteID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the note with ID %s. Error: %s. Please check the note ID and your permissions, and try again.", noteID, err)
+			utils.CliErrorWithExit("Failed to delete the note: %s.", err)
 		}
 
-		utils.CliInfo("Note successfully deleted: %s.", noteID)
+		utils.CliSuccess("Note deleted: %s", noteID)
 	},
+}
+
+func init() {
+	noteDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }

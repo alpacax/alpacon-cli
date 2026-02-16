@@ -18,8 +18,13 @@ var memberDeleteCmd = &cobra.Command{
 	It's useful for managing group membership and ensuring only current members have access.
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
+		if memberDeleteRequest.Group == "" || memberDeleteRequest.User == "" {
 			promptForDeleteMembers()
+		}
+
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Remove member '%s' from group '%s'?", memberDeleteRequest.User, memberDeleteRequest.Group)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -29,16 +34,17 @@ var memberDeleteCmd = &cobra.Command{
 
 		err = iam.DeleteMember(alpaconClient, memberDeleteRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to add the member to group: %s.", err)
+			utils.CliErrorWithExit("Failed to remove the member from group: %s.", err)
 		}
 
-		utils.CliInfo("%s successfully deleted to %s.", memberRequest.User, memberRequest.Group)
+		utils.CliSuccess("Member %s removed from group %s", memberDeleteRequest.User, memberDeleteRequest.Group)
 	},
 }
 
 func init() {
 	memberDeleteCmd.Flags().StringVarP(&memberDeleteRequest.Group, "group", "g", "", "Group")
 	memberDeleteCmd.Flags().StringVarP(&memberDeleteRequest.User, "user", "u", "", "User")
+	memberDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
 
 func promptForDeleteMembers() {

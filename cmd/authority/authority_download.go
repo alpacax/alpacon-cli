@@ -36,7 +36,7 @@ var authorityDownloadCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to download the root certificate from authority: %s.", err)
 		}
 
-		utils.CliInfo("Root certificate downloaded successfully: '%s'.", filePath)
+		utils.CliSuccess("Root certificate downloaded: %s", filePath)
 	},
 }
 

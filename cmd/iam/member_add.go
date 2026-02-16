@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -34,14 +33,14 @@ var memberAddCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to add the member to group: %s.", err)
 		}
 
-		utils.CliInfo("%s successfully added to %s.", memberRequest.User, memberRequest.Group)
+		utils.CliSuccess("Member %s added to group %s", memberRequest.User, memberRequest.Group)
 	},
 }
 
 func init() {
 	memberAddCmd.Flags().StringVarP(&memberRequest.Group, "group", "g", "", "Group")
 	memberAddCmd.Flags().StringVarP(&memberRequest.User, "user", "u", "", "User")
-	memberAddCmd.Flags().StringVarP(&memberRequest.Group, "role", "r", "", "Role of member")
+	memberAddCmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member (owner, manager, member)")
 }
 
 func promptForMembers() {
@@ -62,6 +61,6 @@ func promptForRole() string {
 		if strings.ToLower(role) == "owner" || strings.ToLower(role) == "manager" || strings.ToLower(role) == "member" {
 			return role
 		}
-		fmt.Println("Invalid role. Please choose 'owner', 'manager', or 'member'. Role determines the user's permissions within the group")
+		utils.CliWarning("Invalid role. Please choose 'owner', 'manager', or 'member'.")
 	}
 }

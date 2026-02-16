@@ -1,8 +1,6 @@
 package workspace
 
 import (
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -32,7 +30,7 @@ var workspaceSwitchCmd = &cobra.Command{
 		}
 
 		if cfg.WorkspaceName == targetName {
-			fmt.Printf("Already on workspace %q.\n", targetName)
+			utils.CliInfoWithExit("Already on workspace %q.", targetName)
 			return
 		}
 
@@ -59,6 +57,6 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to connect to workspace %q: %s. Reverted to %q.", newName, err, origName)
 		}
 
-		fmt.Printf("Switched to workspace %q (%s)\n", newName, newURL)
+		utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
 	},
 }

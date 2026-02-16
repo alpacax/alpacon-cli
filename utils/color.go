@@ -23,3 +23,8 @@ func Blue(value string) string {
 func Red(value string) string {
 	return color.New(color.FgRed, color.Bold).Sprint(value)
 }
+
+// Bold converts a string to bold text in the console.
+func Bold(value string) string {
+	return color.New(color.Bold).Sprint(value)
+}

@@ -31,7 +31,7 @@ func ShowLogo() {
      |  | |  | |     |'|  |      |  | |  |(_'  '--'\  '  '-'  '|  | \   |
      ` + "`" + `--' ` + "`" + `--' ` + "`" + `-----' ` + "`" + `--'      ` + "`" + `--' ` + "`" + `--'   ` + "`" + `-----'   ` + "`" + `-----' ` + "`" + `--'  ` + "`" + `--'
     `
-	fmt.Println(alpaconLogo)
+	fmt.Fprintln(os.Stderr, alpaconLogo)
 }
 
 func ReadFileFromPath(filePath string) ([]byte, error) {
@@ -439,7 +439,7 @@ func SplitPath(path string) (string, string) {
 // It returns true if the user enters "y" or "yes" (case-insensitive), and false otherwise.
 func CommandConfirm() bool {
 	if IsInteractiveShell() {
-		fmt.Print("Do you want to continue executing the command? (y/n): ")
+		fmt.Fprint(os.Stderr, "Do you want to continue executing the command? [y/n]: ")
 		reader := bufio.NewReader(os.Stdin)
 		input, err := reader.ReadString('\n')
 		if err != nil {
@@ -449,7 +449,7 @@ func CommandConfirm() bool {
 
 		input = strings.TrimSpace(strings.ToLower(input))
 		if input != "y" && input != "yes" {
-			fmt.Println("Command execution cancelled.")
+			CliInfo("Command execution cancelled.")
 			return false
 		}
 		return true

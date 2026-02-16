@@ -34,7 +34,7 @@ var userUpdateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
 		}
 
-		utils.CliInfo("%s user successfully updated to alpacon.", userName)
+		utils.CliSuccess("User updated: %s", userName)
 		utils.PrintJson(userDetail)
 	},
 }

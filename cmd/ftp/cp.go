@@ -265,7 +265,7 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		return err
 	}
 	wrappedSrc := fmt.Sprintf("[%s]", strings.Join(src, ", "))
-	utils.CliInfo("Upload request for %s to %s successful.", wrappedSrc, dest)
+	utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 	return nil
 }
 
@@ -316,6 +316,6 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 		}
 		return err
 	}
-	utils.CliInfo("Download request for %s to %s successful.", src, dest)
+	utils.CliSuccess("Downloaded %s to %s", src, dest)
 	return nil
 }

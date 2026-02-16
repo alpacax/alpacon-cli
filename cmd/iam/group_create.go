@@ -2,6 +2,7 @@ package iam
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -43,7 +44,7 @@ var groupCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to create the new group: %s.", err)
 		}
 
-		utils.CliInfo("%s group successfully created to alpacon.", groupRequest.Name)
+		utils.CliSuccess("Group created: %s", groupRequest.Name)
 	},
 }
 
@@ -64,14 +65,14 @@ func promptForGroup(ac *client.AlpaconClient, serverList []server.ServerAttribut
 }
 
 func displayServers(serverList []server.ServerAttributes) {
-	fmt.Println("Servers:")
+	fmt.Fprintln(os.Stderr, "Servers:")
 	for i, server := range serverList {
-		fmt.Printf("[%d] %s\n", i+1, server.Name)
+		fmt.Fprintf(os.Stderr, "[%d] %s\n", i+1, server.Name)
 	}
 }
 
 func selectAndConvertServers(ac *client.AlpaconClient, serverList []server.ServerAttributes) []string {
-	chosenServers := utils.PromptForInput("Select servers that are authorized for this group. (e.g., 1,2):")
+	chosenServers := utils.PromptForInput("Select servers (e.g., 1,2): ")
 	intServers := utils.SplitAndParseInt(chosenServers)
 
 	var serverIDs []string

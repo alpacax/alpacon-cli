@@ -3,25 +3,26 @@ package utils
 import (
 	"bufio"
 	"fmt"
-	"golang.org/x/term"
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 func PromptForPassword(promptText string) string {
-	fmt.Print(promptText)
+	fmt.Fprint(os.Stderr, promptText)
 	bytePassword, err := term.ReadPassword(0)
 	if err != nil {
 		return ""
 	}
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	return strings.TrimSpace(string(bytePassword))
 }
 
 func PromptForInput(promptText string) string {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Print(promptText)
+	fmt.Fprint(os.Stderr, promptText)
 	input, err := reader.ReadString('\n')
 	if err != nil {
 		CliErrorWithExit("Invalid input. Please try again.")
@@ -35,7 +36,7 @@ func PromptForRequiredInput(promptText string) string {
 		if input != "" {
 			return input
 		}
-		fmt.Println("This field is required. Please enter a value.")
+		CliWarning("This field is required. Please enter a value.")
 	}
 }
 
@@ -44,7 +45,7 @@ func PromptForRequiredIntInput(promptText string) int {
 		inputStr := PromptForInput(promptText)
 		inputInt, err := strconv.Atoi(inputStr)
 		if err != nil {
-			fmt.Println("Only integers are allowed. Please try again.")
+			CliWarning("Only integers are allowed. Please try again.")
 			continue
 		}
 		return inputInt
@@ -59,7 +60,7 @@ func PromptForIntInput(promptText string, defaultValue int) int {
 	}
 	inputInt, err := strconv.Atoi(inputStr)
 	if err != nil {
-		fmt.Printf("Invalid input. Using default value: %d\n", defaultValue)
+		CliWarning("Invalid input. Using default value: %d", defaultValue)
 		return defaultValue
 	}
 	return inputInt
@@ -84,7 +85,20 @@ func PromptForRequiredListInput(promptText string) []string {
 		if len(inputList) > 0 && inputList[0] != "" {
 			return inputList
 		}
-		fmt.Println("This field is required. Please enter a value.")
+		CliWarning("This field is required. Please enter a value.")
+	}
+}
+
+// ConfirmAction prompts the user for confirmation before a destructive action.
+// In non-interactive mode (piped stdin, CI, etc.), it exits and asks for --yes flag.
+// Returns on confirm; exits the program on decline.
+func ConfirmAction(msg string, args ...any) {
+	if !IsInteractiveShell() {
+		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+	}
+	message := fmt.Sprintf(msg, args...)
+	if !PromptForBool(message) {
+		CliInfoWithExit("Operation cancelled.")
 	}
 }
 
@@ -92,7 +106,7 @@ func PromptForBool(prompt string) bool {
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Printf("%s [y/n]: ", prompt)
+		fmt.Fprintf(os.Stderr, "%s [y/n]: ", prompt)
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(strings.ToLower(input))
 
@@ -102,7 +116,7 @@ func PromptForBool(prompt string) bool {
 		case "n", "no":
 			return false
 		default:
-			fmt.Println("Invalid input. Please enter 'y' (yes) or 'n' (no).")
+			CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 		}
 	}
 }

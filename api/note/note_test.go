@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/server"
+	iamapi "github.com/alpacax/alpacon-cli/api/iam"
+	serverapi "github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 )
 
@@ -19,20 +19,6 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-
-		// server name lookup by ID (for each note)
-		if strings.HasPrefix(r.URL.Path, "/api/servers/servers/srv-") {
-			resp := server.ServerDetails{ID: "srv-1", Name: "test-server"}
-			_ = json.NewEncoder(w).Encode(resp)
-			return
-		}
-
-		// user name lookup by ID (for each note)
-		if strings.HasPrefix(r.URL.Path, "/api/iam/users/usr-") {
-			resp := iam.UserDetailAttributes{Username: "test-user"}
-			_ = json.NewEncoder(w).Encode(resp)
-			return
-		}
 
 		// note list endpoint
 		if strings.HasPrefix(r.URL.Path, "/api/servers/notes") {
@@ -47,12 +33,12 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 				t.Errorf("expected page_size=25, got %s", pageSize)
 			}
 
-			results := []NoteDetails{
-				{ID: "note-1", Server: "srv-1", Author: "usr-1", Content: "hello", Private: false},
-				{ID: "note-2", Server: "srv-1", Author: "usr-1", Content: "world", Private: true},
+			results := []NoteResponse{
+				{ID: "note-1", Server: serverapi.ServerInfo{ID: "srv-1", Name: "test-server"}, Author: iamapi.UserSummary{Name: "test-user"}, Content: "hello", Private: false},
+				{ID: "note-2", Server: serverapi.ServerInfo{ID: "srv-1", Name: "test-server"}, Author: iamapi.UserSummary{Name: "test-user"}, Content: "world", Private: true},
 			}
 
-			resp := api.ListResponse[NoteDetails]{
+			resp := api.ListResponse[NoteResponse]{
 				Count:   200, // more items exist on server
 				Results: results,
 			}

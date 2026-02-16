@@ -33,6 +33,6 @@ var systemPackageUploadCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to upload the system packages to alpacon: %s.", err)
 		}
 
-		utils.CliInfo("`%s` successfully uploaded to alpacon.", file)
+		utils.CliSuccess("Package uploaded: %s", file)
 	},
 }

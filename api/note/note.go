@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -38,26 +37,16 @@ func GetNoteList(ac *client.AlpaconClient, serverName string, pageSize int) ([]N
 		return nil, err
 	}
 
-	var response api.ListResponse[NoteDetails]
+	var response api.ListResponse[NoteResponse]
 	if err = json.Unmarshal(responseBody, &response); err != nil {
 		return nil, err
 	}
 
 	for _, note := range response.Results {
-		sName, err := server.GetServerNameByID(ac, note.Server)
-		if err != nil {
-			return nil, err
-		}
-
-		userName, err := iam.GetUserNameByID(ac, note.Author)
-		if err != nil {
-			return nil, err
-		}
-
 		noteList = append(noteList, NoteDetails{
 			ID:      note.ID,
-			Server:  sName,
-			Author:  userName,
+			Server:  note.Server.Name,
+			Author:  note.Author.Name,
 			Content: note.Content,
 			Private: note.Private,
 		})

@@ -1,8 +1,6 @@
 package workspace
 
 import (
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -19,13 +17,12 @@ var WorkspaceCmd = &cobra.Command{
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
 
-		fmt.Printf("Current workspace: %s\n", cfg.WorkspaceName)
-		fmt.Printf("URL: %s\n", cfg.WorkspaceURL)
+		utils.CliInfo("Current workspace: %s (%s)", cfg.WorkspaceName, cfg.WorkspaceURL)
 
 		if cfg.IsMultiWorkspaceMode() {
-			fmt.Printf("Base domain: %s\n", cfg.BaseDomain)
-			fmt.Println("\nUse 'alpacon workspace ls' to list all workspaces.")
-			fmt.Println("Use 'alpacon workspace switch <name>' to switch workspaces.")
+			utils.CliInfo("Base domain: %s", cfg.BaseDomain)
+			utils.CliInfo("Run 'alpacon workspace ls' to list all workspaces")
+			utils.CliInfo("Run 'alpacon workspace switch <name>' to switch workspaces")
 		}
 	},
 }

@@ -2,14 +2,14 @@ package cmd
 
 import (
 	"crypto/tls"
-	"fmt"
+	"net/http"
+
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
-	"net/http"
 )
 
 const (
@@ -26,12 +26,11 @@ var logoutCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		validConfig, err := config.LoadConfig()
 		if err != nil {
-			fmt.Println("You are not logged in.")
-			return
+			utils.CliInfoWithExit("You are not logged in.")
 		}
 
 		if validConfig.IsMultiWorkspaceMode() {
-			fmt.Println("Note: This will log you out from all workspaces associated with this account.")
+			utils.CliWarning("This will log you out from all workspaces associated with this account.")
 		}
 
 		httpClient := &http.Client{
@@ -44,7 +43,6 @@ var logoutCmd = &cobra.Command{
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Failed to create Alpacon API client: %s.", err)
-			return
 		}
 		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
 		if err != nil {
@@ -69,6 +67,6 @@ var logoutCmd = &cobra.Command{
 				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
 			}
 		}
-		fmt.Println("Logout succeeded!")
+		utils.CliSuccess("Logout succeeded!")
 	},
 }

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,7 @@ func (s *Spinner) Start() {
 			select {
 			case <-s.stopCh:
 				// Clear the spinner line
-				fmt.Print("\r\033[K")
+				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
 			default:
 				s.mu.Lock()
@@ -67,7 +68,7 @@ func (s *Spinner) Start() {
 					displayMsg = baseMsg + s.dots[dotIdx%len(s.dots)]
 				}
 
-				fmt.Printf("\r%s %s", Yellow(frame), displayMsg)
+				fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
 				frameIdx++
 
 				// Update dots every 3 frames (300ms)
@@ -100,7 +101,7 @@ func (s *Spinner) Stop() {
 // StopWithMessage stops the spinner and prints a final message
 func (s *Spinner) StopWithMessage(message string) {
 	s.Stop()
-	fmt.Println(message)
+	fmt.Fprintln(os.Stderr, message)
 }
 
 // UpdateMessage updates the spinner message while running

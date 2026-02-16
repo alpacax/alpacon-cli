@@ -23,6 +23,11 @@ var userDeleteCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		userName := args[0]
 
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Delete user '%s'?", userName)
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -37,6 +42,10 @@ var userDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to delete the user: %s.", err)
 		}
 
-		utils.CliInfo("User successfully deleted: %s.", userName)
+		utils.CliSuccess("User deleted: %s", userName)
 	},
+}
+
+func init() {
+	userDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }

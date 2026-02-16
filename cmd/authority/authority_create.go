@@ -2,6 +2,7 @@ package authority
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/api/cert"
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -44,9 +45,9 @@ func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
 	authorityRequest.Domain = utils.PromptForRequiredInput("Domain name of the root certificate: ")
 	authorityRequest.RootValidDays = utils.PromptForIntInput("Root certificate validity in days (default: 3650): ", 365*10)
 	authorityRequest.DefaultValidDays = utils.PromptForIntInput("Child certificate validity in days (default: 365): ", 365)
-	authorityRequest.MaxValidDays = utils.PromptForIntInput("Maximum valid days that users can request (default: 730)", 365*2)
+	authorityRequest.MaxValidDays = utils.PromptForIntInput("Maximum valid days that users can request (default: 730): ", 365*2)
 
-	agent := utils.PromptForRequiredInput("Name of sever to run this CA on: ")
+	agent := utils.PromptForRequiredInput("Name of server to run this CA on: ")
 	agentID, err := server.GetServerIDByName(ac, agent)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to retrieve the server %s", err)
@@ -63,9 +64,9 @@ func promptForAuthority(ac *client.AlpaconClient) cert.AuthorityRequest {
 }
 
 func installAuthorityInfo(response cert.AuthorityCreateResponse) {
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Installation instruction")
-	fmt.Println()
-	fmt.Println(response.Instruction + "\n")
-	utils.CliWarning("Please be aware that after leaving this page, you cannot obtain the script again for security.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, response.Instruction)
+	utils.CliWarning("After leaving this page, you cannot obtain the script again for security.")
 }

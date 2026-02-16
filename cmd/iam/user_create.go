@@ -1,8 +1,6 @@
 package iam
 
 import (
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -37,7 +35,7 @@ var userCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to create the new user: %s.", err)
 		}
 
-		utils.CliInfo("%s user successfully created to alpacon.", userRequest.Username)
+		utils.CliSuccess("User created: %s", userRequest.Username)
 	},
 }
 
@@ -53,22 +51,22 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 			userRequest.Password = password
 			break
 		} else {
-			fmt.Println("Passwords do not match. Please try again.")
+			utils.CliWarning("Passwords do not match. Please try again.")
 		}
 	}
 	userRequest.FirstName = utils.PromptForRequiredInput("First name(required): ")
 	userRequest.LastName = utils.PromptForRequiredInput("Last name(required): ")
 	userRequest.Email = utils.PromptForRequiredInput("Email(required): ")
 	userRequest.Phone = utils.PromptForInput("Phone number(optional): ")
-	userRequest.Tags = utils.PromptForInput("Tags(optional, Add tags for this user so that people can find easily. Tags should start with `#` and be comma-separated.): ")
+	userRequest.Tags = utils.PromptForInput("Tags (optional, comma-separated, e.g., #dev, #ops): ")
 	userRequest.Description = utils.PromptForInput("Description(optional): ")
 	userRequest.Shell = utils.PromptForInput("Shell(optional, An absolute path for a shell of choice. default: /bin/bash): ")
 
-	userRequest.IsLdapUser = utils.PromptForBool("LDAP status: ")
+	userRequest.IsLdapUser = utils.PromptForBool("LDAP status")
 
 	if ac.Privileges == "superuser" {
-		userRequest.IsStaff = utils.PromptForBool("Staff status:")
-		userRequest.IsSuperuser = utils.PromptForBool("Superuser status:")
+		userRequest.IsStaff = utils.PromptForBool("Staff status")
+		userRequest.IsSuperuser = utils.PromptForBool("Superuser status")
 	}
 
 	return userRequest

@@ -32,6 +32,6 @@ var pythonPackageDownloadCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to download the python packages from alpacon: %s.", err)
 		}
 
-		utils.CliInfo("`%s` successfully downloaded from alpacon.", file)
+		utils.CliSuccess("Package downloaded: %s", file)
 	},
 }

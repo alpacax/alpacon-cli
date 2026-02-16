@@ -31,7 +31,7 @@ func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
 			Version:  pkg.Version,
 			Arch:     pkg.Arch,
 			Platform: pkg.Platform,
-			Owner:    pkg.OwnerName,
+			Owner:    pkg.Owner.Name,
 		})
 	}
 	return packageList, nil
@@ -51,7 +51,7 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 			PythonTarget: pkg.Target,
 			ABI:          pkg.ABI,
 			Platform:     pkg.Platform,
-			Owner:        pkg.OwnerName,
+			Owner:        pkg.Owner.Name,
 		})
 	}
 	return packageList, nil

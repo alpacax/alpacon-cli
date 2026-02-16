@@ -23,6 +23,11 @@ var tokenDeleteCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		tokenId := args[0]
 
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes {
+			utils.ConfirmAction("Delete API token '%s'?", tokenId)
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -40,6 +45,10 @@ var tokenDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to delete the api token: %s.", err)
 		}
 
-		utils.CliInfo("API Token successfully deleted: %s", tokenId)
+		utils.CliSuccess("API token deleted: %s", tokenId)
 	},
+}
+
+func init() {
+	tokenDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 }
