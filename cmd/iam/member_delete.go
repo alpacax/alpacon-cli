@@ -18,7 +18,7 @@ var memberDeleteCmd = &cobra.Command{
 	It's useful for managing group membership and ensuring only current members have access.
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if memberRequest.Group == "" || memberRequest.User == "" || memberRequest.Role == "" {
+		if memberDeleteRequest.Group == "" || memberDeleteRequest.User == "" {
 			promptForDeleteMembers()
 		}
 

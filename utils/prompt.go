@@ -90,8 +90,8 @@ func PromptForRequiredListInput(promptText string) []string {
 }
 
 // ConfirmAction prompts the user for confirmation before a destructive action.
-// In non-interactive mode (piped stdin, CI, etc.), it refuses and asks for --yes flag.
-// Returns true if confirmed, exits the program if declined.
+// In non-interactive mode (piped stdin, CI, etc.), it exits and asks for --yes flag.
+// Returns on confirm; exits the program on decline.
 func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
 		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
