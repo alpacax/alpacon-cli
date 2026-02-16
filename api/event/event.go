@@ -52,7 +52,7 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 	var eventList []EventAttributes
 	for _, event := range response.Results {
 		eventList = append(eventList, EventAttributes{
-			Server:      event.ServerName,
+			Server:      event.Server.Name,
 			Shell:       event.Shell,
 			Command:     event.Line,
 			Result:      utils.TruncateString(event.Result, 70),

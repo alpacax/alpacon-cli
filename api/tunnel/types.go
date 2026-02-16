@@ -1,5 +1,7 @@
 package tunnel
 
+import "github.com/alpacax/alpacon-cli/api/server"
+
 type TunnelSessionRequest struct {
 	Server     string `json:"server"`      // Server UUID
 	TargetPort int    `json:"target_port"` // Target port on the remote server
@@ -12,6 +14,6 @@ type TunnelSessionResponse struct {
 	ID            string `json:"id"`
 	WebsocketURL  string `json:"websocket_url"`
 	UserchannelID string `json:"userchannel_id"`
-	Server        string `json:"server"`
+	Server        server.ServerInfo `json:"server"`
 	TargetPort    int    `json:"target_port"`
 }

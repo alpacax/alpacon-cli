@@ -285,7 +285,7 @@ func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
 }
 
 func HandleUsernameRequired() (*SetUsernameResponse, error) {
-	fmt.Println("\nUsername is required for your account.")
+	utils.CliInfo("Username is required for your account.")
 	username := utils.PromptForRequiredInput("Please enter your username: ")
 
 	response, err := SetUsername(username)
@@ -293,9 +293,7 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 		return nil, fmt.Errorf("failed to set username: %v", err)
 	}
 
-	fmt.Printf("\n✓ Username successfully set!\n")
-	fmt.Printf("  User ID: %s\n", response.ID)
-	fmt.Printf("  Username: %s\n\n", response.Username)
+	utils.CliSuccess("Username set to %q", response.Username)
 
 	return response, nil
 }

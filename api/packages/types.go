@@ -1,5 +1,7 @@
 package packages
 
+import "github.com/alpacax/alpacon-cli/api/iam"
+
 type SystemPackage struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
@@ -18,30 +20,28 @@ type PythonPackage struct {
 }
 
 type PythonPackageDetail struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Target      string `json:"target"`
-	ABI         string `json:"abi"`
-	Platform    string `json:"platform"`
-	Filesize    int64  `json:"filesize"`
-	Owner       string `json:"owner"`
-	OwnerName   string `json:"owner_name"`
-	AddedAt     string `json:"added_at"`
-	DownloadURL string `json:"download_url"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Version     string          `json:"version"`
+	Target      string          `json:"target"`
+	ABI         string          `json:"abi"`
+	Platform    string          `json:"platform"`
+	Filesize    int64           `json:"filesize"`
+	Owner       iam.UserSummary `json:"owner"`
+	AddedAt     string          `json:"added_at"`
+	DownloadURL string          `json:"download_url"`
 }
 
 type SystemPackageDetail struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Platform    string `json:"platform"`
-	Arch        string `json:"arch"`
-	Filesize    int64  `json:"filesize"`
-	Owner       string `json:"owner"`
-	OwnerName   string `json:"owner_name"`
-	AddedAt     string `json:"added_at"`
-	DownloadURL string `json:"download_url"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Version     string          `json:"version"`
+	Platform    string          `json:"platform"`
+	Arch        string          `json:"arch"`
+	Filesize    int64           `json:"filesize"`
+	Owner       iam.UserSummary `json:"owner"`
+	AddedAt     string          `json:"added_at"`
+	DownloadURL string          `json:"download_url"`
 }
 
 type DownloadURL struct {
