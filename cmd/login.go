@@ -9,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
+	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -78,18 +79,45 @@ var loginCmd = &cobra.Command{
 			utils.CliErrorWithExit("%s", err.Error())
 		}
 
-		// Check login method
-		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
+		// Check if this is a cloud app URL that needs post-login region resolution
+		isAppURL := isCloudAppURL(workspaceURL)
+
+		// Extract workspace name and auth env URL
+		var workspaceName string
+		var appBaseDomain string
+		authEnvURL := workspaceURL
+		if isAppURL {
+			parsedURL, parseErr := url.Parse(workspaceURL)
+			if parseErr != nil {
+				utils.CliErrorWithExit("Invalid workspace URL: %s", parseErr.Error())
+			}
+
+			pathSegment := strings.Trim(parsedURL.Path, "/")
+			segments := strings.Split(pathSegment, "/")
+			if len(segments) != 1 || segments[0] == "" {
+				utils.CliErrorWithExit("Invalid workspace URL: path must contain exactly one workspace name")
+			}
+			workspaceName = segments[0]
+			appBaseDomain = parsedURL.Hostname()
+
+			// Use the app base URL for auth env (e.g., https://alpacon.io)
+			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Hostname())
+		} else {
+			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
+		}
+
+		envInfo, err := auth0.FetchAuthEnv(authEnvURL, httpClient)
 		if err != nil {
 			if strings.Contains(err.Error(), "404") {
-				// envInfo = &auth0.AuthEnvResponse{Method: "legacy"}
 				envInfo = &auth0.AuthEnvResponse{
 					Auth0: auth0.Auth0Config{
 						Method: "legacy",
 					},
 				}
+			} else if isAppURL {
+				utils.CliErrorWithExit("Failed to fetch auth config. Try using the direct API URL format (e.g., %s.<region>.alpacon.io): %v", workspaceName, err)
 			} else {
-				utils.CliErrorWithExit("Failed to patch environment variables from workspace. %v", err)
+				utils.CliErrorWithExit("Failed to fetch environment variables from workspace: %v", err)
 			}
 		}
 
@@ -98,10 +126,9 @@ var loginCmd = &cobra.Command{
 		token, _ := cmd.Flags().GetString("token")
 
 		fmt.Printf("Logging in to %s\n", workspaceURL)
-		workspaceName := utils.ExtractWorkspaceName(workspaceURL)
 
 		if envInfo.Auth0.Method == "auth0" && token == "" {
-			deviceCode, err := auth0.RequestDeviceCode(workspaceURL, httpClient, envInfo)
+			deviceCode, err := auth0.RequestDeviceCode(workspaceName, httpClient, envInfo)
 			if err != nil {
 				utils.CliErrorWithExit("Device code request failed. %v", err)
 			}
@@ -119,6 +146,29 @@ var loginCmd = &cobra.Command{
 				utils.CliErrorWithExit("%s", err.Error())
 			}
 
+			// For cloud app URLs, resolve the correct region-specific workspace URL from JWT
+			if isAppURL {
+				resolvedURL, resolvedName, resolveErr := workspace.ResolveWorkspaceURL(tokenRes.AccessToken, workspaceName, appBaseDomain)
+				if resolveErr != nil {
+					utils.CliErrorWithExit("Failed to resolve workspace region: %v", resolveErr)
+				}
+
+				// Verify the resolved URL is reachable
+				resp, httpErr := httpClient.Get(resolvedURL)
+				if httpErr != nil {
+					utils.CliErrorWithExit("Resolved workspace URL '%s' is unreachable: %v", resolvedURL, httpErr)
+				}
+				if resp.StatusCode >= 400 {
+					_ = resp.Body.Close()
+					utils.CliErrorWithExit("Resolved workspace URL '%s' returned HTTP %d. Please check your connection", resolvedURL, resp.StatusCode)
+				}
+				_ = resp.Body.Close()
+
+				workspaceURL = resolvedURL
+				workspaceName = resolvedName
+				fmt.Printf("Workspace resolved to %s\n", workspaceURL)
+			}
+
 			baseDomain := utils.ExtractBaseDomain(workspaceURL)
 
 			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
@@ -127,6 +177,11 @@ var loginCmd = &cobra.Command{
 			}
 
 		} else {
+			// Legacy or token login — requires a direct API URL
+			if isAppURL {
+				utils.CliErrorWithExit("Cloud app URL format is not supported for token or legacy login. Use the direct API URL format: %s.<region>.alpacon.io", workspaceName)
+			}
+
 			if (workspaceURL == "" || username == "" || password == "") && token == "" {
 				workspaceURL, username, password = promptForCredentials(workspaceURL, username, password)
 			}
@@ -183,6 +238,18 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 	return workspaceURL, username, password
 }
 
+// isCloudAppURL checks if the URL is an alpacon.io app URL with a workspace path.
+// e.g., "https://alpacon.io/myworkspace" → true
+// e.g., "https://dev.alpacon.io/myworkspace" → false (dev.alpacon.io is already a region-specific subdomain)
+// e.g., "https://myws.us1.alpacon.io" → false (already a direct API URL)
+func isCloudAppURL(workspaceURL string) bool {
+	parsedURL, err := url.Parse(workspaceURL)
+	if err != nil {
+		return false
+	}
+	return parsedURL.Hostname() == "alpacon.io" && parsedURL.Path != "" && parsedURL.Path != "/"
+}
+
 func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client) (string, error) {
 	if !strings.HasPrefix(workspaceURL, "http") {
 		workspaceURL = "https://" + workspaceURL
@@ -194,13 +261,16 @@ func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client)
 	parsedURL, err := url.Parse(workspaceURL)
 	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
 		workspace := strings.TrimPrefix(parsedURL.Path, "/")
-		domain := parsedURL.Host
+		domain := parsedURL.Hostname()
 		protocol := parsedURL.Scheme
 
-		// ToDo: modify below code after region decision in portal (multiple region)
+		// For alpacon.io app URLs, the region is unknown at login time.
+		// Keep the app URL as-is; the login flow will resolve the correct
+		// region-specific API URL from the JWT after authentication.
 		if domain == "alpacon.io" {
-			domain = "us1." + domain
+			return workspaceURL, nil
 		}
+
 		if domain != "" && workspace != "" {
 			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
 		}

@@ -167,6 +167,58 @@ func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
 	assert.Equal(t, "*", entries[0].Current)
 }
 
+func TestResolveWorkspaceURL(t *testing.T) {
+	token := buildTestJWT(t, map[string]any{
+		"https://alpacon.io/workspaces": []map[string]any{
+			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
+			{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
+		},
+	})
+
+	tests := []struct {
+		name       string
+		target     string
+		baseDomain string
+		expectURL  string
+		expectName string
+		expectErr  bool
+	}{
+		{
+			name:       "Resolve ws1 in AP region",
+			target:     "ws1",
+			baseDomain: "alpacon.io",
+			expectURL:  "https://ws1.ap1.alpacon.io",
+			expectName: "ws1",
+		},
+		{
+			name:       "Resolve ws2 in US region",
+			target:     "ws2",
+			baseDomain: "alpacon.io",
+			expectURL:  "https://ws2.us1.alpacon.io",
+			expectName: "ws2",
+		},
+		{
+			name:       "Non-existent workspace",
+			target:     "ws-nonexistent",
+			baseDomain: "alpacon.io",
+			expectErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolvedURL, name, err := ResolveWorkspaceURL(token, tt.target, tt.baseDomain)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectURL, resolvedURL)
+				assert.Equal(t, tt.expectName, name)
+			}
+		})
+	}
+}
+
 func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{

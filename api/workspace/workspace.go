@@ -63,19 +63,24 @@ func GetWorkspaceList(cfg config.Config) ([]WorkspaceListEntry, error) {
 	return entries, nil
 }
 
-// ValidateAndBuildWorkspaceURL finds the target workspace in the JWT and builds its full URL.
-func ValidateAndBuildWorkspaceURL(cfg config.Config, targetName string) (newURL, newName string, err error) {
-	workspaces, err := GetWorkspacesFromToken(cfg.AccessToken)
+// ResolveWorkspaceURL finds the target workspace in the JWT and builds its full URL.
+func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, newName string, err error) {
+	workspaces, err := GetWorkspacesFromToken(accessToken)
 	if err != nil {
 		return "", "", err
 	}
 
 	for _, ws := range workspaces {
 		if ws.SchemaName == targetName {
-			newURL = fmt.Sprintf("https://%s.%s.%s", ws.SchemaName, ws.Region, cfg.BaseDomain)
+			newURL = fmt.Sprintf("https://%s.%s.%s", ws.SchemaName, ws.Region, baseDomain)
 			return newURL, ws.SchemaName, nil
 		}
 	}
 
-	return "", "", fmt.Errorf("workspace %q not found in your account. Run 'alpacon workspace ls' to see available workspaces", targetName)
+	return "", "", fmt.Errorf("workspace %q not found in your account", targetName)
+}
+
+// ValidateAndBuildWorkspaceURL finds the target workspace in the JWT and builds its full URL.
+func ValidateAndBuildWorkspaceURL(cfg config.Config, targetName string) (newURL, newName string, err error) {
+	return ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
 }
