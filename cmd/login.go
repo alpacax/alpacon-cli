@@ -84,6 +84,7 @@ var loginCmd = &cobra.Command{
 
 		// Extract workspace name and auth env URL
 		var workspaceName string
+		var appBaseDomain string
 		authEnvURL := workspaceURL
 		if isAppURL {
 			parsedURL, parseErr := url.Parse(workspaceURL)
@@ -97,9 +98,10 @@ var loginCmd = &cobra.Command{
 				utils.CliErrorWithExit("Invalid workspace URL: path must contain exactly one workspace name")
 			}
 			workspaceName = segments[0]
+			appBaseDomain = parsedURL.Hostname()
 
 			// Use the app base URL for auth env (e.g., https://alpacon.io)
-			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Host)
+			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Hostname())
 		} else {
 			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
 		}
@@ -146,7 +148,7 @@ var loginCmd = &cobra.Command{
 
 			// For cloud app URLs, resolve the correct region-specific workspace URL from JWT
 			if isAppURL {
-				resolvedURL, resolvedName, resolveErr := workspace.ResolveWorkspaceURL(tokenRes.AccessToken, workspaceName, "alpacon.io")
+				resolvedURL, resolvedName, resolveErr := workspace.ResolveWorkspaceURL(tokenRes.AccessToken, workspaceName, appBaseDomain)
 				if resolveErr != nil {
 					utils.CliErrorWithExit("Failed to resolve workspace region: %v", resolveErr)
 				}
