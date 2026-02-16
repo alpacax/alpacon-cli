@@ -77,7 +77,7 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 		}
 	}
 
-	return "", "", fmt.Errorf("workspace %q not found in your account. Run 'alpacon workspace ls' to see available workspaces", targetName)
+	return "", "", fmt.Errorf("workspace %q not found in your account", targetName)
 }
 
 // ValidateAndBuildWorkspaceURL finds the target workspace in the JWT and builds its full URL.
