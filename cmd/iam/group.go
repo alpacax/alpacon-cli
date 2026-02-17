@@ -17,7 +17,7 @@ var GroupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon group list', 'alpacon group create', 'alpacon group detail', 'alpacon group delete', or 'alpacon group member' to manage groups. Run 'alpacon group --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon group list', 'alpacon group create', 'alpacon group describe', 'alpacon group update', 'alpacon group delete', or 'alpacon group member' to manage groups. Run 'alpacon group --help' for more information")
 	},
 }
 
@@ -26,6 +26,8 @@ func init() {
 	GroupCmd.AddCommand(groupDetailCmd)
 	GroupCmd.AddCommand(groupDeleteCmd)
 	GroupCmd.AddCommand(groupCreateCmd)
+
+	GroupCmd.AddCommand(groupUpdateCmd)
 
 	GroupCmd.AddCommand(MemberCmd)
 }

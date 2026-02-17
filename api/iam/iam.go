@@ -260,6 +260,30 @@ func getLDAPStatus(isLDAP bool) string {
 	return "local"
 }
 
+func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
+	groupID, err := GetGroupIDByName(ac, groupName)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err := GetGroupDetail(ac, groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := utils.ProcessEditedData(responseBody)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err = ac.SendPatchRequest(utils.BuildURL(groupURL, groupID, nil), data)
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
 func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
 	userId, err := GetUserIDByName(ac, userName)
 	if err != nil {

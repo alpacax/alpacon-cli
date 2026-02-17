@@ -19,7 +19,7 @@ var NoteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon note list', 'alpacon note create', or 'alpacon note delete'. Run 'alpacon note --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon note list', 'alpacon note create', 'alpacon note describe', 'alpacon note update', or 'alpacon note delete'. Run 'alpacon note --help' for more information")
 	},
 }
 
@@ -27,4 +27,6 @@ func init() {
 	NoteCmd.AddCommand(noteListCmd)
 	NoteCmd.AddCommand(noteCreateCmd)
 	NoteCmd.AddCommand(noteDeleteCmd)
+	NoteCmd.AddCommand(noteDetailCmd)
+	NoteCmd.AddCommand(noteUpdateCmd)
 }

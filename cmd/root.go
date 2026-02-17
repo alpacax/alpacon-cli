@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
+	"github.com/alpacax/alpacon-cli/cmd/audit"
 	"github.com/alpacax/alpacon-cli/cmd/authority"
 	"github.com/alpacax/alpacon-cli/cmd/cert"
 	"github.com/alpacax/alpacon-cli/cmd/csr"
@@ -15,9 +16,12 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/log"
 	"github.com/alpacax/alpacon-cli/cmd/note"
 	"github.com/alpacax/alpacon-cli/cmd/packages"
+	"github.com/alpacax/alpacon-cli/cmd/revoke"
 	"github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/alpacax/alpacon-cli/cmd/token"
 	"github.com/alpacax/alpacon-cli/cmd/tunnel"
+	"github.com/alpacax/alpacon-cli/cmd/webftp"
+	"github.com/alpacax/alpacon-cli/cmd/webhook"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -99,4 +103,16 @@ func init() {
 
 	// workspace
 	RootCmd.AddCommand(workspace.WorkspaceCmd)
+
+	// revoke
+	RootCmd.AddCommand(revoke.RevokeCmd)
+
+	// audit
+	RootCmd.AddCommand(audit.AuditCmd)
+
+	// webhook
+	RootCmd.AddCommand(webhook.WebhookCmd)
+
+	// webftp
+	RootCmd.AddCommand(webftp.WebFTPCmd)
 }

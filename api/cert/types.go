@@ -156,6 +156,42 @@ type Certificate struct {
 	RenewedBy string           `json:"renewed_by"`
 }
 
+type CRLResponse struct {
+	CrlText   string    `json:"crl_text"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type RevokeRequestCreate struct {
+	Certificate     string `json:"certificate"`
+	Reason          int    `json:"reason"`
+	RequestedReason string `json:"requested_reason,omitempty"`
+}
+
+type RevokeRequestResponse struct {
+	ID              string           `json:"id"`
+	Certificate     string           `json:"certificate"`
+	Authority       AuthoritySummary `json:"authority"`
+	CommonName      string           `json:"common_name"`
+	SerialNumber    string           `json:"serial_number"`
+	Reason          int              `json:"reason"`
+	Status          string           `json:"status"`
+	RequestedReason string           `json:"requested_reason"`
+	RequestedBy     iam.UserSummary  `json:"requested_by"`
+	AddedAt         time.Time        `json:"added_at"`
+	ErrorMessage    string           `json:"error_message"`
+	HandledAt       *time.Time       `json:"handled_at"`
+}
+
+type RevokeRequestAttributes struct {
+	ID           string `json:"id" table:"ID"`
+	CommonName   string `json:"common_name" table:"Common Name"`
+	Authority    string `json:"authority"`
+	SerialNumber string `json:"serial_number" table:"Serial Number"`
+	Status       string `json:"status"`
+	RequestedBy  string `json:"requested_by" table:"Requested By"`
+	AddedAt      string `json:"added_at" table:"Added At"`
+}
+
 type CertificateAttributes struct {
 	Id        string `json:"id" table:"ID"`
 	Authority string `json:"authority"`
