@@ -99,6 +99,30 @@ func GetServerNameByID(ac *client.AlpaconClient, serverID string) (string, error
 	return response.Name, nil
 }
 
+func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
+	serverID, err := GetServerIDByName(ac, serverName)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err := GetServerDetail(ac, serverName)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := utils.ProcessEditedData(responseBody)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err = ac.SendPatchRequest(utils.BuildURL(serverURL, serverID, nil), data)
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
 func CreateServer(ac *client.AlpaconClient, serverRequest ServerRequest) (ServerCreatedResponse, error) {
 	var response ServerCreatedResponse
 	responseBody, err := ac.SendPostRequest(serverURL, serverRequest)

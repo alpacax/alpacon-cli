@@ -160,6 +160,16 @@ func DenyCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
 	return responseBody, nil
 }
 
+func RetryCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
+	relativePath := path.Join(csrId, "retry")
+	responseBody, err := ac.SendPostRequest(utils.BuildURL(signRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
 func DeleteCSR(ac *client.AlpaconClient, csrId string) error {
 	_, err := ac.SendDeleteRequest(utils.BuildURL(signRequestURL, csrId, nil))
 	if err != nil {
@@ -241,6 +251,41 @@ func DownloadCertificate(ac *client.AlpaconClient, certId string, filePath strin
 	}
 
 	return nil
+}
+
+func UpdateAuthority(ac *client.AlpaconClient, authorityId string) ([]byte, error) {
+	responseBody, err := GetAuthorityDetail(ac, authorityId)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := utils.ProcessEditedData(responseBody)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err = ac.SendPatchRequest(utils.BuildURL(authorityURL, authorityId, nil), data)
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
+func DownloadCRL(ac *client.AlpaconClient, authorityId string, filePath string) error {
+	relativePath := path.Join(authorityId, "crl")
+	body, err := ac.SendGetRequest(utils.BuildURL(authorityURL, relativePath, nil))
+	if err != nil {
+		return err
+	}
+
+	var response CRLResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return err
+	}
+
+	return utils.SaveFile(filePath, []byte(response.CrlText))
 }
 
 func DownloadRootCertificate(ac *client.AlpaconClient, authorityId string, filePath string) error {

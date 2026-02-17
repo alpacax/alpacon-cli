@@ -72,6 +72,34 @@ func CreateNote(ac *client.AlpaconClient, noteRequest NoteCreateRequest) error {
 	return nil
 }
 
+func GetNoteDetail(ac *client.AlpaconClient, noteID string) ([]byte, error) {
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(noteURL, noteID, nil))
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
+func UpdateNote(ac *client.AlpaconClient, noteID string) ([]byte, error) {
+	responseBody, err := GetNoteDetail(ac, noteID)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := utils.ProcessEditedData(responseBody)
+	if err != nil {
+		return nil, err
+	}
+
+	responseBody, err = ac.SendPatchRequest(utils.BuildURL(noteURL, noteID, nil), data)
+	if err != nil {
+		return nil, err
+	}
+
+	return responseBody, nil
+}
+
 func DeleteNote(ac *client.AlpaconClient, noteID string) error {
 	_, err := ac.SendDeleteRequest(utils.BuildURL(noteURL, noteID, nil))
 	if err != nil {

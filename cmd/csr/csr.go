@@ -25,4 +25,5 @@ func init() {
 	CsrCmd.AddCommand(csrDeleteCmd)
 	CsrCmd.AddCommand(csrDetailCmd)
 	CsrCmd.AddCommand(csrDownloadCrtCmd)
+	CsrCmd.AddCommand(csrRetryCmd)
 }

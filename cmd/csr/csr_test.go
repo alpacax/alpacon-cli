@@ -50,6 +50,10 @@ func TestCsrSubcommands(t *testing.T) {
 			name:    "download-crt subcommand",
 			cmdName: "download-crt",
 		},
+		{
+			name:    "retry subcommand",
+			cmdName: "retry",
+		},
 	}
 
 	subCmds := CsrCmd.Commands()
@@ -72,7 +76,7 @@ func TestCsrSubcommands(t *testing.T) {
 		})
 	}
 
-	assert.Equal(t, 7, len(subCmds), "should have 7 subcommands")
+	assert.Equal(t, 8, len(subCmds), "should have 8 subcommands")
 }
 
 func TestSubcommandAliases(t *testing.T) {
