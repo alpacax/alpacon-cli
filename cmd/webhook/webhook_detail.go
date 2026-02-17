@@ -8,7 +8,7 @@ import (
 )
 
 var webhookDetailCmd = &cobra.Command{
-	Use:     "describe [WEBHOOK NAME]",
+	Use:     "describe WEBHOOK",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific webhook",
 	Long: `

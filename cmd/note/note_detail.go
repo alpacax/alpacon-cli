@@ -8,7 +8,7 @@ import (
 )
 
 var noteDetailCmd = &cobra.Command{
-	Use:     "describe [NOTE ID]",
+	Use:     "describe NOTE_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific note",
 	Long: `

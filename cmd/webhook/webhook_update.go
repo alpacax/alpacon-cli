@@ -8,7 +8,7 @@ import (
 )
 
 var webhookUpdateCmd = &cobra.Command{
-	Use:   "update [WEBHOOK NAME]",
+	Use:   "update WEBHOOK",
 	Short: "Update a webhook configuration",
 	Long: `
 	Update an existing webhook configuration in the Alpacon.

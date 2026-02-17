@@ -8,8 +8,8 @@ import (
 )
 
 var revokeListCmd = &cobra.Command{
-	Use:     "list",
-	Aliases: []string{"ls", "all"},
+	Use:     "ls",
+	Aliases: []string{"list", "all"},
 	Short:   "List certificate revoke requests",
 	Long: `
 	List all certificate revoke requests with optional filtering by status or certificate.

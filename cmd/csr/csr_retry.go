@@ -8,13 +8,13 @@ import (
 )
 
 var csrRetryCmd = &cobra.Command{
-	Use:   "retry [CSR ID]",
+	Use:   "retry CSR_ID",
 	Short: "Retry a failed CSR",
 	Long: `
 	Retries a previously failed Certificate Signing Request,
 	resubmitting it for processing in the signing pipeline.
 	`,
-	Example: `alpacon csr retry [CSR ID]`,
+	Example: `alpacon csr retry CSR_ID`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		csrId := args[0]

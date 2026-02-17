@@ -8,8 +8,8 @@ import (
 )
 
 var webhookListCmd = &cobra.Command{
-	Use:     "list",
-	Aliases: []string{"ls", "all"},
+	Use:     "ls",
+	Aliases: []string{"list", "all"},
 	Short:   "List all webhooks",
 	Long: `
 	List all configured webhooks with their name, URL, status, and owner information.

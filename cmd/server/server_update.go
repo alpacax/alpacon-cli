@@ -8,7 +8,7 @@ import (
 )
 
 var serverUpdateCmd = &cobra.Command{
-	Use:   "update [SERVER NAME]",
+	Use:   "update SERVER",
 	Short: "Update the server information",
 	Long: `
 	Update the server information in the Alpacon.

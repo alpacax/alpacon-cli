@@ -8,7 +8,7 @@ import (
 )
 
 var revokeDetailCmd = &cobra.Command{
-	Use:     "describe [REQUEST ID]",
+	Use:     "describe REQUEST_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a revoke request",
 	Long: `

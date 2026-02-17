@@ -8,12 +8,12 @@ import (
 )
 
 var revokeDenyCmd = &cobra.Command{
-	Use:   "deny [REQUEST ID]",
+	Use:   "deny REQUEST_ID",
 	Short: "Deny a revoke request",
 	Long: `
 	Denies a pending certificate revoke request, preventing the certificate from being revoked.
 	`,
-	Example: `alpacon revoke deny [REQUEST ID]`,
+	Example: `alpacon revoke deny REQUEST_ID`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		requestId := args[0]

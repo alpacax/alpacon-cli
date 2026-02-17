@@ -8,15 +8,15 @@ import (
 )
 
 var revokeCancelCmd = &cobra.Command{
-	Use:   "cancel [REQUEST ID]",
+	Use:   "cancel REQUEST_ID",
 	Short: "Cancel a revoke request",
 	Long: `
 	Cancels a pending certificate revoke request by deleting it.
 	This action is irreversible.
 	`,
 	Example: `
-	alpacon revoke cancel [REQUEST ID]
-	alpacon revoke cancel [REQUEST ID] -y
+	alpacon revoke cancel REQUEST_ID
+	alpacon revoke cancel REQUEST_ID -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

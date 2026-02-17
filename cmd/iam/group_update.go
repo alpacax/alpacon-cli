@@ -8,7 +8,7 @@ import (
 )
 
 var groupUpdateCmd = &cobra.Command{
-	Use:   "update [GROUP NAME]",
+	Use:   "update GROUP",
 	Short: "Update the group information",
 	Long: `
 	Update the group information in the Alpacon.

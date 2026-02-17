@@ -8,13 +8,13 @@ import (
 )
 
 var revokeRetryCmd = &cobra.Command{
-	Use:   "retry [REQUEST ID]",
+	Use:   "retry REQUEST_ID",
 	Short: "Retry a failed revoke request",
 	Long: `
 	Retries a previously failed certificate revoke request,
 	resubmitting it for processing in the revocation pipeline.
 	`,
-	Example: `alpacon revoke retry [REQUEST ID]`,
+	Example: `alpacon revoke retry REQUEST_ID`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		requestId := args[0]

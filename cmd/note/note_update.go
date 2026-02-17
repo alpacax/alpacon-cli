@@ -8,7 +8,7 @@ import (
 )
 
 var noteUpdateCmd = &cobra.Command{
-	Use:   "update [NOTE ID]",
+	Use:   "update NOTE_ID",
 	Short: "Update a note",
 	Long: `
 	Update an existing note in the Alpacon.

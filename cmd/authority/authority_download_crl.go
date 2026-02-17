@@ -8,14 +8,14 @@ import (
 )
 
 var authorityDownloadCrlCmd = &cobra.Command{
-	Use:   "download-crl [AUTHORITY ID]",
+	Use:   "download-crl AUTHORITY_ID",
 	Short: "Download a certificate revocation list (CRL)",
 	Long: `
 	Download the certificate revocation list (CRL) from the specified authority and save it to a file.
 	The path argument should include the file name and extension where the CRL will be stored.
 	For example, '/path/to/revoked.crl'. The recommended file extension is '.crl'.`,
 	Example: `
-	alpacon authority download-crl [AUTHORITY ID] --out=/path/to/revoked.crl
+	alpacon authority download-crl AUTHORITY_ID --out=/path/to/revoked.crl
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

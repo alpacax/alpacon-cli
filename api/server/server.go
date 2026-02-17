@@ -105,7 +105,7 @@ func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 		return nil, err
 	}
 
-	responseBody, err := GetServerDetail(ac, serverName)
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(serverURL, serverID, nil))
 	if err != nil {
 		return nil, err
 	}

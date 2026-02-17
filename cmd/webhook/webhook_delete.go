@@ -8,7 +8,7 @@ import (
 )
 
 var webhookDeleteCmd = &cobra.Command{
-	Use:     "delete [WEBHOOK NAME]",
+	Use:     "delete WEBHOOK",
 	Aliases: []string{"rm"},
 	Short:   "Delete a webhook",
 	Long: `

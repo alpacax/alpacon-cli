@@ -8,7 +8,7 @@ import (
 )
 
 var authorityUpdateCmd = &cobra.Command{
-	Use:   "update [AUTHORITY ID]",
+	Use:   "update AUTHORITY_ID",
 	Short: "Update the authority information",
 	Long: `
 	Update the certificate authority information in the Alpacon.
