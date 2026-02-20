@@ -48,7 +48,7 @@ type streamSession interface {
 }
 
 var TunnelCmd = &cobra.Command{
-	Use:   "tunnel [SERVER NAME]",
+	Use:   "tunnel SERVER",
 	Short: "Create a TCP tunnel to a remote server",
 	Long: `
 	This command creates a TCP tunnel that forwards local port traffic to a remote server's port.

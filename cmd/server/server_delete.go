@@ -8,7 +8,7 @@ import (
 )
 
 var serverDeleteCmd = &cobra.Command{
-	Use:     "delete [SERVER NAME]",
+	Use:     "delete SERVER",
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified server",
 	Long: `

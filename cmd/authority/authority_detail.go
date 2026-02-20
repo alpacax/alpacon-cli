@@ -8,7 +8,7 @@ import (
 )
 
 var authorityDetailCmd = &cobra.Command{
-	Use:     "describe [AUTHORITY ID]",
+	Use:     "describe AUTHORITY_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific Certificate Authority",
 	Long: `

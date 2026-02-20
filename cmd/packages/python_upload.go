@@ -8,7 +8,7 @@ import (
 )
 
 var pythonPackageUploadCmd = &cobra.Command{
-	Use:   "upload [FILE PATH]",
+	Use:   "upload FILE",
 	Short: "Upload a python package to alpacon",
 	Long: `
 	The 'upload' command allows users to upload a Python package to the alpacon. 

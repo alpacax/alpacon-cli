@@ -8,7 +8,7 @@ import (
 )
 
 var groupDetailCmd = &cobra.Command{
-	Use:     "describe [GROUP NAME]",
+	Use:     "describe GROUP",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific group",
 	Long: `

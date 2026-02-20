@@ -8,7 +8,7 @@ import (
 )
 
 var certDetailCmd = &cobra.Command{
-	Use:     "describe [CERT ID]",
+	Use:     "describe CERT_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific Certificate",
 	Long: `

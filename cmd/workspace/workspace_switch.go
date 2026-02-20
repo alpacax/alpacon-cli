@@ -9,7 +9,7 @@ import (
 )
 
 var workspaceSwitchCmd = &cobra.Command{
-	Use:   "switch <workspace-name>",
+	Use:   "switch WORKSPACE",
 	Short: "Switch to a different workspace",
 	Long:  "Switch to another workspace in your account. The workspace must exist in your JWT token.",
 	Example: `

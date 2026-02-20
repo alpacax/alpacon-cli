@@ -8,7 +8,7 @@ import (
 )
 
 var csrDetailCmd = &cobra.Command{
-	Use:     "describe [CSR ID]",
+	Use:     "describe CSR_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific Certificate Signing Request",
 	Long: `

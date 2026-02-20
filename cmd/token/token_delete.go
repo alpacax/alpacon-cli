@@ -8,7 +8,7 @@ import (
 )
 
 var tokenDeleteCmd = &cobra.Command{
-	Use:     "delete [TOKEN NAME]",
+	Use:     "delete TOKEN",
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified api token",
 	Long: `

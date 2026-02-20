@@ -8,7 +8,7 @@ import (
 )
 
 var LogCmd = &cobra.Command{
-	Use:     "log [SERVER NAME]",
+	Use:     "log SERVER",
 	Aliases: []string{"logs"},
 	Short:   "Retrieve and display server logs",
 	Long: `Retrieve and display logs for a specified server. This command allows you 

@@ -8,7 +8,7 @@ import (
 )
 
 var userDetailCmd = &cobra.Command{
-	Use:     "describe [USER NAME]",
+	Use:     "describe USER",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific user",
 	Long: `

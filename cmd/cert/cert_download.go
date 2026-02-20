@@ -8,7 +8,7 @@ import (
 )
 
 var certDownloadCmd = &cobra.Command{
-	Use:   "download [CERT ID]",
+	Use:   "download CERT_ID",
 	Short: "Download a certificate",
 	Long: `
 	Download a certificate from the server and save it to a specified file path. 

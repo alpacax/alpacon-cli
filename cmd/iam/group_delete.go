@@ -8,7 +8,7 @@ import (
 )
 
 var groupDeleteCmd = &cobra.Command{
-	Use:     "delete [GROUP NAME]",
+	Use:     "delete GROUP",
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified group",
 	Long: `
