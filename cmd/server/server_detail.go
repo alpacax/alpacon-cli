@@ -8,7 +8,7 @@ import (
 )
 
 var serverDetailCmd = &cobra.Command{
-	Use:     "describe [SERVER NAME]",
+	Use:     "describe SERVER",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific server",
 	Long: `

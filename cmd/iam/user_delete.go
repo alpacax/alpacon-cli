@@ -8,7 +8,7 @@ import (
 )
 
 var userDeleteCmd = &cobra.Command{
-	Use:     "delete [USER NAME]",
+	Use:     "delete USER",
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified user",
 	Long: `

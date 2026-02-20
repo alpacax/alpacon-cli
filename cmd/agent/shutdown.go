@@ -8,7 +8,7 @@ import (
 )
 
 var shutdownAgentCmd = &cobra.Command{
-	Use:     "shutdown [SERVER NAME]",
+	Use:     "shutdown SERVER",
 	Short:   "Shutdown server's agent(alpamon)",
 	Example: `alpacon agent shutdown myserver`,
 	Args:    cobra.ExactArgs(1),

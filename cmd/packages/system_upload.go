@@ -8,7 +8,7 @@ import (
 )
 
 var systemPackageUploadCmd = &cobra.Command{
-	Use:   "upload [FILE PATH]",
+	Use:   "upload FILE",
 	Short: "Upload a system package to alpacon",
 	Long: `
 	The 'upload' command allows users to upload a System package to the alpacon. 

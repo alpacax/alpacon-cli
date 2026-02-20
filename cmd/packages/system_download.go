@@ -8,7 +8,7 @@ import (
 )
 
 var systemPackageDownloadCmd = &cobra.Command{
-	Use:   "download [PACKAGE NAME] [FILE PATH]",
+	Use:   "download PACKAGE FILE",
 	Short: "Download a system package from alpacon",
 	Long: `
 	The 'download' command allows users to download a System package from the alpacon.

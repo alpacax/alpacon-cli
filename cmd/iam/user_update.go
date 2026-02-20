@@ -8,7 +8,7 @@ import (
 )
 
 var userUpdateCmd = &cobra.Command{
-	Use:   "update [USER NAME]",
+	Use:   "update USER",
 	Short: "Update the user information",
 	Long: `
 	Update the user information in the Alpacon.

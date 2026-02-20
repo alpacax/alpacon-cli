@@ -8,7 +8,7 @@ import (
 )
 
 var upgradeAgentCmd = &cobra.Command{
-	Use:     "upgrade [SERVER NAME]",
+	Use:     "upgrade SERVER",
 	Short:   "Upgrade server's agent(alpamon)",
 	Example: `alpacon agent upgrade myserver`,
 	Args:    cobra.ExactArgs(1),

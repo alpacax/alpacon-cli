@@ -8,7 +8,7 @@ import (
 )
 
 var authorityDownloadCmd = &cobra.Command{
-	Use:     "download-crt [AUTHORITY ID]",
+	Use:     "download-crt AUTHORITY_ID",
 	Aliases: []string{"download-cert"},
 	Short:   "Download a root certificate",
 	Long: `

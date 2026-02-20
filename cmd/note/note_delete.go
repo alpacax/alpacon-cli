@@ -8,7 +8,7 @@ import (
 )
 
 var noteDeleteCmd = &cobra.Command{
-	Use:     "delete [NOTE ID]",
+	Use:     "delete NOTE_ID",
 	Aliases: []string{"rm"},
 	Short:   "Delete a specified note",
 	Long: `

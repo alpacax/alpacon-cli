@@ -8,7 +8,7 @@ import (
 )
 
 var csrDeleteCmd = &cobra.Command{
-	Use:     "delete [CSR ID]",
+	Use:     "delete CSR_ID",
 	Aliases: []string{"rm"},
 	Short:   "Delete a CSR",
 	Long: `

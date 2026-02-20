@@ -8,7 +8,7 @@ import (
 )
 
 var restartAgentCmd = &cobra.Command{
-	Use:     "restart [SERVER NAME]",
+	Use:     "restart SERVER",
 	Short:   "Restart server's agent(alpamon)",
 	Example: `alpacon agent restart myserver`,
 	Args:    cobra.ExactArgs(1),

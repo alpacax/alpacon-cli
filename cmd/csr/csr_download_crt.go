@@ -8,7 +8,7 @@ import (
 )
 
 var csrDownloadCrtCmd = &cobra.Command{
-	Use:   "download-crt [CSR ID]",
+	Use:   "download-crt CSR_ID",
 	Short: "Download the certificate for a CSR",
 	Long: `
 	Download the signed certificate associated with a CSR.
