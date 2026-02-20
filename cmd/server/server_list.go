@@ -9,7 +9,7 @@ import (
 
 var serverListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all servers",
 	Long: `
 	Display a detailed list of all servers registered in the Alpacon.
@@ -18,7 +18,6 @@ var serverListCmd = &cobra.Command{
 	Example: `
 	alpacon server ls
 	alpacon server list
-	alpacon server all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()

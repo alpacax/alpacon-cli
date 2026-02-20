@@ -78,7 +78,7 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 - **CLI output helpers**: `utils.CliError*/CliInfo*/CliWarning` all write to stderr. stdout is reserved for data output (tables, JSON)
 - **Group commands**: Use `RunE` (not `Run`) to show help + return error when no subcommand is given
 - **Version injection**: `utils.Version` is set via `-ldflags` at build time by GoReleaser. Local builds default to `"dev"`
-- **Subcommand aliases**: list → `["list", "all"]`, delete → `["rm"]`, describe → `["desc"]`, group → semantic alias (e.g., `workspace` → `ws`)
+- **Subcommand aliases**: list → `["list"]`, delete → `["rm"]`, describe → `["desc"]`, group → semantic alias (e.g., `workspace` → `ws`)
 
 ## Code Style Guidelines
 

@@ -9,7 +9,7 @@ import (
 
 var userListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all users",
 	Long: `
 	Display a detailed list of all users registered in the Alpacon.
@@ -18,7 +18,6 @@ var userListCmd = &cobra.Command{
 	Example: `
 	alpacon user ls
 	alpacon user list
-	alpacon user all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()

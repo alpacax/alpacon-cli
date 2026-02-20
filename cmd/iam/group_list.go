@@ -9,7 +9,7 @@ import (
 
 var groupListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all groups",
 	Long: `
 	Display a detailed list of all groups registered in the Alpacon.
@@ -19,7 +19,6 @@ var groupListCmd = &cobra.Command{
 	alpacon group ls
 	alpacon groups
 	alpacon group list
-	alpacon group all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()

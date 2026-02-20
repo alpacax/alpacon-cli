@@ -9,7 +9,7 @@ import (
 
 var tokenListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all api tokens",
 	Long: `
 	Displays a list of all API tokens issued. 
@@ -18,7 +18,6 @@ var tokenListCmd = &cobra.Command{
 	Example: `
 	alpacon token ls
 	alpacon token list
-	alpacon token all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()

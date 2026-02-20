@@ -26,7 +26,7 @@ func TestCsrSubcommands(t *testing.T) {
 		{
 			name:    "ls subcommand",
 			cmdName: "ls",
-			aliases: []string{"list", "all"},
+			aliases: []string{"list"},
 		},
 		{
 			name:    "approve subcommand",
@@ -86,7 +86,6 @@ func TestSubcommandAliases(t *testing.T) {
 		expectCmd string
 	}{
 		{name: "ls via list", alias: "list", expectCmd: "ls"},
-		{name: "ls via all", alias: "all", expectCmd: "ls"},
 		{name: "delete via rm", alias: "rm", expectCmd: "delete"},
 		{name: "describe via desc", alias: "desc", expectCmd: "describe"},
 	}

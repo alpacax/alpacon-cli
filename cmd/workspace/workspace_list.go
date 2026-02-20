@@ -9,13 +9,12 @@ import (
 
 var workspaceListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "List available workspaces",
 	Long:    "Display all workspaces associated with your account.",
 	Example: `
 	alpacon workspace ls
 	alpacon ws list
-	alpacon workspace all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()

@@ -9,7 +9,7 @@ import (
 
 var certListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all certificates",
 	Long: `
 	Retrieves and shows a detailed list of all the SSL/TLS certificates currently managed by the system, 
@@ -18,7 +18,6 @@ var certListCmd = &cobra.Command{
 	Example: `
 	alpacon cert ls
 	alpacon cert list
-	alpacon cert all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
