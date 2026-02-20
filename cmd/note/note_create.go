@@ -16,7 +16,7 @@ var noteCreateCmd = &cobra.Command{
 	Short: "Create a note on the specified server.",
 	Long: `
 	This command allows you to create a new note on a server. 
-	You can specify the server name, note content, and privacy settings.",
+	You can specify the server name, note content, and privacy settings.
 	`,
 	Example: `
 	alpacon note create 

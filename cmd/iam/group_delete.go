@@ -13,7 +13,7 @@ var groupDeleteCmd = &cobra.Command{
 	Short:   "Delete a specified group",
 	Long: `
 	This command is used to permanently delete a specified group from the Alpacon. 
-	The command requires the exact username as an argument.
+	The command requires the exact group name as an argument.
 	NOTE : alpacon(Alpacon users) group cannot delete or update memberships
 	`,
 	Example: ` 

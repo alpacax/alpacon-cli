@@ -19,7 +19,7 @@ var serverCreateCmd = &cobra.Command{
 	Create a new server with specific configurations. This command allows you to set up a server with a unique name, 
 	choose a platform, and define access permissions for different groups. 
 	`,
-	Example: `alpacon create server`,
+	Example: `alpacon server create`,
 	Run: func(cmd *cobra.Command, args []string) {
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
