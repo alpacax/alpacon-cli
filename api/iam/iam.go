@@ -108,7 +108,7 @@ func DeleteUser(ac *client.AlpaconClient, userName string) error {
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func DeleteGroup(ac *client.AlpaconClient, groupName string) error {
@@ -122,7 +122,7 @@ func DeleteGroup(ac *client.AlpaconClient, groupName string) error {
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func AddMember(ac *client.AlpaconClient, memberRequest MemberAddRequest) error {
@@ -176,7 +176,7 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) {
