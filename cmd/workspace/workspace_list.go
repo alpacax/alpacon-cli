@@ -9,7 +9,7 @@ import (
 
 var workspaceListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list"},
+	Aliases: []string{"list", "all"},
 	Short:   "List available workspaces",
 	Long:    "Display all workspaces associated with your account.",
 	Example: `
