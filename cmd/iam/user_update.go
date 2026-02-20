@@ -18,7 +18,7 @@ var userUpdateCmd = &cobra.Command{
 	Due to these factors, after successfully executing the update command, the return of user information allows for verification of the modifications.
 	`,
 	Example: `
-	alpacon user update [USER_NAME]
+	alpacon user update john
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

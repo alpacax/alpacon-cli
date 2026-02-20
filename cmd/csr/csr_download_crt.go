@@ -15,7 +15,7 @@ var csrDownloadCrtCmd = &cobra.Command{
 	The CSR must be in 'signed' status for the certificate to be available.
 	Use 'alpacon csr ls' to check the status of your CSRs.`,
 	Example: `
-	alpacon csr download-crt [CSR ID] --out=/path/to/certificate.crt`,
+	alpacon csr download-crt 550e8400-e29b-41d4-a716-446655440000 --out=/path/to/certificate.crt`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		csrId := args[0]

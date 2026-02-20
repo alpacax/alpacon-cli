@@ -16,9 +16,10 @@ var groupDeleteCmd = &cobra.Command{
 	The command requires the exact username as an argument.
 	NOTE : alpacon(Alpacon users) group cannot delete or update memberships
 	`,
-	Example: ` 
-	alpacon group delete [GROUP NAME]
-	alpacon group rm [GROUP NAME]
+	Example: `
+	alpacon group delete developers
+	alpacon group rm developers
+	alpacon group delete developers -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

@@ -15,8 +15,8 @@ var aclAddCmd = &cobra.Command{
 	The add command allows you to define access to specific commands for API tokens.
 	`,
 	Example: `
-	alpacon token acl add [TOKEN_ID_OR_NAME] 
-	alpacon token acl add --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
+	alpacon token acl add
+	alpacon token acl add --token=my-api-token --command="server ls"
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		token, _ := cmd.Flags().GetString("token")

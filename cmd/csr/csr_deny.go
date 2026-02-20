@@ -14,7 +14,7 @@ var csrDenyCmd = &cobra.Command{
 	Rejects a Certificate Signing Request, marking it as denied and stopping any further processing 
 	or signing activities for that request
 	`,
-	Example: `alpacon csr deny [CSR ID] `,
+	Example: `alpacon csr deny 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		csrId := args[0]

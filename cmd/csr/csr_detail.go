@@ -15,8 +15,9 @@ var csrDetailCmd = &cobra.Command{
 	The describe command fetches and displays detailed information about a specific certificate signing request, 
 	including its csr text, certificate authority and other relevant attributes. 
 	`,
-	Example: ` 
-	alpacon csr describe [CSR ID]
+	Example: `
+	alpacon csr describe 550e8400-e29b-41d4-a716-446655440000
+	alpacon csr desc 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

@@ -37,13 +37,13 @@ var loginCmd = &cobra.Command{
 	alpacon login alpacon.example.com
 
 	# Login via API Token
-	alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
+	alpacon login myworkspace.us1.alpacon.io -t apikey1234
 
 	# Legacy username/password
-	alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
+	alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
 
 	# Skip TLS certificate verification
-	alpacon login [WORKSPACE_URL] --insecure
+	alpacon login myworkspace.us1.alpacon.io --insecure
 	`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

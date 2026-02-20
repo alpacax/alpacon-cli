@@ -15,9 +15,9 @@ var userDetailCmd = &cobra.Command{
 	The describe command fetches and displays detailed information about a specific user, 
 	including its description, shell and other relevant attributes. 
 	`,
-	Example: ` 
-	# Display details of a user named 'admin'
-  	alpacon user describe admin
+	Example: `
+	alpacon user describe john
+	alpacon user desc john
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

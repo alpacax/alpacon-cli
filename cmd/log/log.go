@@ -16,10 +16,10 @@ var LogCmd = &cobra.Command{
 	to limit the output to the last N log entries. Suitable for debugging and monitoring 
 	server activities.`,
 	Example: `
-	alpacon log [SERVER NAME]
-	alpacon logs [SERVER_NAME]
-	alpacon log [SERVER NAME] --tail=10
-	alpacon logs [SERVER NAME] --tail=10
+	alpacon log my-server
+	alpacon logs my-server
+	alpacon log my-server --tail=10
+	alpacon logs my-server --tail=10
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

@@ -15,8 +15,9 @@ var authorityDetailCmd = &cobra.Command{
 	The describe command fetches and displays detailed information about a specific certificate authority, 
 	including its crt text, organization and other relevant attributes. 
 	`,
-	Example: ` 
-	alpacon authority describe [AUTHORITY ID]
+	Example: `
+	alpacon authority describe 550e8400-e29b-41d4-a716-446655440000
+	alpacon authority desc 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
