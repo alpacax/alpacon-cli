@@ -16,9 +16,10 @@ var noteDeleteCmd = &cobra.Command{
 	It's important to verify that you have the necessary permissions to delete a note before using this command. 
 	The command requires an exact note ID as its argument.
 	`,
-	Example: ` 
-	alpacon server delete [NOTE ID]	
-	alpacon server rm [NOTE ID]
+	Example: `
+	alpacon note delete 550e8400-e29b-41d4-a716-446655440000
+	alpacon note rm 550e8400-e29b-41d4-a716-446655440000
+	alpacon note delete 550e8400-e29b-41d4-a716-446655440000 -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
