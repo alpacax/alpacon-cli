@@ -9,7 +9,7 @@ import (
 
 var csrListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all certificate signing requests",
 	Long: `
 	Display CSRs, optionally filtered by status ('requested', 'processing', 'signed',
@@ -18,7 +18,6 @@ var csrListCmd = &cobra.Command{
 	Example: `
 	alpacon csr ls
 	alpacon csr list
-	alpacon csr all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		status, _ := cmd.Flags().GetString("status")

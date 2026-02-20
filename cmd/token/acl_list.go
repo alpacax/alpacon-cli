@@ -10,16 +10,15 @@ import (
 
 var aclListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display all command ACLs for an API token.",
 	Long: `
 	This command displays all command access control lists (ACLs) registered to an API token. 
 	It shows details such as the token name and the commands associated with each ACL.
 	`,
 	Example: `
-	alpacon token acl ls [TOKEN_ID_OR_NAME] 
+	alpacon token acl ls [TOKEN_ID_OR_NAME]
 	alpacon token acl list [TOKEN_ID_OR_NAME]
-	alpacon token acl all [TOKEN_ID_OR_NAME]  
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

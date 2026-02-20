@@ -9,7 +9,7 @@ import (
 
 var authorityListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all certificate authorities",
 	Long: `
  	Displays a comprehensive list of all certificate authorities that have been initialized within the system, 
@@ -18,7 +18,6 @@ var authorityListCmd = &cobra.Command{
 	Example: `
 	alpacon authority ls
 	alpacon authority list
-	alpacon authority all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 

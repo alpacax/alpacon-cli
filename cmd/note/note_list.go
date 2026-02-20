@@ -9,7 +9,7 @@ import (
 
 var noteListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all notes",
 	Long: `
 	This command displays a comprehensive list of all notes stored on the Alpacon. 
@@ -19,7 +19,6 @@ var noteListCmd = &cobra.Command{
 	Example: `
 	alpacon note ls
 	alpacon note list
-	alpacon note all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()

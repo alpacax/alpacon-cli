@@ -9,7 +9,7 @@ import (
 
 var pythonPackageListCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list", "all"},
+	Aliases: []string{"list"},
 	Short:   "Display a list of all python packages",
 	Long: `
 	Display a detailed list of all python packages registered in the Alpacon.
@@ -18,7 +18,6 @@ var pythonPackageListCmd = &cobra.Command{
 	Example: `
 	alpacon package python ls
 	alpacon package python list
-	alpacon package python all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
