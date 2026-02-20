@@ -15,6 +15,7 @@ var workspaceListCmd = &cobra.Command{
 	Example: `
 	alpacon workspace ls
 	alpacon ws list
+	alpacon workspace all
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
