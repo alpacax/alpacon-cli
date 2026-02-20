@@ -15,9 +15,10 @@ var csrDeleteCmd = &cobra.Command{
  	Removes a Certificate Signing Request from the system, 
 	effectively canceling the request and any associated processing.
 	`,
-	Example: ` 
-	alpacon csr delete [CSR ID]	
-	alpacon csr rm [CSR ID]
+	Example: `
+	alpacon csr delete 550e8400-e29b-41d4-a716-446655440000
+	alpacon csr rm 550e8400-e29b-41d4-a716-446655440000
+	alpacon csr delete 550e8400-e29b-41d4-a716-446655440000 -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

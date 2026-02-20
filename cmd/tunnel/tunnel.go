@@ -55,24 +55,17 @@ var TunnelCmd = &cobra.Command{
 	The tunnel uses WebSocket + smux multiplexing for efficient connection handling.
 	`,
 	Example: `
-	// Create a tunnel to a remote server
-	alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT]
+	# Create a tunnel to forward local port 9000 to remote port 8082
+	alpacon tunnel my-server -l 9000 -r 8082
 
-	// Forward local port 9000 to remote server's port 8082
-	alpacon tunnel [SERVER NAME] --local 9000 --remote 8082
+	# Forward local port 9000 to remote port 8082 (long flags)
+	alpacon tunnel my-server --local 9000 --remote 8082
 
-	// Forward local port 2222 to remote server's SSH port (22)
-	alpacon tunnel [SERVER NAME] -l 2222 -r 22
+	# Forward local port 2222 to remote server's SSH port (22)
+	alpacon tunnel my-server -l 2222 -r 22
 
-	// Specify username and groupname for the tunnel
-	alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT] -u [USER NAME] -g [GROUP NAME]
-
-	Flags:
-	-l, --local [PORT]                 Local port to listen on (required).
-	-r, --remote [PORT]                Remote port to connect to (required).
-	-u, --username [USER NAME]         Username for the tunnel.
-	-g, --groupname [GROUP NAME]       Groupname for the tunnel.
-	-v, --verbose                      Show connection logs.
+	# Specify username and groupname for the tunnel
+	alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
 	`,
 	Args: cobra.ExactArgs(1),
 	Run:  runTunnel,

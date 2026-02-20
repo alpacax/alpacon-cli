@@ -14,7 +14,7 @@ var csrApproveCmd = &cobra.Command{
 	Reviews and approves a pending Certificate Signing Request, 
 	moving it forward in the signing process to eventually be issued as a valid certificate.
 	`,
-	Example: `alpacon csr approve [CSR ID] `,
+	Example: `alpacon csr approve 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		csrId := args[0]

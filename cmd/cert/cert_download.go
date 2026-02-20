@@ -15,7 +15,7 @@ var certDownloadCmd = &cobra.Command{
 	The path argument should include the file name and extension where the certificate will be stored. 
 	For example, '/path/to/certificate.crt'. The recommended file extension for certificates is '.crt'.`,
 	Example: `
-	alpacon cert download [CERT ID] --out=/path/to/certificate.crt
+	alpacon cert download 550e8400-e29b-41d4-a716-446655440000 --out=/path/to/certificate.crt
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

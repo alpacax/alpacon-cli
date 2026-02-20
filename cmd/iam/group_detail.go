@@ -15,9 +15,9 @@ var groupDetailCmd = &cobra.Command{
 	The describe command fetches and displays detailed information about a specific group, 
 	including its description, member names and other relevant attributes. 
 	`,
-	Example: ` 
-	# Display details of a group named 'alpacon'
-  	alpacon group describe alpacon
+	Example: `
+	alpacon group describe developers
+	alpacon group desc developers
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

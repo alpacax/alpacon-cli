@@ -19,9 +19,8 @@ var noteCreateCmd = &cobra.Command{
 	You can specify the server name, note content, and privacy settings.
 	`,
 	Example: `
-	alpacon note create 
-	alpacon note create -s [SERVER NAME]
-	alpacon note create -s myserver -c "hello world!" -p true
+	alpacon note create
+	alpacon note create -s my-server -c "hello world!" -p true
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if noteRequest.Server == "" {

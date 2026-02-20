@@ -17,8 +17,9 @@ var serverDeleteCmd = &cobra.Command{
 	The command requires the exact server name as an argument.
 	`,
 	Example: `
-	alpacon server delete [SERVER NAME]
-	alpacon server rm [SERVER NAME]
+	alpacon server delete my-server
+	alpacon server rm my-server
+	alpacon server delete my-server -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

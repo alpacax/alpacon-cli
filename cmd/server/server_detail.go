@@ -16,9 +16,9 @@ var serverDetailCmd = &cobra.Command{
 	including its status, and other relevant attributes. 
 	This command is useful for getting an in-depth understanding of a server's current state and configuration.
 	`,
-	Example: ` 
-	# Display details of a server named 'myserver'
-  	alpacon server describe myserver
+	Example: `
+	alpacon server describe my-server
+	alpacon server desc my-server
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
