@@ -176,7 +176,7 @@ func DeleteCSR(ac *client.AlpaconClient, csrId string) error {
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func DeleteCA(ac *client.AlpaconClient, authorityId string) error {
@@ -185,7 +185,7 @@ func DeleteCA(ac *client.AlpaconClient, authorityId string) error {
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, error) {

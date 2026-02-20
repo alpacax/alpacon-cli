@@ -106,5 +106,5 @@ func DeleteNote(ac *client.AlpaconClient, noteID string) error {
 		return err
 	}
 
-	return err
+	return nil
 }
