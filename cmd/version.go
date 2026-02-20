@@ -11,7 +11,7 @@ import (
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
-	Short: "Displays the current CLI version.",
+	Short: "Display the current CLI version",
 	Long:  "Displays the current version of the CLI and checks if there is an available update.",
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.CliInfo("Current version: %s", utils.Version)

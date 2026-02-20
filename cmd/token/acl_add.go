@@ -10,7 +10,7 @@ import (
 
 var aclAddCmd = &cobra.Command{
 	Use:   "add",
-	Short: "Add a new command ACL with specific token and command.",
+	Short: "Add a new command ACL with specific token and command",
 	Long: `
 	The add command allows you to define access to specific commands for API tokens.
 	`,

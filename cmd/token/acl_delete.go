@@ -10,7 +10,7 @@ import (
 var aclDeleteCmd = &cobra.Command{
 	Use:     "delete",
 	Aliases: []string{"rm"},
-	Short:   "Delete the specified command ACL from an API token.",
+	Short:   "Delete the specified command ACL from an API token",
 	Long: `
 	Removes an existing command acl from the API token
 	This command requires the command acl id to identify the command acl to be deleted.
