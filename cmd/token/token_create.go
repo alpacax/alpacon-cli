@@ -14,7 +14,7 @@ var tokenCreateCmd = &cobra.Command{
 	Generates a new API token for accessing the server. 
 	This command allows you to create a token by specifying options such as token name, expiration, and limits
 	`,
-	Example: `alpacon create token`,
+	Example: `alpacon token create`,
 	Run: func(cmd *cobra.Command, args []string) {
 		name, _ := cmd.Flags().GetString("name")
 		limit, _ := cmd.Flags().GetBool("limit")

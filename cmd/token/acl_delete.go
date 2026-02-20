@@ -16,9 +16,8 @@ var aclDeleteCmd = &cobra.Command{
 	This command requires the command acl id to identify the command acl to be deleted.
 	`,
 	Example: `
-	alpacon token acl delete [COMMAND_ACL_ID]
-	alpacon token acl rm [COMMAND_ACL_ID]
-	alpacon token acl rm --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
+	alpacon token acl delete 550e8400-e29b-41d4-a716-446655440000
+	alpacon token acl rm 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
