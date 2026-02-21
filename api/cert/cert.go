@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"regexp"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+var uuidRegex = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const (
 	authorityURL   = "/api/cert/authorities/"
@@ -114,6 +117,9 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 }
 
 func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error) {
+	if uuidRegex.MatchString(name) {
+		return name, nil
+	}
 	authorities, err := api.FetchAllPages[AuthorityResponse](ac, authorityURL, nil)
 	if err != nil {
 		return "", err

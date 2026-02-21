@@ -68,6 +68,9 @@ var csrCreateCmd = &cobra.Command{
 			if len(signRequest.DomainList) == 0 && len(signRequest.IpList) == 0 {
 				utils.CliErrorWithExit("You must provide at least one valid domain or IP address.")
 			}
+			if csrFlags.validDays <= 0 {
+				utils.CliErrorWithExit("--valid-days must be a positive integer.")
+			}
 			signRequest.ValidDays = csrFlags.validDays
 			commonName := firstOf(signRequest.DomainList, signRequest.IpList)
 			certPath.PrivateKeyPath = csrFlags.keyPath
