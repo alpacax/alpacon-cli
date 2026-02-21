@@ -17,6 +17,7 @@ var webhookDetailCmd = &cobra.Command{
 	`,
 	Example: `
 	alpacon webhook describe my-webhook
+	alpacon webhook desc my-webhook
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
