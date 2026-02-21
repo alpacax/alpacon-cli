@@ -173,6 +173,10 @@ func EnsureSecureConnection(client *client.AlpaconClient) {
 	if !isTLS {
 		utils.CliWarning("The connection to %s might not be secure.", client.BaseURL)
 
+		if !utils.IsInteractiveShell() {
+			utils.CliErrorWithExit("Cannot confirm insecure connection in a non-interactive environment. Configure the Alpacon API endpoint to use HTTPS.")
+		}
+
 		proceed := utils.PromptForBool("Do you want to proceed with the CSR submission?")
 		if !proceed {
 			utils.CliErrorWithExit("CSR submission cancelled by user.")
