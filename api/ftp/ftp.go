@@ -94,8 +94,8 @@ func executeUpload(ac *client.AlpaconClient, uploadRequest *UploadRequest, conte
 		return err
 	}
 
-	if response.UploadUrl != "" {
-		if err := uploadToS3(ac.HTTPClient, response.UploadUrl, bytes.NewReader(content)); err != nil {
+	if response.UploadURL != "" {
+		if err := uploadToS3(ac.HTTPClient, response.UploadURL, bytes.NewReader(content)); err != nil {
 			return err
 		}
 	}

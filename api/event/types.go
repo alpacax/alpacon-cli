@@ -3,8 +3,7 @@ package event
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 )
 
 type EventAttributes struct {
@@ -18,17 +17,17 @@ type EventAttributes struct {
 }
 
 type EventDetails struct {
-	ID            string                 `json:"id"`
-	Shell         string                 `json:"shell"`
-	Line          string                 `json:"line"`
-	Success       *bool                  `json:"success"`
-	Result        string                 `json:"result"`
-	Status        map[string]any `json:"status"`
-	ResponseDelay float64                `json:"response_delay"`
-	ElapsedTime   float64                `json:"elapsed_time"`
-	AddedAt       time.Time              `json:"added_at"`
-	Server        server.ServerInfo       `json:"server"`
-	RequestedBy   iam.UserSummary        `json:"requested_by"`
+	ID            string             `json:"id"`
+	Shell         string             `json:"shell"`
+	Line          string             `json:"line"`
+	Success       *bool              `json:"success"`
+	Result        string             `json:"result"`
+	Status        map[string]any     `json:"status"`
+	ResponseDelay float64            `json:"response_delay"`
+	ElapsedTime   float64            `json:"elapsed_time"`
+	AddedAt       time.Time          `json:"added_at"`
+	Server        types.ServerSummary `json:"server"`
+	RequestedBy   types.UserSummary  `json:"requested_by"`
 }
 
 type CommandRequest struct {
@@ -44,15 +43,15 @@ type CommandRequest struct {
 }
 
 type CommandResponse struct {
-	ID          string          `json:"id"`
-	Shell       string          `json:"shell"`
-	Line        string          `json:"line"`
-	Data        string          `json:"data"`
-	Username    string          `json:"username"`
-	Groupname   string          `json:"groupname"`
-	AddedAt     time.Time       `json:"added_at"`
-	ScheduledAt time.Time       `json:"scheduled_at"`
-	Server      server.ServerInfo `json:"server"`
-	RequestedBy iam.UserSummary   `json:"requested_by"`
-	RunAfter    []any             `json:"run_after"`
+	ID          string              `json:"id"`
+	Shell       string              `json:"shell"`
+	Line        string              `json:"line"`
+	Data        string              `json:"data"`
+	Username    string              `json:"username"`
+	Groupname   string              `json:"groupname"`
+	AddedAt     time.Time           `json:"added_at"`
+	ScheduledAt time.Time           `json:"scheduled_at"`
+	Server      types.ServerSummary `json:"server"`
+	RequestedBy types.UserSummary   `json:"requested_by"`
+	RunAfter    []any               `json:"run_after"`
 }

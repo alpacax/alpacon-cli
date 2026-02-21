@@ -3,20 +3,20 @@ package audit
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/types"
 )
 
 type AuditLogEntry struct {
-	ID          int              `json:"id"`
-	User        *iam.UserSummary `json:"user"`
-	Username    string           `json:"username"`
-	IP          string           `json:"ip"`
-	App         string           `json:"app"`
-	Action      string           `json:"action"`
-	StatusCode  int              `json:"status_code"`
-	AddedAt     time.Time        `json:"added_at"`
-	Model       string           `json:"model"`
-	Description string           `json:"description"`
+	ID          string             `json:"id"`
+	User        *types.UserSummary `json:"user"`
+	Username    string             `json:"username"`
+	IP          string             `json:"ip"`
+	App         string             `json:"app"`
+	Action      string             `json:"action"`
+	StatusCode  int                `json:"status_code"`
+	AddedAt     time.Time          `json:"added_at"`
+	Model       string             `json:"model"`
+	Description string             `json:"description"`
 }
 
 type AuditLogAttributes struct {

@@ -9,8 +9,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	iamapi "github.com/alpacax/alpacon-cli/api/iam"
-	serverapi "github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 )
 
@@ -34,8 +33,8 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 			}
 
 			results := []NoteResponse{
-				{ID: "note-1", Server: serverapi.ServerInfo{ID: "srv-1", Name: "test-server"}, Author: iamapi.UserSummary{Name: "test-user"}, Content: "hello", Private: false},
-				{ID: "note-2", Server: serverapi.ServerInfo{ID: "srv-1", Name: "test-server"}, Author: iamapi.UserSummary{Name: "test-user"}, Content: "world", Private: true},
+				{ID: "note-1", Server: types.ServerSummary{ID: "srv-1", Name: "test-server"}, Author: types.UserSummary{Name: "test-user"}, Content: "hello", Private: false},
+				{ID: "note-2", Server: types.ServerSummary{ID: "srv-1", Name: "test-server"}, Author: types.UserSummary{Name: "test-user"}, Content: "world", Private: true},
 			}
 
 			resp := api.ListResponse[NoteResponse]{
