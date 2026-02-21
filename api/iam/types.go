@@ -85,7 +85,6 @@ type GroupResponse struct {
 	GID          int                  `json:"gid"`
 	IsLDAPGroup  bool                 `json:"is_ldap_group"`
 	Servers      []types.ServerSummary `json:"servers"`
-	ServersNames []string             `json:"servers_names"`
 }
 
 type GroupCreateRequest struct {
