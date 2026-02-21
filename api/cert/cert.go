@@ -73,7 +73,7 @@ func GetCSRList(ac *client.AlpaconClient, status string) ([]CSRAttributes, error
 	var csrList []CSRAttributes
 	for _, csr := range csrs {
 		csrList = append(csrList, CSRAttributes{
-			Id:            csr.Id,
+			ID:            csr.ID,
 			Name:          csr.CommonName,
 			Authority:     csr.Authority.Name,
 			DomainList:    csr.DomainList,
@@ -97,7 +97,7 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 	var authorityList []AuthorityAttributes
 	for _, authority := range authorities {
 		authorityList = append(authorityList, AuthorityAttributes{
-			Id:               authority.Id,
+			ID:               authority.ID,
 			Name:             authority.Name,
 			Organization:     authority.Organization,
 			Domain:           authority.Domain,
@@ -197,7 +197,7 @@ func GetCertificateList(ac *client.AlpaconClient) ([]CertificateAttributes, erro
 	var certList []CertificateAttributes
 	for _, cert := range certs {
 		certList = append(certList, CertificateAttributes{
-			Id:        cert.Id,
+			ID:        cert.ID,
 			Authority: cert.Authority.Name,
 			Csr:       cert.Csr,
 			ValidDays: cert.ValidDays,
@@ -227,7 +227,7 @@ func DownloadCertificateByCSR(ac *client.AlpaconClient, csrId string, filePath s
 	}
 
 	if detail.CrtText == "" {
-		return fmt.Errorf("certificate text is empty for signed CSR (id: %s)", detail.Id)
+		return fmt.Errorf("certificate text is empty for signed CSR (id: %s)", detail.ID)
 	}
 
 	return utils.SaveFile(filePath, []byte(detail.CrtText))

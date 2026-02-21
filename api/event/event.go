@@ -94,7 +94,7 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 		return "", err
 	}
 
-	result, err := PollCommandExecution(ac, cmdResponse[0].Id)
+	result, err := PollCommandExecution(ac, cmdResponse[0].ID)
 	if err != nil {
 		return "", err
 	}

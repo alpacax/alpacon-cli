@@ -30,7 +30,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := 0; i < 100; i++ {
 				results = append(results, CommandAclResponse{
-					Id:      fmt.Sprintf("acl-%d", i),
+					ID:      fmt.Sprintf("acl-%d", i),
 					Token:   "token-id-1",
 					Command: fmt.Sprintf("cmd-%d", i),
 				})
@@ -38,7 +38,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 		case "2":
 			for i := 0; i < 50; i++ {
 				results = append(results, CommandAclResponse{
-					Id:      fmt.Sprintf("acl-p2-%d", i),
+					ID:      fmt.Sprintf("acl-p2-%d", i),
 					Token:   "token-id-1",
 					Command: fmt.Sprintf("cmd-p2-%d", i),
 				})

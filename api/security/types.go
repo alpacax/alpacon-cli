@@ -6,7 +6,7 @@ type CommandAclRequest struct {
 }
 
 type CommandAclResponse struct {
-	Id        string `json:"id"`
+	ID        string `json:"id"`
 	Token     string `json:"token"`
 	TokenName string `json:"token_name"`
 	Command   string `json:"command"`

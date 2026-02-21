@@ -16,7 +16,7 @@ type SignRequest struct {
 }
 
 type SignRequestResponse struct {
-	Id           string          `json:"id"`
+	ID           string          `json:"id"`
 	Organization string          `json:"organization"`
 	CommonName   string          `json:"common_name"`
 	DomainList   []string        `json:"domain_list"`
@@ -41,7 +41,7 @@ type AuthorityRequest struct {
 }
 
 type AuthorityCreateResponse struct {
-	Id               string          `json:"id"`
+	ID               string          `json:"id"`
 	Name             string          `json:"name"`
 	Organization     string          `json:"organization"`
 	Domain           string          `json:"domain"`
@@ -55,7 +55,7 @@ type AuthorityCreateResponse struct {
 }
 
 type AuthorityResponse struct {
-	Id               string          `json:"id"`
+	ID               string          `json:"id"`
 	Name             string          `json:"name"`
 	Organization     string          `json:"organization"`
 	Domain           string          `json:"domain"`
@@ -70,7 +70,7 @@ type AuthorityResponse struct {
 }
 
 type AuthorityAttributes struct {
-	Id               string `json:"id" table:"ID"`
+	ID               string `json:"id" table:"ID"`
 	Name             string `json:"name"`
 	Organization     string `json:"organization"`
 	Domain           string `json:"domain"`
@@ -83,7 +83,7 @@ type AuthorityAttributes struct {
 }
 
 type AuthorityDetails struct {
-	Id               string          `json:"id"`
+	ID               string          `json:"id"`
 	Name             string          `json:"name"`
 	Organization     string          `json:"organization"`
 	Domain           string          `json:"domain"`
@@ -103,13 +103,13 @@ type AuthorityDetails struct {
 }
 
 type AuthoritySummary struct {
-	Id    string          `json:"id"`
+	ID    string          `json:"id"`
 	Name  string          `json:"name"`
 	Owner iam.UserSummary `json:"owner"`
 }
 
 type SignRequestDetail struct {
-	Id         string `json:"id"`
+	ID         string `json:"id"`
 	CommonName string `json:"common_name"`
 	Status     string `json:"status"`
 	CrtText    string `json:"crt_text"`
@@ -120,7 +120,7 @@ type CSRSubmit struct {
 }
 
 type CSRResponse struct {
-	Id          string            `json:"id"`
+	ID          string            `json:"id"`
 	Authority   AuthorityResponse `json:"authority"`
 	CommonName  string            `json:"common_name"`
 	DomainList  []string          `json:"domain_list"`
@@ -133,7 +133,7 @@ type CSRResponse struct {
 }
 
 type CSRAttributes struct {
-	Id            string   `json:"id" table:"ID"`
+	ID            string   `json:"id" table:"ID"`
 	Name          string   `json:"name"` // Derived from the first domain in the CSR domain list
 	Authority     string   `json:"authority"`
 	DomainList    []string `json:"domain_list" table:"Domain List"`
@@ -145,7 +145,7 @@ type CSRAttributes struct {
 }
 
 type Certificate struct {
-	Id        string           `json:"id"`
+	ID        string           `json:"id"`
 	Authority AuthoritySummary `json:"authority"`
 	Csr       string           `json:"csr"`
 	CrtText   string           `json:"crt_text"`
@@ -193,7 +193,7 @@ type RevokeRequestAttributes struct {
 }
 
 type CertificateAttributes struct {
-	Id        string `json:"id" table:"ID"`
+	ID        string `json:"id" table:"ID"`
 	Authority string `json:"authority"`
 	Csr       string `json:"csr" table:"CSR"`
 	ValidDays int    `json:"valid_days" table:"Valid Days"`
