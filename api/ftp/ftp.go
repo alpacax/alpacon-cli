@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -224,14 +225,25 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte,
 }
 
 func saveDownloadedContent(content []byte, dest, remotePath string, recursive bool) error {
-	var fileName string
+	var filePath string
 	if recursive {
-		fileName = filepath.Base(remotePath) + ".zip"
+		fileName := filepath.Base(remotePath) + ".zip"
+		filePath = filepath.Join(dest, fileName)
 	} else {
-		fileName = filepath.Base(remotePath)
+		// If dest is an existing directory or ends with a separator, append the remote filename.
+		// Otherwise treat dest as the target file path directly (cp-style rename semantics).
+		info, err := os.Stat(dest)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to access destination %q: %w", dest, err)
+		}
+		destHasTrailingSep := len(dest) > 0 && os.IsPathSeparator(dest[len(dest)-1])
+		if (err == nil && info.IsDir()) || destHasTrailingSep {
+			filePath = filepath.Join(dest, filepath.Base(remotePath))
+		} else {
+			filePath = dest
+		}
 	}
 
-	filePath := filepath.Join(dest, fileName)
 	if err := utils.SaveFile(filePath, content); err != nil {
 		return fmt.Errorf("failed to save file locally: %w", err)
 	}
