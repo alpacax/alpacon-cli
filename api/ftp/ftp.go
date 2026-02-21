@@ -233,7 +233,11 @@ func saveDownloadedContent(content []byte, dest, remotePath string, recursive bo
 		// If dest is an existing directory or ends with a separator, append the remote filename.
 		// Otherwise treat dest as the target file path directly (cp-style rename semantics).
 		info, err := os.Stat(dest)
-		if (err == nil && info.IsDir()) || strings.HasSuffix(dest, string(filepath.Separator)) {
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to access destination %q: %w", dest, err)
+		}
+		destHasTrailingSep := len(dest) > 0 && os.IsPathSeparator(dest[len(dest)-1])
+		if (err == nil && info.IsDir()) || destHasTrailingSep {
 			filePath = filepath.Join(dest, filepath.Base(remotePath))
 		} else {
 			filePath = dest
