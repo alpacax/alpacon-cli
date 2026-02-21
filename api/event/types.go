@@ -44,7 +44,7 @@ type CommandRequest struct {
 }
 
 type CommandResponse struct {
-	Id          string          `json:"id"`
+	ID          string          `json:"id"`
 	Shell       string          `json:"shell"`
 	Line        string          `json:"line"`
 	Data        string          `json:"data"`

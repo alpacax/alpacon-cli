@@ -31,7 +31,7 @@ type DownloadResponse struct {
 }
 
 type UploadRequest struct {
-	Id             string `json:"id"`
+	ID             string `json:"id"`
 	Name           string `json:"name"`
 	Path           string `json:"path"`
 	Server         string `json:"server"`
@@ -42,7 +42,7 @@ type UploadRequest struct {
 }
 
 type UploadResponse struct {
-	Id        string    `json:"id"`
+	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Path      string    `json:"path"`
 	Size      int               `json:"size"`

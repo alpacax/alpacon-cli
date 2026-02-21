@@ -99,13 +99,13 @@ func executeUpload(ac *client.AlpaconClient, uploadRequest *UploadRequest, conte
 		}
 	}
 
-	relativePath := path.Join(response.Id, "upload")
+	relativePath := path.Join(response.ID, "upload")
 	fullURL := utils.BuildURL(uploadAPIURL, relativePath, nil)
 	if _, err := ac.SendGetRequest(fullURL); err != nil {
 		return err
 	}
 
-	success, message, err := PollTransferStatus(ac, "upload", response.Id)
+	success, message, err := PollTransferStatus(ac, "upload", response.ID)
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -123,7 +123,7 @@ func uploadSingleFile(ac *client.AlpaconClient, filePath, remotePath, serverID, 
 	}
 
 	uploadRequest := &UploadRequest{
-		Id:             uuid.New().String(),
+		ID:             uuid.New().String(),
 		Name:           filepath.Base(filePath),
 		Path:           remotePath,
 		Server:         serverID,
@@ -163,7 +163,7 @@ func uploadSingleFolder(ac *client.AlpaconClient, folderPath, remotePath, server
 	}
 
 	uploadRequest := &UploadRequest{
-		Id:             uuid.New().String(),
+		ID:             uuid.New().String(),
 		AllowUnzip:     "true",
 		AllowOverwrite: "true",
 		Name:           filepath.Base(folderPath) + ".zip",

@@ -42,7 +42,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := 0; i < 100; i++ {
 				results = append(results, CSRResponse{
-					Id:         fmt.Sprintf("csr-%d", i),
+					ID:         fmt.Sprintf("csr-%d", i),
 					CommonName: fmt.Sprintf("cn-%d", i),
 					Authority: AuthorityResponse{
 						Name: "auth-test",
@@ -53,7 +53,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 		case "2":
 			for i := 0; i < 50; i++ {
 				results = append(results, CSRResponse{
-					Id:         fmt.Sprintf("csr-p2-%d", i),
+					ID:         fmt.Sprintf("csr-p2-%d", i),
 					CommonName: fmt.Sprintf("cn-p2-%d", i),
 					Authority: AuthorityResponse{
 						Name: "auth-test",
@@ -114,7 +114,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := 0; i < 100; i++ {
 				results = append(results, AuthorityResponse{
-					Id:   fmt.Sprintf("auth-%d", i),
+					ID:   fmt.Sprintf("auth-%d", i),
 					Name: fmt.Sprintf("authority-%d", i),
 					Owner: iam.UserSummary{
 						Name: "admin",
@@ -124,7 +124,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 		case "2":
 			for i := 0; i < 50; i++ {
 				results = append(results, AuthorityResponse{
-					Id:   fmt.Sprintf("auth-p2-%d", i),
+					ID:   fmt.Sprintf("auth-p2-%d", i),
 					Name: fmt.Sprintf("authority-p2-%d", i),
 					Owner: iam.UserSummary{
 						Name: "admin",
@@ -184,7 +184,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := 0; i < 100; i++ {
 				results = append(results, Certificate{
-					Id: fmt.Sprintf("cert-%d", i),
+					ID: fmt.Sprintf("cert-%d", i),
 					Authority: AuthoritySummary{
 						Name: "auth-test",
 					},
@@ -193,7 +193,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 		case "2":
 			for i := 0; i < 50; i++ {
 				results = append(results, Certificate{
-					Id: fmt.Sprintf("cert-p2-%d", i),
+					ID: fmt.Sprintf("cert-p2-%d", i),
 					Authority: AuthoritySummary{
 						Name: "auth-test",
 					},
@@ -236,7 +236,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 
 func TestCreateSignRequest(t *testing.T) {
 	expectedResponse := SignRequestResponse{
-		Id:         "new-csr-id",
+		ID:         "new-csr-id",
 		CommonName: "example.com",
 		Status:     "requested",
 		SubmitURL:  "/api/cert/sign-requests/new-csr-id/submit/",
@@ -258,7 +258,7 @@ func TestCreateSignRequest(t *testing.T) {
 
 	resp, err := CreateSignRequest(ac, signReq)
 	assert.NoError(t, err)
-	assert.Equal(t, expectedResponse.Id, resp.Id)
+	assert.Equal(t, expectedResponse.ID, resp.ID)
 	assert.Equal(t, expectedResponse.CommonName, resp.CommonName)
 	assert.Equal(t, expectedResponse.SubmitURL, resp.SubmitURL)
 }
@@ -339,7 +339,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 		{
 			name: "signed CSR with certificate",
 			response: SignRequestDetail{
-				Id:         "test-csr-id",
+				ID:         "test-csr-id",
 				CommonName: "example.com",
 				Status:     "signed",
 				CrtText:    "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
@@ -350,7 +350,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 		{
 			name: "requested CSR without certificate",
 			response: SignRequestDetail{
-				Id:         "test-csr-id",
+				ID:         "test-csr-id",
 				CommonName: "example.com",
 				Status:     "requested",
 				CrtText:    "",
@@ -362,7 +362,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 		{
 			name: "denied CSR",
 			response: SignRequestDetail{
-				Id:         "test-csr-id",
+				ID:         "test-csr-id",
 				CommonName: "example.com",
 				Status:     "denied",
 				CrtText:    "",
@@ -374,7 +374,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 		{
 			name: "signing in progress",
 			response: SignRequestDetail{
-				Id:         "test-csr-id",
+				ID:         "test-csr-id",
 				CommonName: "example.com",
 				Status:     "signing",
 				CrtText:    "",
@@ -386,7 +386,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 		{
 			name: "non-signed CSR with certificate text",
 			response: SignRequestDetail{
-				Id:         "test-csr-id",
+				ID:         "test-csr-id",
 				CommonName: "example.com",
 				Status:     "requested",
 				CrtText:    "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
@@ -468,7 +468,7 @@ func TestDownloadCertificate(t *testing.T) {
 		{
 			name: "valid certificate",
 			response: Certificate{
-				Id:      "test-cert-id",
+				ID:      "test-cert-id",
 				CrtText: "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----",
 			},
 			expectError: false,
@@ -476,7 +476,7 @@ func TestDownloadCertificate(t *testing.T) {
 		{
 			name: "empty certificate text",
 			response: Certificate{
-				Id:      "test-cert-id",
+				ID:      "test-cert-id",
 				CrtText: "",
 			},
 			expectError: false,
