@@ -1,0 +1,22 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release with auto notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — skipping."
+          else
+            gh release create "${GITHUB_REF_NAME}" --generate-notes
+          fi
