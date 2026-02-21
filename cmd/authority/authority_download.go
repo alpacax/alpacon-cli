@@ -8,19 +8,19 @@ import (
 )
 
 var authorityDownloadCmd = &cobra.Command{
-	Use:     "download-crt AUTHORITY_ID",
+	Use:     "download-crt AUTHORITY",
 	Aliases: []string{"download-cert"},
 	Short:   "Download a root certificate",
 	Long: `
-	Download a root certificate from the server and save it to a specified file path. 
-	The path argument should include the file name and extension where the certificate will be stored. 
+	Download a root certificate from the server and save it to a specified file path.
+	The path argument should include the file name and extension where the certificate will be stored.
 	For example, '/path/to/root.crt'. The recommended file extension for certificates is '.crt'.`,
 	Example: `
-	alpacon authority download-crt 550e8400-e29b-41d4-a716-446655440000 --out=/path/to/root.crt
+	alpacon authority download-crt "Root CA" --out=/path/to/root.crt
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		authorityId := args[0]
+		authorityName := args[0]
 		filePath, _ := cmd.Flags().GetString("out")
 		if filePath == "" {
 			filePath = promptForCertificate()
@@ -31,7 +31,12 @@ var authorityDownloadCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		err = cert.DownloadRootCertificate(alpaconClient, authorityId, filePath)
+		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+		}
+
+		err = cert.DownloadRootCertificate(alpaconClient, authorityID, filePath)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to download the root certificate from authority: %s.", err)
 		}

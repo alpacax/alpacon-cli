@@ -8,18 +8,18 @@ import (
 )
 
 var authorityDownloadCrlCmd = &cobra.Command{
-	Use:   "download-crl AUTHORITY_ID",
+	Use:   "download-crl AUTHORITY",
 	Short: "Download a certificate revocation list (CRL)",
 	Long: `
 	Download the certificate revocation list (CRL) from the specified authority and save it to a file.
 	The path argument should include the file name and extension where the CRL will be stored.
 	For example, '/path/to/revoked.crl'. The recommended file extension is '.crl'.`,
 	Example: `
-	alpacon authority download-crl AUTHORITY_ID --out=/path/to/revoked.crl
+	alpacon authority download-crl "Root CA" --out=/path/to/revoked.crl
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		authorityId := args[0]
+		authorityName := args[0]
 		filePath, _ := cmd.Flags().GetString("out")
 		if filePath == "" {
 			filePath = promptForCRL()
@@ -30,7 +30,12 @@ var authorityDownloadCrlCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		err = cert.DownloadCRL(alpaconClient, authorityId, filePath)
+		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+		}
+
+		err = cert.DownloadCRL(alpaconClient, authorityID, filePath)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to download the CRL from authority: %s.", err)
 		}

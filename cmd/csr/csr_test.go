@@ -118,6 +118,73 @@ func TestDownloadSubcommandFlags(t *testing.T) {
 	assert.Equal(t, "", outFlag.DefValue, "default value should be empty")
 }
 
+func TestCreateSubcommandFlags(t *testing.T) {
+	cmd, _, err := CsrCmd.Find([]string{"create"})
+	assert.NoError(t, err)
+
+	tests := []struct {
+		flagName  string
+		shorthand string
+		defValue  string
+	}{
+		{"domain", "d", ""},
+		{"ip", "i", ""},
+		{"key", "k", ""},
+		{"out", "o", ""},
+	}
+	for _, tt := range tests {
+		t.Run("flag --"+tt.flagName, func(t *testing.T) {
+			f := cmd.Flags().Lookup(tt.flagName)
+			assert.NotNil(t, f, "--%s flag should exist", tt.flagName)
+			assert.Equal(t, tt.shorthand, f.Shorthand)
+			assert.Equal(t, tt.defValue, f.DefValue)
+		})
+	}
+
+	validDays := cmd.Flags().Lookup("valid-days")
+	assert.NotNil(t, validDays, "--valid-days flag should exist")
+	assert.Equal(t, "365", validDays.DefValue)
+}
+
+func TestSplitAndTrim(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"single", "a.com", []string{"a.com"}},
+		{"multiple", "a.com,b.com", []string{"a.com", "b.com"}},
+		{"spaces around", " a.com , b.com ", []string{"a.com", "b.com"}},
+		{"empty elements", "a.com,,b.com", []string{"a.com", "b.com"}},
+		{"only commas", ",,,", []string{}},
+		{"whitespace only", " , , ", []string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitAndTrim(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFirstOf(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b []string
+		want string
+	}{
+		{"a non-empty", []string{"a.com", "b.com"}, []string{}, "a.com"},
+		{"a empty b non-empty", []string{}, []string{"1.2.3.4"}, "1.2.3.4"},
+		{"both non-empty returns a", []string{"a.com"}, []string{"1.2.3.4"}, "a.com"},
+		{"both empty returns empty", []string{}, []string{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, firstOf(tt.a, tt.b))
+		})
+	}
+}
+
 func TestEnsureSecureConnection_HTTPS(t *testing.T) {
 	ac := &client.AlpaconClient{
 		HTTPClient: &http.Client{},

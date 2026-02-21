@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"regexp"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+var uuidRegex = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const (
 	authorityURL   = "/api/cert/authorities/"
@@ -111,6 +114,25 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 	}
 
 	return authorityList, nil
+}
+
+// GetAuthorityIDByName resolves an authority name to its ID by fetching all
+// authorities and matching by name. If name is already a UUID, it is returned
+// as-is without making any API call, so callers may pass either a name or an ID.
+func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error) {
+	if uuidRegex.MatchString(name) {
+		return name, nil
+	}
+	authorities, err := api.FetchAllPages[AuthorityResponse](ac, authorityURL, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range authorities {
+		if a.Name == name {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no authority found with name %q", name)
 }
 
 func GetAuthorityDetail(ac *client.AlpaconClient, authorityId string) ([]byte, error) {

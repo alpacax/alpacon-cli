@@ -8,27 +8,32 @@ import (
 )
 
 var authorityDetailCmd = &cobra.Command{
-	Use:     "describe AUTHORITY_ID",
+	Use:     "describe AUTHORITY",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a specific Certificate Authority",
 	Long: `
-	The describe command fetches and displays detailed information about a specific certificate authority, 
-	including its crt text, organization and other relevant attributes. 
+	The describe command fetches and displays detailed information about a specific certificate authority,
+	including its crt text, organization and other relevant attributes.
 	`,
 	Example: `
-	alpacon authority describe 550e8400-e29b-41d4-a716-446655440000
-	alpacon authority desc 550e8400-e29b-41d4-a716-446655440000
+	alpacon authority describe "Root CA"
+	alpacon authority desc my-authority
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		authorityId := args[0]
+		authorityName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		authorityDetail, err := cert.GetAuthorityDetail(alpaconClient, authorityId)
+		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+		}
+
+		authorityDetail, err := cert.GetAuthorityDetail(alpaconClient, authorityID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve the authority details: %s.", err)
 		}
