@@ -12,7 +12,7 @@ var authorityDeleteCmd = &cobra.Command{
 	Aliases: []string{"rm"},
 	Short:   "Delete a CA along with its certificate and CSR",
 	Long: `
-    This command removes a Certificate Authority (CA) from the system, including its certificate and CSR.
+	This command removes a Certificate Authority (CA) from the system, including its certificate and CSR.
 	Note that this action requires manual configuration adjustments to alpamon-cert-authority.
 	`,
 	Example: `

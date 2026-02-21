@@ -126,8 +126,8 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 	var signRequest certApi.SignRequest
 	var certPath cert.CertificatePath
 
-	signRequest.DomainList = utils.PromptForListInput("Domain list (e.g., domain1.com, domain2.com): ")
-	signRequest.IpList = utils.PromptForListInput("IP list (e.g., 192.168.1.1, 10.0.0.1): ")
+	signRequest.DomainList = splitAndTrim(utils.PromptForInput("Domain list (e.g., domain1.com, domain2.com): "))
+	signRequest.IpList = splitAndTrim(utils.PromptForInput("IP list (e.g., 192.168.1.1, 10.0.0.1): "))
 
 	if (len(signRequest.DomainList) == 0) && (len(signRequest.IpList) == 0) {
 		utils.CliErrorWithExit("You must enter at least a domain list or an IP list.")
