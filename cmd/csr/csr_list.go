@@ -37,7 +37,5 @@ var csrListCmd = &cobra.Command{
 }
 
 func init() {
-	var state string
-
-	csrListCmd.Flags().StringVarP(&state, "status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
+	csrListCmd.Flags().StringP("status", "s", "", "Specify the status of the CSR (e.g., 'denied', 'signed')")
 }
