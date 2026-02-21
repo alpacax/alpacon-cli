@@ -91,7 +91,7 @@ type AuthorityDetails struct {
 	RootValidDays    int                 `json:"root_valid_days"`
 	DefaultValidDays int                 `json:"default_valid_days"`
 	MaxValidDays     int                 `json:"max_valid_days"`
-	RemoteIp         string              `json:"remote_ip"`
+	RemoteIP         string              `json:"remote_ip"`
 	IsConnected      bool                `json:"is_connected"`
 	Status           string              `json:"status"`
 	Agent            types.ServerSummary `json:"agent"`

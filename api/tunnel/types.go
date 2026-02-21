@@ -13,7 +13,7 @@ type TunnelSessionRequest struct {
 type TunnelSessionResponse struct {
 	ID            string              `json:"id"`
 	WebsocketURL  string              `json:"websocket_url"`
-	UserchannelID string              `json:"userchannel_id"`
+	UserChannelID string              `json:"userchannel_id"`
 	Server        types.ServerSummary `json:"server"`
 	TargetPort    int                 `json:"target_port"`
 }

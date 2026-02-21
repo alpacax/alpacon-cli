@@ -51,7 +51,7 @@ type UploadResponse struct {
 	Username  string              `json:"username"`
 	Groupname string              `json:"groupname"`
 	ExpiresAt time.Time           `json:"expires_at"`
-	UploadUrl string              `json:"upload_url"`
+	UploadURL string              `json:"upload_url"`
 	Command   string              `json:"command"`
 }
 
