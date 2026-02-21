@@ -17,7 +17,6 @@ var groupListCmd = &cobra.Command{
 	`,
 	Example: `
 	alpacon group ls
-	alpacon groups
 	alpacon group list
 	`,
 	Run: func(cmd *cobra.Command, args []string) {

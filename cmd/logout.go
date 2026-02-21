@@ -47,7 +47,6 @@ var logoutCmd = &cobra.Command{
 		envInfo, err := auth0.FetchAuthEnv(validConfig.WorkspaceURL, httpClient)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to fetch authentication environment: %s.", err)
-			return
 		}
 
 		if envInfo.Auth0.Method == "auth0" {
