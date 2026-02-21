@@ -287,8 +287,10 @@ func TestCreateSignRequest(t *testing.T) {
 		SubmitURL:  "/api/cert/sign-requests/new-csr-id/submit/",
 	}
 
+	var capturedBody map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&capturedBody))
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(expectedResponse)
@@ -306,6 +308,10 @@ func TestCreateSignRequest(t *testing.T) {
 	assert.Equal(t, expectedResponse.ID, resp.ID)
 	assert.Equal(t, expectedResponse.CommonName, resp.CommonName)
 	assert.Equal(t, expectedResponse.SubmitURL, resp.SubmitURL)
+
+	// omitempty: zero-value fields must not be sent to avoid api_insufficient_data errors
+	assert.NotContains(t, capturedBody, "csr_text", "csr_text must be omitted when empty")
+	assert.NotContains(t, capturedBody, "requested_by", "requested_by must be omitted when empty")
 }
 
 func TestSubmitCSR(t *testing.T) {
