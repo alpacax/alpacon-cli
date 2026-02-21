@@ -10,7 +10,7 @@ import (
 var EventCmd = &cobra.Command{
 	Use:     "event",
 	Aliases: []string{"events"},
-	Short:   "Retrieve and display recent Alpacon events.",
+	Short:   "Retrieve and display recent Alpacon events",
 	Long: `
 	Retrieve and display a list of recent events from the Alpacon, with options to filter by server, user, and the number of events. 
 	Use the '--tail' flag to limit the output to the last N event entries. 

@@ -11,7 +11,7 @@ import (
 var aclListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display all command ACLs for an API token.",
+	Short:   "Display all command ACLs for an API token",
 	Long: `
 	This command displays all command access control lists (ACLs) registered to an API token. 
 	It shows details such as the token name and the commands associated with each ACL.

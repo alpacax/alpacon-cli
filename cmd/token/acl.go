@@ -7,7 +7,7 @@ import (
 
 var AclCmd = &cobra.Command{
 	Use:   "acl",
-	Short: "Manages command access for API tokens.",
+	Short: "Manage command access for API tokens",
 	Long: `
 	The acl command allows you to configure access control for API tokens, specifying which commands can be executed by each token. 
 	It supports creating, listing, and modifying ACL rules to fine-tune command execution permissions based on your security requirements.
