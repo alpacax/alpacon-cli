@@ -56,6 +56,9 @@ var csrCreateCmd = &cobra.Command{
 		var certPath cert.CertificatePath
 
 		nonInteractive := csrFlags.domains != "" || csrFlags.ips != ""
+		if !nonInteractive && (cmd.Flags().Changed("valid-days") || cmd.Flags().Changed("key") || cmd.Flags().Changed("out")) {
+			utils.CliErrorWithExit("--valid-days, --key, and --out require --domain or --ip to be specified.")
+		}
 		if nonInteractive {
 			signRequest.DomainList = []string{}
 			signRequest.IpList = []string{}
