@@ -7,7 +7,7 @@ import (
 )
 
 type AuditLogEntry struct {
-	ID          int              `json:"id"`
+	ID          string           `json:"id"`
 	User        *iam.UserSummary `json:"user"`
 	Username    string           `json:"username"`
 	IP          string           `json:"ip"`

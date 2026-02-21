@@ -1,6 +1,9 @@
 package iam
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type UserAttributes struct {
 	Username   string `json:"username"`
@@ -86,7 +89,7 @@ type GroupResponse struct {
 	NumMembers   int      `json:"num_members"`
 	GID          int      `json:"gid"`
 	IsLDAPGroup  bool     `json:"is_ldap_group"`
-	Servers      []string `json:"servers"`
+	Servers      []json.RawMessage `json:"servers"`
 	ServersNames []string `json:"servers_names"`
 }
 
