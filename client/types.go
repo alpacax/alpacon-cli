@@ -8,6 +8,7 @@ type AlpaconClient struct {
 	Token       string
 	AccessToken string
 	Privileges  string
+	Username    string
 	UserAgent   string
 }
 
@@ -16,6 +17,7 @@ type CheckAuthResponse struct {
 }
 
 type CheckPrivilegesResponse struct {
-	IsStaff     bool `json:"is_staff"`
-	IsSuperuser bool `json:"is_superuser"`
+	Username    string `json:"username"`
+	IsStaff     bool   `json:"is_staff"`
+	IsSuperuser bool   `json:"is_superuser"`
 }

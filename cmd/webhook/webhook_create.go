@@ -32,13 +32,13 @@ var webhookCreateCmd = &cobra.Command{
 		if url == "" {
 			url = utils.PromptForRequiredInput("Webhook URL: ")
 		}
-		if owner == "" {
-			owner = utils.PromptForRequiredInput("Owner (username): ")
-		}
-
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		}
+
+		if owner == "" {
+			owner = alpaconClient.Username
 		}
 
 		ownerID, err := iam.GetUserIDByName(alpaconClient, owner)

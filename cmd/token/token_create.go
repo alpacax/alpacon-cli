@@ -23,7 +23,7 @@ var tokenCreateCmd = &cobra.Command{
 		var tokenRequest auth.APITokenRequest
 		var err error
 
-		if name == "" || (limit && expiresAt == 0) {
+		if name == "" {
 			tokenRequest, err = promptForToken()
 			if err != nil {
 				utils.CliErrorWithExit("During token input: %v. Check your input and try again.", err)
