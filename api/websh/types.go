@@ -4,8 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/gorilla/websocket"
 )
 
@@ -24,16 +23,16 @@ type SessionRequest struct {
 }
 
 type SessionResponse struct {
-	ID           string          `json:"id"`
-	Rows         int             `json:"rows"`
-	Cols         int             `json:"cols"`
-	Server       server.ServerInfo `json:"server"`
-	User         iam.UserSummary `json:"user"`
-	UserName     string          `json:"user_name"`
-	GroupName    string          `json:"group_name"`
-	UserAgent    string          `json:"user_agent"`
-	RemoteIP     string          `json:"remote_ip"`
-	WebsocketURL string          `json:"websocket_url"`
+	ID           string              `json:"id"`
+	Rows         int                 `json:"rows"`
+	Cols         int                 `json:"cols"`
+	Server       types.ServerSummary `json:"server"`
+	User         types.UserSummary   `json:"user"`
+	UserName     string              `json:"user_name"`
+	GroupName    string              `json:"group_name"`
+	UserAgent    string              `json:"user_agent"`
+	RemoteIP     string              `json:"remote_ip"`
+	WebsocketURL string              `json:"websocket_url"`
 }
 
 type ShareResponse struct {

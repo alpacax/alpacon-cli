@@ -3,7 +3,7 @@ package log
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 )
 
 type LogAttributes struct {
@@ -14,18 +14,18 @@ type LogAttributes struct {
 }
 
 type LogEntry struct {
-	ID         int       `json:"id"`
-	AddedAt    time.Time `json:"added_at"`
-	Date       time.Time `json:"date"`
-	Program    string    `json:"program"`
-	Level      int       `json:"level"`
-	Name       string    `json:"name"`
-	Path       string    `json:"path"`
-	LineNo     int       `json:"lineno"`
-	PID        int       `json:"pid"`
-	TID        int       `json:"tid"`
-	Process    string    `json:"process"`
-	Thread     string    `json:"thread"`
-	Msg        string    `json:"msg"`
-	Server     *server.ServerInfo `json:"server"`
+	ID      int                  `json:"id"`
+	AddedAt time.Time            `json:"added_at"`
+	Date    time.Time            `json:"date"`
+	Program string               `json:"program"`
+	Level   int                  `json:"level"`
+	Name    string               `json:"name"`
+	Path    string               `json:"path"`
+	LineNo  int                  `json:"lineno"`
+	PID     int                  `json:"pid"`
+	TID     int                  `json:"tid"`
+	Process string               `json:"process"`
+	Thread  string               `json:"thread"`
+	Msg     string               `json:"msg"`
+	Server  *types.ServerSummary `json:"server"`
 }

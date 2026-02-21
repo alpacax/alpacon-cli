@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 )
@@ -47,7 +47,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 					Authority: AuthorityResponse{
 						Name: "auth-test",
 					},
-					RequestedBy: iam.UserSummary{Name: "admin"},
+					RequestedBy: types.UserSummary{Name: "admin"},
 				})
 			}
 		case "2":
@@ -58,7 +58,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 					Authority: AuthorityResponse{
 						Name: "auth-test",
 					},
-					RequestedBy: iam.UserSummary{Name: "admin"},
+					RequestedBy: types.UserSummary{Name: "admin"},
 				})
 			}
 		}
@@ -116,7 +116,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-%d", i),
 					Name: fmt.Sprintf("authority-%d", i),
-					Owner: iam.UserSummary{
+					Owner: types.UserSummary{
 						Name: "admin",
 					},
 				})
@@ -126,7 +126,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-p2-%d", i),
 					Name: fmt.Sprintf("authority-p2-%d", i),
-					Owner: iam.UserSummary{
+					Owner: types.UserSummary{
 						Name: "admin",
 					},
 				})

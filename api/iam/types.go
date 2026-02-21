@@ -1,6 +1,10 @@
 package iam
 
-import "time"
+import (
+	"time"
+
+	"github.com/alpacax/alpacon-cli/api/types"
+)
 
 type UserAttributes struct {
 	Username   string `json:"username"`
@@ -46,12 +50,6 @@ type UserResponse struct {
 	DateJoined  time.Time `json:"date_joined"`
 }
 
-type UserSummary struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
-
 type UserCreateRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
@@ -79,15 +77,15 @@ type GroupAttributes struct {
 }
 
 type GroupResponse struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	DisplayName  string   `json:"display_name"`
-	Tags         string   `json:"tags"`
-	NumMembers   int      `json:"num_members"`
-	GID          int      `json:"gid"`
-	IsLDAPGroup  bool     `json:"is_ldap_group"`
-	Servers      []string `json:"servers"`
-	ServersNames []string `json:"servers_names"`
+	ID           string               `json:"id"`
+	Name         string               `json:"name"`
+	DisplayName  string               `json:"display_name"`
+	Tags         string               `json:"tags"`
+	NumMembers   int                  `json:"num_members"`
+	GID          int                  `json:"gid"`
+	IsLDAPGroup  bool                 `json:"is_ldap_group"`
+	Servers      []types.ServerSummary `json:"servers"`
+	ServersNames []string             `json:"servers_names"`
 }
 
 type GroupCreateRequest struct {
@@ -106,10 +104,10 @@ type MemberAddRequest struct {
 }
 
 type MemberDetailResponse struct {
-	ID    string      `json:"id"`
-	Group string      `json:"group"`
-	User  UserSummary `json:"user"`
-	Role  string      `json:"role"`
+	ID    string             `json:"id"`
+	Group string             `json:"group"`
+	User  types.UserSummary  `json:"user"`
+	Role  string             `json:"role"`
 }
 
 type MemberDeleteRequest struct {

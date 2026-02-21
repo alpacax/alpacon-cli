@@ -3,19 +3,19 @@ package webftp
 import (
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 )
 
 type WebFTPLogEntry struct {
-	AddedAt  time.Time          `json:"added_at"`
-	FileName string             `json:"file_name"`
-	Action   string             `json:"action"`
-	Size     int64              `json:"size"`
-	Success  bool               `json:"success"`
-	User     string             `json:"user"`
-	Server   *server.ServerInfo `json:"server"`
-	RemoteIP string             `json:"remote_ip"`
-	Message  string             `json:"message"`
+	AddedAt  time.Time            `json:"added_at"`
+	FileName string               `json:"file_name"`
+	Action   string               `json:"action"`
+	Size     int64                `json:"size"`
+	Success  bool                 `json:"success"`
+	User     string               `json:"user"`
+	Server   *types.ServerSummary `json:"server"`
+	RemoteIP string               `json:"remote_ip"`
+	Message  string               `json:"message"`
 }
 
 type WebFTPLogAttributes struct {

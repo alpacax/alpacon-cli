@@ -9,8 +9,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 )
 
@@ -35,10 +34,10 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 		for i := 0; i < 25; i++ {
 			results = append(results, EventDetails{
 				ID:          fmt.Sprintf("evt-%d", i),
-				Server:      server.ServerInfo{Name: "test-server"},
+				Server:      types.ServerSummary{Name: "test-server"},
 				Shell:       "bash",
 				Line:        fmt.Sprintf("cmd-%d", i),
-				RequestedBy: iam.UserSummary{Name: "admin"},
+				RequestedBy: types.UserSummary{Name: "admin"},
 			})
 		}
 

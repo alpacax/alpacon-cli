@@ -1,16 +1,14 @@
 package webhook
 
-import (
-	"github.com/alpacax/alpacon-cli/api/iam"
-)
+import "github.com/alpacax/alpacon-cli/api/types"
 
 type WebhookResponse struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	URL       string          `json:"url"`
-	SSLVerify bool            `json:"ssl_verify"`
-	Enabled   bool            `json:"enabled"`
-	Owner     iam.UserSummary `json:"owner"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	URL       string            `json:"url"`
+	SSLVerify bool              `json:"ssl_verify"`
+	Enabled   bool              `json:"enabled"`
+	Owner     types.UserSummary `json:"owner"`
 }
 
 type WebhookAttributes struct {
