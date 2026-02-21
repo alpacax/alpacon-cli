@@ -22,17 +22,24 @@ func ParseErrorResponse(err error) (code, source string) {
 
 	errStr := err.Error()
 
+	// Try JSON format: {"code": "...", "source": "..."}
 	start := strings.Index(errStr, "{")
-	if start == -1 {
-		return "", ""
+	if start != -1 {
+		var errorResp ErrorResponse
+		if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
+			return errorResp.Code, errorResp.Source
+		}
 	}
 
-	jsonPart := errStr[start:]
-
-	var errorResp ErrorResponse
-	if jsonErr := json.Unmarshal([]byte(jsonPart), &errorResp); jsonErr != nil {
-		return "", ""
+	// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
+	for _, part := range strings.Split(errStr, "; ") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "code: ") {
+			code = strings.TrimPrefix(part, "code: ")
+		} else if strings.HasPrefix(part, "source: ") {
+			source = strings.TrimPrefix(part, "source: ")
+		}
 	}
 
-	return errorResp.Code, errorResp.Source
+	return code, source
 }
