@@ -1,8 +1,6 @@
 package iam
 
-import (
-	"time"
-)
+import "time"
 
 type UserAttributes struct {
 	Username   string `json:"username"`
