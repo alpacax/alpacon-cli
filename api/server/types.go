@@ -1,16 +1,22 @@
 package server
 
-import (
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"time"
-)
+import "time"
+
+// UserSummary is a local copy of the nested user object returned in server API responses.
+// Defined here to avoid an import cycle with api/iam (which imports api/server).
+type UserSummary struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
 
 // ServerInfo represents the nested server object returned in API responses.
-// API responses return server as {id, name, os} instead of a UUID string.
+// API responses return server as {id, name, os, is_connected} instead of a UUID string.
 type ServerInfo struct {
-	ID   string  `json:"id"`
-	Name string  `json:"name"`
-	OS   *string `json:"os"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	OS          *string `json:"os"`
+	IsConnected bool    `json:"is_connected"`
 }
 
 type ServerAttributes struct {
@@ -67,7 +73,7 @@ type ServerDetails struct {
 	OSVersion        string          `json:"os_version"`
 	Load             float64         `json:"load"`
 	BootTime         time.Time       `json:"boot_time"`
-	Owner            iam.UserSummary `json:"owner"`
+	Owner            UserSummary `json:"owner"`
 	Groups           []string        `json:"groups"`
 	GroupsName       []string        `json:"groups_name"`
 }

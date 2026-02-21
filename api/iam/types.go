@@ -1,6 +1,10 @@
 package iam
 
-import "time"
+import (
+	"time"
+
+	"github.com/alpacax/alpacon-cli/api/server"
+)
 
 type UserAttributes struct {
 	Username   string `json:"username"`
@@ -78,23 +82,16 @@ type GroupAttributes struct {
 	LDAPStatus  string `json:"ldap_status" table:"LDAP"`
 }
 
-type GroupServerInfo struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	OS          *string `json:"os"`
-	IsConnected bool    `json:"is_connected"`
-}
-
 type GroupResponse struct {
-	ID           string          `json:"id"`
-	Name         string          `json:"name"`
-	DisplayName  string          `json:"display_name"`
-	Tags         string          `json:"tags"`
-	NumMembers   int             `json:"num_members"`
-	GID          int             `json:"gid"`
-	IsLDAPGroup  bool            `json:"is_ldap_group"`
-	Servers      []GroupServerInfo `json:"servers"`
-	ServersNames []string        `json:"servers_names"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	DisplayName  string             `json:"display_name"`
+	Tags         string             `json:"tags"`
+	NumMembers   int                `json:"num_members"`
+	GID          int                `json:"gid"`
+	IsLDAPGroup  bool               `json:"is_ldap_group"`
+	Servers      []server.ServerInfo `json:"servers"`
+	ServersNames []string           `json:"servers_names"`
 }
 
 type GroupCreateRequest struct {

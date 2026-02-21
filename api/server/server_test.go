@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 )
 
@@ -37,7 +36,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-%d", i),
 					Name:     fmt.Sprintf("server-%d", i),
 					RemoteIP: "10.0.0.1",
-					Owner:    iam.UserSummary{Name: "admin"},
+					Owner:    UserSummary{Name: "admin"},
 				})
 			}
 		case "2":
@@ -46,7 +45,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 					ID:       fmt.Sprintf("id-p2-%d", i),
 					Name:     fmt.Sprintf("server-p2-%d", i),
 					RemoteIP: "10.0.0.2",
-					Owner:    iam.UserSummary{Name: "admin"},
+					Owner:    UserSummary{Name: "admin"},
 				})
 			}
 		}
