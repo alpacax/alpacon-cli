@@ -96,6 +96,51 @@ func TestGetCSRList_Pagination(t *testing.T) {
 	}
 }
 
+func TestGetAuthorityIDByName(t *testing.T) {
+	authorities := []AuthorityResponse{
+		{ID: "aaaa-0000-0000-0000-000000000001", Name: "Root CA"},
+		{ID: "aaaa-0000-0000-0000-000000000002", Name: "Intermediate CA"},
+	}
+
+	newServer := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			resp := api.ListResponse[AuthorityResponse]{Count: len(authorities), Results: authorities}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+		}))
+	}
+
+	t.Run("found by name", func(t *testing.T) {
+		ts := newServer()
+		defer ts.Close()
+		id, err := GetAuthorityIDByName(newTestClient(ts), "Root CA")
+		assert.NoError(t, err)
+		assert.Equal(t, "aaaa-0000-0000-0000-000000000001", id)
+	})
+
+	t.Run("not found returns error", func(t *testing.T) {
+		ts := newServer()
+		defer ts.Close()
+		_, err := GetAuthorityIDByName(newTestClient(ts), "Nonexistent CA")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no authority found with name")
+	})
+
+	t.Run("uuid fast-path skips fetch", func(t *testing.T) {
+		var called bool
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer ts.Close()
+		uuid := "550e8400-e29b-41d4-a716-446655440000"
+		id, err := GetAuthorityIDByName(newTestClient(ts), uuid)
+		assert.NoError(t, err)
+		assert.Equal(t, uuid, id)
+		assert.False(t, called, "should not call server for UUID input")
+	})
+}
+
 func TestGetAuthorityList_Pagination(t *testing.T) {
 	var requestCount atomic.Int32
 

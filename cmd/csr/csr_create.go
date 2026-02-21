@@ -37,13 +37,13 @@ var csrCreateCmd = &cobra.Command{
 	Use:   "create [flags]",
 	Short: "Create a CSR",
 	Long: `
- 	Generates a new Certificate Signing Request based on provided information,
+	Generates a new Certificate Signing Request based on provided information,
 	which can then be submitted for signing to a certificate authority.
 	`,
 	Example: `
-  alpacon csr create                                   # interactive
-  alpacon csr create --domain test-cli.alpacax.lab     # non-interactive
-  alpacon csr create -d "a.com,b.com" --valid-days 90
+	alpacon csr create                                   # interactive
+	alpacon csr create --domain test-cli.alpacax.lab     # non-interactive
+	alpacon csr create -d "a.com,b.com" --valid-days 90
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 
