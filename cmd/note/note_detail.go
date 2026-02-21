@@ -17,6 +17,7 @@ var noteDetailCmd = &cobra.Command{
 	`,
 	Example: `
 	alpacon note describe 550e8400-e29b-41d4-a716-446655440000
+	alpacon note desc 550e8400-e29b-41d4-a716-446655440000
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
