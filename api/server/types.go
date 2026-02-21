@@ -62,5 +62,4 @@ type ServerDetails struct {
 	BootTime         time.Time         `json:"boot_time"`
 	Owner            types.UserSummary `json:"owner"`
 	Groups           []string          `json:"groups"`
-	GroupsName       []string          `json:"groups_name"`
 }

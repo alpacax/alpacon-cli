@@ -28,8 +28,8 @@ type SessionResponse struct {
 	Cols         int                 `json:"cols"`
 	Server       types.ServerSummary `json:"server"`
 	User         types.UserSummary   `json:"user"`
-	UserName     string              `json:"user_name"`
-	GroupName    string              `json:"group_name"`
+	Username     string              `json:"username"`
+	Groupname    string              `json:"groupname"`
 	UserAgent    string              `json:"user_agent"`
 	RemoteIP     string              `json:"remote_ip"`
 	WebsocketURL string              `json:"websocket_url"`

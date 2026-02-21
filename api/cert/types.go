@@ -144,15 +144,21 @@ type CSRAttributes struct {
 }
 
 type Certificate struct {
-	ID        string           `json:"id"`
-	Authority AuthoritySummary `json:"authority"`
-	Csr       string           `json:"csr"`
-	CrtText   string           `json:"crt_text"`
-	ValidDays int              `json:"valid_days"`
-	SignedAt  time.Time        `json:"signed_at"`
-	ExpiresAt time.Time        `json:"expires_at"`
-	SignedBy  string           `json:"signed_by"`
-	RenewedBy string           `json:"renewed_by"`
+	ID           string           `json:"id"`
+	Authority    AuthoritySummary `json:"authority"`
+	Csr          string           `json:"csr"`
+	CrtText      string           `json:"crt_text"`
+	CommonName   string           `json:"common_name"`
+	SerialNumber string           `json:"serial_number"`
+	ValidDays    int              `json:"valid_days"`
+	Status       string           `json:"status"`
+	IsRevoked    bool             `json:"is_revoked"`
+	RevokedAt    *time.Time       `json:"revoked_at"`
+	CanRevoke    bool             `json:"can_revoke"`
+	SignedAt     time.Time        `json:"signed_at"`
+	ExpiresAt    time.Time        `json:"expires_at"`
+	SignedBy     string           `json:"signed_by"`
+	RenewedBy    string           `json:"renewed_by"`
 }
 
 type CRLResponse struct {
@@ -176,6 +182,8 @@ type RevokeRequestResponse struct {
 	Status          string            `json:"status"`
 	RequestedReason string            `json:"requested_reason"`
 	RequestedBy     types.UserSummary `json:"requested_by"`
+	ApprovedBy      *types.UserSummary `json:"approved_by"`
+	DeniedBy        *types.UserSummary `json:"denied_by"`
 	AddedAt         time.Time         `json:"added_at"`
 	ErrorMessage    string            `json:"error_message"`
 	HandledAt       *time.Time        `json:"handled_at"`
