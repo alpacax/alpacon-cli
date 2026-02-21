@@ -12,11 +12,12 @@ var webhookCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new webhook",
 	Long: `
-	Create a new webhook configuration. You will be prompted for the webhook name,
-	URL, and owner if not provided via flags.
+	Create a new webhook configuration. You will be prompted for the webhook name
+	and URL if not provided via flags. Owner defaults to the currently logged-in user.
 	`,
 	Example: `
 	alpacon webhook create
+	alpacon webhook create --name=my-webhook --url=https://example.com/hook
 	alpacon webhook create --name=my-webhook --url=https://example.com/hook --owner=admin
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -38,7 +39,11 @@ var webhookCreateCmd = &cobra.Command{
 		}
 
 		if owner == "" {
-			owner = alpaconClient.Username
+			if alpaconClient.Username != "" {
+				owner = alpaconClient.Username
+			} else {
+				owner = utils.PromptForRequiredInput("Owner (username): ")
+			}
 		}
 
 		ownerID, err := iam.GetUserIDByName(alpaconClient, owner)

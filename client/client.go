@@ -105,7 +105,7 @@ func (ac *AlpaconClient) checkPrivileges() error {
 	}
 
 	ac.Privileges = getUserPrivileges(checkPrivilegesResponse.IsStaff, checkPrivilegesResponse.IsSuperuser)
-	ac.Username = checkPrivilegesResponse.Username
+	ac.Username = strings.TrimSpace(checkPrivilegesResponse.Username)
 
 	return nil
 }
