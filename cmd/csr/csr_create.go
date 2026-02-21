@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	certApi "github.com/alpacax/alpacon-cli/api/cert"
 	"github.com/alpacax/alpacon-cli/client"
@@ -24,14 +25,26 @@ const (
 		"Note: Root permission may be required for certain paths."
 )
 
+var csrFlags struct {
+	domains   string
+	ips       string
+	validDays int
+	keyPath   string
+	csrPath   string
+}
+
 var csrCreateCmd = &cobra.Command{
-	Use:   "create",
+	Use:   "create [flags]",
 	Short: "Create a CSR",
 	Long: `
- 	Generates a new Certificate Signing Request based on provided information, 
+ 	Generates a new Certificate Signing Request based on provided information,
 	which can then be submitted for signing to a certificate authority.
 	`,
-	Example: `alpacon csr create`,
+	Example: `
+  alpacon csr create                                   # interactive
+  alpacon csr create --domain test-cli.alpacax.lab     # non-interactive
+  alpacon csr create -d "a.com,b.com" --valid-days 90
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -39,7 +52,32 @@ var csrCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		signRequest, certPath := promptForCert()
+		var signRequest certApi.SignRequest
+		var certPath cert.CertificatePath
+
+		nonInteractive := csrFlags.domains != "" || csrFlags.ips != ""
+		if nonInteractive {
+			signRequest.DomainList = []string{}
+			signRequest.IpList = []string{}
+			if csrFlags.domains != "" {
+				signRequest.DomainList = splitAndTrim(csrFlags.domains)
+			}
+			if csrFlags.ips != "" {
+				signRequest.IpList = splitAndTrim(csrFlags.ips)
+			}
+			signRequest.ValidDays = csrFlags.validDays
+			commonName := firstOf(signRequest.DomainList, signRequest.IpList)
+			certPath.PrivateKeyPath = csrFlags.keyPath
+			if certPath.PrivateKeyPath == "" {
+				certPath.PrivateKeyPath = filepath.Join(defaultPrivateKeyDir, commonName+".key")
+			}
+			certPath.CSRPath = csrFlags.csrPath
+			if certPath.CSRPath == "" {
+				certPath.CSRPath = filepath.Join(defaultCSRDir, commonName+".csr")
+			}
+		} else {
+			signRequest, certPath = promptForCert()
+		}
 
 		EnsureSecureConnection(alpaconClient)
 
@@ -70,6 +108,12 @@ func init() {
 
 	defaultPrivateKeyDir = filepath.Join(usr.HomeDir, "tmp/private/")
 	defaultCSRDir = filepath.Join(usr.HomeDir, "tmp/")
+
+	csrCreateCmd.Flags().StringVarP(&csrFlags.domains, "domain", "d", "", "Comma-separated domain list (e.g., a.com,b.com)")
+	csrCreateCmd.Flags().StringVarP(&csrFlags.ips, "ip", "i", "", "Comma-separated IP list (e.g., 192.168.1.1)")
+	csrCreateCmd.Flags().IntVar(&csrFlags.validDays, "valid-days", 365, "Certificate validity in days")
+	csrCreateCmd.Flags().StringVarP(&csrFlags.keyPath, "key", "k", "", "Path for the private key file")
+	csrCreateCmd.Flags().StringVarP(&csrFlags.csrPath, "out", "o", "", "Path for the CSR output file")
 }
 
 func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
@@ -126,4 +170,26 @@ func EnsureSecureConnection(client *client.AlpaconClient) {
 		}
 
 	}
+}
+
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+func firstOf(a, b []string) string {
+	if len(a) > 0 {
+		return a[0]
+	}
+	if len(b) > 0 {
+		return b[0]
+	}
+	return ""
 }

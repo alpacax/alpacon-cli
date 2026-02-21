@@ -8,25 +8,25 @@ import (
 )
 
 var authorityDeleteCmd = &cobra.Command{
-	Use:     "delete AUTHORITY_ID",
+	Use:     "delete AUTHORITY",
 	Aliases: []string{"rm"},
 	Short:   "Delete a CA along with its certificate and CSR",
 	Long: `
-    This command removes a Certificate Authority (CA) from the system, including its certificate and CSR. 
+    This command removes a Certificate Authority (CA) from the system, including its certificate and CSR.
 	Note that this action requires manual configuration adjustments to alpamon-cert-authority.
 	`,
 	Example: `
-	alpacon authority delete 550e8400-e29b-41d4-a716-446655440000
-	alpacon authority rm 550e8400-e29b-41d4-a716-446655440000
-	alpacon authority delete 550e8400-e29b-41d4-a716-446655440000 -y
+	alpacon authority delete "Root CA"
+	alpacon authority rm my-authority
+	alpacon authority delete my-authority -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		authorityId := args[0]
+		authorityName := args[0]
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete CA '%s'? This will also remove its certificate and CSR.", authorityId)
+			utils.ConfirmAction("Delete CA '%s'? This will also remove its certificate and CSR.", authorityName)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -34,12 +34,17 @@ var authorityDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		err = cert.DeleteCA(alpaconClient, authorityId)
+		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+		}
+
+		err = cert.DeleteCA(alpaconClient, authorityID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to delete the CA: %s.", err)
 		}
 
-		utils.CliSuccess("CA deleted: %s", authorityId)
+		utils.CliSuccess("CA deleted: %s", authorityName)
 	},
 }
 

@@ -113,6 +113,19 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 	return authorityList, nil
 }
 
+func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error) {
+	authorities, err := api.FetchAllPages[AuthorityResponse](ac, authorityURL, nil)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range authorities {
+		if a.Name == name {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no authority found with name %q", name)
+}
+
 func GetAuthorityDetail(ac *client.AlpaconClient, authorityId string) ([]byte, error) {
 	body, err := ac.SendGetRequest(utils.BuildURL(authorityURL, authorityId, nil))
 	if err != nil {

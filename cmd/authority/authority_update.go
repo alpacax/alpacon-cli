@@ -8,7 +8,7 @@ import (
 )
 
 var authorityUpdateCmd = &cobra.Command{
-	Use:   "update AUTHORITY_ID",
+	Use:   "update AUTHORITY",
 	Short: "Update the authority information",
 	Long: `
 	Update the certificate authority information in the Alpacon.
@@ -17,23 +17,28 @@ var authorityUpdateCmd = &cobra.Command{
 	After saving, the updated authority information is displayed for verification.
 	`,
 	Example: `
-	alpacon authority update 550e8400-e29b-41d4-a716-446655440000
+	alpacon authority update "Root CA"
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		authorityId := args[0]
+		authorityName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		authorityDetail, err := cert.UpdateAuthority(alpaconClient, authorityId)
+		authorityID, err := cert.GetAuthorityIDByName(alpaconClient, authorityName)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to find authority: %s.", err)
+		}
+
+		authorityDetail, err := cert.UpdateAuthority(alpaconClient, authorityID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to update the authority info: %s.", err)
 		}
 
-		utils.CliSuccess("Authority updated: %s", authorityId)
+		utils.CliSuccess("Authority updated: %s", authorityName)
 		utils.PrintJson(authorityDetail)
 	},
 }
