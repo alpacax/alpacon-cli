@@ -8,7 +8,7 @@ on:
       - "LICENSE"
 
   pull_request:
-    types: [opened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize]
 
   workflow_call:
 
@@ -19,9 +19,6 @@ jobs:
   build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: [ '1.25.x' ]
 
     steps:
       - name: Check out code
@@ -30,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: '1.25.x'
 
       - name: Build
         run: go build -v .

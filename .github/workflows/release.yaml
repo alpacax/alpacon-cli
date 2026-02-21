@@ -10,7 +10,7 @@ jobs:
   build-and-test:
     permissions:
       contents: read
-    uses: ./.github/workflows/build-and-test.yml
+    uses: ./.github/workflows/build-and-test.yaml
 
   goreleaser:
     needs: [build-and-test]
@@ -84,8 +84,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
-
-      - run: ls
 
       - name: Upload AMD64 DEB to PackageCloud
         uses: danielmundi/upload-packagecloud@v1
