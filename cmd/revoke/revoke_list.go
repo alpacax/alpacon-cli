@@ -38,8 +38,6 @@ var revokeListCmd = &cobra.Command{
 }
 
 func init() {
-	var status string
-	var certificate string
-	revokeListCmd.Flags().StringVar(&status, "status", "", "Filter by status (e.g., pending, approved, denied)")
-	revokeListCmd.Flags().StringVar(&certificate, "certificate", "", "Filter by certificate ID")
+	revokeListCmd.Flags().String("status", "", "Filter by status (e.g., pending, approved, denied)")
+	revokeListCmd.Flags().String("certificate", "", "Filter by certificate ID")
 }
