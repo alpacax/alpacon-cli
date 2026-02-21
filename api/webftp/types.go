@@ -12,7 +12,7 @@ type WebFTPLogEntry struct {
 	Action   string               `json:"action"`
 	Size     int64                `json:"size"`
 	Success  bool                 `json:"success"`
-	User     string               `json:"user"`
+	User     *types.UserSummary   `json:"user"`
 	Server   *types.ServerSummary `json:"server"`
 	RemoteIP string               `json:"remote_ip"`
 	Message  string               `json:"message"`

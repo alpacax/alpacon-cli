@@ -44,7 +44,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 				results = append(results, CSRResponse{
 					ID:         fmt.Sprintf("csr-%d", i),
 					CommonName: fmt.Sprintf("cn-%d", i),
-					Authority: AuthorityResponse{
+					Authority: AuthoritySummary{
 						Name: "auth-test",
 					},
 					RequestedBy: types.UserSummary{Name: "admin"},
@@ -55,7 +55,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 				results = append(results, CSRResponse{
 					ID:         fmt.Sprintf("csr-p2-%d", i),
 					CommonName: fmt.Sprintf("cn-p2-%d", i),
-					Authority: AuthorityResponse{
+					Authority: AuthoritySummary{
 						Name: "auth-test",
 					},
 					RequestedBy: types.UserSummary{Name: "admin"},

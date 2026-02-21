@@ -119,8 +119,8 @@ type CSRSubmit struct {
 }
 
 type CSRResponse struct {
-	ID          string            `json:"id"`
-	Authority   AuthorityResponse `json:"authority"`
+	ID          string           `json:"id"`
+	Authority   AuthoritySummary `json:"authority"`
 	CommonName  string            `json:"common_name"`
 	DomainList  []string          `json:"domain_list"`
 	IpList      []string          `json:"ip_list"`

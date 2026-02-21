@@ -44,13 +44,17 @@ func GetWebFTPLogList(ac *client.AlpaconClient, pageSize int, serverName string,
 		if entry.Server != nil {
 			serverName = entry.Server.Name
 		}
+		userName := ""
+		if entry.User != nil {
+			userName = entry.User.Name
+		}
 		logList = append(logList, WebFTPLogAttributes{
 			Server:   serverName,
 			FileName: entry.FileName,
 			Action:   entry.Action,
 			Size:     entry.Size,
 			Success:  entry.Success,
-			User:     entry.User,
+			User:     userName,
 			RemoteIP: entry.RemoteIP,
 			AddedAt:  utils.TimeUtils(entry.AddedAt),
 		})

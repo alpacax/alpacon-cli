@@ -77,14 +77,18 @@ type GroupAttributes struct {
 }
 
 type GroupResponse struct {
-	ID           string               `json:"id"`
-	Name         string               `json:"name"`
-	DisplayName  string               `json:"display_name"`
-	Tags         string               `json:"tags"`
-	NumMembers   int                  `json:"num_members"`
-	GID          int                  `json:"gid"`
-	IsLDAPGroup  bool                 `json:"is_ldap_group"`
+	ID           string                `json:"id"`
+	Name         string                `json:"name"`
+	DisplayName  string                `json:"display_name"`
+	Description  string                `json:"description"`
+	Tags         string                `json:"tags"`
+	NumMembers   int                   `json:"num_members"`
+	MembersNames []string              `json:"members_names"`
+	GID          int                   `json:"gid"`
+	IsLDAPGroup  bool                  `json:"is_ldap_group"`
 	Servers      []types.ServerSummary `json:"servers"`
+	AddedAt      time.Time             `json:"added_at"`
+	UpdatedAt    time.Time             `json:"updated_at"`
 }
 
 type GroupCreateRequest struct {
@@ -103,10 +107,11 @@ type MemberAddRequest struct {
 }
 
 type MemberDetailResponse struct {
-	ID    string             `json:"id"`
-	Group string             `json:"group"`
-	User  types.UserSummary  `json:"user"`
-	Role  string             `json:"role"`
+	ID        string            `json:"id"`
+	Group     string            `json:"group"`
+	GroupName string            `json:"group_name"`
+	User      types.UserSummary `json:"user"`
+	Role      string            `json:"role"`
 }
 
 type MemberDeleteRequest struct {
