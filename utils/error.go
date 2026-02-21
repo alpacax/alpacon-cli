@@ -26,7 +26,7 @@ func ParseErrorResponse(err error) (code, source string) {
 	start := strings.Index(errStr, "{")
 	if start != -1 {
 		var errorResp ErrorResponse
-		if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && errorResp.Code != "" {
+		if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
 			return errorResp.Code, errorResp.Source
 		}
 	}
