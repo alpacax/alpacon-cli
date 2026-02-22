@@ -64,6 +64,18 @@ jobs:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
+      - name: Upload ARM64 DEB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+
+      - name: Upload ARM64 RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
+
   packagecloud-deploy:
     needs: [goreleaser]
     runs-on: ubuntu-latest
@@ -85,6 +97,16 @@ jobs:
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
+      - name: Download ARM64 DEB Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+
+      - name: Download ARM64 RPM Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
+
       - name: Upload AMD64 DEB to PackageCloud
         uses: danielmundi/upload-packagecloud@v1
         with:
@@ -98,6 +120,24 @@ jobs:
         uses: danielmundi/upload-packagecloud@v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
+          PACKAGECLOUD-USERNAME: alpacax
+          PACKAGECLOUD-REPO: alpacon
+          PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+      - name: Upload ARM64 DEB to PackageCloud
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+          PACKAGECLOUD-USERNAME: alpacax
+          PACKAGECLOUD-REPO: alpacon
+          PACKAGECLOUD-DISTRIB: any/any
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+      - name: Upload ARM64 RPM to PackageCloud
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
           PACKAGECLOUD-USERNAME: alpacax
           PACKAGECLOUD-REPO: alpacon
           PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
