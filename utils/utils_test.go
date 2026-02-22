@@ -92,6 +92,10 @@ func TestTimeUtils(t *testing.T) {
 		{"3 hours ago", now.Add(-3 * time.Hour), "3 hours ago"},
 		{"yesterday", now.Add(-30 * time.Hour), "yesterday"},
 		{"3 days ago", now.Add(-72 * time.Hour), "3 days ago"},
+		// Future cases use a buffer (e.g. +30s, +30m) to guard against integer
+		// truncation: time.Duration division truncates toward zero, so
+		// 5m0s becomes 4m59s by the time it reaches the threshold check.
+		// Past cases don't need a buffer because they are already in the past.
 		{"in a few seconds", now.Add(30 * time.Second), "in a few seconds"},
 		{"in 5 minutes", now.Add(5*time.Minute + 30*time.Second), "in 5 minutes"},
 		{"in 3 hours", now.Add(3*time.Hour + 30*time.Minute), "in 3 hours"},

@@ -262,6 +262,7 @@ func TestGetUserList_StatusMapping(t *testing.T) {
 		{ID: "2", Username: "staffuser", IsStaff: true},
 		{ID: "3", Username: "activeuser", IsActive: true},
 		{ID: "4", Username: "inactive"},
+		{ID: "5", Username: "ldapuser", IsLDAPUser: true},
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -276,14 +277,23 @@ func TestGetUserList_StatusMapping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(list) != 4 {
-		t.Fatalf("expected 4 users, got %d", len(list))
+	if len(list) != 5 {
+		t.Fatalf("expected 5 users, got %d", len(list))
 	}
 
-	expected := []string{"superuser", "staff", "active", "inactive"}
+	expected := []struct{ status, ldap string }{
+		{"superuser", "local"},
+		{"staff", "local"},
+		{"active", "local"},
+		{"inactive", "local"},
+		{"inactive", "ldap"}, // IsLDAPUser does not affect Status
+	}
 	for i, u := range list {
-		if u.Status != expected[i] {
-			t.Errorf("user[%d] status: expected %q, got %q", i, expected[i], u.Status)
+		if u.Status != expected[i].status {
+			t.Errorf("user[%d] status: expected %q, got %q", i, expected[i].status, u.Status)
+		}
+		if u.LDAPStatus != expected[i].ldap {
+			t.Errorf("user[%d] ldap_status: expected %q, got %q", i, expected[i].ldap, u.LDAPStatus)
 		}
 	}
 }
