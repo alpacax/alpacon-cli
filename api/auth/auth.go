@@ -27,7 +27,8 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: insecure,
+				InsecureSkipVerify: insecure, //nolint:gosec
+				MinVersion:         tls.VersionTLS12,
 			},
 		},
 	}
