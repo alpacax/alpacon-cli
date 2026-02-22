@@ -20,7 +20,7 @@ jobs:
       packages: write
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -28,7 +28,7 @@ jobs:
         run: git fetch --force --tags
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: 1.25.x
 
@@ -39,7 +39,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v1"
@@ -53,16 +53,28 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }} 
 
       - name: Upload AMD64 DEB artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Upload AMD64 RPM artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
+
+      - name: Upload ARM64 DEB artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+
+      - name: Upload ARM64 RPM artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
+          path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
 
   packagecloud-deploy:
     needs: [goreleaser]
@@ -76,14 +88,24 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }} 
 
       - name: Download AMD64 DEB Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Download AMD64 RPM Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
+
+      - name: Download ARM64 DEB Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+
+      - name: Download ARM64 RPM Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
 
       - name: Upload AMD64 DEB to PackageCloud
         uses: danielmundi/upload-packagecloud@v1
@@ -98,6 +120,24 @@ jobs:
         uses: danielmundi/upload-packagecloud@v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
+          PACKAGECLOUD-USERNAME: alpacax
+          PACKAGECLOUD-REPO: alpacon
+          PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+      - name: Upload ARM64 DEB to PackageCloud
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
+          PACKAGECLOUD-USERNAME: alpacax
+          PACKAGECLOUD-REPO: alpacon
+          PACKAGECLOUD-DISTRIB: any/any
+          PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+      - name: Upload ARM64 RPM to PackageCloud
+        uses: danielmundi/upload-packagecloud@v1
+        with:
+          PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
           PACKAGECLOUD-USERNAME: alpacax
           PACKAGECLOUD-REPO: alpacon
           PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
