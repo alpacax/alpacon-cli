@@ -16,11 +16,20 @@ Alpacon consists of the following components:
 
 ## Documentation
 
-[Alpacon CLI Documentation](https://github.com/alpacax/alpacon-cli/blob/main/docs/alpacon.md)
+> [!NOTE]
+> This README is intended as a **development and contribution guide**.
+> For production usage and deployment, please refer to the [official documentation](https://docs.alpacax.com/reference/cli/).
+
+[Alpacon CLI Documentation](https://docs.alpacax.com/reference/cli/)
 
 ## Installation
 
 Download the latest `Alpacon CLI` directly from our [releases page](https://github.com/alpacax/alpacon-cli/releases) or install it using package managers.
+
+> [!IMPORTANT]
+> Building from source is intended for **development purposes only**.
+> For production use, please install via package managers or download pre-built binaries from the [releases page](https://github.com/alpacax/alpacon-cli/releases).
+> See the [official documentation](https://docs.alpacax.com/reference/cli/) for more details.
 
 ### Docker
 
