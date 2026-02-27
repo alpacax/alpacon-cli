@@ -8,10 +8,8 @@ import (
 var AclCmd = &cobra.Command{
 	Use:   "acl",
 	Short: "Manage command access for API tokens",
-	Long: `Configure access control for API tokens, specifying which commands each token can execute.
-
-ACL rules apply to both CLI commands (e.g., "server ls", "websh") and server-side shell
-commands executed via websh or exec (e.g., "whoami", "systemctl status *").
+	Long: `Configure access control for API tokens, specifying which server-side shell commands
+each token can execute via websh or exec (e.g., "whoami", "systemctl status *").
 
 Create, list, and modify ACL rules to fine-tune command execution permissions.`,
 	RunE: func(cmd *cobra.Command, args []string) error {

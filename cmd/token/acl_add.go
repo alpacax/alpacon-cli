@@ -11,12 +11,8 @@ import (
 var aclAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a command ACL rule to a token",
-	Long: `Define which commands an API token is allowed to execute.
-
-ACL rules control two types of commands:
-  - CLI commands: Alpacon CLI subcommands like "server ls", "websh", or "cp"
-  - Server-side commands: Shell commands executed on remote servers via websh or exec
-    (e.g., "whoami", "systemctl status *", "docker compose *")
+	Long: `Define which server-side shell commands an API token is allowed to execute
+via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").
 
 Use * as a wildcard to match any arguments. Without a wildcard, only the exact
 command string is matched.`,
@@ -70,7 +66,7 @@ func init() {
 	var token, command string
 
 	aclAddCmd.Flags().StringVarP(&token, "token", "t", "", "Token ID")
-	aclAddCmd.Flags().StringVarP(&command, "command", "c", "", "CLI subcommand or server-side shell command (supports * wildcard)")
+	aclAddCmd.Flags().StringVarP(&command, "command", "c", "", "Server-side shell command (supports * wildcard)")
 }
 
 func promptForAcl() security.CommandAclRequest {
