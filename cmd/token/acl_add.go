@@ -10,7 +10,7 @@ import (
 
 var aclAddCmd = &cobra.Command{
 	Use:   "add",
-	Short: "Add a new command ACL with specific token and command",
+	Short: "Add a command ACL rule to a token",
 	Long: `Define which commands an API token is allowed to execute.
 
 ACL rules control two types of commands:
