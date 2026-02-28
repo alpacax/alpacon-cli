@@ -102,7 +102,7 @@ Note: All flags must be placed before the server name.
 				if serverName == "" {
 					serverName = args[i]
 				} else {
-						commandArgs = append(commandArgs, args[i:]...)
+					commandArgs = append(commandArgs, args[i:]...)
 					i = len(args)
 				}
 			}
