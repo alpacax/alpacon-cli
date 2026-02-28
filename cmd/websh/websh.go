@@ -53,7 +53,7 @@ Flags:
   -s, --share                        Share the terminal via a temporary link.
   --url [SHARED_URL]                 URL of the shared session to join.
   -p, --password [PASSWORD]          Password for the shared session.
-  --read-only [true|false]           Set shared session to read-only (default: false).
+  --read-only=[true|false]           Set shared session to read-only (default: false).
 
 Note: All flags must be placed before the server name.
       Everything after the server name is treated as the remote command.`,
