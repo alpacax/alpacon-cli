@@ -20,8 +20,6 @@ Alpacon consists of the following components:
 > This README is intended as a **development and contribution guide**.
 > For production usage and deployment, please refer to the [official documentation](https://docs.alpacax.com/reference/cli/).
 
-[Alpacon CLI Documentation](https://docs.alpacax.com/reference/cli/)
-
 ## Installation
 
 Download the latest `Alpacon CLI` directly from our [releases page](https://github.com/alpacax/alpacon-cli/releases) or install it using package managers.
@@ -204,31 +202,28 @@ Select groups that are authorized to access this server. (e.g., 1,2):
 #### Connect Websh
 Access a server's websh terminal:
 ```bash
-# Open a websh terminal for the specified server.
-$ alpacon websh [SERVER NAME]
+# Open a websh terminal
+$ alpacon websh my-server
 
-# Open a websh terminal as the root user.
-$ alpacon websh -r [SERVER NAME]
+# Open as root using SSH-like syntax
+$ alpacon websh root@my-server
 
-# Open a websh terminal for the specified server using a specified username and groupname.
-$ alpacon websh -u [USER NAME] -g [GROUP NAME] [SERVER NAME]
+# Open with specific user and group
+$ alpacon websh -u admin -g developers my-server
 ```
 
 #### Execute a command via Websh
 Execute a command directly on a server and retrieve the output:
 ```bash
-$ alpacon websh [SERVER NAME] [COMMAND]
+$ alpacon websh my-server "ls -la /var/log"
 
-$ alpacon websh -u [USER NAME] -g [GROUP NAME] [SERVER NAME] [COMMAND]
+$ alpacon websh root@my-server "systemctl status nginx"
 
-$ alpacon websh --username=[USER NAME] --groupname=[GROUP NAME] [SERVER NAME] [COMMAND]
+$ alpacon websh -u admin -g developers my-server "docker ps"
 
-$ alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" [SERVER NAME] [COMMAND]
-
-# Use the current shell's value for the environment variable 'KEY'.
-$ alpacon websh --env="KEY" [SERVER NAME] [COMMAND]
+$ alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
 ```
-- Note: All flags must be placed before the `[SERVER NAME]`.
+> **Note**: All flags must be placed before the server name. Everything after the server name is treated as the remote command.
 
 #### Execute a command (SSH-style)
 Execute a command on a remote server using SSH-like `user@host` syntax:
@@ -266,8 +261,8 @@ $ alpacon tunnel [SERVER NAME] -l 9000 -r 8082 -v
 You can share the current terminal to others via a temporary link:
 ```bash
 # Open a websh terminal and share the current terminal
-$ alpacon websh [SERVER NAME] --share
-$ alpacon websh [SERVER NAME] --share --read-only true
+$ alpacon websh --share my-server
+$ alpacon websh --share --read-only=true my-server
 
 # Join an existing shared session
 $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
