@@ -133,7 +133,7 @@ func TestCommandParsing(t *testing.T) {
 		},
 		{
 			testName:          "ShareSessionWithFlags",
-			args:              []string{"test-server", "--share"},
+			args:              []string{"--share", "test-server"},
 			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
@@ -161,7 +161,7 @@ func TestCommandParsing(t *testing.T) {
 		},
 		{
 			testName:          "ReadOnlySharedSession",
-			args:              []string{"test-server", "--share", "--read-only"},
+			args:              []string{"--share", "--read-only=true", "test-server"},
 			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
@@ -175,7 +175,7 @@ func TestCommandParsing(t *testing.T) {
 		},
 		{
 			testName:          "ReadOnlySharedSession2",
-			args:              []string{"test-server", "--share", "--read-only=True"},
+			args:              []string{"--share", "--read-only=True", "test-server"},
 			expectUsername:    "",
 			expectGroupname:   "",
 			expectEnv:         map[string]string{},
@@ -272,6 +272,14 @@ func TestCommandParsing(t *testing.T) {
 			expectEnv:         map[string]string{},
 			expectServerName:  "web-server-01.example.com",
 			expectCommandArgs: []string{"uptime"},
+		},
+		{
+			testName:          "DashSAfterCommandNotParsedAsShare",
+			args:              []string{"my-server", "ls", "-s"},
+			expectServerName:  "my-server",
+			expectEnv:         map[string]string{},
+			expectCommandArgs: []string{"ls", "-s"},
+			expectShare:       false,
 		},
 	}
 
