@@ -39,8 +39,8 @@ to ensure it is interpreted correctly on the remote server.`,
   alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
 
   # Share terminal session
-  alpacon websh my-server --share
-  alpacon websh my-server --share --read-only true
+  alpacon websh --share my-server
+  alpacon websh --share --read-only=true my-server
 
   # Join an existing shared session
   alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
@@ -56,7 +56,7 @@ Flags:
   --read-only [true|false]           Set shared session to read-only (default: false).
 
 Note: All flags must be placed before the server name.
-      Flags placed after the server name are treated as part of the remote command.`,
+      Everything after the server name is treated as the remote command.`,
 	// DisableFlagParsing is required because positional args after the server name
 	// (e.g., "ls -la") would otherwise be consumed by Cobra's flag parser.
 	// As a trade-off, we parse all flags manually in the Run function.
@@ -102,13 +102,18 @@ Note: All flags must be placed before the server name.
 				if serverName == "" {
 					serverName = args[i]
 				} else {
-					commandArgs = append(commandArgs, args[i])
+						commandArgs = append(commandArgs, args[i:]...)
+					i = len(args)
 				}
 			}
 		}
 
 		if serverName == "" {
 			utils.CliErrorWithExit("Server name is required.")
+		}
+
+		if share && len(commandArgs) > 0 {
+			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
 		// Parse SSH-like syntax for user@host
