@@ -256,6 +256,22 @@ $ alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT] -u [USER NAME] -
 $ alpacon tunnel [SERVER NAME] -l 9000 -r 8082 -v
 ```
 
+Run a local TCP application in the same session with an attached tunnel:
+```bash
+# psql through tunnel (local 5432 -> remote 5432)
+$ alpacon tunnel run [SERVER NAME] -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
+
+# kubectl through tunnel (local 6443 -> remote 6443)
+$ alpacon tunnel run [SERVER NAME] -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
+
+# SSH through tunnel
+$ alpacon tunnel run [SERVER NAME] -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
+```
+> `--` separator is required.  
+> `alpacon tunnel run` does not auto-detect app ports; pass the app's local target (e.g. `127.0.0.1:<LOCAL_PORT>`) explicitly.
+> Prefer `-- COMMAND [ARGS...]` over a single quoted command string.  
+> If you really need shell one-liner style, use `-- sh -c "..."`.
+
 
 #### Share your terminal
 You can share the current terminal to others via a temporary link:
