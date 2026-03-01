@@ -11,6 +11,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetEventList_NoExtraPagination(t *testing.T) {
@@ -65,5 +67,68 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 	}
 	if len(events) != 25 {
 		t.Errorf("expected 25 events, got %d", len(events))
+	}
+}
+
+func TestPollCommandExecution(t *testing.T) {
+	tests := []struct {
+		name           string
+		statusSequence []string
+		wantStatus     string
+		wantResult     string
+		wantRequests   int
+	}{
+		{
+			name:           "running then completed",
+			statusSequence: []string{"running", "running", "completed"},
+			wantStatus:     "completed",
+			wantResult:     "done",
+			wantRequests:   3,
+		},
+		{
+			name:           "acked then completed (backwards compat)",
+			statusSequence: []string{"acked", "completed"},
+			wantStatus:     "completed",
+			wantResult:     "done",
+			wantRequests:   2,
+		},
+		{
+			name:           "immediate terminal status",
+			statusSequence: []string{"error"},
+			wantStatus:     "error",
+			wantResult:     "done",
+			wantRequests:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var reqCount atomic.Int32
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				idx := int(reqCount.Add(1)) - 1
+				if idx >= len(tt.statusSequence) {
+					idx = len(tt.statusSequence) - 1
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(EventDetails{
+					ID:     "cmd-1",
+					Status: tt.statusSequence[idx],
+					Result: "done",
+				})
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{
+				HTTPClient: ts.Client(),
+				BaseURL:    ts.URL,
+			}
+
+			result, err := PollCommandExecution(ac, "cmd-1")
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantStatus, result.Status)
+			assert.Equal(t, tt.wantResult, result.Result)
+			assert.Equal(t, tt.wantRequests, int(reqCount.Load()))
+		})
 	}
 }

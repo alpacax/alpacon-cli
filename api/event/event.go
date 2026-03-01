@@ -128,7 +128,7 @@ func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails,
 			}
 
 			switch response.Status {
-			case "running":
+			case "running", "acked":
 				timer.Reset(5 * time.Minute)
 				continue
 			default:
