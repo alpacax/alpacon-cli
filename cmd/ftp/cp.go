@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/ftp"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -103,6 +105,18 @@ Remote paths use the format [USER@]SERVER:/path.`,
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					RefreshToken: func() error {
+						cfg, err := config.LoadConfig()
+						if err != nil {
+							return err
+						}
+						tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, alpaconClient.HTTPClient, cfg.RefreshToken)
+						if err != nil {
+							return err
+						}
+						alpaconClient.AccessToken = tokenRes.AccessToken
+						return nil
+					},
 					RetryOperation: func() error {
 						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
 					},
@@ -124,6 +138,18 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					OnUsernameRequired: func() error {
 						_, err := iam.HandleUsernameRequired()
 						return err
+					},
+					RefreshToken: func() error {
+						cfg, err := config.LoadConfig()
+						if err != nil {
+							return err
+						}
+						tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, alpaconClient.HTTPClient, cfg.RefreshToken)
+						if err != nil {
+							return err
+						}
+						alpaconClient.AccessToken = tokenRes.AccessToken
+						return nil
 					},
 					RetryOperation: func() error {
 						return downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)

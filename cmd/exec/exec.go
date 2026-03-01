@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -67,6 +69,18 @@ var ExecCmd = &cobra.Command{
 				OnUsernameRequired: func() error {
 					_, err := iam.HandleUsernameRequired()
 					return err
+				},
+				RefreshToken: func() error {
+					cfg, err := config.LoadConfig()
+					if err != nil {
+						return err
+					}
+					tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, alpaconClient.HTTPClient, cfg.RefreshToken)
+					if err != nil {
+						return err
+					}
+					alpaconClient.AccessToken = tokenRes.AccessToken
+					return nil
 				},
 				RetryOperation: func() error {
 					result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)

@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	maxRetryDuration = 1 * time.Minute
+	maxRetryDuration = 3 * time.Minute
 	retryInterval    = 5 * time.Second
 )
 
@@ -18,6 +18,10 @@ type ErrorHandlerCallbacks struct {
 
 	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
+
+	// RefreshToken is called before each MFA retry to refresh the access token
+	// so the server can see the latest MFA completion state
+	RefreshToken func() error
 
 	// RetryOperation is called to retry the original operation after error handling
 	// Should return nil on success, error on failure
@@ -52,6 +56,10 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			}
 
 			time.Sleep(retryInterval)
+
+			if callbacks.RefreshToken != nil {
+				_ = callbacks.RefreshToken()
+			}
 
 			if callbacks.RetryOperation != nil {
 				if err := callbacks.RetryOperation(); err == nil {
