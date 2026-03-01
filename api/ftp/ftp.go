@@ -289,13 +289,10 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 		return err
 	}
 
-	if status.Status["text"] == "Stuck" || status.Status["text"] == "Error" {
-		if msg, ok := status.Status["message"].(string); ok {
-			utils.CliErrorWithExit("%s", msg)
-		}
-		utils.CliErrorWithExit("command failed with status: %v", status.Status["text"])
+	if status.Status == "stuck" || status.Status == "error" {
+		utils.CliErrorWithExit("command failed with status: %s", status.Status)
 	}
-	if status.Status["text"] == "Failed" {
+	if status.Status == "failed" {
 		utils.CliErrorWithExit("%s", status.Result)
 	}
 
