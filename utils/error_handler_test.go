@@ -4,9 +4,15 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func init() {
+	// Override retry interval to keep MFA tests fast
+	retryInterval = 10 * time.Millisecond
+}
 
 func TestHandleCommonErrors_UnknownError(t *testing.T) {
 	err := errors.New("connection refused")

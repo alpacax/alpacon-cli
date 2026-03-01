@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const (
+var (
 	maxRetryDuration = 3 * time.Minute
 	retryInterval    = 5 * time.Second
 )
