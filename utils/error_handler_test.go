@@ -9,9 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func init() {
-	// Override retry interval to keep MFA tests fast
+func withFastRetry(t *testing.T) {
+	t.Helper()
+	orig := retryInterval
 	retryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { retryInterval = orig })
 }
 
 func TestHandleCommonErrors_UnknownError(t *testing.T) {
@@ -53,6 +55,7 @@ func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
 }
 
 func TestHandleCommonErrors_MFA_RefreshTokenError(t *testing.T) {
+	withFastRetry(t)
 	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
 	refreshErr := errors.New("refresh token expired")
 
@@ -70,6 +73,7 @@ func TestHandleCommonErrors_MFA_RefreshTokenError(t *testing.T) {
 }
 
 func TestHandleCommonErrors_MFA_RefreshThenRetrySucceeds(t *testing.T) {
+	withFastRetry(t)
 	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
 	var refreshCount atomic.Int32
 	var retryCount atomic.Int32
