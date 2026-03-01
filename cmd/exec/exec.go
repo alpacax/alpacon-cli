@@ -68,6 +68,7 @@ var ExecCmd = &cobra.Command{
 					_, err := iam.HandleUsernameRequired()
 					return err
 				},
+				RefreshToken: alpaconClient.RefreshToken,
 				RetryOperation: func() error {
 					result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 					return err

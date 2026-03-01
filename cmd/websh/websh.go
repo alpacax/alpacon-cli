@@ -157,6 +157,7 @@ Note: All flags must be placed before the server name.
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
 						return err
@@ -180,6 +181,7 @@ Note: All flags must be placed before the server name.
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
 						return err

@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-const (
-	maxRetryDuration = 1 * time.Minute
-	retryInterval    = 5 * time.Second
-)
+const maxRetryDuration = 3 * time.Minute
+
+var retryInterval = 5 * time.Second
 
 // ErrorHandlerCallbacks defines callback functions for handling different error types
 type ErrorHandlerCallbacks struct {
@@ -18,6 +17,10 @@ type ErrorHandlerCallbacks struct {
 
 	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
+
+	// RefreshToken is called before each MFA retry to refresh the access token
+	// so the server can see the latest MFA completion state
+	RefreshToken func() error
 
 	// RetryOperation is called to retry the original operation after error handling
 	// Should return nil on success, error on failure
@@ -52,6 +55,13 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			}
 
 			time.Sleep(retryInterval)
+
+			if callbacks.RefreshToken != nil {
+				if err := callbacks.RefreshToken(); err != nil {
+					spinner.Stop()
+					return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
+				}
+			}
 
 			if callbacks.RetryOperation != nil {
 				if err := callbacks.RetryOperation(); err == nil {

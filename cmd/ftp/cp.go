@@ -103,6 +103,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
 					},
@@ -125,6 +126,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						return downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
 					},
