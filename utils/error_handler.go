@@ -59,7 +59,7 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			if callbacks.RefreshToken != nil {
 				if err := callbacks.RefreshToken(); err != nil {
 					spinner.Stop()
-					return fmt.Errorf("failed to refresh token: %w", err)
+					return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
 				}
 			}
 

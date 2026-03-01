@@ -68,7 +68,7 @@ func TestHandleCommonErrors_MFA_RefreshTokenError(t *testing.T) {
 		},
 	})
 
-	assert.ErrorContains(t, result, "failed to refresh token")
+	assert.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
 	assert.ErrorIs(t, result, refreshErr)
 }
 
