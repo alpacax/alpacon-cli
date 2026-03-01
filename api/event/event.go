@@ -99,11 +99,8 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 		return "", err
 	}
 
-	if result.Status["text"] == "Stuck" || result.Status["text"] == "Error" {
-		if msg, ok := result.Status["message"].(string); ok {
-			return msg, nil
-		}
-		return fmt.Sprintf("command failed with status: %v", result.Status["text"]), nil
+	if result.Status == "stuck" || result.Status == "error" {
+		return fmt.Sprintf("command failed with status: %s", result.Status), nil
 	}
 
 	return result.Result, nil
@@ -130,8 +127,8 @@ func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails,
 				return response, err
 			}
 
-			switch response.Status["text"] {
-			case "Acked":
+			switch response.Status {
+			case "acked":
 				timer.Reset(5 * time.Minute)
 				continue
 			default:
