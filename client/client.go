@@ -285,6 +285,20 @@ func (ac *AlpaconClient) IsUsingHTTPS() (bool, error) {
 	return false, nil
 }
 
+// RefreshToken refreshes the access token using the stored refresh token.
+func (ac *AlpaconClient) RefreshToken() error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return err
+	}
+	tokenRes, err := auth0.RefreshAccessToken(cfg.WorkspaceURL, ac.HTTPClient, cfg.RefreshToken)
+	if err != nil {
+		return err
+	}
+	ac.AccessToken = tokenRes.AccessToken
+	return nil
+}
+
 func isAccessTokenExpired(cfg config.Config) bool {
 	if cfg.AccessToken == "" {
 		return false

@@ -58,7 +58,10 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			time.Sleep(retryInterval)
 
 			if callbacks.RefreshToken != nil {
-				_ = callbacks.RefreshToken()
+				if err := callbacks.RefreshToken(); err != nil {
+					spinner.Stop()
+					return fmt.Errorf("failed to refresh token: %w", err)
+				}
 			}
 
 			if callbacks.RetryOperation != nil {
