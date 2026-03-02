@@ -343,5 +343,5 @@ func extractTCPPort(addr net.Addr) (int, error) {
 
 func isRetryableAcceptError(err error) bool {
 	var ne net.Error
-	return errors.As(err, &ne) && (ne.Timeout() || ne.Temporary())
+	return errors.As(err, &ne) && ne.Timeout()
 }

@@ -159,37 +159,50 @@ func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 	}
 }
 
-func TestAcceptConnectionsRetriesOnTemporaryNonTimeoutError(t *testing.T) {
-	var attempts int32
-	const retryCount = 2
+func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T) {
+	var listenerCloseCount int32
+	var sessionCloseCount int32
 
 	r := &Runtime{
 		listener: &mockListener{
 			acceptFn: func() (net.Conn, error) {
-				n := atomic.AddInt32(&attempts, 1)
-				if int(n) <= retryCount {
-					return nil, &tempNetError{
-						msg:       "temporary but not timeout",
-						timeout:   false,
-						temporary: true,
-					}
+				return nil, &tempNetError{
+					msg:       "temporary but not timeout",
+					timeout:   false,
+					temporary: true,
 				}
-				return nil, net.ErrClosed
+			},
+			closeFn: func() error {
+				atomic.AddInt32(&listenerCloseCount, 1)
+				return nil
 			},
 		},
-		session: &mockSession{},
-		done:    make(chan struct{}),
+		session: &mockSession{
+			closeFn: func() error {
+				atomic.AddInt32(&sessionCloseCount, 1)
+				return nil
+			},
+		},
+		done: make(chan struct{}),
 	}
 
 	r.acceptConnections()
 
-	got := atomic.LoadInt32(&attempts)
-	if got <= int32(retryCount) {
-		t.Fatalf("expected more than %d attempts, got %d", retryCount, got)
+	select {
+	case <-r.done:
+	default:
+		t.Fatal("expected done channel to be closed")
 	}
 
-	if err := r.Cause(); err != nil {
-		t.Fatalf("unexpected shutdown cause: %v", err)
+	if r.Cause() == nil {
+		t.Fatal("expected shutdown cause, got nil")
+	}
+
+	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+		t.Fatalf("listener Close() called %d times, want 1", got)
+	}
+	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+		t.Fatalf("session Close() called %d times, want 1", got)
 	}
 }
 
