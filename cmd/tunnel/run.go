@@ -11,6 +11,8 @@ import (
 
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
+	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 const (
@@ -80,6 +82,8 @@ func extractRunInvocation(args []string, dashIndex int) (string, []string, error
 }
 
 func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int, error) {
+	defer restoreTerminalForeground()
+
 	waitCh := make(chan error, 1)
 	go func() {
 		waitCh <- localCmd.Wait()
@@ -209,7 +213,26 @@ func configureCommandProcess(cmd *exec.Cmd) {
 	if cmd == nil {
 		return
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdinFd := int(os.Stdin.Fd())
+	if term.IsTerminal(stdinFd) {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid:    true,
+			Foreground: true,
+			Ctty:       stdinFd,
+		}
+	} else {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+}
+
+func restoreTerminalForeground() {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return
+	}
+	signal.Ignore(syscall.SIGTTOU)
+	defer signal.Reset(syscall.SIGTTOU)
+	_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, syscall.Getpgrp())
 }
 
 func signalCommandProcess(cmd *exec.Cmd, sig os.Signal) error {
