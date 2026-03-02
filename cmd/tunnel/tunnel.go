@@ -7,6 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/client"
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -151,10 +154,50 @@ func executeTunnelCommand(cmd *cobra.Command, args []string, sigChan <-chan os.S
 	return 0, executeTunnel(args[0], sigChan)
 }
 
+func handleTunnelStartError(err error, serverName string, retry func() error) error {
+	var ac *client.AlpaconClient
+	getClient := func() (*client.AlpaconClient, error) {
+		if ac != nil {
+			return ac, nil
+		}
+		var clientErr error
+		ac, clientErr = client.NewAlpaconAPIClient()
+		return ac, clientErr
+	}
+
+	return utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+		OnMFARequired: func(srv string) error {
+			c, err := getClient()
+			if err != nil {
+				return err
+			}
+			return mfa.HandleMFAError(c, srv)
+		},
+		OnUsernameRequired: func() error {
+			_, err := iam.HandleUsernameRequired()
+			return err
+		},
+		RefreshToken: func() error {
+			c, err := getClient()
+			if err != nil {
+				return err
+			}
+			return c.RefreshToken()
+		},
+		RetryOperation: retry,
+	})
+}
+
 func executeTunnel(serverName string, sigChan <-chan os.Signal) error {
 	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
 	if err != nil {
-		return err
+		err = handleTunnelStartError(err, serverName, func() error {
+			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+			return err
+		})
+		if err != nil {
+			return err
+		}
 	}
 	defer runtime.Close(nil)
 	if err := runtime.CheckReady(); err != nil {

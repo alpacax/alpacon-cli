@@ -27,7 +27,13 @@ const (
 func executeTunnelRunWithInvocation(serverName string, localCommand []string) (int, error) {
 	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
 	if err != nil {
-		return 1, err
+		err = handleTunnelStartError(err, serverName, func() error {
+			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+			return err
+		})
+		if err != nil {
+			return 1, err
+		}
 	}
 	if err := runtime.CheckReady(); err != nil {
 		runtime.Close(nil)
