@@ -22,7 +22,8 @@ type EventDetails struct {
 	Line          string              `json:"line"`
 	Success       *bool               `json:"success"`
 	Result        string              `json:"result"`
-	Status        map[string]any      `json:"status"`
+	Status        string              `json:"status"`
+	Cancellable   bool                `json:"cancellable"`
 	ResponseDelay float64             `json:"response_delay"`
 	ElapsedTime   float64             `json:"elapsed_time"`
 	AddedAt       time.Time           `json:"added_at"`

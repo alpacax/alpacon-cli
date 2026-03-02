@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const maxRetryDuration = 3 * time.Minute
+var maxRetryDuration = 3 * time.Minute
 
 var retryInterval = 5 * time.Second
 
@@ -17,6 +17,10 @@ type ErrorHandlerCallbacks struct {
 
 	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
+
+	// CheckMFACompleted is called to poll for MFA completion via a lightweight endpoint.
+	// If nil, falls back to the legacy RefreshToken+RetryOperation loop.
+	CheckMFACompleted func() (bool, error)
 
 	// RefreshToken is called before each MFA retry to refresh the access token
 	// so the server can see the latest MFA completion state
@@ -47,31 +51,72 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 		spinner.Start()
 
 		startTime := time.Now()
-		// Retry loop
-		for {
-			if time.Since(startTime) > maxRetryDuration {
-				spinner.Stop()
-				return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
-			}
 
-			time.Sleep(retryInterval)
-
-			if callbacks.RefreshToken != nil {
-				if err := callbacks.RefreshToken(); err != nil {
+		if callbacks.CheckMFACompleted != nil {
+			// New flow: poll lightweight completion endpoint, then retry once
+			for {
+				if time.Since(startTime) > maxRetryDuration {
 					spinner.Stop()
-					return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
+					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 				}
-			}
 
-			if callbacks.RetryOperation != nil {
-				if err := callbacks.RetryOperation(); err == nil {
-					spinner.Stop()
-					CliSuccess("MFA authentication completed")
-					return nil
+				time.Sleep(retryInterval)
+
+				completed, err := callbacks.CheckMFACompleted()
+				if err != nil {
+					// Non-fatal: endpoint may not be deployed yet, keep polling
+					continue
 				}
-			} else {
+				if !completed {
+					continue
+				}
+
+				// MFA completed — refresh token and retry once
+				if callbacks.RefreshToken != nil {
+					if err := callbacks.RefreshToken(); err != nil {
+						spinner.Stop()
+						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
+					}
+				}
+
+				if callbacks.RetryOperation != nil {
+					if err := callbacks.RetryOperation(); err != nil {
+						spinner.Stop()
+						return err
+					}
+				}
+
 				spinner.Stop()
-				break
+				CliSuccess("MFA authentication completed")
+				return nil
+			}
+		} else {
+			// Legacy flow: RefreshToken + RetryOperation loop
+			for {
+				if time.Since(startTime) > maxRetryDuration {
+					spinner.Stop()
+					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
+				}
+
+				time.Sleep(retryInterval)
+
+				if callbacks.RefreshToken != nil {
+					if err := callbacks.RefreshToken(); err != nil {
+						spinner.Stop()
+						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
+					}
+				}
+
+				if callbacks.RetryOperation != nil {
+					if err := callbacks.RetryOperation(); err == nil {
+						spinner.Stop()
+						CliSuccess("MFA authentication completed")
+						return nil
+					}
+				} else {
+					spinner.Stop()
+					break
+				}
 			}
 		}
 

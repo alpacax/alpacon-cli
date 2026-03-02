@@ -12,11 +12,16 @@ import (
 )
 
 const (
-	mfaURL = "/api/auth0/mfa"
+	mfaURL           = "/api/auth0/mfa"
+	mfaCompletionURL = "/api/auth0/mfa/completion/"
 )
 
 type mfaResponse struct {
 	MfaURL string `json:"mfa_url"`
+}
+
+type mfaCompletionResponse struct {
+	Completed bool `json:"completed"`
 }
 
 func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
@@ -35,6 +40,20 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n  %s\n\n", mfaURL)
 
 	return nil
+}
+
+func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
+	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
+	if err != nil {
+		return false, fmt.Errorf("failed to check MFA completion: %w", err)
+	}
+
+	var resp mfaCompletionResponse
+	if err := json.Unmarshal(responseBody, &resp); err != nil {
+		return false, fmt.Errorf("failed to parse MFA completion response: %w", err)
+	}
+
+	return resp.Completed, nil
 }
 
 func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {

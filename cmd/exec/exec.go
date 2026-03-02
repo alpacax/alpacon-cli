@@ -16,10 +16,10 @@ var ExecCmd = &cobra.Command{
 	Use:   "exec [USER@]SERVER COMMAND...",
 	Short: "Execute a command on a remote server",
 	Long: `Execute a command on a remote server.
-	
+
 	This command executes a specified command on a remote server and returns the output.
 	It supports SSH-like syntax for specifying the user and server.
-	
+
 	Examples:
 	  alpacon exec prod-docker docker ps
 	  alpacon exec root@prod-docker docker ps
@@ -67,6 +67,9 @@ var ExecCmd = &cobra.Command{
 				OnUsernameRequired: func() error {
 					_, err := iam.HandleUsernameRequired()
 					return err
+				},
+				CheckMFACompleted: func() (bool, error) {
+					return mfa.CheckMFACompletion(alpaconClient)
 				},
 				RefreshToken: alpaconClient.RefreshToken,
 				RetryOperation: func() error {

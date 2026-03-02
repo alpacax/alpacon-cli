@@ -157,6 +157,9 @@ Note: All flags must be placed before the server name.
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
+					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
@@ -180,6 +183,9 @@ Note: All flags must be placed before the server name.
 					OnUsernameRequired: func() error {
 						_, err := iam.HandleUsernameRequired()
 						return err
+					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
