@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 )
 
 type fakeRunRuntime struct {
@@ -21,8 +19,6 @@ type fakeRunRuntime struct {
 
 	causeMu sync.RWMutex
 	cause   error
-
-	checkReadyErr error
 
 	closeCalls int32
 	closeOnce  sync.Once
@@ -43,7 +39,7 @@ func (f *fakeRunRuntime) RemoteAddress() string {
 }
 
 func (f *fakeRunRuntime) CheckReady() error {
-	return f.checkReadyErr
+	return nil
 }
 
 func (f *fakeRunRuntime) Done() <-chan struct{} {
@@ -79,19 +75,18 @@ func (f *fakeRunRuntime) setCause(cause error) {
 	}
 }
 
-func runHelperCommand(mode string, extraArgs ...string) *exec.Cmd {
+func runHelperCommand(mode string) *exec.Cmd {
 	args := []string{"-test.run=TestRunHelperProcess", "--", "run-helper", mode}
-	args = append(args, extraArgs...)
 	return exec.Command(os.Args[0], args...)
 }
 
-func parseRunHelperInvocation(args []string) (mode string, extra []string, ok bool) {
+func parseRunHelperInvocation(args []string) (mode string, ok bool) {
 	for i := 0; i < len(args); i++ {
 		if args[i] == "run-helper" && i+1 < len(args) {
-			return args[i+1], args[i+2:], true
+			return args[i+1], true
 		}
 	}
-	return "", nil, false
+	return "", false
 }
 
 func TestExtractRunInvocation(t *testing.T) {
@@ -155,6 +150,16 @@ func TestExtractRunInvocation(t *testing.T) {
 				t.Fatalf("command = %#v, want %#v", gotCmd, tt.wantCmd)
 			}
 		})
+	}
+}
+
+func TestExtractRunInvocationLegacyRunSubcommandRemoved(t *testing.T) {
+	_, _, err := extractRunInvocation([]string{"run", "prod-db", "psql"}, 2)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "`alpacon tunnel run` has been removed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -231,182 +236,29 @@ func TestMonitorLocalCommandReturnsErrorWhenTunnelCloses(t *testing.T) {
 	}
 }
 
-func TestExecuteTunnelRunWithInvocationStartFailure(t *testing.T) {
-	origStarter := runTunnelStarter
-	origFactory := runLocalCommandFactory
-	defer func() {
-		runTunnelStarter = origStarter
-		runLocalCommandFactory = origFactory
-	}()
+func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
+	originalFlags := tunnelFlags
+	t.Cleanup(func() {
+		tunnelFlags = originalFlags
+	})
 
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return nil, errors.New("start failed")
-	}
+	tunnelFlags.localPort = "5432"
+	tunnelFlags.remotePort = "invalid"
 
 	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "start failed") {
+	if !strings.Contains(err.Error(), "invalid remote port") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if exitCode != 1 {
 		t.Fatalf("exitCode = %d, want 1", exitCode)
-	}
-}
-
-func TestExecuteTunnelRunWithInvocationCommandStartFailureClosesRuntime(t *testing.T) {
-	origStarter := runTunnelStarter
-	origFactory := runLocalCommandFactory
-	defer func() {
-		runTunnelStarter = origStarter
-		runLocalCommandFactory = origFactory
-	}()
-
-	runtime := newFakeRunRuntime()
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return runtime, nil
-	}
-	runLocalCommandFactory = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/definitely/not/a-real-command")
-	}
-
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to start local command") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1", exitCode)
-	}
-	if got := atomic.LoadInt32(&runtime.closeCalls); got != 1 {
-		t.Fatalf("runtime.Close called %d times, want 1", got)
-	}
-}
-
-func TestExecuteTunnelRunWithInvocationReadyCheckFailure(t *testing.T) {
-	origStarter := runTunnelStarter
-	origFactory := runLocalCommandFactory
-	defer func() {
-		runTunnelStarter = origStarter
-		runLocalCommandFactory = origFactory
-	}()
-
-	runtime := newFakeRunRuntime()
-	runtime.checkReadyErr = errors.New("readiness failed")
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return runtime, nil
-	}
-
-	var commandFactoryCalled int32
-	runLocalCommandFactory = func(name string, args ...string) *exec.Cmd {
-		atomic.AddInt32(&commandFactoryCalled, 1)
-		return runHelperCommand("exit0")
-	}
-
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to establish tunnel connection") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if exitCode != 1 {
-		t.Fatalf("exitCode = %d, want 1", exitCode)
-	}
-	if got := atomic.LoadInt32(&commandFactoryCalled); got != 0 {
-		t.Fatalf("local command factory called %d times, want 0", got)
-	}
-	if got := atomic.LoadInt32(&runtime.closeCalls); got != 1 {
-		t.Fatalf("runtime.Close called %d times, want 1", got)
-	}
-}
-
-func TestExecuteTunnelRunWithInvocationPreservesLocalCommandArgs(t *testing.T) {
-	origStarter := runTunnelStarter
-	origFactory := runLocalCommandFactory
-	defer func() {
-		runTunnelStarter = origStarter
-		runLocalCommandFactory = origFactory
-	}()
-
-	runtime := newFakeRunRuntime()
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return runtime, nil
-	}
-
-	var capturedName string
-	var capturedArgs []string
-	runLocalCommandFactory = func(name string, args ...string) *exec.Cmd {
-		capturedName = name
-		capturedArgs = append([]string(nil), args...)
-		return runHelperCommand("exit0")
-	}
-
-	exitCode, err := executeTunnelRunWithInvocation("prod-k8s", []string{"kubectl", "get", "pods"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0", exitCode)
-	}
-
-	if capturedName != "kubectl" {
-		t.Fatalf("command name = %q, want kubectl", capturedName)
-	}
-	wantArgs := []string{"get", "pods"}
-	if !reflect.DeepEqual(capturedArgs, wantArgs) {
-		t.Fatalf("command args = %#v, want %#v", capturedArgs, wantArgs)
-	}
-}
-
-func TestExecuteTunnelRunWithInvocationDoesNotInjectTunnelPortEnv(t *testing.T) {
-	origStarter := runTunnelStarter
-	origFactory := runLocalCommandFactory
-	origPort, hadPort := os.LookupEnv("ALPACON_TUNNEL_PORT")
-	defer func() {
-		runTunnelStarter = origStarter
-		runLocalCommandFactory = origFactory
-		if hadPort {
-			_ = os.Setenv("ALPACON_TUNNEL_PORT", origPort)
-		} else {
-			_ = os.Unsetenv("ALPACON_TUNNEL_PORT")
-		}
-	}()
-	_ = os.Unsetenv("ALPACON_TUNNEL_PORT")
-
-	envDumpFile := t.TempDir() + "/env.txt"
-
-	runtime := newFakeRunRuntime()
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return runtime, nil
-	}
-	runLocalCommandFactory = func(name string, args ...string) *exec.Cmd {
-		return runHelperCommand("print-env", envDumpFile)
-	}
-
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if exitCode != 0 {
-		t.Fatalf("exitCode = %d, want 0", exitCode)
-	}
-
-	data, err := os.ReadFile(envDumpFile)
-	if err != nil {
-		t.Fatalf("failed to read env dump: %v", err)
-	}
-	envDump := string(data)
-	if strings.Contains(envDump, "ALPACON_TUNNEL_PORT=") {
-		t.Fatalf("unexpected ALPACON_TUNNEL_PORT in env dump:\n%s", envDump)
 	}
 }
 
 func TestRunHelperProcess(t *testing.T) {
-	mode, extra, ok := parseRunHelperInvocation(os.Args)
+	mode, ok := parseRunHelperInvocation(os.Args)
 	if !ok {
 		return
 	}
@@ -423,15 +275,6 @@ func TestRunHelperProcess(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			os.Exit(8)
 		}
-	case "print-env":
-		if len(extra) < 1 {
-			os.Exit(2)
-		}
-		err := os.WriteFile(extra[0], []byte(strings.Join(os.Environ(), "\n")), 0o600)
-		if err != nil {
-			os.Exit(3)
-		}
-		os.Exit(0)
 	default:
 		os.Exit(2)
 	}

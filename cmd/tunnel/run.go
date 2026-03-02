@@ -11,84 +11,19 @@ import (
 
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/spf13/cobra"
 )
 
 const (
 	localCommandGracePeriod  = 5 * time.Second
 	remoteCloseGracePeriod   = 3 * time.Second
 	forceInterruptBufferSize = 2
-	missingRunSeparatorUsage = "missing '--' separator. usage: alpacon tunnel run SERVER -l <LOCAL_PORT> -r <REMOTE_PORT> -- COMMAND [ARGS...]"
+	missingRunSeparatorUsage = "missing '--' separator. usage: alpacon tunnel SERVER -l <LOCAL_PORT> -r <REMOTE_PORT> -- COMMAND [ARGS...]"
+	removedRunSubcommandHint = "`alpacon tunnel run` has been removed. use: alpacon tunnel SERVER -l <LOCAL_PORT> -r <REMOTE_PORT> -- COMMAND [ARGS...]"
 	shellOneLinerHint        = "(for shell-style one-liner, use: -- sh -c \"<command>\")"
 )
 
-var runFlags tunnelFlagValues
-
-var (
-	runTunnelStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-		return tunnelruntime.Start(opts)
-	}
-	runLocalCommandFactory = exec.Command
-)
-
-var TunnelRunCmd = &cobra.Command{
-	Use:   "run SERVER -l LOCAL_PORT -r REMOTE_PORT -- COMMAND [ARGS...]",
-	Short: "Run a local TCP program with an attached tunnel session",
-	Long: `Create a TCP tunnel and execute a local command in the same terminal session.
-
-Use '--' before the local command so Alpacon parses tunnel flags and forwards the rest to the local program.
-This is preferred because arguments are preserved exactly.
-
-Alpacon does not auto-detect application ports. Pass your app target explicitly
-(for example, 127.0.0.1:<LOCAL_PORT>).`,
-	Example: `
-	# Run psql through tunnel
-	alpacon tunnel run prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
-
-	# Run kubectl through tunnel
-	alpacon tunnel run prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
-
-	# Run SSH through tunnel
-	alpacon tunnel run bastion -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
-	`,
-	Args: validateTunnelRunArgs,
-	Run:  runTunnelWithLocalCommand,
-}
-
-func init() {
-	bindTunnelFlags(TunnelRunCmd, &runFlags)
-}
-
-func validateTunnelRunArgs(cmd *cobra.Command, args []string) error {
-	_, _, err := extractRunInvocation(args, cmd.ArgsLenAtDash())
-	return err
-}
-
-func runTunnelWithLocalCommand(cmd *cobra.Command, args []string) {
-	exitCode, err := executeTunnelRun(cmd, args)
-	if err != nil {
-		utils.CliError("%s", err)
-		if exitCode == 0 {
-			exitCode = 1
-		}
-		os.Exit(exitCode)
-	}
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
-}
-
-func executeTunnelRun(cmd *cobra.Command, args []string) (int, error) {
-	serverName, localCommand, err := extractRunInvocation(args, cmd.ArgsLenAtDash())
-	if err != nil {
-		return 1, err
-	}
-
-	return executeTunnelRunWithInvocation(serverName, localCommand)
-}
-
 func executeTunnelRunWithInvocation(serverName string, localCommand []string) (int, error) {
-	runtime, err := runTunnelStarter(runFlags.toStartOptions(serverName))
+	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
 	if err != nil {
 		return 1, err
 	}
@@ -104,12 +39,12 @@ func executeTunnelRunWithInvocation(serverName string, localCommand []string) (i
 	commandName := localCommand[0]
 	commandArgs := localCommand[1:]
 
-	localCmd := runLocalCommandFactory(commandName, commandArgs...)
+	localCmd := exec.Command(commandName, commandArgs...)
 	localCmd.Stdin = os.Stdin
 	localCmd.Stdout = os.Stdout
 	localCmd.Stderr = os.Stderr
 	localCmd.Env = os.Environ()
-	localCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureCommandProcess(localCmd)
 
 	if err := localCmd.Start(); err != nil {
 		runtime.Close(nil)
@@ -132,6 +67,9 @@ func extractRunInvocation(args []string, dashIndex int) (string, []string, error
 		return "", nil, errors.New("server name is required before '--'")
 	}
 	if dashIndex > 1 {
+		if len(args) > 0 && args[0] == "run" {
+			return "", nil, errors.New(removedRunSubcommandHint)
+		}
 		return "", nil, errors.New("only one server name can be provided before '--'")
 	}
 	if len(args) <= dashIndex {
@@ -162,6 +100,12 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			return exitCodeFromProcessError(err), nil
 
 		case <-runtime.Done():
+			select {
+			case err := <-waitCh:
+				return exitCodeFromProcessError(err), nil
+			default:
+			}
+
 			cause := runtime.Cause()
 			if cause == nil {
 				err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
@@ -177,11 +121,16 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			}
 			return exitCode, fmt.Errorf("tunnel connection lost: %w", cause)
 
-		case <-sigChan:
+		case sig := <-sigChan:
 			interruptCount++
 			if interruptCount == 1 {
-				utils.CliInfo("Interrupt received. Stopping local command... (Press Ctrl+C again to force stop)")
-				interruptProcess(localCmd)
+				if sig == os.Interrupt {
+					utils.CliInfo("Interrupt received. Stopping local command... (Press Ctrl+C again to force stop)")
+					interruptProcess(localCmd)
+				} else {
+					utils.CliInfo("Termination signal received. Stopping local command...")
+					signalProcess(localCmd, sig)
+				}
 				graceTimer = time.After(localCommandGracePeriod)
 				continue
 			}
@@ -190,7 +139,7 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			killProcess(localCmd)
 			runtime.Close(nil)
 			<-runtime.Done()
-			err := <-waitCh
+			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
 			return exitCodeFromProcessError(err), nil
 
 		case <-graceTimer:
@@ -198,7 +147,7 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			killProcess(localCmd)
 			runtime.Close(nil)
 			<-runtime.Done()
-			err := <-waitCh
+			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
 			return exitCodeFromProcessError(err), nil
 		}
 	}
@@ -210,7 +159,13 @@ func waitForProcessExit(waitCh <-chan error, localCmd *exec.Cmd, timeout time.Du
 		return err
 	case <-time.After(timeout):
 		killProcess(localCmd)
-		return <-waitCh
+	}
+
+	select {
+	case err := <-waitCh:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("local command did not exit after force kill")
 	}
 }
 
@@ -222,12 +177,7 @@ func killProcess(localCmd *exec.Cmd) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
-	if localCmd.Process.Pid > 0 {
-		if err := syscall.Kill(-localCmd.Process.Pid, syscall.SIGKILL); err == nil || errors.Is(err, syscall.ESRCH) {
-			return
-		}
-	}
-	if err := localCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := killCommandProcess(localCmd); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		utils.CliWarning("Failed to force stop local command: %s", err)
 	}
 }
@@ -236,12 +186,7 @@ func signalProcess(localCmd *exec.Cmd, sig os.Signal) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
-	if unixSignal, ok := sig.(syscall.Signal); ok && localCmd.Process.Pid > 0 {
-		if err := syscall.Kill(-localCmd.Process.Pid, unixSignal); err == nil || errors.Is(err, syscall.ESRCH) {
-			return
-		}
-	}
-	if err := localCmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := signalCommandProcess(localCmd, sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		utils.CliWarning("Failed to signal local command: %s", err)
 	}
 }
@@ -258,4 +203,46 @@ func exitCodeFromProcessError(err error) int {
 		}
 	}
 	return 1
+}
+
+func configureCommandProcess(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func signalCommandProcess(cmd *exec.Cmd, sig os.Signal) error {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return nil
+	}
+
+	unixSig, ok := sig.(syscall.Signal)
+	if !ok {
+		return cmd.Process.Signal(sig)
+	}
+
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err == nil && pgid > 0 {
+		if err := syscall.Kill(-pgid, unixSig); err == nil || errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+	}
+
+	return cmd.Process.Signal(sig)
+}
+
+func killCommandProcess(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+		return nil
+	}
+
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err == nil && pgid > 0 {
+		if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil || errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+	}
+
+	return cmd.Process.Kill()
 }

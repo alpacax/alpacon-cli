@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -30,17 +31,17 @@ type tunnelCommandRuntime interface {
 
 var tunnelFlags tunnelFlagValues
 
-var tunnelCommandStarter = func(opts tunnelruntime.StartOptions) (tunnelCommandRuntime, error) {
-	return tunnelruntime.Start(opts)
-}
-
 var TunnelCmd = &cobra.Command{
-	Use:   "tunnel SERVER -l LOCAL_PORT -r REMOTE_PORT",
-	Short: "Create a TCP tunnel to a remote server",
+	Use:   "tunnel SERVER -l LOCAL_PORT -r REMOTE_PORT [-- COMMAND [ARGS...]]",
+	Short: "Create a TCP tunnel, optionally with a local command attached",
 	Long: `
 	Create a TCP tunnel that forwards local TCP traffic to a remote server port.
 	Use -l/--local and -r/--remote to configure local and remote ports.
-	The tunnel uses WebSocket + smux multiplexing for efficient connection handling.
+	If '-- COMMAND [ARGS...]' is provided, Alpacon runs the local command
+	in the same session with the tunnel lifecycle attached.
+
+	Use '--' before the local command so Alpacon parses tunnel flags and forwards
+	the rest to the local program exactly as provided.
 	`,
 	Example: `
 	# Forward local 9000 to remote 8082
@@ -54,15 +55,19 @@ var TunnelCmd = &cobra.Command{
 
 	# Specify username and groupname for the tunnel
 	alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
+
+	# Run psql with attached tunnel session
+	alpacon tunnel prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
+
+	# Run kubectl with attached tunnel session
+	alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
 	`,
-	Args: cobra.ExactArgs(1),
+	Args: validateTunnelArgs,
 	Run:  runTunnel,
 }
 
 func init() {
 	bindTunnelFlags(TunnelCmd, &tunnelFlags)
-
-	TunnelCmd.AddCommand(TunnelRunCmd)
 }
 
 func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
@@ -72,8 +77,12 @@ func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
 	cmd.Flags().StringVarP(&flags.groupname, "groupname", "g", "", "Groupname for the tunnel")
 	cmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Show connection logs")
 
-	_ = cmd.MarkFlagRequired("local")
-	_ = cmd.MarkFlagRequired("remote")
+	if err := cmd.MarkFlagRequired("local"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("remote"); err != nil {
+		panic(err)
+	}
 }
 
 func (f tunnelFlagValues) toStartOptions(serverName string) tunnelruntime.StartOptions {
@@ -87,20 +96,63 @@ func (f tunnelFlagValues) toStartOptions(serverName string) tunnelruntime.StartO
 	}
 }
 
-func runTunnel(cmd *cobra.Command, args []string) {
-	serverName := args[0]
+func validateTunnelArgs(cmd *cobra.Command, args []string) error {
+	dashIndex := cmd.ArgsLenAtDash()
+	if dashIndex >= 0 {
+		_, _, err := extractRunInvocation(args, dashIndex)
+		return err
+	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-
-	if err := executeTunnel(serverName, sigChan); err != nil {
-		utils.CliErrorWithExit("%s", err)
+	switch len(args) {
+	case 1:
+		return nil
+	case 0:
+		return errors.New("server name is required")
+	default:
+		if args[0] == "run" {
+			return errors.New(removedRunSubcommandHint)
+		}
+		return errors.New(missingRunSeparatorUsage + " " + shellOneLinerHint)
 	}
 }
 
+func runTunnel(cmd *cobra.Command, args []string) {
+	var sigChan <-chan os.Signal
+	if cmd.ArgsLenAtDash() < 0 {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+		sigChan = ch
+	}
+
+	exitCode, err := executeTunnelCommand(cmd, args, sigChan)
+	if err != nil {
+		utils.CliError("%s", err)
+		if exitCode == 0 {
+			exitCode = 1
+		}
+		os.Exit(exitCode)
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+func executeTunnelCommand(cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+	dashIndex := cmd.ArgsLenAtDash()
+	if dashIndex >= 0 {
+		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
+		if err != nil {
+			return 1, err
+		}
+		return executeTunnelRunWithInvocation(serverName, localCommand)
+	}
+
+	return 0, executeTunnel(args[0], sigChan)
+}
+
 func executeTunnel(serverName string, sigChan <-chan os.Signal) error {
-	runtime, err := tunnelCommandStarter(tunnelFlags.toStartOptions(serverName))
+	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
 	if err != nil {
 		return err
 	}
