@@ -103,6 +103,9 @@ Remote paths use the format [USER@]SERVER:/path.`,
 						_, err := iam.HandleUsernameRequired()
 						return err
 					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
+					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
 						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
@@ -125,6 +128,9 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					OnUsernameRequired: func() error {
 						_, err := iam.HandleUsernameRequired()
 						return err
+					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
