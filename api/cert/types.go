@@ -40,17 +40,17 @@ type AuthorityRequest struct {
 }
 
 type AuthorityCreateResponse struct {
-	ID               string               `json:"id"`
-	Name             string               `json:"name"`
-	Organization     string               `json:"organization"`
-	Domain           string               `json:"domain"`
-	RootValidDays    int                  `json:"root_valid_days"`
-	DefaultValidDays int                  `json:"default_valid_days"`
-	MaxValidDays     int                  `json:"max_valid_days"`
-	Agent            types.ServerSummary  `json:"agent"`
-	Owner            types.UserSummary    `json:"owner"`
-	Instruction      string               `json:"instruction"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	ID               string              `json:"id"`
+	Name             string              `json:"name"`
+	Organization     string              `json:"organization"`
+	Domain           string              `json:"domain"`
+	RootValidDays    int                 `json:"root_valid_days"`
+	DefaultValidDays int                 `json:"default_valid_days"`
+	MaxValidDays     int                 `json:"max_valid_days"`
+	Agent            types.ServerSummary `json:"agent"`
+	Owner            types.UserSummary   `json:"owner"`
+	Instruction      string              `json:"instruction"`
+	UpdatedAt        time.Time           `json:"updated_at"`
 }
 
 type AuthorityResponse struct {
@@ -119,8 +119,8 @@ type CSRSubmit struct {
 }
 
 type CSRResponse struct {
-	ID          string           `json:"id"`
-	Authority   AuthoritySummary `json:"authority"`
+	ID          string            `json:"id"`
+	Authority   AuthoritySummary  `json:"authority"`
 	CommonName  string            `json:"common_name"`
 	DomainList  []string          `json:"domain_list"`
 	IpList      []string          `json:"ip_list"`
@@ -173,20 +173,20 @@ type RevokeRequestCreate struct {
 }
 
 type RevokeRequestResponse struct {
-	ID              string            `json:"id"`
-	Certificate     string            `json:"certificate"`
-	Authority       AuthoritySummary  `json:"authority"`
-	CommonName      string            `json:"common_name"`
-	SerialNumber    string            `json:"serial_number"`
-	Reason          int               `json:"reason"`
-	Status          string            `json:"status"`
-	RequestedReason string            `json:"requested_reason"`
-	RequestedBy     types.UserSummary `json:"requested_by"`
+	ID              string             `json:"id"`
+	Certificate     string             `json:"certificate"`
+	Authority       AuthoritySummary   `json:"authority"`
+	CommonName      string             `json:"common_name"`
+	SerialNumber    string             `json:"serial_number"`
+	Reason          int                `json:"reason"`
+	Status          string             `json:"status"`
+	RequestedReason string             `json:"requested_reason"`
+	RequestedBy     types.UserSummary  `json:"requested_by"`
 	ApprovedBy      *types.UserSummary `json:"approved_by"`
 	DeniedBy        *types.UserSummary `json:"denied_by"`
-	AddedAt         time.Time         `json:"added_at"`
-	ErrorMessage    string            `json:"error_message"`
-	HandledAt       *time.Time        `json:"handled_at"`
+	AddedAt         time.Time          `json:"added_at"`
+	ErrorMessage    string             `json:"error_message"`
+	HandledAt       *time.Time         `json:"handled_at"`
 }
 
 type RevokeRequestAttributes struct {
