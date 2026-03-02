@@ -113,10 +113,12 @@ Remote paths use the format [USER@]SERVER:/path.`,
 				})
 
 				if err != nil {
-					// Error already handled in uploadObject
+					utils.CliErrorWithExit("Failed to upload to '%s': %s", dest, err)
 					return
 				}
 			}
+			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			serverName, _ := utils.SplitPath(sources[0])
 			err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
@@ -139,10 +141,11 @@ Remote paths use the format [USER@]SERVER:/path.`,
 				})
 
 				if err != nil {
-					// Error already handled in downloadObject
+					utils.CliErrorWithExit("Failed to download from '%s': %s", sources[0], err)
 					return
 				}
 			}
+			utils.CliSuccess("Downloaded %s to %s", sources[0], dest)
 		} else {
 			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
@@ -262,18 +265,9 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
-		} else {
-			utils.CliError("Failed to upload to server '%s': %s\n\n"+
-				"Try these solutions:\n"+
-				"  • Check server connectivity: alpacon exec %s 'echo test'\n"+
-				"  • Verify destination path exists: alpacon exec %s 'ls -la %s'\n"+
-				"  • Check available disk space on server",
-				serverName, err, serverName, serverName, filepath.Dir(remotePath))
 		}
 		return err
 	}
-	wrappedSrc := fmt.Sprintf("[%s]", strings.Join(src, ", "))
-	utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 	return nil
 }
 
@@ -314,16 +308,8 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 				"  • Insufficient local disk space\n"+
 				"  • Server-side file access issues",
 				serverName, err)
-		} else {
-			utils.CliError("Failed to download from server '%s': %s\n\n"+
-				"Try these solutions:\n"+
-				"  • Check server connectivity: alpacon exec %s 'echo test'\n"+
-				"  • Verify source file: alpacon exec %s 'file %s'\n"+
-				"  • Check local destination permissions",
-				serverName, err, serverName, serverName, remotePath)
 		}
 		return err
 	}
-	utils.CliSuccess("Downloaded %s to %s", src, dest)
 	return nil
 }
