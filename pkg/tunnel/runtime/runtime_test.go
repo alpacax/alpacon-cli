@@ -376,6 +376,7 @@ func TestBuildTunnelMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	metadata := string(metadataBytes)
 	if !strings.HasSuffix(metadata, "\n") {
 		t.Fatalf("metadata should end with newline: %q", metadata)

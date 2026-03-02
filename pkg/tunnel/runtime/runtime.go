@@ -71,16 +71,6 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, fmt.Errorf("invalid local port: %w", err)
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
-	}
-
-	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
-	}
-
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", bindPort))
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on local port: %w", err)
@@ -89,6 +79,18 @@ func Start(opts StartOptions) (*Runtime, error) {
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("failed to resolve local port: %w", err)
+	}
+
+	alpaconClient, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
+	}
+
+	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort)
+	if err != nil {
+		_ = listener.Close()
+		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
 	}
 
 	headers := alpaconClient.SetWebsocketHeader()
