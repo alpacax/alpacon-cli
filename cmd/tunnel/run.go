@@ -11,8 +11,6 @@ import (
 
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
-	"golang.org/x/sys/unix"
-	"golang.org/x/term"
 )
 
 const (
@@ -52,7 +50,6 @@ func executeTunnelRunWithInvocation(serverName string, localCommand []string) (i
 	localCmd.Stdout = os.Stdout
 	localCmd.Stderr = os.Stderr
 	localCmd.Env = os.Environ()
-	configureCommandProcess(localCmd)
 
 	if err := localCmd.Start(); err != nil {
 		runtime.Close(nil)
@@ -88,8 +85,6 @@ func extractRunInvocation(args []string, dashIndex int) (string, []string, error
 }
 
 func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int, error) {
-	defer restoreTerminalForeground()
-
 	waitCh := make(chan error, 1)
 	go func() {
 		waitCh <- localCmd.Wait()
@@ -215,63 +210,16 @@ func exitCodeFromProcessError(err error) int {
 	return 1
 }
 
-func configureCommandProcess(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	stdinFd := int(os.Stdin.Fd())
-	if term.IsTerminal(stdinFd) {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Setpgid:    true,
-			Foreground: true,
-			Ctty:       stdinFd,
-		}
-	} else {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
-}
-
-func restoreTerminalForeground() {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return
-	}
-	signal.Ignore(syscall.SIGTTOU)
-	defer signal.Reset(syscall.SIGTTOU)
-	_ = unix.IoctlSetPointerInt(fd, unix.TIOCSPGRP, syscall.Getpgrp())
-}
-
 func signalCommandProcess(cmd *exec.Cmd, sig os.Signal) error {
-	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-
-	unixSig, ok := sig.(syscall.Signal)
-	if !ok {
-		return cmd.Process.Signal(sig)
-	}
-
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err == nil && pgid > 0 {
-		if err := syscall.Kill(-pgid, unixSig); err == nil || errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-	}
-
 	return cmd.Process.Signal(sig)
 }
 
 func killCommandProcess(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil || cmd.Process.Pid <= 0 {
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err == nil && pgid > 0 {
-		if err := syscall.Kill(-pgid, syscall.SIGKILL); err == nil || errors.Is(err, syscall.ESRCH) {
-			return nil
-		}
-	}
-
 	return cmd.Process.Kill()
 }
