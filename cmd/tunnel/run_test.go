@@ -77,7 +77,9 @@ func (f *fakeRunRuntime) setCause(cause error) {
 
 func runHelperCommand(mode string) *exec.Cmd {
 	args := []string{"-test.run=TestRunHelperProcess", "--", "run-helper", mode}
-	return exec.Command(os.Args[0], args...)
+	cmd := exec.Command(os.Args[0], args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return cmd
 }
 
 func parseRunHelperInvocation(args []string) (mode string, ok bool) {
