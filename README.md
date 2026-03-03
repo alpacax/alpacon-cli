@@ -244,28 +244,28 @@ $ alpacon exec -g docker user@server docker images
 Create a TCP tunnel that forwards local port traffic to a remote server's port:
 ```bash
 # Forward local port 9000 to remote server's port 8082
-$ alpacon tunnel [SERVER NAME] -l 9000 -r 8082
+$ alpacon tunnel my-server -l 9000 -r 8082
 
 # Forward local port 2222 to remote server's SSH port (22)
-$ alpacon tunnel [SERVER NAME] -l 2222 -r 22
+$ alpacon tunnel my-server -l 2222 -r 22
 
 # Specify username and groupname for the tunnel
-$ alpacon tunnel [SERVER NAME] -l [LOCAL PORT] -r [REMOTE PORT] -u [USER NAME] -g [GROUP NAME]
+$ alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
 
 # Enable verbose connection logs
-$ alpacon tunnel [SERVER NAME] -l 9000 -r 8082 -v
+$ alpacon tunnel my-server -l 9000 -r 8082 -v
 ```
 
 Run a local TCP application in the same session with an attached tunnel:
 ```bash
 # psql through tunnel (local 5432 -> remote 5432)
-$ alpacon tunnel [SERVER NAME] -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
+$ alpacon tunnel prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
 
 # kubectl through tunnel (local 6443 -> remote 6443)
-$ alpacon tunnel [SERVER NAME] -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
+$ alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
 
 # SSH through tunnel
-$ alpacon tunnel [SERVER NAME] -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
+$ alpacon tunnel my-server -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
 ```
 > `--` separator is required.  
 > `alpacon tunnel` does not auto-detect app ports; pass the app's local target (e.g. `127.0.0.1:<LOCAL_PORT>`) explicitly.
