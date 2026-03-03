@@ -36,7 +36,7 @@ var tunnelFlags tunnelFlagValues
 
 var TunnelCmd = &cobra.Command{
 	Use:   "tunnel [flags] SERVER [-- COMMAND...]",
-	Short: "Create a TCP tunnel, optionally with a local command attached",
+	Short: "Create a TCP tunnel (optionally run a command)",
 	Long: `
 	Create a TCP tunnel that forwards local TCP traffic to a remote server port.
 	Use -l/--local and -r/--remote to configure local and remote ports.

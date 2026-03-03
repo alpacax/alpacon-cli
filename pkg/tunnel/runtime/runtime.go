@@ -254,7 +254,6 @@ func (r *Runtime) acceptConnections() {
 				}
 			}
 
-			utils.CliError("Failed to accept connection: %s", err)
 			r.shutdown(fmt.Errorf("accept failed: %w", err))
 			return
 		}
@@ -269,7 +268,6 @@ func (r *Runtime) handleTCPConnection(tcpConn net.Conn) {
 
 	stream, err := r.session.OpenStream()
 	if err != nil {
-		utils.CliError("Failed to open stream: %s", err)
 		r.shutdown(fmt.Errorf("open stream failed: %w", err))
 		return
 	}
