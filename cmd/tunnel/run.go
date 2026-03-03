@@ -40,7 +40,7 @@ func executeTunnelRunWithInvocation(serverName string, localCommand []string) (i
 	}
 
 	fmt.Fprintf(os.Stderr, "[alpacon tunnel] CONNECTED %s -> %s\n", runtime.LocalAddress(), runtime.RemoteAddress())
-	fmt.Fprintln(os.Stderr, "[alpacon tunnel] streams=0 status=healthy (Ctrl+C: interrupt, Ctrl+C twice: force stop)")
+	fmt.Fprintln(os.Stderr, "[alpacon tunnel] (Ctrl+C: interrupt, Ctrl+C twice: force stop)")
 
 	commandName := localCommand[0]
 	commandArgs := localCommand[1:]

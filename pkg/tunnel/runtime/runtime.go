@@ -22,7 +22,7 @@ import (
 // StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
 	ServerName string
-	LocalPort  string // Empty means auto-assign.
+	LocalPort  string // Use "0" to auto-assign the local port.
 	RemotePort string
 	Username   string
 	Groupname  string
