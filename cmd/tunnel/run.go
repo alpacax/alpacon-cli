@@ -49,7 +49,6 @@ func executeTunnelRunWithInvocation(serverName string, localCommand []string) (i
 	localCmd.Stdin = os.Stdin
 	localCmd.Stdout = os.Stdout
 	localCmd.Stderr = os.Stderr
-	localCmd.Env = os.Environ()
 
 	if err := localCmd.Start(); err != nil {
 		runtime.Close(nil)
