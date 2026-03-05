@@ -17,18 +17,18 @@ type EventAttributes struct {
 }
 
 type EventDetails struct {
-	ID            string             `json:"id"`
-	Shell         string             `json:"shell"`
-	Line          string             `json:"line"`
-	Success       *bool              `json:"success"`
-	Result        string             `json:"result"`
-	Status        string             `json:"status"`
-	Cancellable   bool               `json:"cancellable"`
-	ResponseDelay float64            `json:"response_delay"`
-	ElapsedTime   float64            `json:"elapsed_time"`
-	AddedAt       time.Time          `json:"added_at"`
+	ID            string              `json:"id"`
+	Shell         string              `json:"shell"`
+	Line          string              `json:"line"`
+	Success       *bool               `json:"success"`
+	Result        string              `json:"result"`
+	Status        string              `json:"status"`
+	Cancellable   bool                `json:"cancellable"`
+	ResponseDelay float64             `json:"response_delay"`
+	ElapsedTime   float64             `json:"elapsed_time"`
+	AddedAt       time.Time           `json:"added_at"`
 	Server        types.ServerSummary `json:"server"`
-	RequestedBy   types.UserSummary  `json:"requested_by"`
+	RequestedBy   types.UserSummary   `json:"requested_by"`
 }
 
 type CommandRequest struct {

@@ -1,318 +1,100 @@
 package tunnel
 
 import (
-	"errors"
-	"fmt"
-	"net"
-	"sync"
-	"sync/atomic"
+	"strings"
 	"testing"
-	"time"
 
-	"github.com/xtaci/smux"
+	"github.com/spf13/cobra"
 )
 
-type mockSession struct {
-	openStreamFn func() (*smux.Stream, error)
-	closeFn      func() error
-	closeChan    chan struct{}
-}
-
-func (m *mockSession) OpenStream() (*smux.Stream, error) {
-	if m.openStreamFn != nil {
-		return m.openStreamFn()
+func parseTunnelCommandArgs(t *testing.T, rawArgs []string) (*cobra.Command, []string) {
+	t.Helper()
+	cmd := &cobra.Command{Use: "tunnel"}
+	if err := cmd.ParseFlags(rawArgs); err != nil {
+		t.Fatalf("failed to parse args %v: %v", rawArgs, err)
 	}
-	return nil, errors.New("open stream not implemented")
+	return cmd, cmd.Flags().Args()
 }
 
-func (m *mockSession) Close() error {
-	if m.closeFn != nil {
-		return m.closeFn()
-	}
-	return nil
-}
-
-func (m *mockSession) CloseChan() <-chan struct{} {
-	if m.closeChan != nil {
-		return m.closeChan
-	}
-	return make(chan struct{})
-}
-
-type mockListener struct {
-	acceptFn func() (net.Conn, error)
-	closeFn  func() error
-}
-
-func (m *mockListener) Accept() (net.Conn, error) {
-	if m.acceptFn != nil {
-		return m.acceptFn()
-	}
-	return nil, net.ErrClosed
-}
-
-func (m *mockListener) Close() error {
-	if m.closeFn != nil {
-		return m.closeFn()
-	}
-	return nil
-}
-
-func (m *mockListener) Addr() net.Addr {
-	return &net.TCPAddr{}
-}
-
-func TestShutdownTunnelRunsOnce(t *testing.T) {
-	cause := errors.New("shutdown cause")
-	var listenerCloseCount int32
-	var sessionCloseCount int32
-
-	ctx := &tunnelContext{
-		listener: &mockListener{
-			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
-				return nil
-			},
+func TestValidateTunnelArgs(t *testing.T) {
+	tests := []struct {
+		name        string
+		rawArgs     []string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "tunnel only",
+			rawArgs: []string{"prod-db"},
 		},
-		session: &mockSession{
-			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
-				return nil
-			},
+		{
+			name:    "tunnel with local command",
+			rawArgs: []string{"prod-db", "--", "psql", "-c", "select 1"},
 		},
-		done:        make(chan struct{}),
-		shutdownErr: make(chan error, 1),
+		{
+			name:        "missing separator",
+			rawArgs:     []string{"prod-db", "psql"},
+			wantErr:     true,
+			errContains: "missing '--' separator",
+		},
+		{
+			name:        "missing server before separator",
+			rawArgs:     []string{"--", "psql"},
+			wantErr:     true,
+			errContains: "server name is required before '--'",
+		},
+		{
+			name:        "missing command after separator",
+			rawArgs:     []string{"prod-db", "--"},
+			wantErr:     true,
+			errContains: "local command is required after '--'",
+		},
+		{
+			name:        "legacy run subcommand removed",
+			rawArgs:     []string{"run", "prod-db", "--", "psql"},
+			wantErr:     true,
+			errContains: "`alpacon tunnel run` has been removed",
+		},
 	}
 
-	const workers = 8
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
-			shutdownTunnel(ctx, cause)
-		}()
-	}
-	wg.Wait()
-
-	select {
-	case <-ctx.done:
-	default:
-		t.Fatal("expected done channel to be closed")
-	}
-
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
-		t.Fatalf("listener Close() called %d times, want 1", got)
-	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
-		t.Fatalf("session Close() called %d times, want 1", got)
-	}
-
-	select {
-	case err := <-ctx.shutdownErr:
-		if !errors.Is(err, cause) {
-			t.Fatalf("unexpected shutdown cause: %v", err)
-		}
-	default:
-		t.Fatal("expected shutdown cause in shutdownErr channel")
-	}
-}
-
-// tempNetError implements net.Error with Timeout() == true for testing retry logic.
-type tempNetError struct{ msg string }
-
-func (e *tempNetError) Error() string   { return e.msg }
-func (e *tempNetError) Timeout() bool   { return true }
-func (e *tempNetError) Temporary() bool { return true }
-
-func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
-	var attempts int32
-	const retryCount = 3
-
-	ctx := &tunnelContext{
-		listener: &mockListener{
-			acceptFn: func() (net.Conn, error) {
-				n := atomic.AddInt32(&attempts, 1)
-				if int(n) <= retryCount {
-					return nil, &tempNetError{msg: "temporary accept error"}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, args := parseTunnelCommandArgs(t, tt.rawArgs)
+			err := validateTunnelArgs(cmd, args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error, got nil")
 				}
-				// After retries, return a permanent error to exit the loop
-				return nil, net.ErrClosed
-			},
-		},
-		session:     &mockSession{},
-		done:        make(chan struct{}),
-		shutdownErr: make(chan error, 1),
-	}
-
-	acceptConnections(ctx)
-
-	got := atomic.LoadInt32(&attempts)
-	if got <= int32(retryCount) {
-		t.Fatalf("expected more than %d attempts, got %d", retryCount, got)
-	}
-
-	// shutdownTunnel should NOT have been called (exited via net.ErrClosed path)
-	select {
-	case err := <-ctx.shutdownErr:
-		t.Fatalf("unexpected shutdownErr: %v", err)
-	default:
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Fatalf("error = %q, want contains %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
 
-func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
-	acceptErr := errors.New("accept failure")
-	var listenerCloseCount int32
-	var sessionCloseCount int32
+func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.T) {
+	originalFlags := tunnelFlags
+	t.Cleanup(func() {
+		tunnelFlags = originalFlags
+	})
 
-	ctx := &tunnelContext{
-		listener: &mockListener{
-			acceptFn: func() (net.Conn, error) {
-				return nil, acceptErr
-			},
-			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
-				return nil
-			},
-		},
-		session: &mockSession{
-			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
-				return nil
-			},
-		},
-		done:        make(chan struct{}),
-		shutdownErr: make(chan error, 1),
+	tunnelFlags.localPort = "5432"
+	tunnelFlags.remotePort = "invalid"
+
+	cmd, args := parseTunnelCommandArgs(t, []string{"prod-db", "--", "psql"})
+	exitCode, err := executeTunnelCommand(cmd, args, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-
-	acceptConnections(ctx)
-
-	select {
-	case <-ctx.done:
-	default:
-		t.Fatal("expected done channel to be closed")
+	if !strings.Contains(err.Error(), "invalid remote port") {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	select {
-	case err := <-ctx.shutdownErr:
-		if !errors.Is(err, acceptErr) {
-			t.Fatalf("shutdownErr = %v, want wrapped acceptErr", err)
-		}
-	default:
-		t.Fatal("expected shutdown cause in shutdownErr channel")
-	}
-
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
-		t.Fatalf("listener Close() called %d times, want 1", got)
-	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
-		t.Fatalf("session Close() called %d times, want 1", got)
-	}
-}
-
-func TestSessionCloseChanTriggersShutdown(t *testing.T) {
-	closeChan := make(chan struct{})
-	var listenerCloseCount int32
-	var sessionCloseCount int32
-
-	ctx := &tunnelContext{
-		listener: &mockListener{
-			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
-				return nil
-			},
-		},
-		session: &mockSession{
-			closeChan: closeChan,
-			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
-				return nil
-			},
-		},
-		done:        make(chan struct{}),
-		shutdownErr: make(chan error, 1),
-	}
-
-	go func() {
-		<-ctx.session.CloseChan()
-		shutdownTunnel(ctx, fmt.Errorf("session closed by remote"))
-	}()
-
-	close(closeChan)
-
-	select {
-	case <-ctx.done:
-	case <-time.After(time.Second):
-		t.Fatal("expected done channel to be closed")
-	}
-
-	select {
-	case err := <-ctx.shutdownErr:
-		if err == nil || err.Error() != "session closed by remote" {
-			t.Fatalf("shutdownErr = %v, want 'session closed by remote'", err)
-		}
-	default:
-		t.Fatal("expected shutdown cause in shutdownErr channel")
-	}
-
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
-		t.Fatalf("listener Close() called %d times, want 1", got)
-	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
-		t.Fatalf("session Close() called %d times, want 1", got)
-	}
-}
-
-func TestHandleTCPConnectionOpenStreamFailureTriggersShutdown(t *testing.T) {
-	openErr := errors.New("open stream failure")
-	var listenerCloseCount int32
-	var sessionCloseCount int32
-
-	ctx := &tunnelContext{
-		listener: &mockListener{
-			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
-				return nil
-			},
-		},
-		session: &mockSession{
-			openStreamFn: func() (*smux.Stream, error) {
-				return nil, openErr
-			},
-			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
-				return nil
-			},
-		},
-		remotePort:  "8080",
-		done:        make(chan struct{}),
-		shutdownErr: make(chan error, 1),
-	}
-
-	clientConn, serverConn := net.Pipe()
-	defer func() { _ = serverConn.Close() }()
-
-	handleTCPConnection(clientConn, ctx)
-
-	select {
-	case <-ctx.done:
-	default:
-		t.Fatal("expected done channel to be closed")
-	}
-
-	select {
-	case err := <-ctx.shutdownErr:
-		if !errors.Is(err, openErr) {
-			t.Fatalf("shutdownErr = %v, want wrapped openErr", err)
-		}
-	default:
-		t.Fatal("expected shutdown cause in shutdownErr channel")
-	}
-
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
-		t.Fatalf("listener Close() called %d times, want 1", got)
-	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
-		t.Fatalf("session Close() called %d times, want 1", got)
+	if exitCode != 1 {
+		t.Fatalf("exitCode = %d, want 1", exitCode)
 	}
 }

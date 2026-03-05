@@ -4,11 +4,11 @@ import "github.com/alpacax/alpacon-cli/api/types"
 
 // NoteResponse is the API response type where Server and Author are nested objects.
 type NoteResponse struct {
-	ID      string               `json:"id"`
-	Server  types.ServerSummary  `json:"server"`
-	Author  types.UserSummary    `json:"author"`
-	Content string               `json:"content"`
-	Private bool                 `json:"private"`
+	ID      string              `json:"id"`
+	Server  types.ServerSummary `json:"server"`
+	Author  types.UserSummary   `json:"author"`
+	Content string              `json:"content"`
+	Private bool                `json:"private"`
 }
 
 // NoteDetails is the display type for PrintTable.

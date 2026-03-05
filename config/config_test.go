@@ -2,8 +2,8 @@ package config
 
 import (
 	"encoding/json"
-	"path/filepath"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
