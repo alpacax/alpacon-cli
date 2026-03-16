@@ -1,13 +1,13 @@
 package exec
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
+// TestExecCommandParsing validates backward compatibility with the original
+// parsing behavior using the new ParseRemoteExecArgs implementation.
 func TestExecCommandParsing(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -15,66 +15,58 @@ func TestExecCommandParsing(t *testing.T) {
 		expectedUsername  string
 		expectedGroupname string
 		expectedServer    string
-		expectedCommand   []string
+		expectedCommand   string
 	}{
 		{
-			name:              "Simple command execution",
-			args:              []string{"prod-docker", "docker", "ps"},
-			expectedUsername:  "",
-			expectedGroupname: "",
-			expectedServer:    "prod-docker",
-			expectedCommand:   []string{"docker", "ps"},
+			name:            "Simple command execution",
+			args:            []string{"prod-docker", "docker", "ps"},
+			expectedServer:  "prod-docker",
+			expectedCommand: "docker ps",
 		},
 		{
-			name:              "User@host syntax",
-			args:              []string{"root@prod-docker", "docker", "ps"},
-			expectedUsername:  "root",
-			expectedGroupname: "",
-			expectedServer:    "prod-docker",
-			expectedCommand:   []string{"docker", "ps"},
+			name:            "User@host syntax",
+			args:            []string{"root@prod-docker", "docker", "ps"},
+			expectedUsername: "root",
+			expectedServer:  "prod-docker",
+			expectedCommand: "docker ps",
 		},
 		{
-			name:              "Complex command with user",
-			args:              []string{"admin@web-server", "ls", "-la", "/var/log"},
-			expectedUsername:  "admin",
-			expectedGroupname: "",
-			expectedServer:    "web-server",
-			expectedCommand:   []string{"ls", "-la", "/var/log"},
+			name:            "Complex command with user",
+			args:            []string{"admin@web-server", "ls", "-la", "/var/log"},
+			expectedUsername: "admin",
+			expectedServer:  "web-server",
+			expectedCommand: "ls -la /var/log",
 		},
 		{
-			name:              "Single word command",
-			args:              []string{"server", "uptime"},
-			expectedUsername:  "",
-			expectedGroupname: "",
-			expectedServer:    "server",
-			expectedCommand:   []string{"uptime"},
+			name:            "Single word command",
+			args:            []string{"server", "uptime"},
+			expectedServer:  "server",
+			expectedCommand: "uptime",
 		},
 		{
-			name:              "Complex hostname with user",
-			args:              []string{"deploy@web-server-01.example.com", "systemctl", "status", "nginx"},
-			expectedUsername:  "deploy",
-			expectedGroupname: "",
-			expectedServer:    "web-server-01.example.com",
-			expectedCommand:   []string{"systemctl", "status", "nginx"},
+			name:            "Complex hostname with user",
+			args:            []string{"deploy@web-server-01.example.com", "systemctl", "status", "nginx"},
+			expectedUsername: "deploy",
+			expectedServer:  "web-server-01.example.com",
+			expectedCommand: "systemctl status nginx",
 		},
 		{
-			name:              "Command with pipes and special characters",
-			args:              []string{"root@server", "ps", "aux", "|", "grep", "nginx"},
-			expectedUsername:  "root",
-			expectedGroupname: "",
-			expectedServer:    "server",
-			expectedCommand:   []string{"ps", "aux", "|", "grep", "nginx"},
+			name:            "Command with pipes and special characters",
+			args:            []string{"root@server", "ps", "aux", "|", "grep", "nginx"},
+			expectedUsername: "root",
+			expectedServer:  "server",
+			expectedCommand: "ps aux | grep nginx",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			username, groupname, serverName, commandArgs := parseExecArgs(tt.args, "", "")
+			result := ParseRemoteExecArgs(tt.args)
 
-			assert.Equal(t, tt.expectedUsername, username, "Username should match")
-			assert.Equal(t, tt.expectedGroupname, groupname, "Groupname should match")
-			assert.Equal(t, tt.expectedServer, serverName, "Server name should match")
-			assert.Equal(t, tt.expectedCommand, commandArgs, "Command args should match")
+			assert.Equal(t, tt.expectedUsername, result.Username, "Username should match")
+			assert.Equal(t, tt.expectedGroupname, result.Groupname, "Groupname should match")
+			assert.Equal(t, tt.expectedServer, result.Server, "Server name should match")
+			assert.Equal(t, tt.expectedCommand, result.Command, "Command should match")
 		})
 	}
 }
@@ -83,87 +75,54 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 	tests := []struct {
 		name              string
 		args              []string
-		initialUsername   string
-		initialGroupname  string
 		expectedUsername  string
 		expectedGroupname string
 		expectedServer    string
-		expectedCommand   []string
+		expectedCommand   string
 	}{
 		{
-			name:              "Username flag overrides user@host",
-			args:              []string{"root@prod-docker", "docker", "ps"},
-			initialUsername:   "override",
-			initialGroupname:  "",
-			expectedUsername:  "override",
-			expectedGroupname: "",
-			expectedServer:    "prod-docker",
-			expectedCommand:   []string{"docker", "ps"},
+			name:            "Username flag overrides user@host",
+			args:            []string{"-u", "override", "root@prod-docker", "docker", "ps"},
+			expectedUsername: "override",
+			expectedServer:  "prod-docker",
+			expectedCommand: "docker ps",
 		},
 		{
 			name:              "Groupname flag with user@host",
-			args:              []string{"admin@server", "ls"},
-			initialUsername:   "",
-			initialGroupname:  "docker",
+			args:              []string{"-g", "docker", "admin@server", "ls"},
 			expectedUsername:  "admin",
 			expectedGroupname: "docker",
 			expectedServer:    "server",
-			expectedCommand:   []string{"ls"},
+			expectedCommand:   "ls",
 		},
 		{
 			name:              "Both flags with user@host",
-			args:              []string{"user@server", "uptime"},
-			initialUsername:   "flag-user",
-			initialGroupname:  "flag-group",
+			args:              []string{"-u", "flag-user", "-g", "flag-group", "user@server", "uptime"},
 			expectedUsername:  "flag-user",
 			expectedGroupname: "flag-group",
 			expectedServer:    "server",
-			expectedCommand:   []string{"uptime"},
+			expectedCommand:   "uptime",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			username, groupname, serverName, commandArgs := parseExecArgs(tt.args, tt.initialUsername, tt.initialGroupname)
+			result := ParseRemoteExecArgs(tt.args)
 
-			assert.Equal(t, tt.expectedUsername, username, "Username should match")
-			assert.Equal(t, tt.expectedGroupname, groupname, "Groupname should match")
-			assert.Equal(t, tt.expectedServer, serverName, "Server name should match")
-			assert.Equal(t, tt.expectedCommand, commandArgs, "Command args should match")
+			assert.Equal(t, tt.expectedUsername, result.Username, "Username should match")
+			assert.Equal(t, tt.expectedGroupname, result.Groupname, "Groupname should match")
+			assert.Equal(t, tt.expectedServer, result.Server, "Server name should match")
+			assert.Equal(t, tt.expectedCommand, result.Command, "Command should match")
 		})
 	}
 }
 
-// parseExecArgs simulates the parsing logic from the exec command for testing
-func parseExecArgs(args []string, initialUsername, initialGroupname string) (string, string, string, []string) {
-	if len(args) < 2 {
-		return "", "", "", nil
-	}
-
-	username := initialUsername
-	groupname := initialGroupname
-	serverName := args[0]
-	commandArgs := args[1:]
-
-	// Parse SSH-like syntax for user@host (same logic as in exec.go)
-	if len(serverName) > 0 && !strings.Contains(serverName, ":") && strings.Contains(serverName, "@") {
-		sshTarget := utils.ParseSSHTarget(serverName)
-		if username == "" && sshTarget.User != "" {
-			username = sshTarget.User
-		}
-		serverName = sshTarget.Host
-	}
-
-	return username, groupname, serverName, commandArgs
-}
-
-// Test the required pattern from the issue description
+// TestRequiredExecPattern validates the exact pattern from the issue description.
 func TestRequiredExecPattern(t *testing.T) {
-	// Test: alpacon exec root@prod-docker docker ps
 	args := []string{"root@prod-docker", "docker", "ps"}
-	username, _, serverName, commandArgs := parseExecArgs(args, "", "")
+	result := ParseRemoteExecArgs(args)
 
-	assert.Equal(t, "root", username, "Username should be extracted from user@host")
-	assert.Equal(t, "prod-docker", serverName, "Server name should be extracted correctly")
-	assert.Equal(t, []string{"docker", "ps"}, commandArgs, "Command should be preserved")
+	assert.Equal(t, "root", result.Username, "Username should be extracted from user@host")
+	assert.Equal(t, "prod-docker", result.Server, "Server name should be extracted correctly")
+	assert.Equal(t, "docker ps", result.Command, "Command should be preserved")
 }

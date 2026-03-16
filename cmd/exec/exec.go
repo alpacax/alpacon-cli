@@ -2,51 +2,50 @@ package exec
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
 var ExecCmd = &cobra.Command{
-	Use:   "exec [USER@]SERVER COMMAND...",
+	Use:   "exec [flags] [USER@]SERVER [--] COMMAND...",
 	Short: "Execute a command on a remote server",
 	Long: `Execute a command on a remote server.
 
-	This command executes a specified command on a remote server and returns the output.
-	It supports SSH-like syntax for specifying the user and server.
+This command executes a specified command on a remote server and returns the output.
+It supports SSH-like syntax for specifying the user and server.
 
-	Examples:
-	  alpacon exec prod-docker docker ps
-	  alpacon exec root@prod-docker docker ps
-	  alpacon exec admin@web-server ls -la /var/log
-	  alpacon exec -u root prod-docker systemctl status nginx
-	  alpacon exec -g docker user@server docker images
-	`,
-	Args: cobra.MinimumNArgs(2),
+Use -- to separate alpacon flags from the remote command, ensuring that flags
+intended for the remote command (e.g., -U, -d) are not interpreted as alpacon flags.
+
+All flags must be placed before the server name.`,
+	Example: `  # Simple command execution
+  alpacon exec prod-docker docker ps
+  alpacon exec root@prod-docker docker ps
+
+  # Use -- to pass flags to the remote command
+  alpacon exec root@db-server -- docker exec postgres psql -U myproject -d myproject
+  alpacon exec my-server -- grep -r "pattern" /var/log
+
+  # Specify user and group with flags
+  alpacon exec -u root prod-docker systemctl status nginx
+  alpacon exec -g docker user@server docker images`,
+	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
+	// would otherwise be consumed by Cobra's flag parser.
+	// All flags are parsed manually in the Run function.
+	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
-		username, _ := cmd.Flags().GetString("username")
-		groupname, _ := cmd.Flags().GetString("groupname")
+		parsed := ParseRemoteExecArgs(args)
 
-		if len(args) < 2 {
-			utils.CliErrorWithExit("You must specify at least a server name and a command.")
+		if parsed.Server == "" {
+			_ = cmd.Help()
 			return
 		}
 
-		serverName := args[0]
-		commandArgs := args[1:]
-
-		// Parse SSH-like syntax for user@host
-		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
-			sshTarget := utils.ParseSSHTarget(serverName)
-			if username == "" && sshTarget.User != "" {
-				username = sshTarget.User
-			}
-			serverName = sshTarget.Host
+		if parsed.Command == "" {
+			utils.CliErrorWithExit("You must specify a command to execute.")
+			return
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -55,39 +54,12 @@ var ExecCmd = &cobra.Command{
 			return
 		}
 
-		command := strings.Join(commandArgs, " ")
-		env := make(map[string]string) // Empty env map for now, could be extended with --env flags
-
-		result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
+		env := make(map[string]string)
+		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-				OnMFARequired: func(srv string) error {
-					return mfa.HandleMFAError(alpaconClient, srv)
-				},
-				OnUsernameRequired: func() error {
-					_, err := iam.HandleUsernameRequired()
-					return err
-				},
-				CheckMFACompleted: func() (bool, error) {
-					return mfa.CheckMFACompletion(alpaconClient)
-				},
-				RefreshToken: alpaconClient.RefreshToken,
-				RetryOperation: func() error {
-					result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
-					return err
-				},
-			})
-
-			if err != nil {
-				utils.CliErrorWithExit("Failed to execute command on '%s' server: %s.", serverName, err)
-				return
-			}
+			utils.CliErrorWithExit("%s", err)
+			return
 		}
 		fmt.Println(result)
 	},
-}
-
-func init() {
-	ExecCmd.Flags().StringP("username", "u", "", "Specify username for command execution")
-	ExecCmd.Flags().StringP("groupname", "g", "", "Specify groupname for command execution")
 }
