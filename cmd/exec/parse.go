@@ -18,9 +18,15 @@ type RemoteExecArgs struct {
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
 // It recognizes -u/--username, -g/--groupname, and -h/--help flags before
-// the server name. The -- separator stops flag parsing: everything after it
-// is treated as the remote command. Without --, everything after the server
-// name is the remote command.
+// the server name.
+//
+// The -- separator has two roles depending on position:
+//   - After the server name: acts as a command separator. Everything after
+//     it is the remote command, with no further flag parsing.
+//   - Before the server name (e.g., after flags): acts as an end-of-flags
+//     marker. The first arg after -- becomes the server, the rest is the command.
+//
+// Without --, everything after the server name is the remote command.
 //
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
@@ -97,8 +103,15 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 // matchShortOrLongFlag checks whether arg is an exact match for the given short
 // or long flag name, or a prefixed form (-uVALUE, --username=VALUE).
 func matchShortOrLongFlag(arg, short, long string) bool {
-	return arg == short || strings.HasPrefix(arg, short+"=") || len(arg) > len(short) && strings.HasPrefix(arg, short) && arg[len(short)] != '-' ||
-		arg == long || strings.HasPrefix(arg, long+"=")
+	// Short flag: exact (-u), with = (-u=val), or attached value (-uroot)
+	if arg == short || strings.HasPrefix(arg, short+"=") {
+		return true
+	}
+	if len(arg) > len(short) && strings.HasPrefix(arg, short) && arg[len(short)] != '-' {
+		return true
+	}
+	// Long flag: exact (--username) or with = (--username=val)
+	return arg == long || strings.HasPrefix(arg, long+"=")
 }
 
 // extractFlagValue extracts a flag value from one of three forms:
