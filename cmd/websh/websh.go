@@ -5,11 +5,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
+	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -147,29 +147,9 @@ Note: All flags must be placed before the server name.
 				}
 			}
 			command := strings.Join(commandArgs, " ")
-			result, err := event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
+			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env)
 			if err != nil {
-				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						result, err = event.RunCommand(alpaconClient, serverName, command, username, groupname, env)
-						return err
-					},
-				})
-
-				if err != nil {
-					utils.CliErrorWithExit("Failed to run the command on the '%s' server: %s.", serverName, err)
-				}
+				utils.CliErrorWithExit("%s", err)
 			}
 			fmt.Println(result)
 		} else {
