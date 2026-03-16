@@ -59,9 +59,17 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		case arg == "-h" || arg == "--help":
 			return RemoteExecArgs{ShowHelp: true}
 		case matchShortOrLongFlag(arg, "-u", "--username"):
-			username, i = extractFlagValue(args, i, "-u")
+			var errMsg string
+			username, i, errMsg = extractFlagValue(args, i, "-u")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
-			groupname, i = extractFlagValue(args, i, "-g")
+			var errMsg string
+			groupname, i, errMsg = extractFlagValue(args, i, "-g")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
@@ -97,20 +105,22 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 //   - attached short: -uroot          → "root"
 //   - long with =:    --username=root → "root"
 //   - separate:       -u root         → "root" (advances i)
-func extractFlagValue(args []string, i int, short string) (string, int) {
+//
+// Returns the value, updated index, and an error message if no value was found.
+func extractFlagValue(args []string, i int, short string) (string, int, string) {
 	arg := args[i]
 	// --flag=value
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)
-		return parts[1], i
+		return parts[1], i, ""
 	}
 	// -uroot (short flag with attached value, no space)
 	if strings.HasPrefix(arg, short) && len(arg) > len(short) {
-		return arg[len(short):], i
+		return arg[len(short):], i, ""
 	}
 	// -u root (next arg is the value)
 	if i+1 < len(args) {
-		return args[i+1], i + 1
+		return args[i+1], i + 1, ""
 	}
-	return "", i
+	return "", i, "flag needs an argument: " + arg
 }

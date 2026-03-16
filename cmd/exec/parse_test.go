@@ -421,30 +421,12 @@ func TestParseRemoteExecArgs(t *testing.T) {
 		},
 		// ── Edge cases ──────────────────────────────────────────────
 		{
-			name: "-u as last arg with no value",
-			args: []string{"-u"},
-			expected: RemoteExecArgs{
-				Username: "",
-				Server:   "",
-				Command:  "",
-			},
-		},
-		{
 			name: "-u with only server, no command",
 			args: []string{"-u", "admin", "server"},
 			expected: RemoteExecArgs{
 				Username: "admin",
 				Server:   "server",
 				Command:  "",
-			},
-		},
-		{
-			name: "-g with only value, no server",
-			args: []string{"-g", "docker"},
-			expected: RemoteExecArgs{
-				Groupname: "docker",
-				Server:    "",
-				Command:   "",
 			},
 		},
 		{
@@ -476,7 +458,7 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 	}
 }
 
-func TestParseRemoteExecArgs_UnknownFlags(t *testing.T) {
+func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string
 		args        []string
@@ -496,6 +478,26 @@ func TestParseRemoteExecArgs_UnknownFlags(t *testing.T) {
 			name:        "typo -U before server (not after --)",
 			args:        []string{"-U", "root", "server", "ls"},
 			expectedErr: "unknown flag: -U",
+		},
+		{
+			name:        "-u as last arg with no value",
+			args:        []string{"-u"},
+			expectedErr: "flag needs an argument: -u",
+		},
+		{
+			name:        "-g as last arg with no value",
+			args:        []string{"-g"},
+			expectedErr: "flag needs an argument: -g",
+		},
+		{
+			name:        "--username as last arg with no value",
+			args:        []string{"--username"},
+			expectedErr: "flag needs an argument: --username",
+		},
+		{
+			name:        "--groupname as last arg with no value",
+			args:        []string{"--groupname"},
+			expectedErr: "flag needs an argument: --groupname",
 		},
 	}
 

@@ -19,7 +19,11 @@ It supports SSH-like syntax for specifying the user and server.
 Use -- to separate alpacon flags from the remote command, ensuring that flags
 intended for the remote command (e.g., -U, -d) are not interpreted as alpacon flags.
 
-All flags must be placed before the server name.`,
+All flags must be placed before the server name.
+
+Flags:
+  -u, --username [USER_NAME]    Specify the username for command execution.
+  -g, --groupname [GROUP_NAME]  Specify the group name for command execution.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps
@@ -50,6 +54,7 @@ All flags must be placed before the server name.`,
 
 		if parsed.Server == "" {
 			_ = cmd.Help()
+			utils.CliErrorWithExit("server name is required.")
 			return
 		}
 
