@@ -12,6 +12,8 @@ type RemoteExecArgs struct {
 	Groupname string
 	Server    string
 	Command   string
+	ShowHelp  bool
+	Err       string
 }
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
@@ -55,12 +57,13 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		// Flag parsing (only before server is identified)
 		switch {
 		case arg == "-h" || arg == "--help":
-			// Handled by caller (print help)
-			return RemoteExecArgs{}
+			return RemoteExecArgs{ShowHelp: true}
 		case matchShortOrLongFlag(arg, "-u", "--username"):
 			username, i = extractFlagValue(args, i, "-u")
 		case matchShortOrLongFlag(arg, "-g", "--groupname"):
 			groupname, i = extractFlagValue(args, i, "-g")
+		case strings.HasPrefix(arg, "-"):
+			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
 			server = arg
 		}

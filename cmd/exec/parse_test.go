@@ -470,7 +470,40 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 	for _, flag := range []string{"-h", "--help"} {
 		t.Run(flag, func(t *testing.T) {
 			result := ParseRemoteExecArgs([]string{flag, "server", "ls"})
+			assert.True(t, result.ShowHelp, "ShowHelp should be true")
 			assert.Empty(t, result.Server, "help flag should return empty result")
+		})
+	}
+}
+
+func TestParseRemoteExecArgs_UnknownFlags(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		expectedErr string
+	}{
+		{
+			name:        "unknown short flag -x",
+			args:        []string{"-x", "server", "ls"},
+			expectedErr: "unknown flag: -x",
+		},
+		{
+			name:        "unknown long flag --unknown",
+			args:        []string{"--unknown", "server", "ls"},
+			expectedErr: "unknown flag: --unknown",
+		},
+		{
+			name:        "typo -U before server (not after --)",
+			args:        []string{"-U", "root", "server", "ls"},
+			expectedErr: "unknown flag: -U",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.expectedErr, result.Err)
+			assert.Empty(t, result.Server)
 		})
 	}
 }

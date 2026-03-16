@@ -38,6 +38,16 @@ All flags must be placed before the server name.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed := ParseRemoteExecArgs(args)
 
+		if parsed.ShowHelp {
+			_ = cmd.Help()
+			return
+		}
+
+		if parsed.Err != "" {
+			utils.CliErrorWithExit("%s", parsed.Err)
+			return
+		}
+
 		if parsed.Server == "" {
 			_ = cmd.Help()
 			return
