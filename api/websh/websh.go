@@ -25,7 +25,9 @@ const (
 )
 
 func GetSessionList(ac *client.AlpaconClient, pageSize int) ([]SessionListItem, error) {
-	params := map[string]string{}
+	params := map[string]string{
+		"is_connectable": "true",
+	}
 	if pageSize > 0 {
 		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
