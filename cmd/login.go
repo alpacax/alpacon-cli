@@ -25,7 +25,8 @@ var (
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to Alpacon",
-	Long: `Log in to Alpacon. A workspace URL must be specified.
+	Long: `Log in to Alpacon. If no workspace URL is provided, the previously saved
+workspace is used, or you will be prompted to enter one.
 
 The browser is opened automatically for Auth0 and MFA authentication.
 To disable this, use --no-browser or set ALPACON_NO_BROWSER=1.`,

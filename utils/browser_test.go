@@ -3,6 +3,7 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -77,6 +78,18 @@ func TestShouldOpenBrowser(t *testing.T) {
 			envSet:   map[string]string{"ALPACON_NO_BROWSER": "false"},
 			expected: true,
 		},
+		{
+			name:     "ALPACON_NO_BROWSER=FALSE case-insensitive does not block",
+			url:      "https://auth.alpacon.io/authorize",
+			envSet:   map[string]string{"ALPACON_NO_BROWSER": "FALSE"},
+			expected: true,
+		},
+		{
+			name:     "ALPACON_NO_BROWSER=TRUE blocks browser",
+			url:      "https://auth.alpacon.io/authorize",
+			envSet:   map[string]string{"ALPACON_NO_BROWSER": "TRUE"},
+			expected: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -86,6 +99,10 @@ func TestShouldOpenBrowser(t *testing.T) {
 			for _, key := range []string{"SSH_CONNECTION", "SSH_TTY", "ALPACON_NO_BROWSER"} {
 				t.Setenv(key, "")
 				_ = os.Unsetenv(key)
+			}
+			// Ensure DISPLAY is set so Linux headless check doesn't interfere
+			if runtime.GOOS == "linux" {
+				t.Setenv("DISPLAY", ":0")
 			}
 
 			for k, v := range tt.envSet {

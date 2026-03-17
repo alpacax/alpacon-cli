@@ -54,7 +54,7 @@ func shouldOpenBrowser(url string) bool {
 	}
 
 	// Respect explicit opt-out via environment variable
-	if v, ok := os.LookupEnv("ALPACON_NO_BROWSER"); ok && v != "0" && v != "false" {
+	if v, ok := os.LookupEnv("ALPACON_NO_BROWSER"); ok && !strings.EqualFold(v, "0") && !strings.EqualFold(v, "false") {
 		return false
 	}
 
