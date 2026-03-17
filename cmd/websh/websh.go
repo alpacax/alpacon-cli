@@ -183,6 +183,14 @@ Note: All flags must be placed before the server name.
 	},
 }
 
+func init() {
+	WebshCmd.AddCommand(webshListCmd)
+	WebshCmd.AddCommand(webshDescribeCmd)
+	WebshCmd.AddCommand(webshCloseCmd)
+	WebshCmd.AddCommand(webshForceCloseCmd)
+	WebshCmd.AddCommand(webshInviteCmd)
+}
+
 func extractValue(args []string, i int) (string, int) {
 	if strings.Contains(args[i], "=") { // --username=admins
 		parts := strings.SplitN(args[i], "=", 2)
