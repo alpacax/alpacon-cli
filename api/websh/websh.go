@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
+	"syscall"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -74,6 +76,23 @@ func CloseSession(ac *client.AlpaconClient, sessionID string) error {
 func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
 	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
 	return err
+}
+
+func ConnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResponse, error) {
+	req := &ConnectRequest{
+		Session:  sessionID,
+		IsMaster: false,
+		ReadOnly: true,
+	}
+	responseBody, err := ac.SendPostRequest(userChannelsBaseURL, req)
+	if err != nil {
+		return SessionResponse{}, err
+	}
+	var response SessionResponse
+	if err = json.Unmarshal(responseBody, &response); err != nil {
+		return SessionResponse{}, err
+	}
+	return response, nil
 }
 
 func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string, readOnly bool) error {
@@ -162,6 +181,51 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	}
 
 	return response, nil
+}
+
+// OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.
+// Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
+// Exits cleanly on Ctrl+C or SIGTERM.
+func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
+	wsClient := &WebsocketClient{
+		Header: ac.SetWebsocketHeader(),
+		Done:   make(chan error, 1),
+	}
+
+	var err error
+	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
+	if err != nil {
+		utils.CliErrorWithExit("websocket connection failed %v", err)
+	}
+	defer func() { _ = wsClient.conn.Close() }()
+
+	oldState, err := checkTerminal()
+	if err != nil {
+		utils.CliErrorWithExit("websocket connection failed %v", err)
+	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		wsClient.Done <- nil
+	}()
+
+	// In raw mode Ctrl+C is 0x03 — detect it to exit
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			_, err := os.Stdin.Read(buf)
+			if err != nil || buf[0] == 0x03 {
+				wsClient.Done <- nil
+				return
+			}
+		}
+	}()
+
+	go wsClient.readFromServer()
+	return <-wsClient.Done
 }
 
 // Handles graceful termination of the websh terminal.

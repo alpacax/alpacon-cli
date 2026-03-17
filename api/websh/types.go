@@ -82,3 +82,9 @@ type InviteRequest struct {
 	Emails   []string `json:"emails"`
 	ReadOnly bool     `json:"read_only"`
 }
+
+type ConnectRequest struct {
+	Session  string `json:"session"`
+	IsMaster bool   `json:"is_master"`
+	ReadOnly bool   `json:"read_only"`
+}
