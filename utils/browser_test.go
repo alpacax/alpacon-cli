@@ -81,14 +81,12 @@ func TestShouldOpenBrowser(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Unsetenv("SSH_CONNECTION")
-			os.Unsetenv("SSH_TTY")
-			os.Unsetenv("ALPACON_NO_BROWSER")
-			t.Cleanup(func() {
-				os.Unsetenv("SSH_CONNECTION")
-				os.Unsetenv("SSH_TTY")
-				os.Unsetenv("ALPACON_NO_BROWSER")
-			})
+			// t.Setenv registers cleanup automatically; setting then
+			// unsetting ensures the var is absent for the test body.
+			for _, key := range []string{"SSH_CONNECTION", "SSH_TTY", "ALPACON_NO_BROWSER"} {
+				t.Setenv(key, "")
+				_ = os.Unsetenv(key)
+			}
 
 			for k, v := range tt.envSet {
 				t.Setenv(k, v)
