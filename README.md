@@ -126,9 +126,16 @@ $ alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
 # Skip TLS certificate verification
 $ alpacon login [WORKSPACE_URL] --insecure
 
+# Disable auto-open browser (useful for CI, scripted, or remote sessions)
+$ alpacon login --no-browser
+$ ALPACON_NO_BROWSER=1 alpacon login
+
 # Logout
 $ alpacon logout
 ```
+
+For Auth0 and MFA authentication, the CLI automatically opens the authentication URL in your default browser. This is skipped in SSH sessions and headless environments. To disable it explicitly, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The `ALPACON_NO_BROWSER` environment variable also applies to MFA prompts triggered by other commands.
+
 A successful login generates a `config.json` file in `~/.alpacon`, which includes the workspace url, API token, and token expiration time (approximately 1 week).
 This file is crucial for executing commands, and you will need to log in again once the token expires.
 
