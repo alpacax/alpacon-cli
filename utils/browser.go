@@ -40,9 +40,12 @@ func OpenBrowser(url string) {
 		return
 	}
 
-	// Fire and forget — reap the child process asynchronously to avoid zombies
+	// Fire and forget — reap the child process asynchronously to avoid zombies.
+	// On failure, release the lock so the next attempt can retry.
 	if err := cmd.Start(); err == nil {
 		go func() { _ = cmd.Wait() }()
+	} else {
+		releaseBrowserLock()
 	}
 }
 
@@ -107,6 +110,14 @@ func acquireBrowserLock() bool {
 	}
 	_ = f.Close()
 	return true
+}
+
+// releaseBrowserLock removes the lock file so the next attempt can retry.
+func releaseBrowserLock() {
+	lockPath := browserLockPathFunc()
+	if lockPath != "" {
+		_ = os.Remove(lockPath)
+	}
 }
 
 // browserLockPath returns the path to the browser debounce lock file.
