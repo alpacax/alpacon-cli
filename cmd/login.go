@@ -28,8 +28,9 @@ var loginCmd = &cobra.Command{
 	Long: `Log in to Alpacon. If no workspace URL is provided, the previously saved
 workspace is used, or you will be prompted to enter one.
 
-The browser is opened automatically for Auth0 and MFA authentication.
-To disable this, use --no-browser or set ALPACON_NO_BROWSER=1.`,
+The browser is opened automatically for authentication. Use --no-browser to
+disable this for login. To also suppress browser opens during MFA prompts
+from other commands, set ALPACON_NO_BROWSER=1.`,
 	Example: `  # Re-login to saved workspace
   alpacon login
 

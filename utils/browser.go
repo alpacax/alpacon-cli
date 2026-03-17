@@ -41,9 +41,14 @@ func OpenBrowser(url string) {
 	}
 
 	// Fire and forget — reap the child process asynchronously to avoid zombies.
-	// On failure, release the lock so the next attempt can retry.
+	// Release the lock if the browser fails to start or exits with an error
+	// (e.g., xdg-open returns non-zero when no browser is configured).
 	if err := cmd.Start(); err == nil {
-		go func() { _ = cmd.Wait() }()
+		go func() {
+			if err := cmd.Wait(); err != nil {
+				releaseBrowserLock()
+			}
+		}()
 	} else {
 		releaseBrowserLock()
 	}
