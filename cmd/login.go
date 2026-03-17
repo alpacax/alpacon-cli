@@ -18,33 +18,41 @@ import (
 )
 
 var (
-	insecure bool
+	insecure  bool
+	noBrowser bool
 )
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to Alpacon",
-	Long:  "Log in to Alpacon. To access Alpacon, workspace url is must specified",
-	Example: `
-	# Re-login to saved workspace
-	alpacon login
+	Long: `Log in to Alpacon. If no workspace URL is provided, the previously saved
+workspace is used, or you will be prompted to enter one.
 
-	# Cloud login (portal URL or API URL)
-	alpacon login https://alpacon.io/myworkspace
-	alpacon login myworkspace.us1.alpacon.io
+The browser is opened automatically for authentication. Use --no-browser to
+disable this for login. To also suppress browser opens during MFA prompts
+from other commands, set ALPACON_NO_BROWSER=1.`,
+	Example: `  # Re-login to saved workspace
+  alpacon login
 
-	# Self-hosted
-	alpacon login alpacon.example.com
+  # Cloud login (portal URL or API URL)
+  alpacon login https://alpacon.io/myworkspace
+  alpacon login myworkspace.us1.alpacon.io
 
-	# Login via API Token
-	alpacon login myworkspace.us1.alpacon.io -t apikey1234
+  # Self-hosted
+  alpacon login alpacon.example.com
 
-	# Legacy username/password
-	alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
+  # Login via API Token
+  alpacon login myworkspace.us1.alpacon.io -t apikey1234
 
-	# Skip TLS certificate verification
-	alpacon login myworkspace.us1.alpacon.io --insecure
-	`,
+  # Legacy username/password
+  alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
+
+  # Skip TLS certificate verification
+  alpacon login myworkspace.us1.alpacon.io --insecure
+
+  # Disable auto-open browser
+  alpacon login --no-browser
+  ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		var workspaceURL string
@@ -136,6 +144,9 @@ var loginCmd = &cobra.Command{
 
 			fmt.Fprintf(os.Stderr, "\nPlease authenticate by visiting:\n  %s\n\n", utils.Blue(deviceCode.VerificationURIComplete))
 			fmt.Fprintf(os.Stderr, "Verification code: %s\n\n", utils.Bold(deviceCode.UserCode))
+			if !noBrowser {
+				utils.OpenBrowser(deviceCode.VerificationURIComplete)
+			}
 
 			tokenRes, err := auth0.PollForToken(deviceCode, envInfo)
 			if err != nil {
@@ -210,6 +221,7 @@ func init() {
 	loginCmd.Flags().StringVarP(&password, "password", "p", "", "Password for login")
 	loginCmd.Flags().StringVarP(&token, "token", "t", "", "API token for login")
 	loginCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification")
+	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
 }
 
 func promptForCredentials(workspaceURL, username, password string) (string, string, string) {
