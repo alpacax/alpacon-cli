@@ -51,13 +51,13 @@ type JoinRequest struct {
 }
 
 type SessionListItem struct {
-	ID        string `json:"ID"`
-	Server    string `json:"Server"`
-	User      string `json:"User"`
-	Username  string `json:"Username"`
-	RemoteIP  string `json:"Remote IP"`
-	AddedAt   string `json:"Added At"`
-	ClosedAt  string `json:"Closed At"`
+	ID       string `json:"ID"`
+	Server   string `json:"Server"`
+	User     string `json:"User"`
+	Username string `json:"Username"`
+	RemoteIP string `json:"Remote IP"`
+	AddedAt  string `json:"Added At"`
+	ClosedAt string `json:"Closed At"`
 }
 
 type SessionDetailResponse struct {

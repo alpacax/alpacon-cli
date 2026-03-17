@@ -8,10 +8,10 @@ import (
 )
 
 var webshCloseCmd = &cobra.Command{
-	Use:   "close SESSION_ID",
-	Short: "Close a websh session",
+	Use:     "close SESSION_ID",
+	Short:   "Close a websh session",
 	Example: `  alpacon websh close abc123`,
-	Args: cobra.ExactArgs(1),
+	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		sessionID := args[0]
 
