@@ -2,11 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project overview
 
 Alpacon CLI (`alpacon`, alias `ac`) is a command-line tool for interacting with the Alpacon platform. Built with Go and [Cobra](https://github.com/spf13/cobra).
 
-## Development Commands
+## Development commands
 
 ### Build
 
@@ -33,7 +33,7 @@ go vet ./...
 
 ## Architecture
 
-### Project Structure
+### Project structure
 
 ```
 main.go              # Entry point
@@ -65,13 +65,15 @@ pkg/                 # Internal packages (cert, tunnel)
 utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 ```
 
-### Key Patterns
+### Key patterns
 
 - **Command registration**: All commands are registered in `cmd/root.go` via `RootCmd.AddCommand()`
 - **API layer**: Each `cmd/` package calls corresponding `api/` package for HTTP requests
 - **SSH-like syntax**: `websh`, `exec`, `cp` support `user@host` syntax via `utils.ParseSSHTarget()`
 - **Error handling**: Common errors (MFA required, username required) are handled via `utils.HandleCommonErrors()` with retry callbacks
-- **Custom flag parsing**: `websh` uses `DisableFlagParsing: true` and parses flags manually to support positional args after the server name
+- **Custom flag parsing**: `websh` and `exec` use `DisableFlagParsing: true` and parse flags manually to support positional args and `--` separator
+- **Shared command execution**: `exec.RunCommandWithRetry()` wraps `event.RunCommand()` + `HandleCommonErrors()` with MFA/retry logic. Used by both `exec` and `websh`
+- **Browser auto-open**: `utils.OpenBrowser()` opens auth URLs with SSH/headless detection, cross-process debounce (`~/.alpacon/.browser_lock`), and `ALPACON_NO_BROWSER` env var opt-out
 - **Table output**: API response → `*Attributes` struct projection → `utils.PrintTable()`. All list commands follow this pattern
 - **Pagination**: `api.FetchAllPages[T]` (generics) handles all pagination internally. `cmd/` layer never sees pagination
 - **Dual auth tokens**: `AccessToken` (Auth0 Bearer JWT) takes priority; `Token` (legacy API key) is fallback. Set in `client.setHTTPHeader()`
@@ -80,9 +82,9 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 - **Version injection**: `utils.Version` is set via `-ldflags` at build time by GoReleaser. Local builds default to `"dev"`
 - **Subcommand aliases**: list → `["list"]`, delete → `["rm"]`, describe → `["desc"]`, group → semantic alias (e.g., `workspace` → `ws`)
 
-## Code Style Guidelines
+## Code style guidelines
 
-### CLI Usage String Convention
+### CLI usage string convention
 
 All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 
@@ -99,13 +101,13 @@ Use: "cp [SOURCE...] [DESTINATION]"
 Use: "exec [USER@]SERVER COMMAND... [flags]"
 ```
 
-### Cobra Command Conventions
+### Cobra command conventions
 
 - `Short`: Concise, starts with a verb, under 50 chars
 - `Long`: Document SSH-like `user@host` syntax where supported
 - `Example`: Use realistic values (e.g., `my-server`, not `[SERVER_NAME]`)
 
-### Error Handling
+### Error handling
 
 - golangci-lint `errcheck` is enabled — all error returns must be explicitly handled
 - For deferred close calls, use the named discard pattern:
@@ -129,7 +131,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 - Error strings should be lowercase and not end with punctuation (per Go convention / staticcheck ST1005)
 
-### Test Patterns
+### Test patterns
 
 - Table-driven tests with `testify/assert`
 - API tests use `httptest.NewServer` with a minimal `*client.AlpaconClient` pointing at `ts.URL`
@@ -139,7 +141,19 @@ _ = json.NewEncoder(w).Encode(resp)
 
 - Always write comments in English
 
-## Important Notes
+### Writing conventions
+
+- Use **sentence case** for all headings and descriptions (capitalize only the first word and proper nouns)
+  - Good: "Execute a command on a remote server"
+  - Bad: "Execute a Command on a Remote Server"
+- Product and feature names:
+  - **Alpacon** — the platform (proper noun, always capitalized)
+  - **alpacon** — the CLI binary name (lowercase in code/commands)
+  - **websh** — lowercase in prose and code. Never "WebSH" or "Websh"
+  - **Alpamon** — the agent (proper noun)
+  - **Auth0** — third-party service (their capitalization)
+
+## Important notes
 
 - **Go version**: 1.25.7 (specified in go.mod)
 - **Linter**: golangci-lint v2 with errcheck, govet, ineffassign, staticcheck, unused (see `.golangci.yml`)
