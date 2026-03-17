@@ -11,6 +11,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -22,6 +23,65 @@ const (
 	sessionsBaseURL     = "/api/websh/sessions/"
 	userChannelsBaseURL = "/api/websh/user-channels/"
 )
+
+func GetSessionList(ac *client.AlpaconClient, pageSize int) ([]SessionListItem, error) {
+	params := map[string]string{}
+	if pageSize > 0 {
+		params["page_size"] = fmt.Sprintf("%d", pageSize)
+	}
+
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, "", params))
+	if err != nil {
+		return nil, err
+	}
+
+	var response api.ListResponse[SessionDetailResponse]
+	if err = json.Unmarshal(responseBody, &response); err != nil {
+		return nil, err
+	}
+
+	var list []SessionListItem
+	for _, s := range response.Results {
+		closedAt := "-"
+		if s.ClosedAt != nil {
+			closedAt = *s.ClosedAt
+		}
+		list = append(list, SessionListItem{
+			ID:       s.ID,
+			Server:   s.Server.Name,
+			User:     s.User.Name,
+			Username: s.Username,
+			RemoteIP: s.RemoteIP,
+			AddedAt:  s.AddedAt,
+			ClosedAt: closedAt,
+		})
+	}
+
+	return list, nil
+}
+
+func GetSessionDetail(ac *client.AlpaconClient, sessionID string) ([]byte, error) {
+	return ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, sessionID, nil))
+}
+
+func CloseSession(ac *client.AlpaconClient, sessionID string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "close"), nil), nil)
+	return err
+}
+
+func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
+	return err
+}
+
+func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string, readOnly bool) error {
+	req := &InviteRequest{
+		Emails:   emails,
+		ReadOnly: readOnly,
+	}
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "invite"), nil), req)
+	return err
+}
 
 func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (SessionResponse, error) {
 	parsedURL, err := url.Parse(sharedURL)
