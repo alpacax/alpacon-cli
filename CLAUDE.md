@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Alpacon CLI (`alpacon`, alias `ac`) is a command-line tool for [Alpacon](https://alpacon.io) — a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Built with Go and [Cobra](https://github.com/spf13/cobra).
+Alpacon CLI (`alpacon`, alias `ac`) is a command-line tool for [Alpacon](https://alpacon.io)—a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Built with Go and [Cobra](https://github.com/spf13/cobra).
 
 Alpacon enables teams to scale operations across servers and customer environments without per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely. The CLI is designed to be used by AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI) for the most AI-native infrastructure operations.
 
@@ -90,10 +90,10 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 
 All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 
-- **UPPERCASE**: User-supplied values (positional arguments) — `SERVER`, `COMMAND`, `SOURCE`
-- **lowercase**: Literal keywords or framework tokens — `[flags]`, `[command]`
-- **`[]`**: Optional — `[USER@]`, `[flags]`
-- **`...`**: Repeatable — `SOURCE...`, `COMMAND...`
+- **UPPERCASE**: User-supplied values (positional arguments)—`SERVER`, `COMMAND`, `SOURCE`
+- **lowercase**: Literal keywords or framework tokens—`[flags]`, `[command]`
+- **`[]`**: Optional—`[USER@]`, `[flags]`
+- **`...`**: Repeatable—`SOURCE...`, `COMMAND...`
 
 Examples:
 
@@ -111,15 +111,15 @@ Use: "exec [USER@]SERVER COMMAND... [flags]"
 
 ### Error handling
 
-- golangci-lint `errcheck` is enabled — all error returns must be explicitly handled
+- golangci-lint `errcheck` is enabled—all error returns must be explicitly handled
 - For deferred close calls, use the named discard pattern:
 
 ```go
-// Good — errcheck satisfied
+// Good—errcheck satisfied
 defer func() { _ = resp.Body.Close() }()
 defer func() { _ = file.Close() }()
 
-// Bad — errcheck violation
+// Bad—errcheck violation
 defer resp.Body.Close()
 defer file.Close()
 ```
@@ -149,11 +149,12 @@ _ = json.NewEncoder(w).Encode(resp)
   - Good: "Execute a command on a remote server"
   - Bad: "Execute a Command on a Remote Server"
 - Product and feature names:
-  - **Alpacon** — the platform (proper noun, always capitalized)
-  - **alpacon** — the CLI binary name (lowercase in code/commands)
-  - **Websh** — the browser-based terminal feature (proper noun). Never "WebSH" or "websh" in prose. Use `websh` only in code and CLI commands
-  - **Alpamon** — the agent (proper noun)
-  - **Auth0** — third-party service (their capitalization)
+  - **Alpacon**—the platform (proper noun, always capitalized)
+  - **alpacon**—the CLI binary name (lowercase in code/commands)
+  - **Websh**—the browser-based terminal feature (proper noun). Never "WebSH" or "websh" in prose. Use `websh` only in code and CLI commands
+  - **Alpamon**—the agent (proper noun)
+  - **Auth0**—third-party service (their capitalization)
+- Use em-dashes (`—`) without surrounding spaces: `word—word`, not `word — word`
 
 ## Important notes
 
