@@ -8,7 +8,7 @@ import (
 var CertCmd = &cobra.Command{
 	Use:     "cert",
 	Aliases: []string{"certificate"},
-	Short:   "Manage and interact with SSL/TLS certificates",
+	Short:   "List, describe, and download certificates",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

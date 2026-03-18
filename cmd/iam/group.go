@@ -7,11 +7,8 @@ import (
 
 var GroupCmd = &cobra.Command{
 	Use:   "group",
-	Short: "Manage Group resources",
-	Long: `
-	The 'group' command is used to manage IAM group resources,
-	including groups, and permissions within the Alpacon.
-	`,
+	Short: "Manage groups, members, and permissions",
+	Long:  "Manage groups, role-based access controls, and group membership within the Alpacon workspace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

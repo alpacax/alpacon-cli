@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions
+# GitHub Copilot instructions
 
 This repository is the Alpacon CLI (`alpacon`), built with Go and [Cobra](https://github.com/spf13/cobra).
 
@@ -34,3 +34,14 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - Cobra `Example` blocks should use realistic server names (e.g., `my-server`, not `[SERVER_NAME]`)
 - List commands should project API responses into `*Attributes` structs for `utils.PrintTable()`
 - Comments must be written in English
+
+## Writing conventions
+
+- Use **sentence case** for all headings and descriptions (capitalize only the first word and proper nouns)
+- Product and feature names:
+  - **Alpacon**—the platform (proper noun, always capitalized)
+  - **alpacon**—the CLI binary name (lowercase in code/commands)
+  - **Websh**—the browser-based terminal feature (proper noun). Never "WebSH" or "websh" in prose. Use `websh` only in code and CLI commands
+  - **Alpamon**—the agent (proper noun)
+  - **Auth0**—third-party service (their capitalization)
+- Use em-dashes (`—`) without surrounding spaces: `word—word`, not `word — word`

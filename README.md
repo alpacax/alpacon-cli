@@ -4,15 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/alpacax/alpacon-cli/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/alpacax/alpacon-cli)](https://github.com/alpacax/alpacon-cli/releases)
 
-`Alpacon CLI` is a command-line tool for managing [Alpacon](https://alpacon.io) — a platform for secure remote access, server automation, and certificate management. This CLI lets you interact with your Alpacon workspace directly from the terminal.
+`Alpacon CLI` is a command-line tool for [Alpacon](https://alpacon.io)—a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Alpacon enables teams to scale operations across servers and customer environments without managing per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely.
+
+This CLI lets you interact with your Alpacon workspace directly from the terminal: open browser-based terminals, execute remote commands, transfer files, create TCP tunnels, and manage certificates—all with built-in MFA, session recording, and role-based access controls. Designed to be used by engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms for the most AI-native infrastructure operations.
 
 ## Architecture
 
 Alpacon consists of the following components:
 
-- **Alpacon Server** — The platform for secure remote access and server automation. Sign up for a workspace at [alpacon.io](https://alpacon.io) to get started.
-- **[Alpamon](https://github.com/alpacax/alpamon)** — An open-source agent installed on managed servers to enable remote access and monitoring.
-- **Alpacon CLI** (this repository) — A command-line client for interacting with your Alpacon workspace.
+- **Alpacon Server**—The zero-trust access platform with encrypted connections, MFA, session recording, and granular access controls. No inbound ports required. Sign up at [alpacon.io](https://alpacon.io).
+- **[Alpamon](https://github.com/alpacax/alpamon)**—An open-source agent installed on managed servers to enable remote access and monitoring.
+- **Alpacon CLI** (this repository)—A command-line client for interacting with your Alpacon workspace. Manage API tokens for CI/CD and automation.
 
 ## Documentation
 
@@ -104,7 +106,7 @@ sudo mv alpacon /usr/local/bin
 Download the latest `.zip` archive for Windows from [GitHub Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your PATH.
 
 
-### Login & Logout
+### Login & logout
 To access and utilize all features of `Alpacon CLI`, first authenticate with your Alpacon workspace:
 
 ```bash
@@ -176,9 +178,9 @@ Available Commands:
   version     Displays the current CLI version.
   websh       Open a websh terminal or execute a command on a server
 ```
-### Examples of Use Cases
+### Examples of use cases
 
-#### Server Management
+#### Server fleet operations
 Manage and interact with servers efficiently using Alpacon CLI:
 ```bash
 # List all servers.
@@ -207,7 +209,7 @@ Select groups that are authorized to access this server. (e.g., 1,2):
 ```
 
 #### Connect Websh
-Access a server's websh terminal:
+Access a server's Websh terminal:
 ```bash
 # Open a websh terminal
 $ alpacon websh my-server
@@ -219,7 +221,7 @@ $ alpacon websh root@my-server
 $ alpacon websh -u admin -g developers my-server
 ```
 
-#### Execute a command via Websh
+#### Remote command execution
 Execute a command directly on a server and retrieve the output:
 ```bash
 $ alpacon websh my-server "ls -la /var/log"
@@ -232,7 +234,7 @@ $ alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
 ```
 > **Note**: All flags must be placed before the server name. Everything after the server name is treated as the remote command.
 
-#### Execute a command (SSH-style)
+#### SSH-style command execution
 Execute a command on a remote server using SSH-like `user@host` syntax:
 ```bash
 # Execute a command on a server
@@ -247,7 +249,7 @@ $ alpacon exec -u root prod-docker systemctl status nginx
 $ alpacon exec -g docker user@server docker images
 ```
 
-#### TCP Tunnel
+#### TCP tunneling
 Create a TCP tunnel that forwards local port traffic to a remote server's port:
 ```bash
 # Forward local port 9000 to remote server's port 8082
@@ -280,7 +282,7 @@ $ alpacon tunnel my-server -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
 > If you really need shell one-liner style, use `-- sh -c "..."`.
 
 
-#### Share your terminal
+#### Terminal sharing
 You can share the current terminal to others via a temporary link:
 ```bash
 # Open a websh terminal and share the current terminal
@@ -293,10 +295,10 @@ $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 
 
 
-#### Identity and Access Management (IAM)
+#### Identity and access management (IAM)
 Efficiently manage user and group resources:
 ```bash
-# Managing Users
+# Managing users
 
 # List all users.
 $ alpacon user ls / list / all
@@ -314,7 +316,7 @@ $ alpacon user update [USER NAME]
 $ alpacon user delete [USER NAME]
 $ alpacon user rm [USER NAME]
 
-# Managing Groups
+# Managing groups
 
 # List all groups.
 $ alpacon group ls
@@ -335,8 +337,8 @@ $ alpacon group member delete --group [GROUP NAME] --member[MEMBER NAME]
 $ alpacon group member rm --group [GROUP NAME] --member [MEMBER NAME]
 ```
 
-#### API tokens
-API tokens can be used to access alpacon.
+#### API tokens and automation
+API tokens can be used to access Alpacon.
 ```bash
 # Create a new API token
 $ alpacon token create
@@ -354,7 +356,7 @@ $ alpacon token rm [TOKEN_ID_OR_NAME]
 $ alpacon login -s [SERVER URL] -t [TOKEN KEY]
 ```
 
-#### Command ACL in API Token
+#### Token command ACL
 Defines command access for API tokens and enables setting specific commands that each API token can run.
 ```bash
 # Add a new command ACL with specific token and command.
@@ -370,7 +372,7 @@ $ alpacon token acl rm [COMMAND_ACL_ID]
 $ alpacon token acl delete --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
 ```
 
-#### File Transfer Protocol (FTP)
+#### File transfer
 Facilitate file uploads and downloads:
 ```bash
 $ alpacon cp [SOURCE] [DESTINATION]
@@ -386,7 +388,7 @@ $ alpacon cp -u [USER NAME] -g [GROUP NAME] [SOURCE] [DESTINATION]
 ```
 - `[SERVER NAME]:[PATH]` : denotes the server's name and the file's path for FTP operations.
 
-#### Package Management
+#### Package management
 Handle Python and system packages effortlessly:
 ```bash
 # python
@@ -400,7 +402,7 @@ $ alpacon package system upload osquery-5.10.2-1.linux.x86_64.rpm
 $ alpacon package system download osquery-5.10.2-1.linux.x86_64.rpm .
 ```
 
-#### Logs Management
+#### Log retrieval
 Retrieve and monitor server logs:
 ```bash
 # View recent logs or tail specific logs.
@@ -408,7 +410,7 @@ $ alpacon logs [SERVER_NAME]
 $ alpacon logs [SERVER NAME] --tail=10
 ```
 
-#### Events Management
+#### Event monitoring
 Retrieve and monitor events in the Alpacon:
 ```bash
 # Display a list of recent events in the Alpacon
@@ -420,7 +422,7 @@ $ alpacon event -t 10 -s myserver -u admin
 $ alpacon event --tail=10 --server=myserver --user=admin
 ```
 
-#### Agent (Alpamon) Commands
+#### Agent (Alpamon) management
 Manage server agents(Alpamon) with ease:
 ```bash
 # Commands to control and upgrade server agents.
@@ -429,7 +431,7 @@ $ alpacon agent upgrade [SERVER NAME]
 $ alpacon agent shutdown [SERVER NAME]
 ```
 
-#### Note Commands
+#### Server notes
 Manage and view server notes:
 ```bash
 # Display a list of all notes
@@ -445,7 +447,7 @@ $ alpacon note delete [NOTE ID]
 $ alpacon note rm [NOTE ID]
 ```
 
-#### Private CA, Certificate Commands
+#### Private CA and certificates
 Easily manage your private Certificate Authorities (CAs) and certificates:
 ```bash
 # Create a new Certificate Authority

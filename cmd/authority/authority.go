@@ -7,7 +7,7 @@ import (
 
 var AuthorityCmd = &cobra.Command{
 	Use:   "authority",
-	Short: "Commands to manage and interact with certificate authorities",
+	Short: "Manage private certificate authorities",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

@@ -13,7 +13,7 @@ var (
 var NoteCmd = &cobra.Command{
 	Use:     "note",
 	Aliases: []string{"notes"},
-	Short:   "Manage and view server notes",
+	Short:   "Manage notes attached to servers",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {
