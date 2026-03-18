@@ -8,7 +8,7 @@ import (
 var PackagesCmd = &cobra.Command{
 	Use:     "package",
 	Aliases: []string{"packages"},
-	Short: "List, upload, and download system and Python packages",
+	Short:   "Manage system and Python packages",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

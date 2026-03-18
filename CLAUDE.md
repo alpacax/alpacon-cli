@@ -73,7 +73,7 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 - **API layer**: Each `cmd/` package calls corresponding `api/` package for HTTP requests
 - **SSH-like syntax**: `websh`, `exec`, `cp` support `user@host` syntax via `utils.ParseSSHTarget()`
 - **Error handling**: Common errors (MFA required, username required) are handled via `utils.HandleCommonErrors()` with retry callbacks
-- **Custom flag parsing**: `websh` and `exec` use `DisableFlagParsing: true` and parse flags manually to support positional args and `--` separator
+- **Custom flag parsing**: `websh` and `exec` use `DisableFlagParsing: true` and parse flags manually. `exec` supports `--` separator for remote command flags
 - **Shared command execution**: `exec.RunCommandWithRetry()` wraps `event.RunCommand()` + `HandleCommonErrors()` with MFA/retry logic. Used by both `exec` and `websh`
 - **Browser auto-open**: `utils.OpenBrowser()` opens auth URLs with SSH/headless detection, cross-process debounce (`~/.alpacon/.browser_lock`), and `ALPACON_NO_BROWSER` env var opt-out
 - **Table output**: API response → `*Attributes` struct projection → `utils.PrintTable()`. All list commands follow this pattern

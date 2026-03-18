@@ -8,7 +8,7 @@ import (
 var RevokeCmd = &cobra.Command{
 	Use:     "revoke",
 	Aliases: []string{"revoke-request"},
-	Short: "Create, approve, deny, and manage certificate revocation requests",
+	Short:   "Manage certificate revocation requests",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

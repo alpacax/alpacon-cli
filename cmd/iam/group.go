@@ -7,7 +7,7 @@ import (
 
 var GroupCmd = &cobra.Command{
 	Use:   "group",
-	Short: "List, create, describe, update, and delete groups and members",
+	Short: "Manage groups, members, and permissions",
 	Long:  "Manage groups, role-based access controls, and group membership within the Alpacon workspace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()

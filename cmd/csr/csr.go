@@ -7,7 +7,7 @@ import (
 
 var CsrCmd = &cobra.Command{
 	Use:   "csr",
-	Short: "Generate and manage Certificate Signing Request (CSR) operations",
+	Short: "Manage certificate signing requests (CSRs)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

@@ -7,7 +7,7 @@ import (
 
 var TokenCmd = &cobra.Command{
 	Use:   "token",
-	Short: "Create, list, and delete API tokens for CI/CD and automation",
+	Short: "Manage API tokens for CI/CD and automation",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

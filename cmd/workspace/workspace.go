@@ -9,8 +9,8 @@ import (
 var WorkspaceCmd = &cobra.Command{
 	Use:     "workspace",
 	Aliases: []string{"ws"},
-	Short: "View, list, and switch between workspaces",
-	Long:  "View the current workspace, list available workspaces, and switch between them.",
+	Short:   "View, list, and switch workspaces",
+	Long:    "View the current workspace, list available workspaces, and switch between them.",
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
 		if err != nil {
