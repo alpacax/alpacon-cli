@@ -208,8 +208,8 @@ Groups:
 Select groups that are authorized to access this server. (e.g., 1,2):
 ```
 
-#### Connect websh
-Access a server's websh terminal:
+#### Connect Websh
+Access a server's Websh terminal:
 ```bash
 # Open a websh terminal
 $ alpacon websh my-server
@@ -221,7 +221,7 @@ $ alpacon websh root@my-server
 $ alpacon websh -u admin -g developers my-server
 ```
 
-#### Execute a command via websh
+#### Execute a command via Websh
 Execute a command directly on a server and retrieve the output:
 ```bash
 $ alpacon websh my-server "ls -la /var/log"
@@ -282,7 +282,7 @@ $ alpacon tunnel my-server -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
 > If you really need shell one-liner style, use `-- sh -c "..."`.
 
 
-#### Share your websh terminal
+#### Share your Websh terminal
 You can share the current terminal to others via a temporary link:
 ```bash
 # Open a websh terminal and share the current terminal
@@ -537,7 +537,7 @@ The test script will automatically:
   - Command execution (regular and root user)
   - File upload/download operations
   - Folder upload/download operations (recursive)
-  - websh functionality
+  - Websh functionality
   - Advanced operations and error handling
 - Clean up all test files after completion
 

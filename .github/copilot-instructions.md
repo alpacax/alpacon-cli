@@ -41,6 +41,6 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - Product and feature names:
   - **Alpacon** — the platform (proper noun, always capitalized)
   - **alpacon** — the CLI binary name (lowercase in code/commands)
-  - **websh** — always lowercase in prose and code. Never "WebSH" or "Websh"
+  - **Websh** — the browser-based terminal feature (proper noun). Never "WebSH" or "websh" in prose. Use `websh` only in code and CLI commands
   - **Alpamon** — the agent (proper noun)
   - **Auth0** — third-party service (their capitalization)
