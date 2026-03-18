@@ -14,7 +14,7 @@ Alpacon consists of the following components:
 
 - **Alpacon Server**—The zero-trust access platform with encrypted connections, MFA, session recording, and granular access controls. No inbound ports required. Sign up at [alpacon.io](https://alpacon.io).
 - **[Alpamon](https://github.com/alpacax/alpamon)**—An open-source agent installed on managed servers to enable remote access and monitoring.
-- **Alpacon CLI** (this repository)—A command-line client for interacting with your Alpacon workspace. Also provides API tokens for CI/CD and automation.
+- **Alpacon CLI** (this repository)—A command-line client for interacting with your Alpacon workspace. Manage API tokens for CI/CD and automation.
 
 ## Documentation
 
@@ -338,7 +338,7 @@ $ alpacon group member rm --group [GROUP NAME] --member [MEMBER NAME]
 ```
 
 #### API tokens and automation
-API tokens can be used to access alpacon.
+API tokens can be used to access Alpacon.
 ```bash
 # Create a new API token
 $ alpacon token create
