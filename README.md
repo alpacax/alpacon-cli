@@ -232,7 +232,7 @@ $ alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
 ```
 > **Note**: All flags must be placed before the server name. Everything after the server name is treated as the remote command.
 
-#### Execute a command (SSH style)
+#### Execute a command (SSH-style)
 Execute a command on a remote server using SSH-like `user@host` syntax:
 ```bash
 # Execute a command on a server
@@ -296,7 +296,7 @@ $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 #### Identity and access management (IAM)
 Efficiently manage user and group resources:
 ```bash
-# Managing Users
+# Managing users
 
 # List all users.
 $ alpacon user ls / list / all
@@ -314,7 +314,7 @@ $ alpacon user update [USER NAME]
 $ alpacon user delete [USER NAME]
 $ alpacon user rm [USER NAME]
 
-# Managing Groups
+# Managing groups
 
 # List all groups.
 $ alpacon group ls
