@@ -4,15 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/alpacax/alpacon-cli/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/alpacax/alpacon-cli)](https://github.com/alpacax/alpacon-cli/releases)
 
-`Alpacon CLI` is a command-line tool for managing [Alpacon](https://alpacon.io) — a platform for secure remote access, server automation, and certificate management. This CLI lets you interact with your Alpacon workspace directly from the terminal.
+`Alpacon CLI` is a command-line tool for [Alpacon](https://alpacon.io) — a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Alpacon enables teams to scale operations across servers and customer environments without managing per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely.
+
+This CLI lets you interact with your Alpacon workspace directly from the terminal: open browser-based terminals, execute remote commands, transfer files, create TCP tunnels, and manage certificates — all with built-in MFA, session recording, and role-based access controls.
 
 ## Architecture
 
 Alpacon consists of the following components:
 
-- **Alpacon Server** — The platform for secure remote access and server automation. Sign up for a workspace at [alpacon.io](https://alpacon.io) to get started.
+- **Alpacon Server** — The zero-trust access platform with encrypted connections, MFA, session recording, and granular access controls. No inbound ports required. Sign up at [alpacon.io](https://alpacon.io).
 - **[Alpamon](https://github.com/alpacax/alpamon)** — An open-source agent installed on managed servers to enable remote access and monitoring.
-- **Alpacon CLI** (this repository) — A command-line client for interacting with your Alpacon workspace.
+- **Alpacon CLI** (this repository) — A command-line client for interacting with your Alpacon workspace. Also provides API tokens for CI/CD and automation.
 
 ## Documentation
 
