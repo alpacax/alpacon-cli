@@ -6,7 +6,7 @@
 
 `Alpacon CLI` is a command-line tool for [Alpacon](https://alpacon.io)—a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Alpacon enables teams to scale operations across servers and customer environments without managing per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely.
 
-This CLI lets you interact with your Alpacon workspace directly from the terminal: open browser-based terminals, execute remote commands, transfer files, create TCP tunnels, and manage certificates—all with built-in MFA, session recording, and role-based access controls. Designed to be used by AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI) for the most AI-native infrastructure operations.
+This CLI lets you interact with your Alpacon workspace directly from the terminal: open browser-based terminals, execute remote commands, transfer files, create TCP tunnels, and manage certificates—all with built-in MFA, session recording, and role-based access controls. Designed to be used by engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms for the most AI-native infrastructure operations.
 
 ## Architecture
 

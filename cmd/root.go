@@ -37,7 +37,7 @@ or bastion hosts. Open terminals, execute commands, transfer files, create TCP
 tunnels, and manage certificates — all with zero-trust authentication, MFA,
 session recording, and role-based access controls.
 
-Designed to be used by engineers and AI coding agents alike.`,
+Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.ShowLogo()
 		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
