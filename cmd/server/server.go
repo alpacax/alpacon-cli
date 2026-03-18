@@ -8,7 +8,7 @@ import (
 var ServerCmd = &cobra.Command{
 	Use:     "server",
 	Aliases: []string{"servers"},
-	Short:   "Commands to manage and interact with servers",
+	Short: "List, create, describe, update, and delete servers",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

@@ -7,11 +7,8 @@ import (
 
 var UserCmd = &cobra.Command{
 	Use:   "user",
-	Short: "Manage User resources",
-	Long: `
-	The 'user' command is used to manage IAM user resources,
-	including users and permissions within the Alpacon.
-	`,
+	Short: "List, create, describe, update, and delete users",
+	Long:  "Manage user accounts and their permissions within the Alpacon workspace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

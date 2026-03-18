@@ -31,8 +31,13 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short:   "Alpacon CLI: Your Gateway to Alpacon Services",
-	Long:    "Use this tool to interact with the alpacon service.",
+	Short: "CLI for Alpacon zero-trust infrastructure access",
+	Long: `Alpacon CLI provides secure access to remote servers without SSH keys, VPNs,
+or bastion hosts. Open terminals, execute commands, transfer files, create TCP
+tunnels, and manage certificates — all with zero-trust authentication, MFA,
+session recording, and role-based access controls.
+
+Designed to be used by engineers and AI coding agents alike.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.ShowLogo()
 		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")

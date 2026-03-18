@@ -7,7 +7,7 @@ import (
 
 var AgentCmd = &cobra.Command{
 	Use:   "agent",
-	Short: "Commands to manage server's agent",
+	Short: "Upgrade, restart, or shut down the Alpamon agent on a server",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {
