@@ -44,6 +44,8 @@ var webshWatchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to watch websh session: %s.", err)
 		}
 
-		_ = websh.OpenReadOnlyTerminal(alpaconClient, session)
+		if err = websh.OpenReadOnlyTerminal(alpaconClient, session); err != nil {
+			utils.CliErrorWithExit("websh watch session ended with error: %s.", err)
+		}
 	},
 }

@@ -201,7 +201,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 
 	oldState, err := checkTerminal()
 	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed %v", err)
+		utils.CliErrorWithExit("failed to set up terminal: %v", err)
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 
@@ -209,7 +209,10 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		wsClient.Done <- nil
+		select {
+		case wsClient.Done <- nil:
+		default:
+		}
 	}()
 
 	// In raw mode Ctrl+C is 0x03 — detect it to exit
@@ -218,7 +221,10 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		for {
 			_, err := os.Stdin.Read(buf)
 			if err != nil || buf[0] == 0x03 {
-				wsClient.Done <- nil
+				select {
+				case wsClient.Done <- nil:
+				default:
+				}
 				return
 			}
 		}

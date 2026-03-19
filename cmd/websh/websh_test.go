@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -309,4 +310,53 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 	}
 
 	return username, groupname, serverName, commandArgs, share, readOnly, env
+}
+
+func TestSubcommandRegistration(t *testing.T) {
+	subcommands := map[string]bool{
+		"join":        false,
+		"ls":          false,
+		"describe":    false,
+		"close":       false,
+		"force-close": false,
+		"invite":      false,
+		"watch":       false,
+	}
+
+	for _, cmd := range WebshCmd.Commands() {
+		if _, ok := subcommands[cmd.Name()]; ok {
+			subcommands[cmd.Name()] = true
+		}
+	}
+
+	for name, registered := range subcommands {
+		assert.True(t, registered, "subcommand %q is not registered", name)
+	}
+}
+
+func TestSubcommandFlags(t *testing.T) {
+	tests := []struct {
+		subcommand string
+		flags      []string
+	}{
+		{"ls", []string{"tail"}},
+		{"invite", []string{"email", "read-only"}},
+		{"join", []string{"url", "password"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.subcommand, func(t *testing.T) {
+			var cmd *cobra.Command
+			for _, c := range WebshCmd.Commands() {
+				if c.Name() == tc.subcommand {
+					cmd = c
+					break
+				}
+			}
+			assert.NotNil(t, cmd, "subcommand %q not found", tc.subcommand)
+			for _, flag := range tc.flags {
+				assert.NotNil(t, cmd.Flags().Lookup(flag), "flag --%s not found on %q", flag, tc.subcommand)
+			}
+		})
+	}
 }
