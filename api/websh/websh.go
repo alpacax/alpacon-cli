@@ -281,7 +281,10 @@ func (wsClient *WebsocketClient) readFromServer() {
 	for {
 		_, message, err := wsClient.conn.ReadMessage()
 		if err != nil {
-			wsClient.Done <- err
+			select {
+			case wsClient.Done <- err:
+			default:
+			}
 			return
 		}
 		fmt.Print(string(message))
