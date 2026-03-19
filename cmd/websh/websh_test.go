@@ -18,10 +18,7 @@ func TestCommandParsing(t *testing.T) {
 		expectEnv         map[string]string
 		expectCommandArgs []string
 		expectShare       bool
-		expectJoin        bool
 		expectReadOnly    bool
-		expectUrl         string
-		expectPassword    string
 	}{
 		{
 			testName:          "ExecuteUpdateAsAdminSysadmin",
@@ -140,24 +137,7 @@ func TestCommandParsing(t *testing.T) {
 			expectServerName:  "test-server",
 			expectCommandArgs: nil,
 			expectShare:       true,
-			expectJoin:        false,
 			expectReadOnly:    false,
-			expectUrl:         "",
-			expectPassword:    "",
-		},
-		{
-			testName:          "JoinSharedSession",
-			args:              []string{"join", "--url", "http://localhost:3000/websh/join?session=abcd", "--password", "1234"},
-			expectUsername:    "",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "join",
-			expectCommandArgs: nil,
-			expectShare:       false,
-			expectJoin:        true,
-			expectReadOnly:    false,
-			expectUrl:         "http://localhost:3000/websh/join?session=abcd",
-			expectPassword:    "1234",
 		},
 		{
 			testName:          "ReadOnlySharedSession",
@@ -168,10 +148,7 @@ func TestCommandParsing(t *testing.T) {
 			expectServerName:  "test-server",
 			expectCommandArgs: nil,
 			expectShare:       true,
-			expectJoin:        false,
 			expectReadOnly:    true,
-			expectUrl:         "",
-			expectPassword:    "",
 		},
 		{
 			testName:          "ReadOnlySharedSession2",
@@ -182,24 +159,7 @@ func TestCommandParsing(t *testing.T) {
 			expectServerName:  "test-server",
 			expectCommandArgs: nil,
 			expectShare:       true,
-			expectJoin:        false,
 			expectReadOnly:    true,
-			expectUrl:         "",
-			expectPassword:    "",
-		},
-		{
-			testName:          "InvalidFlagCombination",
-			args:              []string{"--share", "join", "--url", "http://localhost:3000/websh/join?session=abcd"},
-			expectUsername:    "",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "join",
-			expectCommandArgs: nil,
-			expectShare:       true,
-			expectJoin:        true,
-			expectReadOnly:    false,
-			expectUrl:         "http://localhost:3000/websh/join?session=abcd",
-			expectPassword:    "",
 		},
 		{
 			testName:          "SingleEnvVariable",
@@ -285,27 +245,24 @@ func TestCommandParsing(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.testName, func(t *testing.T) {
-			username, groupname, serverName, commandArgs, share, join, readOnly, url, password, env := executeTestCommand(tc.args)
+			username, groupname, serverName, commandArgs, share, readOnly, env := executeTestCommand(tc.args)
 
 			assert.Equal(t, tc.expectUsername, username, "Mismatch in username")
 			assert.Equal(t, tc.expectGroupname, groupname, "Mismatch in groupname")
 			assert.Equal(t, tc.expectServerName, serverName, "Mismatch in server name")
 			assert.Equal(t, tc.expectCommandArgs, commandArgs, "Mismatch in command arguments")
 			assert.Equal(t, tc.expectShare, share, "Mismatch in share flag")
-			assert.Equal(t, tc.expectJoin, join, "Mismatch in join functionality")
 			assert.Equal(t, tc.expectReadOnly, readOnly, "Mismatch in read-only flag")
-			assert.Equal(t, tc.expectUrl, url, "Mismatch in URL for joining")
-			assert.Equal(t, tc.expectPassword, password, "Mismatch in password for joining")
 			assert.Equal(t, tc.expectEnv, env, "Mismatch in env")
 		})
 	}
 }
 
-func executeTestCommand(args []string) (string, string, string, []string, bool, bool, bool, string, string, map[string]string) {
+func executeTestCommand(args []string) (string, string, string, []string, bool, bool, map[string]string) {
 	var (
-		share, join, readOnly                          bool
-		username, groupname, serverName, url, password string
-		commandArgs                                    []string
+		share, readOnly                bool
+		username, groupname, serverName string
+		commandArgs                     []string
 	)
 
 	env := make(map[string]string)
@@ -315,15 +272,11 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 		case args[i] == "-s" || args[i] == "--share":
 			share = true
 		case args[i] == "-h" || args[i] == "--help":
-			return username, groupname, serverName, commandArgs, share, join, readOnly, url, password, env
+			return username, groupname, serverName, commandArgs, share, readOnly, env
 		case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
 			username, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			groupname, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "--url"):
-			url, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "-p") || strings.HasPrefix(args[i], "--password"):
-			password, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "--env"):
 			i = extractEnvValue(args, i, env)
 		case strings.HasPrefix(args[i], "--read-only"):
@@ -346,10 +299,6 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 		}
 	}
 
-	if serverName == "join" {
-		join = true
-	}
-
 	// Parse SSH-like syntax for user@host (same logic as in the main command)
 	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 		sshTarget := utils.ParseSSHTarget(serverName)
@@ -359,5 +308,5 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 		serverName = sshTarget.Host
 	}
 
-	return username, groupname, serverName, commandArgs, share, join, readOnly, url, password, env
+	return username, groupname, serverName, commandArgs, share, readOnly, env
 }
