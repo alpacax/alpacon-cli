@@ -8,9 +8,12 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
+	"syscall"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -22,6 +25,76 @@ const (
 	sessionsBaseURL     = "/api/websh/sessions/"
 	userChannelsBaseURL = "/api/websh/user-channels/"
 )
+
+func GetSessionList(ac *client.AlpaconClient) ([]SessionListItem, error) {
+	params := map[string]string{
+		"is_connectable": "true",
+	}
+
+	sessions, err := api.FetchAllPages[SessionDetailResponse](ac, sessionsBaseURL, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var list []SessionListItem
+	for _, s := range sessions {
+		closedAt := "-"
+		if s.ClosedAt != nil {
+			closedAt = *s.ClosedAt
+		}
+		list = append(list, SessionListItem{
+			ID:       s.ID,
+			Server:   s.Server.Name,
+			User:     s.User.Name,
+			Username: s.Username,
+			RemoteIP: s.RemoteIP,
+			AddedAt:  s.AddedAt,
+			ClosedAt: closedAt,
+		})
+	}
+
+	return list, nil
+}
+
+func GetSessionDetail(ac *client.AlpaconClient, sessionID string) ([]byte, error) {
+	return ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, sessionID, nil))
+}
+
+func CloseSession(ac *client.AlpaconClient, sessionID string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "close"), nil), nil)
+	return err
+}
+
+func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
+	return err
+}
+
+func ConnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResponse, error) {
+	req := &ConnectRequest{
+		Session:  sessionID,
+		IsMaster: false,
+		ReadOnly: true,
+	}
+	responseBody, err := ac.SendPostRequest(userChannelsBaseURL, req)
+	if err != nil {
+		return SessionResponse{}, err
+	}
+	var response SessionResponse
+	if err = json.Unmarshal(responseBody, &response); err != nil {
+		return SessionResponse{}, err
+	}
+	return response, nil
+}
+
+func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string, readOnly bool) error {
+	req := &InviteRequest{
+		Emails:   emails,
+		ReadOnly: readOnly,
+	}
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "invite"), nil), req)
+	return err
+}
 
 func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (SessionResponse, error) {
 	parsedURL, err := url.Parse(sharedURL)
@@ -102,6 +175,57 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	return response, nil
 }
 
+// OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.
+// Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
+// Exits cleanly on Ctrl+C or SIGTERM.
+func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
+	wsClient := &WebsocketClient{
+		Header: ac.SetWebsocketHeader(),
+		Done:   make(chan error, 1),
+	}
+
+	var err error
+	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
+	if err != nil {
+		utils.CliErrorWithExit("websocket connection failed %v", err)
+	}
+	defer func() { _ = wsClient.conn.Close() }()
+
+	oldState, err := checkTerminal()
+	if err != nil {
+		utils.CliErrorWithExit("failed to set up terminal: %v", err)
+	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		select {
+		case wsClient.Done <- nil:
+		default:
+		}
+	}()
+
+	// In raw mode Ctrl+C is 0x03 — detect it to exit
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			_, err := os.Stdin.Read(buf)
+			if err != nil || buf[0] == 0x03 {
+				select {
+				case wsClient.Done <- nil:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	go wsClient.readFromServer()
+	return <-wsClient.Done
+}
+
 // Handles graceful termination of the websh terminal.
 // Exits on error without further error handling.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
@@ -157,7 +281,10 @@ func (wsClient *WebsocketClient) readFromServer() {
 	for {
 		_, message, err := wsClient.conn.ReadMessage()
 		if err != nil {
-			wsClient.Done <- err
+			select {
+			case wsClient.Done <- err:
+			default:
+			}
 			return
 		}
 		fmt.Print(string(message))

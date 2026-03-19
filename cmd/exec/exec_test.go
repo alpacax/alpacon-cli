@@ -24,18 +24,18 @@ func TestExecCommandParsing(t *testing.T) {
 			expectedCommand: "docker ps",
 		},
 		{
-			name:            "User@host syntax",
-			args:            []string{"root@prod-docker", "docker", "ps"},
+			name:             "User@host syntax",
+			args:             []string{"root@prod-docker", "docker", "ps"},
 			expectedUsername: "root",
-			expectedServer:  "prod-docker",
-			expectedCommand: "docker ps",
+			expectedServer:   "prod-docker",
+			expectedCommand:  "docker ps",
 		},
 		{
-			name:            "Complex command with user",
-			args:            []string{"admin@web-server", "ls", "-la", "/var/log"},
+			name:             "Complex command with user",
+			args:             []string{"admin@web-server", "ls", "-la", "/var/log"},
 			expectedUsername: "admin",
-			expectedServer:  "web-server",
-			expectedCommand: "ls -la /var/log",
+			expectedServer:   "web-server",
+			expectedCommand:  "ls -la /var/log",
 		},
 		{
 			name:            "Single word command",
@@ -44,18 +44,18 @@ func TestExecCommandParsing(t *testing.T) {
 			expectedCommand: "uptime",
 		},
 		{
-			name:            "Complex hostname with user",
-			args:            []string{"deploy@web-server-01.example.com", "systemctl", "status", "nginx"},
+			name:             "Complex hostname with user",
+			args:             []string{"deploy@web-server-01.example.com", "systemctl", "status", "nginx"},
 			expectedUsername: "deploy",
-			expectedServer:  "web-server-01.example.com",
-			expectedCommand: "systemctl status nginx",
+			expectedServer:   "web-server-01.example.com",
+			expectedCommand:  "systemctl status nginx",
 		},
 		{
-			name:            "Command with pipes and special characters",
-			args:            []string{"root@server", "ps", "aux", "|", "grep", "nginx"},
+			name:             "Command with pipes and special characters",
+			args:             []string{"root@server", "ps", "aux", "|", "grep", "nginx"},
 			expectedUsername: "root",
-			expectedServer:  "server",
-			expectedCommand: "ps aux | grep nginx",
+			expectedServer:   "server",
+			expectedCommand:  "ps aux | grep nginx",
 		},
 	}
 
@@ -81,11 +81,11 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 		expectedCommand   string
 	}{
 		{
-			name:            "Username flag overrides user@host",
-			args:            []string{"-u", "override", "root@prod-docker", "docker", "ps"},
+			name:             "Username flag overrides user@host",
+			args:             []string{"-u", "override", "root@prod-docker", "docker", "ps"},
 			expectedUsername: "override",
-			expectedServer:  "prod-docker",
-			expectedCommand: "docker ps",
+			expectedServer:   "prod-docker",
+			expectedCommand:  "docker ps",
 		},
 		{
 			name:              "Groupname flag with user@host",

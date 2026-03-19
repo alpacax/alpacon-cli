@@ -43,7 +43,15 @@ to ensure it is interpreted correctly on the remote server.`,
   alpacon websh --share --read-only=true my-server
 
   # Join an existing shared session
-  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
+  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234?channel=default --password my-session-pass
+
+  # Session management
+  alpacon websh ls                          # List active sessions
+  alpacon websh describe SESSION_ID         # Show session details
+  alpacon websh watch SESSION_ID            # Watch a session (read-only, staff/superuser only)
+  alpacon websh invite SESSION_ID --email user@example.com
+  alpacon websh close SESSION_ID            # Close a session
+  alpacon websh force-close SESSION_ID      # Force close (admin only)
 
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
@@ -51,8 +59,6 @@ Flags:
   --env="KEY=VALUE"                  Set environment variable 'KEY' to 'VALUE'.
   --env="KEY"                        Use the current shell's value for 'KEY'.
   -s, --share                        Share the terminal via a temporary link.
-  --url [SHARED_URL]                 URL of the shared session to join.
-  -p, --password [PASSWORD]          Password for the shared session.
   --read-only=[true|false]           Set shared session to read-only (default: false).
 
 Note: All flags must be placed before the server name.
@@ -64,9 +70,9 @@ Note: All flags must be placed before the server name.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		var (
-			username, groupname, serverName, url, password string
-			commandArgs                                    []string
-			share, readOnly                                bool
+			username, groupname, serverName string
+			commandArgs                     []string
+			share, readOnly                 bool
 		)
 
 		env := make(map[string]string)
@@ -82,10 +88,6 @@ Note: All flags must be placed before the server name.
 				username, i = extractValue(args, i)
 			case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 				groupname, i = extractValue(args, i)
-			case strings.HasPrefix(args[i], "--url"):
-				url, i = extractValue(args, i)
-			case strings.HasPrefix(args[i], "-p") || strings.HasPrefix(args[i], "--password"):
-				password, i = extractValue(args, i)
 			case strings.HasPrefix(args[i], "--env"):
 				i = extractEnvValue(args, i, env)
 			case strings.HasPrefix(args[i], "--read-only"):
@@ -130,16 +132,7 @@ Note: All flags must be placed before the server name.
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if serverName == "join" {
-			if url == "" || password == "" {
-				utils.CliErrorWithExit("Both URL and password are required.")
-			}
-			session, err := websh.JoinWebshSession(alpaconClient, url, password)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to join the session: %s.", err)
-			}
-			_ = websh.OpenNewTerminal(alpaconClient, session)
-		} else if len(commandArgs) > 0 {
+		if len(commandArgs) > 0 {
 			if len(commandArgs) > 1 {
 				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
 				if !utils.CommandConfirm() {
@@ -181,6 +174,16 @@ Note: All flags must be placed before the server name.
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
 	},
+}
+
+func init() {
+	WebshCmd.AddCommand(webshJoinCmd)
+	WebshCmd.AddCommand(webshListCmd)
+	WebshCmd.AddCommand(webshDescribeCmd)
+	WebshCmd.AddCommand(webshCloseCmd)
+	WebshCmd.AddCommand(webshForceCloseCmd)
+	WebshCmd.AddCommand(webshInviteCmd)
+	WebshCmd.AddCommand(webshWatchCmd)
 }
 
 func extractValue(args []string, i int) (string, int) {

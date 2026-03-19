@@ -32,7 +32,7 @@ type RemoteExecArgs struct {
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, server string
-		commandParts               []string
+		commandParts                []string
 	)
 
 	for i := 0; i < len(args); i++ {
