@@ -260,7 +260,7 @@ func TestCommandParsing(t *testing.T) {
 
 func executeTestCommand(args []string) (string, string, string, []string, bool, bool, map[string]string) {
 	var (
-		share, readOnly                bool
+		share, readOnly                 bool
 		username, groupname, serverName string
 		commandArgs                     []string
 	)
@@ -310,4 +310,3 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 
 	return username, groupname, serverName, commandArgs, share, readOnly, env
 }
-

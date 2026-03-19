@@ -71,8 +71,8 @@ Note: All flags must be placed before the server name.
 	Run: func(cmd *cobra.Command, args []string) {
 		var (
 			username, groupname, serverName string
-			commandArgs                      []string
-			share, readOnly                  bool
+			commandArgs                     []string
+			share, readOnly                 bool
 		)
 
 		env := make(map[string]string)
