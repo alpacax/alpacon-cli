@@ -38,8 +38,8 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "empty args",
-			args: []string{},
+			name:     "empty args",
+			args:     []string{},
 			expected: RemoteExecArgs{},
 		},
 
@@ -430,8 +430,8 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "only -- with nothing else",
-			args: []string{"--"},
+			name:     "only -- with nothing else",
+			args:     []string{"--"},
 			expected: RemoteExecArgs{},
 		},
 	}
