@@ -45,6 +45,14 @@ to ensure it is interpreted correctly on the remote server.`,
   # Join an existing shared session
   alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
 
+  # Session management
+  alpacon websh ls                          # List active sessions
+  alpacon websh describe SESSION_ID         # Show session details
+  alpacon websh watch SESSION_ID            # Watch a session (read-only, staff/superuser only)
+  alpacon websh invite SESSION_ID --email user@example.com
+  alpacon websh close SESSION_ID            # Close a session
+  alpacon websh force-close SESSION_ID      # Force close (admin only)
+
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
   -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
