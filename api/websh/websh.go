@@ -26,26 +26,18 @@ const (
 	userChannelsBaseURL = "/api/websh/user-channels/"
 )
 
-func GetSessionList(ac *client.AlpaconClient, pageSize int) ([]SessionListItem, error) {
+func GetSessionList(ac *client.AlpaconClient) ([]SessionListItem, error) {
 	params := map[string]string{
 		"is_connectable": "true",
 	}
-	if pageSize > 0 {
-		params["page_size"] = fmt.Sprintf("%d", pageSize)
-	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, "", params))
+	sessions, err := api.FetchAllPages[SessionDetailResponse](ac, sessionsBaseURL, params)
 	if err != nil {
 		return nil, err
 	}
 
-	var response api.ListResponse[SessionDetailResponse]
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return nil, err
-	}
-
 	var list []SessionListItem
-	for _, s := range response.Results {
+	for _, s := range sessions {
 		closedAt := "-"
 		if s.ClosedAt != nil {
 			closedAt = *s.ClosedAt

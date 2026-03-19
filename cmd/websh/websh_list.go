@@ -14,16 +14,20 @@ var webshListCmd = &cobra.Command{
 	Example: `  alpacon websh ls
   alpacon websh ls --tail 50`,
 	Run: func(cmd *cobra.Command, args []string) {
-		pageSize, _ := cmd.Flags().GetInt("tail")
+		tail, _ := cmd.Flags().GetInt("tail")
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		sessionList, err := websh.GetSessionList(alpaconClient, pageSize)
+		sessionList, err := websh.GetSessionList(alpaconClient)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve websh sessions: %s.", err)
+		}
+
+		if tail > 0 && tail < len(sessionList) {
+			sessionList = sessionList[len(sessionList)-tail:]
 		}
 
 		utils.PrintTable(sessionList)
