@@ -30,17 +30,6 @@ type DownloadResponse struct {
 	Command     string              `json:"command"`
 }
 
-type UploadRequest struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Path           string `json:"path"`
-	Server         string `json:"server"`
-	Username       string `json:"username"`
-	Groupname      string `json:"groupname"`
-	AllowUnzip     string `json:"allow_unzip"`
-	AllowOverwrite string `json:"allow_overwrite"`
-}
-
 type UploadResponse struct {
 	ID        string              `json:"id"`
 	Name      string              `json:"name"`
@@ -62,4 +51,25 @@ type TransferStatusResponse struct {
 
 type TransferErrorResponse struct {
 	Code string `json:"code"`
+}
+
+type BulkUploadRequest struct {
+	Names          []string `json:"names"`
+	Path           string   `json:"path"`
+	Server         string   `json:"server"`
+	Username       string   `json:"username"`
+	Groupname      string   `json:"groupname"`
+	AllowOverwrite bool     `json:"allow_overwrite"`
+	AllowUnzip     bool     `json:"allow_unzip"`
+}
+
+type BulkUploadTriggerRequest struct {
+	IDs []string `json:"ids"`
+}
+
+type BulkDownloadRequest struct {
+	Path      []string `json:"path"`
+	Server    string   `json:"server"`
+	Username  string   `json:"username"`
+	Groupname string   `json:"groupname"`
 }

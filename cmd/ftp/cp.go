@@ -37,11 +37,16 @@ Remote paths use the format [USER@]SERVER:/path.`,
   alpacon cp -u admin /local/file.txt my-server:/remote/path/
 
   # Specify groupname
-  alpacon cp -g developers /local/file.txt my-server:/remote/path/`,
+  alpacon cp -g developers /local/file.txt my-server:/remote/path/
+
+  # Upload without overwriting existing files
+  alpacon cp --no-overwrite /local/file.txt my-server:/remote/path/`,
 	Run: func(cmd *cobra.Command, args []string) {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
 		recursive, _ := cmd.Flags().GetBool("recursive")
+		noOverwrite, _ := cmd.Flags().GetBool("no-overwrite")
+		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
 			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
@@ -93,7 +98,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, _ := utils.SplitPath(dest)
-			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -108,7 +113,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
 					},
 				})
 
@@ -160,6 +165,7 @@ func init() {
 	var username, groupname string
 
 	CpCmd.Flags().BoolP("recursive", "r", false, "Recursively copy directories")
+	CpCmd.Flags().BoolP("no-overwrite", "n", false, "Do not overwrite existing files on the server")
 	CpCmd.Flags().StringVarP(&username, "username", "u", "", "Specify username")
 	CpCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Specify groupname")
 }
@@ -230,16 +236,16 @@ func validatePaths(sources []string, dest string) error {
 	return nil
 }
 
-func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) error {
+func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool) error {
 	var err error
 
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
-		err = ftp.UploadFolder(client, src, dest, username, groupname)
+		err = ftp.UploadFolder(client, src, dest, username, groupname, allowOverwrite)
 	} else {
-		err = ftp.UploadFile(client, src, dest, username, groupname)
+		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite)
 	}
 	if err != nil {
 		// Parse error and provide specific guidance
