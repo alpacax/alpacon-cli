@@ -43,7 +43,7 @@ to ensure it is interpreted correctly on the remote server.`,
   alpacon websh --share --read-only=true my-server
 
   # Join an existing shared session
-  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234 --password my-session-pass
+  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234?channel=default --password my-session-pass
 
   # Session management
   alpacon websh ls                          # List active sessions
