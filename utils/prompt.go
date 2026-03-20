@@ -12,12 +12,49 @@ import (
 
 func PromptForPassword(promptText string) string {
 	fmt.Fprint(os.Stderr, promptText)
-	bytePassword, err := term.ReadPassword(0)
+
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		return ""
+		// Fallback to standard hidden input
+		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
+		if err != nil {
+			return ""
+		}
+		fmt.Fprintln(os.Stderr)
+		return strings.TrimSpace(string(bytePassword))
 	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+
+	var password []byte
+	buf := make([]byte, 1)
+	for {
+		_, err := os.Stdin.Read(buf)
+		if err != nil {
+			break
+		}
+		switch buf[0] {
+		case '\n', '\r':
+			fmt.Fprint(os.Stderr, "\r\n")
+			return strings.TrimSpace(string(password))
+		case 127, '\b': // backspace
+			if len(password) > 0 {
+				password = password[:len(password)-1]
+				fmt.Fprint(os.Stderr, "\b \b")
+			}
+		case 3: // Ctrl+C
+			fmt.Fprint(os.Stderr, "\r\n")
+			_ = term.Restore(int(os.Stdin.Fd()), oldState)
+			os.Exit(1)
+		default:
+			if buf[0] >= 32 { // printable characters only
+				password = append(password, buf[0])
+				fmt.Fprint(os.Stderr, "*")
+			}
+		}
+	}
+
 	fmt.Fprintln(os.Stderr)
-	return strings.TrimSpace(string(bytePassword))
+	return strings.TrimSpace(string(password))
 }
 
 func PromptForInput(promptText string) string {
@@ -38,6 +75,15 @@ func PromptForRequiredInput(promptText string) string {
 		}
 		CliWarning("This field is required. Please enter a value.")
 	}
+}
+
+// PromptForInputWithDefault prompts for input and returns the default if empty.
+func PromptForInputWithDefault(promptText, defaultValue string) string {
+	input := PromptForInput(promptText)
+	if input == "" {
+		return defaultValue
+	}
+	return input
 }
 
 func PromptForRequiredIntInput(promptText string) int {
