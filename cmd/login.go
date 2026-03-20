@@ -30,47 +30,40 @@ var loginCmd = &cobra.Command{
 	Short: "Log in to Alpacon",
 	Long: `Log in to Alpacon.
 
-There are two ways to log in depending on your deployment:
+Browser authentication is required. The CLI opens the browser automatically
+and waits for completion. Do not use --no-browser unless running in a
+headless environment (SSH, containers) where no browser is available.
 
   Alpacon Cloud:
-    Run 'alpacon login' without arguments. You will be prompted for your
-    workspace name and region, then authenticate via browser.
-
-    For non-interactive environments (CI/CD pipelines, AI agents), use flags:
-      alpacon login --workspace <name> --region <region>
+    alpacon login                                      (interactive prompts)
+    alpacon login --workspace <name> --region <region>  (non-interactive)
 
   Self-hosted:
-    Provide the host as an argument:
-      alpacon login <host>
+    alpacon login <host>
 
-If you have previously logged in, running 'alpacon login' without arguments
-will re-authenticate to your saved workspace.
-
-The browser opens automatically for authentication. Use --no-browser to
-disable this. To suppress browser opens globally (including MFA prompts),
-set ALPACON_NO_BROWSER=1.`,
-	Example: `  # Alpacon Cloud login (interactive prompts)
+Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
+	Example: `  # Alpacon Cloud login (interactive)
   alpacon login
 
-  # Alpacon Cloud login for CI/CD or AI agents (non-interactive)
+  # Alpacon Cloud login (non-interactive, for CI/CD or AI agents)
   alpacon login --workspace myworkspace --region us1
 
-  # Self-hosted instance
+  # Self-hosted
   alpacon login alpacon.example.com
 
-  # Direct API URL (backward compatible)
+  # Direct API URL
   alpacon login myworkspace.us1.alpacon.io
 
-  # Login with API token (self-hosted or direct URL)
+  # API token login
   alpacon login myworkspace.us1.alpacon.io -t <api-token>
 
-  # Login with username and password
+  # Username and password
   alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
 
-  # Skip TLS certificate verification (self-signed certs)
+  # Self-signed certificates
   alpacon login alpacon.example.com --insecure
 
-  # Disable automatic browser open
+  # Headless environment only (no browser available)
   alpacon login --no-browser
   ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),

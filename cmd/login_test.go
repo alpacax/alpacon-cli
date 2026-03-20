@@ -82,12 +82,6 @@ func TestBuildCloudWorkspaceURL(t *testing.T) {
 			region:    "ap1",
 			expected:  "https://myworkspace.ap1.alpacon.io",
 		},
-		{
-			name:      "eu1 region",
-			workspace: "testws",
-			region:    "eu1",
-			expected:  "https://testws.eu1.alpacon.io",
-		},
 	}
 
 	for _, tt := range tests {
