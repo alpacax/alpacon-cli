@@ -38,11 +38,9 @@ There are two ways to log in depending on your deployment:
     For non-interactive environments (CI/CD pipelines, AI agents), use flags:
       alpacon login --workspace <name> --region <region>
 
-  Self-hosted / Local development:
+  Self-hosted:
     Provide the host as an argument:
       alpacon login <host>
-
-    localhost and 127.0.0.1 default to http://. All other hosts use https://.
 
 If you have previously logged in, running 'alpacon login' without arguments
 will re-authenticate to your saved workspace.
@@ -58,9 +56,6 @@ set ALPACON_NO_BROWSER=1.`,
 
   # Self-hosted instance
   alpacon login alpacon.example.com
-
-  # Local development server
-  alpacon login localhost:8000
 
   # Direct API URL (backward compatible)
   alpacon login myworkspace.us1.alpacon.io
