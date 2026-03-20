@@ -4,73 +4,114 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
-	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
+const defaultBaseDomain = "alpacon.io"
+
 var (
-	insecure  bool
-	noBrowser bool
+	insecure      bool
+	noBrowser     bool
+	workspaceFlag string
+	regionFlag    string
 )
 
 var loginCmd = &cobra.Command{
-	Use:   "login",
+	Use:   "login [HOST]",
 	Short: "Log in to Alpacon",
-	Long: `Log in to Alpacon. If no workspace URL is provided, the previously saved
-workspace is used, or you will be prompted to enter one.
+	Long: `Log in to Alpacon.
 
-The browser is opened automatically for authentication. Use --no-browser to
-disable this for login. To also suppress browser opens during MFA prompts
-from other commands, set ALPACON_NO_BROWSER=1.`,
-	Example: `  # Re-login to saved workspace
+There are two ways to log in depending on your deployment:
+
+  SaaS (Alpacon Cloud):
+    Run 'alpacon login' without arguments. You will be prompted for your
+    workspace name and region, then authenticate via browser.
+
+    For non-interactive environments (CI/CD pipelines, AI agents), use flags:
+      alpacon login --workspace <name> --region <region>
+
+  Self-hosted / Local development:
+    Provide the host as an argument:
+      alpacon login <host>
+
+    localhost and 127.0.0.1 default to http://. All other hosts use https://.
+
+If you have previously logged in, running 'alpacon login' without arguments
+will re-authenticate to your saved workspace.
+
+The browser opens automatically for authentication. Use --no-browser to
+disable this. To suppress browser opens globally (including MFA prompts),
+set ALPACON_NO_BROWSER=1.`,
+	Example: `  # SaaS login (interactive prompts)
   alpacon login
 
-  # Cloud login (portal URL or API URL)
-  alpacon login https://alpacon.io/myworkspace
-  alpacon login myworkspace.us1.alpacon.io
+  # SaaS login for CI/CD or AI agents (non-interactive)
+  alpacon login --workspace myworkspace --region ap1
 
-  # Self-hosted
+  # Self-hosted instance
   alpacon login alpacon.example.com
 
-  # Login via API Token
-  alpacon login myworkspace.us1.alpacon.io -t apikey1234
+  # Local development server
+  alpacon login localhost:8000
 
-  # Legacy username/password
+  # Direct API URL (backward compatible)
+  alpacon login myworkspace.us1.alpacon.io
+
+  # Login with API token (self-hosted or direct URL)
+  alpacon login myworkspace.us1.alpacon.io -t <api-token>
+
+  # Login with username and password
   alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
 
-  # Skip TLS certificate verification
-  alpacon login myworkspace.us1.alpacon.io --insecure
+  # Skip TLS certificate verification (self-signed certs)
+  alpacon login alpacon.example.com --insecure
 
-  # Disable auto-open browser
+  # Disable automatic browser open
   alpacon login --no-browser
   ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		var workspaceURL string
+		var workspaceURL, workspaceName, baseDomain string
 
-		// Determine the workspace URL to use
 		if len(args) > 0 {
-			workspaceURL = args[0]
-		}
-
-		if workspaceURL == "" {
+			// Host mode: self-hosted, local dev, or direct API URL
+			workspaceURL = formatHostURL(args[0])
+			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
+			baseDomain = utils.ExtractBaseDomain(workspaceURL)
+		} else if workspaceFlag != "" || regionFlag != "" {
+			// SaaS mode via flags (non-interactive)
+			if workspaceFlag == "" {
+				utils.CliErrorWithExit("--workspace is required when --region is specified")
+			}
+			if regionFlag == "" {
+				utils.CliErrorWithExit("--region is required when --workspace is specified")
+			}
+			workspaceName = workspaceFlag
+			baseDomain = defaultBaseDomain
+			workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceFlag, regionFlag, defaultBaseDomain)
+		} else {
+			// No args, no flags — try saved config for re-login
 			cfg, err := config.LoadConfig()
 			if err == nil && cfg.WorkspaceURL != "" {
 				workspaceURL = cfg.WorkspaceURL
+				workspaceName = cfg.WorkspaceName
+				baseDomain = cfg.BaseDomain
+				utils.CliInfo("Using saved workspace: %s", workspaceURL)
+			} else {
+				// Interactive SaaS prompts
+				workspaceName = utils.PromptForRequiredInput("Workspace: ")
+				region := utils.PromptForInputWithDefault("Region (default: us1): ", "us1")
+				baseDomain = defaultBaseDomain
+				workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceName, region, defaultBaseDomain)
 			}
-		}
-
-		if workspaceURL == "" {
-			workspaceURL = utils.PromptForRequiredInput("Workspace URL (e.g., alpacon.io/myworkspace or myworkspace.us1.alpacon.io): ")
 		}
 
 		httpClient := &http.Client{
@@ -82,52 +123,16 @@ from other commands, set ALPACON_NO_BROWSER=1.`,
 			},
 		}
 
-		// Validate workspaceURL
-		workspaceURL, err := validateAndFormatWorkspaceURL(workspaceURL, httpClient)
-		if err != nil {
+		if err := validateWorkspaceReachability(workspaceURL, httpClient); err != nil {
 			utils.CliErrorWithExit("%s", err.Error())
 		}
 
-		// Check if this is a cloud app URL that needs post-login region resolution
-		isAppURL := isCloudAppURL(workspaceURL)
-
-		// Extract workspace name and auth env URL
-		var workspaceName string
-		var appBaseDomain string
-		authEnvURL := workspaceURL
-		if isAppURL {
-			parsedURL, parseErr := url.Parse(workspaceURL)
-			if parseErr != nil {
-				utils.CliErrorWithExit("Invalid workspace URL: %s", parseErr.Error())
-			}
-
-			pathSegment := strings.Trim(parsedURL.Path, "/")
-			segments := strings.Split(pathSegment, "/")
-			if len(segments) != 1 || segments[0] == "" {
-				utils.CliErrorWithExit("Invalid workspace URL: path must contain exactly one workspace name")
-			}
-			workspaceName = segments[0]
-			appBaseDomain = parsedURL.Hostname()
-
-			// Use the app base URL for auth env (e.g., https://alpacon.io)
-			authEnvURL = fmt.Sprintf("%s://%s", parsedURL.Scheme, parsedURL.Hostname())
-		} else {
-			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
-		}
-
-		envInfo, err := auth0.FetchAuthEnv(authEnvURL, httpClient)
+		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
 			if strings.Contains(err.Error(), "404") {
-				envInfo = &auth0.AuthEnvResponse{
-					Auth0: auth0.Auth0Config{
-						Method: "legacy",
-					},
-				}
-			} else if isAppURL {
-				utils.CliErrorWithExit("Failed to fetch auth config. Try using the direct API URL format (e.g., %s.<region>.alpacon.io): %v", workspaceName, err)
-			} else {
-				utils.CliErrorWithExit("Failed to fetch environment variables from workspace: %v", err)
+				utils.CliErrorWithExit("Workspace not found. Please check your workspace name and region")
 			}
+			utils.CliErrorWithExit("Failed to fetch authentication info from workspace: %v", err)
 		}
 
 		username, _ := cmd.Flags().GetString("username")
@@ -153,42 +158,12 @@ from other commands, set ALPACON_NO_BROWSER=1.`,
 				utils.CliErrorWithExit("%s", err.Error())
 			}
 
-			// For cloud app URLs, resolve the correct region-specific workspace URL from JWT
-			if isAppURL {
-				resolvedURL, resolvedName, resolveErr := workspace.ResolveWorkspaceURL(tokenRes.AccessToken, workspaceName, appBaseDomain)
-				if resolveErr != nil {
-					utils.CliErrorWithExit("Failed to resolve workspace region: %v", resolveErr)
-				}
-
-				// Verify the resolved URL is reachable
-				resp, httpErr := httpClient.Get(resolvedURL)
-				if httpErr != nil {
-					utils.CliErrorWithExit("Resolved workspace URL '%s' is unreachable: %v", resolvedURL, httpErr)
-				}
-				if resp.StatusCode >= 400 {
-					_ = resp.Body.Close()
-					utils.CliErrorWithExit("Resolved workspace URL '%s' returned HTTP %d. Please check your connection", resolvedURL, resp.StatusCode)
-				}
-				_ = resp.Body.Close()
-
-				workspaceURL = resolvedURL
-				workspaceName = resolvedName
-				utils.CliInfo("Workspace resolved to %s", workspaceURL)
-			}
-
-			baseDomain := utils.ExtractBaseDomain(workspaceURL)
-
 			err = config.CreateConfig(workspaceURL, workspaceName, "", "", tokenRes.AccessToken, tokenRes.RefreshToken, baseDomain, tokenRes.ExpiresIn, insecure)
 			if err != nil {
 				utils.CliErrorWithExit("Failed to save config: %v", err)
 			}
 
 		} else {
-			// Legacy or token login — requires a direct API URL
-			if isAppURL {
-				utils.CliErrorWithExit("Cloud app URL format is not supported for token or legacy login. Use the direct API URL format: %s.<region>.alpacon.io", workspaceName)
-			}
-
 			if (workspaceURL == "" || username == "" || password == "") && token == "" {
 				workspaceURL, username, password = promptForCredentials(workspaceURL, username, password)
 			}
@@ -201,6 +176,9 @@ from other commands, set ALPACON_NO_BROWSER=1.`,
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
+				if strings.Contains(err.Error(), "404") {
+					utils.CliErrorWithExit("Login endpoint not found. This workspace may not support username/password login")
+				}
 				utils.CliErrorWithExit("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
 			}
 
@@ -222,6 +200,8 @@ func init() {
 	loginCmd.Flags().StringVarP(&token, "token", "t", "", "API token for login")
 	loginCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification")
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
+	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for SaaS login")
+	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for SaaS login (e.g., ap1, us1)")
 }
 
 func promptForCredentials(workspaceURL, username, password string) (string, string, string) {
@@ -244,60 +224,28 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 	return workspaceURL, username, password
 }
 
-// isCloudAppURL checks if the URL is an alpacon.io app URL with a workspace path.
-// e.g., "https://alpacon.io/myworkspace" → true
-// e.g., "https://dev.alpacon.io/myworkspace" → false (dev.alpacon.io is already a region-specific subdomain)
-// e.g., "https://myws.us1.alpacon.io" → false (already a direct API URL)
-func isCloudAppURL(workspaceURL string) bool {
-	parsedURL, err := url.Parse(workspaceURL)
-	if err != nil {
-		return false
+// formatHostURL normalizes a host argument into a full URL.
+// localhost and 127.0.0.1 default to http://, everything else to https://.
+func formatHostURL(host string) string {
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return strings.TrimSuffix(host, "/")
 	}
-	return parsedURL.Hostname() == "alpacon.io" && parsedURL.Path != "" && parsedURL.Path != "/"
+	scheme := "https"
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
 
-func validateAndFormatWorkspaceURL(workspaceURL string, httpClient *http.Client) (string, error) {
-	if !strings.HasPrefix(workspaceURL, "http") {
-		workspaceURL = "https://" + workspaceURL
-	}
-
-	workspaceURL = strings.TrimSuffix(workspaceURL, "/")
-
-	// Transform URL patterns: domain.com/workspace -> workspace.domain.com
-	parsedURL, err := url.Parse(workspaceURL)
-	if err == nil && parsedURL.Path != "" && parsedURL.Path != "/" {
-		workspace := strings.TrimPrefix(parsedURL.Path, "/")
-		domain := parsedURL.Hostname()
-		protocol := parsedURL.Scheme
-
-		// For alpacon.io app URLs, the region is unknown at login time.
-		// Keep the app URL as-is; the login flow will resolve the correct
-		// region-specific API URL from the JWT after authentication.
-		if domain == "alpacon.io" {
-			return workspaceURL, nil
-		}
-
-		if domain != "" && workspace != "" {
-			workspaceURL = fmt.Sprintf("%s://%s.%s", protocol, workspace, domain)
-		}
-	}
-
-	// Validate that a workspace name is present for cloud domains.
-	// e.g., "dev.alpacon.io" (3 parts) is missing a workspace — need "myws.dev.alpacon.io" (4+ parts).
-	parsedURL, err = url.Parse(workspaceURL)
-	if err == nil {
-		hostname := parsedURL.Hostname()
-		parts := strings.Split(hostname, ".")
-		if len(parts) >= 2 && parts[len(parts)-2]+"."+parts[len(parts)-1] == "alpacon.io" && len(parts) < 4 {
-			return "", fmt.Errorf("workspace name is missing from URL. Use the format: alpacon.io/<workspace> or <workspace>.%s", hostname)
-		}
-	}
-
+// validateWorkspaceReachability checks that the workspace URL responds successfully.
+func validateWorkspaceReachability(workspaceURL string, httpClient *http.Client) error {
 	resp, err := httpClient.Get(workspaceURL)
-	if err != nil || resp.StatusCode >= 400 {
-		return "", fmt.Errorf("workspace URL '%s' is unreachable or invalid. Please check the URL and your internet connection", workspaceURL)
+	if err != nil {
+		return fmt.Errorf("workspace URL '%s' is unreachable. Please check the URL and your internet connection", workspaceURL)
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	return workspaceURL, nil
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("workspace URL '%s' returned HTTP %d. Please check the URL and your internet connection", workspaceURL, resp.StatusCode)
+	}
+	return nil
 }
