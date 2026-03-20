@@ -230,4 +230,3 @@ func formatHostURL(host string) string {
 	}
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
-
