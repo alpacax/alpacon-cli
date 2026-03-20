@@ -280,7 +280,7 @@ func TestDownloadBulk(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/bulk/":
 			_ = json.NewDecoder(r.Body).Decode(&bulkReq)
 			w.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(w).Encode(DownloadResponse{
+			_ = json.NewEncoder(w).Encode(BulkDownloadResponse{
 				ID:          "dl-1",
 				Name:        "archive.zip",
 				Command:     "cmd-1",
@@ -336,6 +336,160 @@ func TestDownloadBulk(t *testing.T) {
 	// Verify temp zip was cleaned up
 	_, err = os.Stat(filepath.Join(dest, "archive.zip"))
 	assert.True(t, os.IsNotExist(err))
+}
+
+func TestExecuteSingleUpload(t *testing.T) {
+	var uploadReq UploadRequest
+	var s3Uploaded bool
+	var triggerCalled bool
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+			_ = json.NewDecoder(r.Body).Decode(&uploadReq)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(UploadResponse{
+				ID:        "single-id-1",
+				Name:      "file1.txt",
+				UploadURL: "http://" + r.Host + "/s3/file1",
+			})
+
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/s3/"):
+			s3Uploaded = true
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
+				Success: boolPtr(true),
+				Message: "completed",
+			})
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+			triggerCalled = true
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &UploadRequest{
+		Name:           "file1.txt",
+		Path:           "/remote/path",
+		Server:         "server-id",
+		Username:       "admin",
+		Groupname:      "developers",
+		AllowOverwrite: true,
+	}
+
+	err := executeSingleUpload(ac, request, []byte("content1"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "file1.txt", uploadReq.Name)
+	assert.Equal(t, "/remote/path", uploadReq.Path)
+	assert.Equal(t, "server-id", uploadReq.Server)
+	assert.Equal(t, "admin", uploadReq.Username)
+	assert.Equal(t, "developers", uploadReq.Groupname)
+	assert.True(t, uploadReq.AllowOverwrite)
+	assert.False(t, uploadReq.AllowUnzip)
+	assert.True(t, s3Uploaded)
+	assert.True(t, triggerCalled)
+}
+
+func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(UploadResponse{
+				ID:        "single-id-1",
+				Name:      "file1.txt",
+				UploadURL: "http://" + r.Host + "/s3/file1",
+			})
+
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
+				Success: boolPtr(false),
+				Message: "permission denied",
+			})
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &UploadRequest{
+		Name:   "file1.txt",
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+
+	err := executeSingleUpload(ac, request, []byte("content"))
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "permission denied")
+}
+
+func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
+	var uploadReq UploadRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+			_ = json.NewDecoder(r.Body).Decode(&uploadReq)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(UploadResponse{
+				ID:        "single-id-1",
+				Name:      "folder.zip",
+				UploadURL: "http://" + r.Host + "/s3/folder",
+			})
+
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &UploadRequest{
+		Name:           "folder.zip",
+		Path:           "/remote/path",
+		Server:         "server-id",
+		AllowOverwrite: true,
+		AllowUnzip:     true,
+	}
+
+	err := executeSingleUpload(ac, request, []byte("zipdata"))
+	require.NoError(t, err)
+	assert.True(t, uploadReq.AllowUnzip)
+	assert.True(t, uploadReq.AllowOverwrite)
 }
 
 func TestExecuteBulkUpload_TransferFailure(t *testing.T) {

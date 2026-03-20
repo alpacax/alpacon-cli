@@ -84,6 +84,39 @@ func uploadToS3(httpClient *http.Client, uploadUrl string, file io.Reader) error
 	return nil
 }
 
+func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, content []byte) error {
+	respBody, err := ac.SendPostRequest(uploadAPIURL, request)
+	if err != nil {
+		return err
+	}
+
+	var response UploadResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return err
+	}
+
+	if response.UploadURL != "" {
+		if err := uploadToS3(ac.HTTPClient, response.UploadURL, bytes.NewReader(content)); err != nil {
+			return err
+		}
+	}
+
+	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", response.ID), nil)
+	if _, err := ac.SendGetRequest(triggerURL); err != nil {
+		return err
+	}
+
+	success, message, err := PollTransferStatus(ac, "upload", response.ID)
+	if err != nil {
+		return fmt.Errorf("upload transfer status check failed: %w", err)
+	}
+	if !success {
+		return fmt.Errorf("%s", message)
+	}
+
+	return nil
+}
+
 func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, contents [][]byte) error {
 	respBody, err := ac.SendPostRequest(uploadBulkAPIURL, request)
 	if err != nil {
@@ -130,13 +163,39 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 	return nil
 }
 
-// UploadFile uploads one or more local files to a remote server using the bulk API.
+// UploadFile uploads local files to a remote server.
+// Uses the single upload API for one file, or the bulk API for multiple files.
 func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool) error {
 	serverName, remotePath := utils.SplitPath(dest)
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return err
+	}
+
+	if len(src) == 1 {
+		content, err := utils.ReadFileFromPath(src[0])
+		if err != nil {
+			return err
+		}
+
+		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
+		spinner.Start()
+		defer spinner.Stop()
+
+		request := &UploadRequest{
+			Name:           filepath.Base(src[0]),
+			Path:           remotePath,
+			Server:         serverID,
+			Username:       username,
+			Groupname:      groupname,
+			AllowOverwrite: allowOverwrite,
+		}
+		return executeSingleUpload(ac, request, content)
+	}
+
+	if !strings.HasSuffix(remotePath, "/") {
+		remotePath += "/"
 	}
 
 	names := make([]string, len(src))
@@ -150,11 +209,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		contents[i] = content
 	}
 
-	spinnerMsg := fmt.Sprintf("Uploading %s...", filepath.Base(src[0]))
-	if len(src) > 1 {
-		spinnerMsg = fmt.Sprintf("Uploading %d files...", len(src))
-	}
-	spinner := utils.NewSpinner(spinnerMsg)
+	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d files...", len(src)))
 	spinner.Start()
 	defer spinner.Stop()
 
@@ -170,14 +225,43 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	return executeBulkUpload(ac, request, contents)
 }
 
-// UploadFolder uploads one or more local folders to a remote server using the bulk API.
+// UploadFolder uploads local folders to a remote server.
 // Each folder is zipped before upload and extracted on the server side.
+// Uses the single upload API for one folder, or the bulk API for multiple folders.
 func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool) error {
 	serverName, remotePath := utils.SplitPath(dest)
+
+	// Folder uploads always target a directory; ensure trailing slash so the
+	// server recognises the path as a directory.
+	if !strings.HasSuffix(remotePath, "/") {
+		remotePath += "/"
+	}
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return err
+	}
+
+	if len(src) == 1 {
+		zipBytes, err := utils.Zip(src[0])
+		if err != nil {
+			return err
+		}
+
+		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
+		spinner.Start()
+		defer spinner.Stop()
+
+		request := &UploadRequest{
+			Name:           filepath.Base(src[0]) + ".zip",
+			Path:           remotePath,
+			Server:         serverID,
+			Username:       username,
+			Groupname:      groupname,
+			AllowOverwrite: allowOverwrite,
+			AllowUnzip:     true,
+		}
+		return executeSingleUpload(ac, request, zipBytes)
 	}
 
 	names := make([]string, len(src))
@@ -191,11 +275,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		contents[i] = zipBytes
 	}
 
-	spinnerMsg := fmt.Sprintf("Uploading %s...", filepath.Base(src[0]))
-	if len(src) > 1 {
-		spinnerMsg = fmt.Sprintf("Uploading %d folders...", len(src))
-	}
-	spinner := utils.NewSpinner(spinnerMsg)
+	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
 	spinner.Start()
 	defer spinner.Stop()
 
@@ -348,7 +428,7 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return err
 	}
 
-	var response DownloadResponse
+	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
