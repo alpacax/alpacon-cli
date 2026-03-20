@@ -88,12 +88,6 @@ set ALPACON_NO_BROWSER=1.`,
 			baseDomain = utils.ExtractBaseDomain(workspaceURL)
 		} else if workspaceFlag != "" || regionFlag != "" {
 			// SaaS mode via flags (non-interactive)
-			if workspaceFlag == "" {
-				utils.CliErrorWithExit("--workspace is required when --region is specified")
-			}
-			if regionFlag == "" {
-				utils.CliErrorWithExit("--region is required when --workspace is specified")
-			}
 			workspaceName = workspaceFlag
 			baseDomain = defaultBaseDomain
 			workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceFlag, regionFlag, defaultBaseDomain)
@@ -104,6 +98,9 @@ set ALPACON_NO_BROWSER=1.`,
 				workspaceURL = cfg.WorkspaceURL
 				workspaceName = cfg.WorkspaceName
 				baseDomain = cfg.BaseDomain
+				if baseDomain == "" {
+					baseDomain = utils.ExtractBaseDomain(workspaceURL)
+				}
 				utils.CliInfo("Using saved workspace: %s", workspaceURL)
 			} else {
 				// Interactive SaaS prompts
@@ -123,16 +120,12 @@ set ALPACON_NO_BROWSER=1.`,
 			},
 		}
 
-		if err := validateWorkspaceReachability(workspaceURL, httpClient); err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
-		}
-
 		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
 			if strings.Contains(err.Error(), "404") {
 				utils.CliErrorWithExit("Workspace not found. Please check your workspace name and region")
 			}
-			utils.CliErrorWithExit("Failed to fetch authentication info from workspace: %v", err)
+			utils.CliErrorWithExit("Workspace '%s' is unreachable or returned an error: %v", workspaceURL, err)
 		}
 
 		username, _ := cmd.Flags().GetString("username")
@@ -202,6 +195,7 @@ func init() {
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
 	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for SaaS login")
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for SaaS login (e.g., ap1, us1)")
+	loginCmd.MarkFlagsRequiredTogether("workspace", "region")
 }
 
 func promptForCredentials(workspaceURL, username, password string) (string, string, string) {
@@ -237,15 +231,3 @@ func formatHostURL(host string) string {
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
 
-// validateWorkspaceReachability checks that the workspace URL responds successfully.
-func validateWorkspaceReachability(workspaceURL string, httpClient *http.Client) error {
-	resp, err := httpClient.Get(workspaceURL)
-	if err != nil {
-		return fmt.Errorf("workspace URL '%s' is unreachable. Please check the URL and your internet connection", workspaceURL)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("workspace URL '%s' returned HTTP %d. Please check the URL and your internet connection", workspaceURL, resp.StatusCode)
-	}
-	return nil
-}

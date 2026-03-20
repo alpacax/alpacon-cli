@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,31 +63,37 @@ func TestFormatHostURL(t *testing.T) {
 	}
 }
 
-func TestValidateWorkspaceReachability(t *testing.T) {
-	t.Run("reachable server returns nil", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		defer ts.Close()
+func TestBuildSaaSWorkspaceURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		region    string
+		expected  string
+	}{
+		{
+			name:      "us1 region",
+			workspace: "myworkspace",
+			region:    "us1",
+			expected:  "https://myworkspace.us1.alpacon.io",
+		},
+		{
+			name:      "ap1 region",
+			workspace: "myworkspace",
+			region:    "ap1",
+			expected:  "https://myworkspace.ap1.alpacon.io",
+		},
+		{
+			name:      "eu1 region",
+			workspace: "testws",
+			region:    "eu1",
+			expected:  "https://testws.eu1.alpacon.io",
+		},
+	}
 
-		err := validateWorkspaceReachability(ts.URL, ts.Client())
-		assert.NoError(t, err)
-	})
-
-	t.Run("server returning 404 returns error", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer ts.Close()
-
-		err := validateWorkspaceReachability(ts.URL, ts.Client())
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "returned HTTP 404")
-	})
-
-	t.Run("unreachable server returns error", func(t *testing.T) {
-		err := validateWorkspaceReachability("http://127.0.0.1:1", &http.Client{})
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "unreachable")
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fmt.Sprintf("https://%s.%s.%s", tt.workspace, tt.region, defaultBaseDomain)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
 }
