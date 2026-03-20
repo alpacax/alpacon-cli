@@ -63,7 +63,7 @@ func TestFormatHostURL(t *testing.T) {
 	}
 }
 
-func TestBuildSaaSWorkspaceURL(t *testing.T) {
+func TestBuildCloudWorkspaceURL(t *testing.T) {
 	tests := []struct {
 		name      string
 		workspace string

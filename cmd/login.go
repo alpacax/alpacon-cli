@@ -32,7 +32,7 @@ var loginCmd = &cobra.Command{
 
 There are two ways to log in depending on your deployment:
 
-  SaaS (Alpacon Cloud):
+  Alpacon Cloud:
     Run 'alpacon login' without arguments. You will be prompted for your
     workspace name and region, then authenticate via browser.
 
@@ -49,11 +49,11 @@ will re-authenticate to your saved workspace.
 The browser opens automatically for authentication. Use --no-browser to
 disable this. To suppress browser opens globally (including MFA prompts),
 set ALPACON_NO_BROWSER=1.`,
-	Example: `  # SaaS login (interactive prompts)
+	Example: `  # Alpacon Cloud login (interactive prompts)
   alpacon login
 
-  # SaaS login for CI/CD or AI agents (non-interactive)
-  alpacon login --workspace myworkspace --region ap1
+  # Alpacon Cloud login for CI/CD or AI agents (non-interactive)
+  alpacon login --workspace myworkspace --region us1
 
   # Self-hosted instance
   alpacon login alpacon.example.com
@@ -84,7 +84,7 @@ set ALPACON_NO_BROWSER=1.`,
 			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
 			baseDomain = utils.ExtractBaseDomain(workspaceURL)
 		} else if workspaceFlag != "" || regionFlag != "" {
-			// SaaS mode via flags (non-interactive)
+			// Alpacon Cloud mode via flags (non-interactive)
 			workspaceName = workspaceFlag
 			baseDomain = defaultBaseDomain
 			workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceFlag, regionFlag, defaultBaseDomain)
@@ -100,7 +100,7 @@ set ALPACON_NO_BROWSER=1.`,
 				}
 				utils.CliInfo("Using saved workspace: %s", workspaceURL)
 			} else {
-				// Interactive SaaS prompts
+				// Interactive Alpacon Cloud prompts
 				workspaceName = utils.PromptForRequiredInput("Workspace: ")
 				region := utils.PromptForInputWithDefault("Region (default: us1): ", "us1")
 				baseDomain = defaultBaseDomain
@@ -190,8 +190,8 @@ func init() {
 	loginCmd.Flags().StringVarP(&token, "token", "t", "", "API token for login")
 	loginCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS certificate verification")
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
-	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for SaaS login")
-	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for SaaS login (e.g., ap1, us1)")
+	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
+	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
 	loginCmd.MarkFlagsRequiredTogether("workspace", "region")
 }
 
