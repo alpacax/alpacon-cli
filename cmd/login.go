@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -77,7 +78,8 @@ set ALPACON_NO_BROWSER=1.`,
 		var workspaceURL, workspaceName, baseDomain string
 
 		if len(args) > 0 {
-			// Host mode: self-hosted, local dev, or direct API URL
+			// Host mode: self-hosted or direct API URL
+			rejectURLWithPath(args[0])
 			workspaceURL = formatHostURL(args[0])
 			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
 			baseDomain = utils.ExtractBaseDomain(workspaceURL)
@@ -211,6 +213,23 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 	}
 
 	return workspaceURL, username, password
+}
+
+// rejectURLWithPath exits with a migration hint if the host argument contains a path.
+// This catches the legacy alpacon.io/workspace format that is no longer supported.
+// TODO: remove once the new workspace/region flow is well-established.
+func rejectURLWithPath(host string) {
+	raw := host
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return
+	}
+	if p := strings.TrimSuffix(parsed.Path, "/"); p != "" {
+		utils.CliErrorWithExit("URL paths are not supported. Use 'alpacon login --workspace <name> --region <region>' instead")
+	}
 }
 
 // formatHostURL normalizes a host argument into a full URL.
