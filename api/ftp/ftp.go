@@ -451,7 +451,7 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	}
 
 	// Save zip and extract contents
-	zipPath := filepath.Join(dest, response.Name)
+	zipPath := filepath.Join(dest, filepath.Base(response.Name))
 	if err := utils.SaveFile(zipPath, content); err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
