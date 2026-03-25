@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -171,6 +172,12 @@ Note: All flags must be placed before the server name.
 					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}
+			// Set up sudo MFA listener (best-effort — older servers may not support events API)
+			sudoListener := setupSudoListener(alpaconClient, session.ID)
+			if sudoListener != nil {
+				defer sudoListener.Stop()
+			}
+
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
 	},
@@ -195,6 +202,24 @@ func extractValue(args []string, i int) (string, int) {
 		return args[i+1], i + 1
 	}
 	return "", i
+}
+
+// setupSudoListener creates an event session, subscribes to sudo events for
+// the given websh session, and starts the listener. Returns nil if the events
+// API is not available (e.g., older server versions).
+func setupSudoListener(ac *client.AlpaconClient, sessionID string) *event.SudoListener {
+	eventSession, err := event.CreateEventSession(ac)
+	if err != nil {
+		return nil
+	}
+
+	if err := event.SubscribeSudoEvent(ac, eventSession.ChannelID, sessionID); err != nil {
+		return nil
+	}
+
+	listener := event.NewSudoListener(ac, eventSession.WebsocketURL)
+	listener.Start()
+	return listener
 }
 
 func extractEnvValue(args []string, i int, env map[string]string) int {
