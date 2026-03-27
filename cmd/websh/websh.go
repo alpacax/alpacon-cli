@@ -206,14 +206,21 @@ func extractValue(args []string, i int) (string, int) {
 
 // setupSudoListener creates an event session, subscribes to sudo events for
 // the given websh session, and starts the listener. Returns nil if the events
-// API is not available (e.g., older server versions).
+// API is not available. Silently skips 404 errors (older servers); logs a
+// warning for other failures so transient issues are visible.
 func setupSudoListener(ac *client.AlpaconClient, sessionID string) *event.SudoListener {
 	eventSession, err := event.CreateEventSession(ac)
 	if err != nil {
+		if !strings.Contains(err.Error(), "404") {
+			utils.CliWarning("Sudo MFA listener unavailable: %s\n", err)
+		}
 		return nil
 	}
 
 	if err := event.SubscribeSudoEvent(ac, eventSession.ChannelID, sessionID); err != nil {
+		if !strings.Contains(err.Error(), "404") {
+			utils.CliWarning("Sudo MFA listener unavailable: %s\n", err)
+		}
 		return nil
 	}
 

@@ -44,7 +44,8 @@ func TestSubscribeSudoEvent(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "events/subscriptions")
 
 		var req EventSubscriptionRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		err := json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, err)
 		assert.Equal(t, "channel-456", req.Channel)
 		assert.Equal(t, "sudo", req.EventType)
 		assert.Equal(t, "session-123", req.TargetID)

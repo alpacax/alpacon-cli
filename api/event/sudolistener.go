@@ -51,9 +51,10 @@ type selfApproveRequest struct {
 // SudoListener listens for sudo MFA events on the event WebSocket
 // and handles the browser-based MFA flow.
 //
-// Note: the AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
-// This is safe because http.Client is concurrency-safe and ac fields are read-only
-// after initialization. Do not call ac.RefreshToken() while the listener is running.
+// The AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
+// http.Client is concurrency-safe. The listener calls ac.RefreshToken() after MFA
+// completion, which mutates ac.AccessToken. This is safe because RefreshToken is
+// only called from the MFA handler goroutine, not concurrently with other writes.
 type SudoListener struct {
 	ac        *client.AlpaconClient
 	wsURL     string
@@ -202,7 +203,13 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		return
 	}
 
-	// MFA completed — self-approve the sudo request
+	// MFA completed — refresh token so server sees updated MFA claims
+	if err := sl.ac.RefreshToken(); err != nil {
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to refresh access token after MFA: %s\033[0m\r\n", err)
+		return
+	}
+
+	// Token refreshed — self-approve the sudo request
 	err := sl.selfApprove(approvalID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo approval failed: %s\033[0m\r\n", err)

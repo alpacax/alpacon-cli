@@ -10,9 +10,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestSudoListener_HandleMessage_ValidMFARequest(t *testing.T) {
+func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
 	payload := sudoMFAEvent{}
 	payload.Payload.Type = "auth"
 	payload.Payload.Query = "mfa_request"
@@ -21,11 +22,11 @@ func TestSudoListener_HandleMessage_ValidMFARequest(t *testing.T) {
 	payload.Payload.Command = "sudo systemctl restart nginx"
 	payload.Payload.SessionID = "test-session-id"
 
-	msg, _ := json.Marshal(payload)
+	msg, err := json.Marshal(payload)
+	require.NoError(t, err)
 
-	// Verify the message is parsed correctly
 	var parsed sudoMFAEvent
-	err := json.Unmarshal(msg, &parsed)
+	err = json.Unmarshal(msg, &parsed)
 	assert.NoError(t, err)
 	assert.Equal(t, "auth", parsed.Payload.Type)
 	assert.Equal(t, "mfa_request", parsed.Payload.Query)
@@ -85,7 +86,6 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 		if err != nil {
 			return
 		}
-		// Keep connection open until client closes
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				break
@@ -107,7 +107,13 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 
 	// Stop should close the connection and the goroutine should exit
 	sl.Stop()
-	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case <-sl.done:
+		// listener has stopped
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for listener to stop")
+	}
 
 	sl.mu.Lock()
 	assert.Nil(t, sl.conn, "connection should be nil after stop")
@@ -117,7 +123,6 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 func TestSudoListener_ConnectAndListen(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
-	// Create a WebSocket server that sends an MFA event then closes
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -125,12 +130,10 @@ func TestSudoListener_ConnectAndListen(t *testing.T) {
 		}
 		defer func() { _ = conn.Close() }()
 
-		// Send a non-MFA message (should be ignored)
 		msg := `{"payload":{"type":"info","query":"status"}}`
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(msg))
 
 		time.Sleep(50 * time.Millisecond)
-		// Close connection to trigger reconnect
 	}))
 	defer server.Close()
 
@@ -142,7 +145,6 @@ func TestSudoListener_ConnectAndListen(t *testing.T) {
 		done:     make(chan struct{}),
 	}
 
-	// Start and stop quickly
 	sl.Start()
 	time.Sleep(200 * time.Millisecond)
 	sl.Stop()
@@ -153,8 +155,6 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 		done: make(chan struct{}),
 	}
 
-	// Override timeout for faster test — poll should return false quickly
-	// since we have no real MFA server
 	start := time.Now()
 	go func() {
 		time.Sleep(100 * time.Millisecond)
