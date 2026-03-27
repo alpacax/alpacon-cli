@@ -52,17 +52,18 @@ type selfApproveRequest struct {
 // and handles the browser-based MFA flow.
 //
 // The AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
-// http.Client is concurrency-safe. The listener calls ac.RefreshToken() after MFA
-// completion, which mutates ac.AccessToken. This is safe because RefreshToken is
-// only called from the MFA handler goroutine, not concurrently with other writes.
+// http.Client is concurrency-safe. Token refresh and self-approve are serialized
+// by mfaMu so only one MFA flow runs at a time.
 type SudoListener struct {
 	ac        *client.AlpaconClient
 	wsURL     string
 	wsHeader  http.Header
 	done      chan struct{}
+	stopped   chan struct{} // closed when listenLoop exits
 	closeOnce sync.Once
 	mu        sync.Mutex
 	conn      *websocket.Conn
+	mfaMu     sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 }
 
 // NewSudoListener creates a SudoListener but does not connect yet.
@@ -72,13 +73,17 @@ func NewSudoListener(ac *client.AlpaconClient, wsURL string) *SudoListener {
 		wsURL:    wsURL,
 		wsHeader: ac.SetWebsocketHeader(),
 		done:     make(chan struct{}),
+		stopped:  make(chan struct{}),
 	}
 }
 
 // Start begins listening for sudo MFA events in a background goroutine.
 // It automatically reconnects on disconnection. Call Stop() to shut down.
 func (sl *SudoListener) Start() {
-	go sl.listenLoop()
+	go func() {
+		defer close(sl.stopped)
+		sl.listenLoop()
+	}()
 }
 
 // Stop signals the listener to shut down and closes the WebSocket connection
@@ -155,7 +160,6 @@ func (sl *SudoListener) connectAndListen() (connected bool, err error) {
 
 		_, message, readErr := conn.ReadMessage()
 		if readErr != nil {
-			// Check if we were asked to stop
 			select {
 			case <-sl.done:
 				return true, nil
@@ -180,10 +184,15 @@ func (sl *SudoListener) handleMessage(message []byte) {
 
 	// Handle MFA in a separate goroutine so the read loop can continue
 	// processing WebSocket pings and other messages during the polling wait.
+	// mfaMu ensures only one MFA flow runs at a time to avoid concurrent
+	// token refresh and duplicate approval calls.
 	go sl.handleSudoMFA(event)
 }
 
 func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
+	sl.mfaMu.Lock()
+	defer sl.mfaMu.Unlock()
+
 	mfaURL := event.Payload.MfaURL
 	approvalID := event.Payload.ApprovalRequestID
 
