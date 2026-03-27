@@ -1,6 +1,7 @@
 package websh
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -254,6 +255,46 @@ func TestCommandParsing(t *testing.T) {
 			assert.Equal(t, tc.expectShare, share, "Mismatch in share flag")
 			assert.Equal(t, tc.expectReadOnly, readOnly, "Mismatch in read-only flag")
 			assert.Equal(t, tc.expectEnv, env, "Mismatch in env")
+		})
+	}
+}
+
+func TestIsNotFoundError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "server returns Not found.",
+			err:      fmt.Errorf("Not found."),
+			expected: true,
+		},
+		{
+			name:     "wrapped not found error",
+			err:      fmt.Errorf("failed to create event session: Not found"),
+			expected: true,
+		},
+		{
+			name:     "case insensitive",
+			err:      fmt.Errorf("NOT FOUND"),
+			expected: true,
+		},
+		{
+			name:     "unrelated error",
+			err:      fmt.Errorf("connection refused"),
+			expected: false,
+		},
+		{
+			name:     "api insufficient data",
+			err:      fmt.Errorf("code: api_insufficient_data"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isNotFoundError(tt.err))
 		})
 	}
 }

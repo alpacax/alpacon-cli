@@ -3,11 +3,13 @@ package event
 import (
 	"encoding/json"
 	"net/http"
+	"sync/atomic"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -177,6 +179,148 @@ func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
 
 	// connectAndListen read the non-MFA message and returned on server disconnect
 	// without panic. This verifies the read loop handles messages and clean shutdown.
+}
+
+func TestSudoListener_WaitConnected_Success(t *testing.T) {
+	sl := &SudoListener{
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+
+	// Simulate connection after short delay
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		close(sl.connected)
+	}()
+
+	result := sl.WaitConnected(2 * time.Second)
+	assert.True(t, result, "should return true when connected")
+}
+
+func TestSudoListener_WaitConnected_Timeout(t *testing.T) {
+	sl := &SudoListener{
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+
+	start := time.Now()
+	result := sl.WaitConnected(100 * time.Millisecond)
+	elapsed := time.Since(start)
+
+	assert.False(t, result, "should return false on timeout")
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
+	assert.Less(t, elapsed, 1*time.Second)
+}
+
+func TestSudoListener_WaitConnected_Shutdown(t *testing.T) {
+	sl := &SudoListener{
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		close(sl.done)
+	}()
+
+	start := time.Now()
+	result := sl.WaitConnected(5 * time.Second)
+	elapsed := time.Since(start)
+
+	assert.False(t, result, "should return false when done is closed")
+	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+}
+
+func TestSudoListener_SelfApprove_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Contains(t, r.URL.Path, "sudo-policies/self-approve")
+
+		var req selfApproveRequest
+		err := json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, err)
+		assert.Equal(t, "approval-123", req.ApprovalRequestID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	sl := &SudoListener{
+		ac: &client.AlpaconClient{
+			HTTPClient: ts.Client(),
+			BaseURL:    ts.URL,
+		},
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+
+	err := sl.selfApprove("approval-123")
+	assert.NoError(t, err)
+}
+
+func TestSudoListener_SelfApprove_ServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	sl := &SudoListener{
+		ac: &client.AlpaconClient{
+			HTTPClient: ts.Client(),
+			BaseURL:    ts.URL,
+		},
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+
+	err := sl.selfApprove("approval-123")
+	assert.Error(t, err)
+}
+
+func TestSudoListener_ReconnectsAfterDisconnect(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var connectCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		connectCount.Add(1)
+		// Close immediately to trigger reconnect
+		_ = conn.Close()
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	sl := &SudoListener{
+		wsURL:     wsURL,
+		wsHeader:  http.Header{},
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
+	}
+	sl.Start()
+
+	// Wait for at least 2 connection attempts (initial + reconnect)
+	require.Eventually(t, func() bool {
+		return connectCount.Load() >= 2
+	}, 5*time.Second, 100*time.Millisecond, "should reconnect after disconnect")
+
+	sl.Stop()
+
+	select {
+	case <-sl.stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for listener to stop")
+	}
 }
 
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
