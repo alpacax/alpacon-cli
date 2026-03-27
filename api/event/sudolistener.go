@@ -55,25 +55,30 @@ type selfApproveRequest struct {
 // http.Client is concurrency-safe. Token refresh and self-approve are serialized
 // by mfaMu so only one MFA flow runs at a time.
 type SudoListener struct {
-	ac        *client.AlpaconClient
-	wsURL     string
-	wsHeader  http.Header
-	done      chan struct{}
-	stopped   chan struct{} // closed when listenLoop exits
-	closeOnce sync.Once
-	mu        sync.Mutex
-	conn      *websocket.Conn
-	mfaMu     sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
+	ac           *client.AlpaconClient
+	serverName   string
+	wsURL        string
+	wsHeader     http.Header
+	done         chan struct{}
+	stopped      chan struct{} // closed when listenLoop exits
+	connected    chan struct{} // closed after first successful WebSocket connection
+	connectOnce  sync.Once
+	closeOnce    sync.Once
+	mu           sync.Mutex
+	conn         *websocket.Conn
+	mfaMu        sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 }
 
 // NewSudoListener creates a SudoListener but does not connect yet.
-func NewSudoListener(ac *client.AlpaconClient, wsURL string) *SudoListener {
+func NewSudoListener(ac *client.AlpaconClient, wsURL, serverName string) *SudoListener {
 	return &SudoListener{
-		ac:       ac,
-		wsURL:    wsURL,
-		wsHeader: ac.SetWebsocketHeader(),
-		done:     make(chan struct{}),
-		stopped:  make(chan struct{}),
+		ac:         ac,
+		serverName: serverName,
+		wsURL:      wsURL,
+		wsHeader:   ac.SetWebsocketHeader(),
+		done:       make(chan struct{}),
+		stopped:    make(chan struct{}),
+		connected:  make(chan struct{}),
 	}
 }
 
@@ -84,6 +89,19 @@ func (sl *SudoListener) Start() {
 		defer close(sl.stopped)
 		sl.listenLoop()
 	}()
+}
+
+// WaitConnected blocks until the WebSocket connection is established or the
+// timeout expires. Returns true if connected, false on timeout or shutdown.
+func (sl *SudoListener) WaitConnected(timeout time.Duration) bool {
+	select {
+	case <-sl.connected:
+		return true
+	case <-sl.done:
+		return false
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // Stop signals the listener to shut down and closes the WebSocket connection
@@ -144,6 +162,9 @@ func (sl *SudoListener) connectAndListen() (connected bool, err error) {
 	sl.conn = conn
 	sl.mu.Unlock()
 
+	// Signal that we have successfully connected (first time only)
+	sl.connectOnce.Do(func() { close(sl.connected) })
+
 	defer func() {
 		sl.mu.Lock()
 		sl.conn = nil
@@ -193,17 +214,31 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	sl.mfaMu.Lock()
 	defer sl.mfaMu.Unlock()
 
-	mfaURL := event.Payload.MfaURL
 	approvalID := event.Payload.ApprovalRequestID
-
-	if mfaURL == "" || approvalID == "" {
+	if approvalID == "" {
 		return
 	}
 
-	// Print MFA prompt to stderr (terminal is in raw mode, use \r\n)
-	fmt.Fprintf(os.Stderr, "\r\n\033[33mSudo MFA required. Opening browser for verification...\033[0m\r\n")
-	utils.OpenBrowser(mfaURL)
+	// Fast path: if MFA is already completed (e.g., recent sudo in another
+	// terminal), skip the browser and approve immediately.
+	if err := sl.ac.RefreshToken(); err == nil {
+		if err := sl.selfApprove(approvalID); err == nil {
+			return
+		}
+	}
+
+	// Slow path: open browser for MFA verification.
+	// Use CLI-specific MFA URL (location=cli) so the server persists
+	// MFACompletion to DB for polling.
+	mfaURL, err := mfa.GetMFALinkForSudo(sl.ac, sl.serverName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
 	fmt.Fprintf(os.Stderr, "  %s\r\n", mfaURL)
+	utils.OpenBrowser(mfaURL)
 
 	// Poll for MFA completion
 	completed := sl.pollMFACompletion()
@@ -218,14 +253,10 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		return
 	}
 
-	// Token refreshed — self-approve the sudo request
-	err := sl.selfApprove(approvalID)
-	if err != nil {
+	if err := sl.selfApprove(approvalID); err != nil {
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo approval failed: %s\033[0m\r\n", err)
 		return
 	}
-
-	fmt.Fprintf(os.Stderr, "\r\n\033[32mSudo MFA approved.\033[0m\r\n")
 }
 
 func (sl *SudoListener) pollMFACompletion() bool {

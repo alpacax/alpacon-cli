@@ -58,8 +58,9 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 	}
 
 	sl := &SudoListener{
-		done:    make(chan struct{}),
-		stopped: make(chan struct{}),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 
 	for _, tt := range tests {
@@ -71,8 +72,9 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 
 func TestSudoListener_StopIsIdempotent(t *testing.T) {
 	sl := &SudoListener{
-		done:    make(chan struct{}),
-		stopped: make(chan struct{}),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 
 	sl.Stop()
@@ -98,10 +100,11 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	sl := &SudoListener{
-		wsURL:    wsURL,
-		wsHeader: http.Header{},
-		done:     make(chan struct{}),
-		stopped:  make(chan struct{}),
+		wsURL:     wsURL,
+		wsHeader:  http.Header{},
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 	sl.Start()
 
@@ -150,10 +153,11 @@ func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
 
 	// Wrap handleMessage to count calls
 	sl := &SudoListener{
-		wsURL:    wsURL,
-		wsHeader: http.Header{},
-		done:     make(chan struct{}),
-		stopped:  make(chan struct{}),
+		wsURL:     wsURL,
+		wsHeader:  http.Header{},
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 
 	// Run connectAndListen directly to verify it reads the message
@@ -177,8 +181,9 @@ func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
 
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	sl := &SudoListener{
-		done:    make(chan struct{}),
-		stopped: make(chan struct{}),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+		connected: make(chan struct{}),
 	}
 
 	start := time.Now()

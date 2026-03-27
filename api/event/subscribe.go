@@ -29,7 +29,7 @@ type EventSubscriptionRequest struct {
 // CreateEventSession creates a new event session and returns the WebSocket URL
 // and channel ID for subscribing to events.
 func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error) {
-	respBody, err := ac.SendPostRequest(eventSessionsURL, nil)
+	respBody, err := ac.SendPostRequest(eventSessionsURL, struct{}{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event session: %w", err)
 	}
