@@ -37,7 +37,7 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n  %s\n\n", mfaURL)
+	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
 	return nil

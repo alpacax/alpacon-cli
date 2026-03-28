@@ -254,7 +254,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	}
 
 	fmt.Fprintf(os.Stderr, "\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
-	fmt.Fprintf(os.Stderr, "  %s\r\n", mfaURL)
+	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
 	// Poll for MFA completion

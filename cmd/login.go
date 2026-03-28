@@ -130,7 +130,7 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 				utils.CliErrorWithExit("Device code request failed. %v", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "\nPlease authenticate by visiting:\n  %s\n\n", utils.Blue(deviceCode.VerificationURIComplete))
+			fmt.Fprintf(os.Stderr, "\nPlease authenticate by visiting:\n%s\n\n", utils.Blue(deviceCode.VerificationURIComplete))
 			fmt.Fprintf(os.Stderr, "Verification code: %s\n\n", utils.Bold(deviceCode.UserCode))
 			if !noBrowser {
 				utils.OpenBrowser(deviceCode.VerificationURIComplete)
