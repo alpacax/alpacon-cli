@@ -277,6 +277,10 @@ func extractEnvValue(args []string, i int, env map[string]string) int {
 // AlpaconClient.SendPostRequest returns the server's error detail (e.g., "Not found.")
 // rather than the raw HTTP status code.
 func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
 	msg := strings.TrimSpace(strings.ToLower(err.Error()))
-	return msg == "not found" || msg == "not found."
+	return msg == "not found" || msg == "not found." ||
+		strings.HasSuffix(msg, ": not found") || strings.HasSuffix(msg, ": not found.")
 }

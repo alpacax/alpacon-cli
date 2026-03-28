@@ -281,9 +281,14 @@ func TestIsNotFoundError(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "wrapped error is not matched (strict)",
+			name:     "wrapped not found error",
 			err:      fmt.Errorf("failed to create event session: Not found"),
-			expected: false,
+			expected: true,
+		},
+		{
+			name:     "wrapped with period",
+			err:      fmt.Errorf("failed to subscribe: Not found."),
+			expected: true,
 		},
 		{
 			name:     "unrelated error",

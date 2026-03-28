@@ -3,9 +3,9 @@ package event
 import (
 	"encoding/json"
 	"net/http"
-	"sync/atomic"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
