@@ -18,7 +18,7 @@ const (
 	sudoApproveURL = "/api/approvals/sudo-policies/self-approve/"
 
 	// mfaPollingInterval is how often we check if MFA is completed.
-	mfaPollingInterval = 2 * time.Second
+	mfaPollingInterval = 500 * time.Millisecond
 
 	// mfaPollingTimeout is the maximum time to wait for MFA completion.
 	// Server expires the approval request after 30s, but we give extra buffer.
