@@ -226,7 +226,7 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	eventSession, err := event.CreateEventSession(ac)
 	if err != nil {
 		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s\n", err)
+			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
 		}
 		return nil
 	}
@@ -244,7 +244,7 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	if err := event.SubscribeSudoEvent(ac, eventSession.ChannelID, sessionID); err != nil {
 		listener.Stop()
 		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s\n", err)
+			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
 		}
 		return nil
 	}
@@ -277,6 +277,6 @@ func extractEnvValue(args []string, i int, env map[string]string) int {
 // AlpaconClient.SendPostRequest returns the server's error detail (e.g., "Not found.")
 // rather than the raw HTTP status code.
 func isNotFoundError(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not found")
+	msg := strings.TrimSpace(strings.ToLower(err.Error()))
+	return msg == "not found" || msg == "not found."
 }

@@ -132,8 +132,9 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 	sl.mu.Unlock()
 }
 
-func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
+func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 	upgrader := websocket.Upgrader{}
+	clientRead := make(chan struct{})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -142,18 +143,16 @@ func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
 		}
 		defer func() { _ = conn.Close() }()
 
-		// Send a non-MFA message
 		msg := `{"payload":{"type":"info","query":"status"}}`
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(msg))
 
-		// Wait for client to read it before closing
-		time.Sleep(50 * time.Millisecond)
+		// Wait for client to read the message before closing
+		<-clientRead
 	}))
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	// Wrap handleMessage to count calls
 	sl := &SudoListener{
 		wsURL:     wsURL,
 		wsHeader:  http.Header{},
@@ -162,23 +161,27 @@ func TestSudoListener_ConnectAndListen_ReadsMessages(t *testing.T) {
 		connected: make(chan struct{}),
 	}
 
-	// Run connectAndListen directly to verify it reads the message
+	// Run connectAndListen and signal when the read loop processes a message
 	go func() {
 		defer close(sl.stopped)
 		_, _ = sl.connectAndListen()
 	}()
 
-	// The server sends one message then closes. After disconnect, verify
-	// that connectAndListen returns (the goroutine exits).
+	// Wait for connection, then signal server to close
+	require.Eventually(t, func() bool {
+		sl.mu.Lock()
+		defer sl.mu.Unlock()
+		return sl.conn != nil
+	}, 2*time.Second, 10*time.Millisecond)
+
+	close(clientRead) // server closes → client read loop exits
+
 	select {
 	case <-sl.stopped:
-		// goroutine exited
+		// connectAndListen returned cleanly after server disconnect
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for connectAndListen to return")
 	}
-
-	// connectAndListen read the non-MFA message and returned on server disconnect
-	// without panic. This verifies the read loop handles messages and clean shutdown.
 }
 
 func TestSudoListener_WaitConnected_Success(t *testing.T) {

@@ -153,7 +153,10 @@ func (sl *SudoListener) listenLoop() {
 // the connection drops or Stop() is called. Returns (true, err) if the
 // connection was established, (false, err) if the dial itself failed.
 func (sl *SudoListener) connectAndListen() (connected bool, err error) {
-	conn, _, dialErr := websocket.DefaultDialer.Dial(sl.wsURL, sl.wsHeader)
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+	conn, _, dialErr := dialer.Dial(sl.wsURL, sl.wsHeader)
 	if dialErr != nil {
 		return false, fmt.Errorf("event websocket connection failed: %w", dialErr)
 	}
@@ -211,8 +214,22 @@ func (sl *SudoListener) handleMessage(message []byte) {
 }
 
 func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
+	// Check if shutdown was requested before acquiring the lock or doing side effects
+	select {
+	case <-sl.done:
+		return
+	default:
+	}
+
 	sl.mfaMu.Lock()
 	defer sl.mfaMu.Unlock()
+
+	// Re-check after acquiring lock in case Stop() was called while waiting
+	select {
+	case <-sl.done:
+		return
+	default:
+	}
 
 	approvalID := event.Payload.ApprovalRequestID
 	if approvalID == "" {
