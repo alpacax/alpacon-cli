@@ -20,7 +20,8 @@ var webhookCreateCmd = &cobra.Command{
 You will be prompted for the webhook name, URL, provider, and SSL verification
 if not provided via flags. Provider is auto-detected from the URL.
 Owner defaults to the currently logged-in user.`,
-	Example: `  alpacon webhook create
+	Example: `
+  alpacon webhook create
   alpacon webhook create --name=my-webhook --url=https://hooks.slack.com/services/xxx
   alpacon webhook create --name=my-webhook --url=https://example.com/hook --provider=custom
   alpacon webhook create --name=my-webhook --url=https://example.com/hook --ssl-verify=false`,
