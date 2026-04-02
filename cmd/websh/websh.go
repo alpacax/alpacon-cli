@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -171,6 +173,24 @@ Note: All flags must be placed before the server name.
 					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}
+			// Set up sudo MFA listener in background so it doesn't delay
+			// terminal open. If the user types sudo before the listener is
+			// ready, the approval request will expire and they can retry.
+			listenerDone := make(chan *event.SudoListener, 1)
+			go func() {
+				listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
+			}()
+			defer func() {
+				select {
+				case sl := <-listenerDone:
+					if sl != nil {
+						sl.Stop()
+					}
+				case <-time.After(3 * time.Second):
+					// Don't block exit if listener setup is stuck
+				}
+			}()
+
 			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
 	},
@@ -197,6 +217,41 @@ func extractValue(args []string, i int) (string, int) {
 	return "", i
 }
 
+// setupSudoListener creates an event session, connects the event WebSocket,
+// then subscribes to sudo events for the given websh session. The server
+// requires the WebSocket to be connected before allowing subscriptions.
+// Returns nil if the events API is not available. Silently skips "not found"
+// errors (older servers); logs a warning for other failures.
+func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *event.SudoListener {
+	eventSession, err := event.CreateEventSession(ac)
+	if err != nil {
+		if !isNotFoundError(err) {
+			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
+		}
+		return nil
+	}
+
+	// Start listener first — the server requires the WebSocket channel to be
+	// connected before it accepts event subscriptions.
+	listener := event.NewSudoListener(ac, eventSession.WebsocketURL, serverName)
+	listener.Start()
+
+	if !listener.WaitConnected(5 * time.Second) {
+		listener.Stop()
+		return nil
+	}
+
+	if err := event.SubscribeSudoEvent(ac, eventSession.ChannelID, sessionID); err != nil {
+		listener.Stop()
+		if !isNotFoundError(err) {
+			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
+		}
+		return nil
+	}
+
+	return listener
+}
+
 func extractEnvValue(args []string, i int, env map[string]string) int {
 	envString := strings.TrimPrefix(args[i], "--env=")
 	envString = strings.Trim(envString, "\"")
@@ -216,4 +271,16 @@ func extractEnvValue(args []string, i int, env map[string]string) int {
 	}
 
 	return i
+}
+
+// isNotFoundError checks if an error message indicates a 404/not-found response.
+// AlpaconClient.SendPostRequest returns the server's error detail (e.g., "Not found.")
+// rather than the raw HTTP status code.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.TrimSpace(strings.ToLower(err.Error()))
+	return msg == "not found" || msg == "not found." ||
+		strings.HasSuffix(msg, ": not found") || strings.HasSuffix(msg, ": not found.")
 }

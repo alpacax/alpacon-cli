@@ -7,7 +7,7 @@ import (
 
 var maxRetryDuration = 3 * time.Minute
 
-var retryInterval = 5 * time.Second
+var retryInterval = 1 * time.Second
 
 // ErrorHandlerCallbacks defines callback functions for handling different error types
 type ErrorHandlerCallbacks struct {

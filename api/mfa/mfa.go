@@ -37,7 +37,7 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n  %s\n\n", mfaURL)
+	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
 	return nil
@@ -55,6 +55,22 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	}
 
 	return resp.Completed, nil
+}
+
+// GetMFALinkForSudo resolves the server name and returns a CLI MFA URL.
+// Used by the sudo MFA listener where only the server name is available.
+func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, error) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve server: %w", err)
+	}
+
+	return GetMFALink(ac, serverID, cfg.WorkspaceName)
 }
 
 func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
