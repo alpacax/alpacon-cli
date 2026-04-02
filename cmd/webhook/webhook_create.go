@@ -42,15 +42,38 @@ Owner defaults to the currently logged-in user.`,
 
 		if provider == "" {
 			detected := detectProviderFromURL(webhookURL)
-			provider = utils.PromptForInputWithDefault(
-				fmt.Sprintf("Provider (slack, discord, teams, telegram, custom) [%s]: ", detected),
-				detected,
-			)
+			for {
+				provider = utils.PromptForInputWithDefault(
+					fmt.Sprintf("Provider (slack, discord, teams, telegram, custom) [%s]: ", detected),
+					detected,
+				)
+				provider = strings.ToLower(strings.TrimSpace(provider))
+				if isValidProvider(provider) {
+					break
+				}
+				utils.CliWarning("Invalid provider. Please choose: slack, discord, teams, telegram, custom.")
+			}
+		} else {
+			provider = strings.ToLower(strings.TrimSpace(provider))
+			if !isValidProvider(provider) {
+				utils.CliErrorWithExit("Invalid provider %q. Supported: slack, discord, teams, telegram, custom.", provider)
+			}
 		}
 
 		if !cmd.Flags().Changed("ssl-verify") {
-			input := utils.PromptForInputWithDefault("SSL verification (y/n) [y]: ", "y")
-			sslVerify = strings.ToLower(input) != "n" && strings.ToLower(input) != "no"
+			for {
+				input := utils.PromptForInputWithDefault("SSL verification (y/n) [y]: ", "y")
+				value := strings.ToLower(strings.TrimSpace(input))
+				if value == "y" || value == "yes" {
+					sslVerify = true
+					break
+				}
+				if value == "n" || value == "no" {
+					sslVerify = false
+					break
+				}
+				utils.CliWarning("Invalid input. Please enter 'y' or 'n'.")
+			}
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -98,6 +121,14 @@ func init() {
 	webhookCreateCmd.Flags().StringVar(&owner, "owner", "", "Owner username")
 	webhookCreateCmd.Flags().BoolVar(&sslVerify, "ssl-verify", true, "Enable SSL verification")
 	webhookCreateCmd.Flags().BoolVar(&enabled, "enabled", true, "Enable the webhook")
+}
+
+func isValidProvider(p string) bool {
+	switch p {
+	case "slack", "discord", "teams", "telegram", "custom":
+		return true
+	}
+	return false
 }
 
 func detectProviderFromURL(rawURL string) string {
