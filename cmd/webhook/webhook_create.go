@@ -140,7 +140,7 @@ func detectProviderFromURL(rawURL string) string {
 	if strings.Contains(lower, "discord") {
 		return "discord"
 	}
-	if strings.Contains(lower, "teams") || strings.Contains(lower, "office") {
+	if strings.Contains(lower, "teams") || strings.Contains(lower, "office") || strings.Contains(lower, "azure") {
 		return "teams"
 	}
 	if strings.Contains(lower, "telegram") {

@@ -11,6 +11,7 @@ func TestDetectProviderFromURL(t *testing.T) {
 		{"slack", "https://hooks.slack.com/services/T00/B00/xxx", "slack"},
 		{"discord", "https://discord.com/api/webhooks/123/abc", "discord"},
 		{"teams", "https://myorg.webhook.office.com/webhookb2/xxx", "teams"},
+		{"teams workflows", "https://prod-00.westus.logic.azure.com:443/workflows/xxx", "teams"},
 		{"telegram", "https://api.telegram.org/bot123/sendMessage", "telegram"},
 		{"custom url", "https://example.com/webhook", "custom"},
 		{"empty url", "", "custom"},
