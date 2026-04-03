@@ -54,8 +54,9 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliWarning("Could not connect to server: %s", err)
+			utils.CliWarning("Could not create authenticated API client: %s", err)
 			utils.CliWarning("Showing local config only. Server fields are unavailable.")
+			warnIfExpiringSoon(cfg)
 			printWhoami(output, jsonFlag)
 			return
 		}
@@ -63,6 +64,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		user, err := iam.GetCurrentUser(ac)
 		if err != nil {
 			utils.CliWarning("Could not fetch user info: %s", err)
+			warnIfExpiringSoon(cfg)
 			printWhoami(output, jsonFlag)
 			return
 		}
