@@ -30,4 +30,5 @@ var WorkspaceCmd = &cobra.Command{
 func init() {
 	WorkspaceCmd.AddCommand(workspaceListCmd)
 	WorkspaceCmd.AddCommand(workspaceSwitchCmd)
+	WorkspaceCmd.AddCommand(workspacePreferencesCmd)
 }
