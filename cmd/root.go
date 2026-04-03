@@ -31,7 +31,7 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short: "Access infrastructure securely with Alpacon",
+	Short:   "Access infrastructure securely with Alpacon",
 	Long: `Alpacon CLI provides secure access to remote servers without SSH keys, VPNs,
 or bastion hosts. Open terminals, execute commands, transfer files, create TCP
 tunnels, and manage certificates — all with zero-trust authentication, MFA,

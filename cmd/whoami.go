@@ -15,17 +15,17 @@ import (
 )
 
 type whoamiOutput struct {
-	Username      string              `json:"username,omitempty"`
-	Email         string              `json:"email,omitempty"`
-	Phone         string              `json:"phone,omitempty"`
-	WorkspaceName string              `json:"workspace_name"`
-	WorkspaceURL  string              `json:"workspace_url"`
-	AuthMethod    string              `json:"auth_method"`
-	ExpiresAt     string              `json:"expires_at,omitempty"`
-	UID           int                 `json:"uid,omitempty"`
-	Shell         string              `json:"shell,omitempty"`
-	HomeDirectory string              `json:"home_directory,omitempty"`
-	Role          string              `json:"role,omitempty"`
+	Username      string                `json:"username,omitempty"`
+	Email         string                `json:"email,omitempty"`
+	Phone         string                `json:"phone,omitempty"`
+	WorkspaceName string                `json:"workspace_name"`
+	WorkspaceURL  string                `json:"workspace_url"`
+	AuthMethod    string                `json:"auth_method"`
+	ExpiresAt     string                `json:"expires_at,omitempty"`
+	UID           int                   `json:"uid,omitempty"`
+	Shell         string                `json:"shell,omitempty"`
+	HomeDirectory string                `json:"home_directory,omitempty"`
+	Role          string                `json:"role,omitempty"`
 	Groups        []iam.GroupMembership `json:"groups,omitempty"`
 }
 
