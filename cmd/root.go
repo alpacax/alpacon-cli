@@ -120,4 +120,7 @@ func init() {
 
 	// webftp
 	RootCmd.AddCommand(webftp.WebFTPCmd)
+
+	// whoami
+	RootCmd.AddCommand(whoamiCmd)
 }
