@@ -32,4 +32,5 @@ func init() {
 	WorkspaceCmd.AddCommand(workspaceSwitchCmd)
 	WorkspaceCmd.AddCommand(workspacePreferencesCmd)
 	WorkspaceCmd.AddCommand(workspaceNotificationsCmd)
+	WorkspaceCmd.AddCommand(workspaceAccessControlCmd)
 }
