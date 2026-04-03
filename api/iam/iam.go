@@ -309,7 +309,7 @@ func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
-	responseBody, err := ac.SendGetRequest(userURL + "-/")
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "-", nil))
 	if err != nil {
 		return nil, err
 	}

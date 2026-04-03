@@ -206,7 +206,7 @@ func printWhoami(output whoamiOutput, jsonOutput bool) {
 		{"Workspace", fmt.Sprintf("%s (%s)", output.WorkspaceName, output.WorkspaceURL)},
 		{"Auth", output.AuthMethod},
 		{"Expires", formatExpiresHuman(output.ExpiresAt)},
-		{"UID", formatUID(output.UID)},
+		{"UID", fmt.Sprintf("%d", output.UID)},
 		{"Shell", output.Shell},
 		{"Home", output.HomeDirectory},
 		{"Role", output.Role},
@@ -219,11 +219,4 @@ func printWhoami(output whoamiOutput, jsonOutput bool) {
 		}
 		fmt.Fprintf(os.Stdout, "%-13s%s\n", l.label+":", l.value)
 	}
-}
-
-func formatUID(uid int) string {
-	if uid == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d", uid)
 }
