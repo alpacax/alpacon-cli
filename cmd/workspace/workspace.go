@@ -34,4 +34,5 @@ func init() {
 	WorkspaceCmd.AddCommand(workspaceNotificationsCmd)
 	WorkspaceCmd.AddCommand(workspaceAccessControlCmd)
 	WorkspaceCmd.AddCommand(workspaceAuthenticationCmd)
+	WorkspaceCmd.AddCommand(workspaceMFAMethodsCmd)
 }
