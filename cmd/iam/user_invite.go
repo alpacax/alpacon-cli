@@ -8,11 +8,12 @@ import (
 )
 
 var userInviteCmd = &cobra.Command{
-	Use:     "invite EMAIL",
-	Short:   "Invite a user to the workspace",
-	Long:    "Invite a user to the workspace by email. This command is available only in Auth0 environments and requires staff or superuser privileges. The invitee will receive an email with a link to join the workspace.",
-	Example: `  alpacon user invite user@example.com`,
-	Args:    cobra.ExactArgs(1),
+	Use:   "invite EMAIL",
+	Short: "Invite a user to the workspace",
+	Long:  "Invite a user to the workspace by email. This command is available only in Auth0 environments and requires staff or superuser privileges. The invitee will receive an email with a link to join the workspace.",
+	Example: `  alpacon user invite user@example.com
+  alpacon user invite`,
+	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -27,7 +28,12 @@ var userInviteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Insufficient permissions to invite users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
 
-		email := args[0]
+		var email string
+		if len(args) > 0 {
+			email = args[0]
+		} else {
+			email = utils.PromptForRequiredInput("Email: ")
+		}
 		err = iam.InviteUser(alpaconClient, iam.UserInviteRequest{Email: email})
 		if err != nil {
 			utils.CliErrorWithExit("Failed to invite user: %s", err)
