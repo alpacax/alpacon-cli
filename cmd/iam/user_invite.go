@@ -8,11 +8,11 @@ import (
 )
 
 var userInviteCmd = &cobra.Command{
-	Use:   "invite EMAIL",
-	Short: "Invite a user to the workspace",
-	Long:  "Invite a user to the workspace by email. This command is available only in Auth0 environments and requires staff or superuser privileges. The invitee will receive an email with a link to join the workspace.",
+	Use:     "invite EMAIL",
+	Short:   "Invite a user to the workspace",
+	Long:    "Invite a user to the workspace by email. This command is available only in Auth0 environments and requires staff or superuser privileges. The invitee will receive an email with a link to join the workspace.",
 	Example: `  alpacon user invite user@example.com`,
-	Args: cobra.ExactArgs(1),
+	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
