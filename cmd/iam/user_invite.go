@@ -8,10 +8,16 @@ import (
 )
 
 var userInviteCmd = &cobra.Command{
-	Use:   "invite EMAIL",
+	Use:   "invite [EMAIL]",
 	Short: "Invite a user to the workspace",
-	Long:  "Invite a user to the workspace by email. This command is available only in Auth0 environments and requires staff or superuser privileges. The invitee will receive an email with a link to join the workspace.",
-	Example: `  alpacon user invite user@example.com
+	Long: `Invite a user to the workspace by email. The invitee will receive an
+email with a link to join the workspace.
+
+This command requires staff or superuser privileges.`,
+	Example: `  # Invite a user directly
+  alpacon user invite user@example.com
+
+  # Invite a user interactively
   alpacon user invite`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
