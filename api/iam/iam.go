@@ -15,6 +15,7 @@ const (
 	groupURL      = "/api/iam/groups/"
 	membershipURL = "/api/iam/memberships/"
 	usernameURL   = "/api/iam/username/"
+	inviteUserURL = "/api/workspaces/users/invite/"
 )
 
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
@@ -76,6 +77,11 @@ func GetGroupDetail(ac *client.AlpaconClient, groupId string) ([]byte, error) {
 	}
 
 	return responseBody, nil
+}
+
+func InviteUser(ac *client.AlpaconClient, request UserInviteRequest) error {
+	_, err := ac.SendPostRequest(inviteUserURL, request)
+	return err
 }
 
 func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) error {

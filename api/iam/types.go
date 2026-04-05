@@ -119,6 +119,10 @@ type MemberDeleteRequest struct {
 	User  string `json:"user"`
 }
 
+type UserInviteRequest struct {
+	Email string `json:"email"`
+}
+
 type SetUsernameRequest struct {
 	Username string `json:"username"`
 }

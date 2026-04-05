@@ -298,6 +298,62 @@ func TestGetUserList_StatusMapping(t *testing.T) {
 	}
 }
 
+func TestInviteUser(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		response   string
+		wantErr    bool
+	}{
+		{
+			name:       "success",
+			statusCode: http.StatusOK,
+			response:   `{"detail": ["User invitation sent."]}`,
+			wantErr:    false,
+		},
+		{
+			name:       "user already exists",
+			statusCode: http.StatusBadRequest,
+			response:   `{"detail": "user already exists in workspace"}`,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", r.Method)
+				}
+				if r.URL.Path != inviteUserURL {
+					t.Errorf("expected path %q, got %q", inviteUserURL, r.URL.Path)
+				}
+				var req UserInviteRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("failed to decode request body: %v", err)
+				}
+				if req.Email != "test@example.com" {
+					t.Errorf("expected email %q, got %q", "test@example.com", req.Email)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := InviteUser(ac, UserInviteRequest{Email: "test@example.com"})
+
+			if tt.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestAddMember(t *testing.T) {
 	const (
 		groupID = "group-uuid-111"
