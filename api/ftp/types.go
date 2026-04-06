@@ -1,8 +1,6 @@
 package ftp
 
 import (
-	"time"
-
 	"github.com/alpacax/alpacon-cli/api/types"
 )
 
@@ -39,7 +37,7 @@ type UploadResponse struct {
 	User      string              `json:"user"`
 	Username  string              `json:"username"`
 	Groupname string              `json:"groupname"`
-	ExpiresAt time.Time           `json:"expires_at"`
+	ExpiresAt string              `json:"expires_at"`
 	UploadURL string              `json:"upload_url"`
 	Command   string              `json:"command"`
 }
