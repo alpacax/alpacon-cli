@@ -25,6 +25,7 @@ func GetWebhookList(ac *client.AlpaconClient) ([]WebhookAttributes, error) {
 			ID:        wh.ID,
 			Name:      wh.Name,
 			URL:       wh.URL,
+			Provider:  wh.Provider,
 			SSLVerify: wh.SSLVerify,
 			Enabled:   wh.Enabled,
 			Owner:     wh.Owner.Name,
