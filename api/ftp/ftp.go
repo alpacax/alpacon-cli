@@ -83,8 +83,8 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
 }
 
-func uploadToS3(httpClient *http.Client, uploadUrl string, file io.Reader) error {
-	req, err := http.NewRequest(http.MethodPut, uploadUrl, file)
+func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader) error {
+	req, err := http.NewRequest(http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
 	}
