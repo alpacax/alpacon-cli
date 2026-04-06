@@ -331,10 +331,15 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte,
 		}
 		_ = resp.Body.Close()
 
-		if count == maxAttempts-1 {
-			return nil, fmt.Errorf("download failed after %d attempts", maxAttempts)
+		// Client errors (4xx) will never succeed on retry
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return nil, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
-		time.Sleep(time.Second * 1)
+
+		if count == maxAttempts-1 {
+			return nil, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
+		}
+		time.Sleep(time.Second)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
