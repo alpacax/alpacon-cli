@@ -1,6 +1,8 @@
 package iam
 
 import (
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -40,6 +42,11 @@ This command requires staff or superuser privileges.`,
 		} else {
 			email = utils.PromptForRequiredInput("Email: ")
 		}
+
+		if !strings.Contains(email, "@") {
+			utils.CliErrorWithExit("invalid email address: %s", email)
+		}
+
 		err = iam.InviteUser(alpaconClient, iam.UserInviteRequest{Email: email})
 		if err != nil {
 			utils.CliErrorWithExit("Failed to invite user: %s", err)
