@@ -534,3 +534,70 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "disk full")
 }
+
+func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+			// Return 1 response for 2 files
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode([]UploadResponse{
+				{ID: "id-1", Name: "file1.txt", UploadURL: "http://" + r.Host + "/s3/file1"},
+			})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &BulkUploadRequest{
+		Names:  []string{"file1.txt", "file2.txt"},
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+
+	err := executeBulkUpload(ac, request, [][]byte{[]byte("content1"), []byte("content2")})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "1 upload slots but 2 files")
+}
+
+func TestPollTransferStatus_Timeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Always return nil success (pending state)
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil, Message: "pending"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	// Use a very short timeout to make the test fast
+	success, _, err := PollTransferStatus(ac, "upload", "test-id", 3*time.Second)
+	assert.Error(t, err)
+	assert.False(t, success)
+	assert.Contains(t, err.Error(), "timed out")
+}
+
+func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
+	var requestCount atomic.Int32
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	_, err := fetchFromURL(ts.Client(), ts.URL, 10)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "client error: 403")
+	// Should fail on first attempt, not retry
+	assert.Equal(t, int32(1), requestCount.Load())
+}
