@@ -227,6 +227,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		remotePath += "/"
 	}
 
+	// TODO: consider streaming upload for large files to avoid loading all contents into memory
 	names := make([]string, len(src))
 	contents := make([][]byte, len(src))
 	for i, filePath := range src {
@@ -508,6 +509,9 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 
 // DownloadFile downloads files from a remote server. Uses the bulk API for multiple files,
 // or the single-file API for a single file.
+// NOTE: src is currently expected to contain a single server:path string. The internal
+// strings.Fields splitting does not support paths with spaces. If multi-file download
+// is needed, change src to []string for safety.
 func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname string, recursive bool) error {
 	serverName, remotePathStr := utils.SplitPath(src)
 
