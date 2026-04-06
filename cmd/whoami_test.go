@@ -16,9 +16,9 @@ func TestGetAuthMethod(t *testing.T) {
 		access   string
 		expected string
 	}{
-		{"auth0 token", "", "some-access-token", "Auth0 (browser)"},
+		{"browser login", "", "some-access-token", "Browser login"},
 		{"api token", "some-token", "", "API token"},
-		{"both tokens prefers auth0", "some-token", "some-access-token", "Auth0 (browser)"},
+		{"both tokens prefers browser", "some-token", "some-access-token", "Browser login"},
 		{"no tokens", "", "", "unknown"},
 	}
 

@@ -95,7 +95,7 @@ func init() {
 
 func getAuthMethod(cfg config.Config) string {
 	if cfg.AccessToken != "" {
-		return "Auth0 (browser)"
+		return "Browser login"
 	}
 	if cfg.Token != "" {
 		return "API token"
@@ -104,9 +104,6 @@ func getAuthMethod(cfg config.Config) string {
 }
 
 func getExpiresAt(cfg config.Config) string {
-	if cfg.AccessToken != "" && cfg.AccessTokenExpiresAt != "" {
-		return cfg.AccessTokenExpiresAt
-	}
 	if cfg.Token != "" && cfg.ExpiresAt != "" {
 		return cfg.ExpiresAt
 	}
@@ -123,7 +120,15 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
+func isAPITokenAuth(cfg config.Config) bool {
+	return cfg.Token != "" && cfg.AccessToken == ""
+}
+
 func warnIfExpiringSoon(cfg config.Config) {
+	if !isAPITokenAuth(cfg) {
+		return
+	}
+
 	expiresAt := getExpiresAt(cfg)
 	if expiresAt == "" {
 		return
