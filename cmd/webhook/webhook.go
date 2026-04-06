@@ -8,7 +8,7 @@ import (
 var WebhookCmd = &cobra.Command{
 	Use:     "webhook",
 	Aliases: []string{"webhooks"},
-	Short: "Configure webhooks for event notifications",
+	Short:   "Configure webhooks for event notifications",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {
