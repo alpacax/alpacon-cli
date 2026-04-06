@@ -27,7 +27,7 @@ This command requires staff or superuser privileges.`,
 		}
 
 		if alpaconClient.AccessToken == "" {
-			utils.CliErrorWithExit("user invite requires Auth0 authentication. Please log in with Auth0 first.")
+			utils.CliErrorWithExit("user invite is only available for Alpacon Cloud workspaces")
 		}
 
 		if alpaconClient.Privileges == "general" {
