@@ -211,7 +211,9 @@ func validatePaths(sources []string, dest string) error {
 	}
 
 	// Check for invalid remote path format
-	allPaths := append(sources, dest)
+	allPaths := make([]string, 0, len(sources)+1)
+	allPaths = append(allPaths, sources...)
+	allPaths = append(allPaths, dest)
 	for _, path := range allPaths {
 		if isRemotePath(path) {
 			if !strings.Contains(path, ":") {
