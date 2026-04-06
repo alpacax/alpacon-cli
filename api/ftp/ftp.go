@@ -25,14 +25,26 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 
 	// Polling configuration for transfer status
-	pollInterval   = 2 * time.Second
-	maxPollRetries = 15 // 30 second timeout (pollInterval * maxPollRetries)
+	pollInterval       = 2 * time.Second
+	basePollTimeout    = 30 * time.Second
+	perFilePollTimeout = 10 * time.Second
+	perMBPollTimeout   = 5 * time.Second
 )
+
+// calcPollTimeout returns a dynamic poll timeout based on file count and total size.
+// Base 30s + 10s per file + 5s per MB.
+func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
+	timeout := basePollTimeout +
+		time.Duration(fileCount)*perFilePollTimeout +
+		time.Duration(totalBytes/(1024*1024))*perMBPollTimeout
+	return timeout
+}
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
+// timeout controls how long to poll before giving up.
 // Returns true if transfer succeeded, false if failed, and error if polling timed out or failed.
-func PollTransferStatus(ac *client.AlpaconClient, transferType, id string) (bool, string, error) {
+func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout time.Duration) (bool, string, error) {
 	var statusURL string
 	if transferType == "upload" {
 		statusURL = fmt.Sprintf("%s%s/status/", uploadAPIURL, id)
@@ -40,7 +52,12 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string) (bool
 		statusURL = fmt.Sprintf("%s%s/status/", downloadAPIURL, id)
 	}
 
-	for i := 0; i < maxPollRetries; i++ {
+	maxRetries := int(timeout / pollInterval)
+	if maxRetries < 1 {
+		maxRetries = 1
+	}
+
+	for i := 0; i < maxRetries; i++ {
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
 			// Check if it's a 422 error (transfer in progress)
@@ -63,7 +80,7 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string) (bool
 		time.Sleep(pollInterval)
 	}
 
-	return false, "", fmt.Errorf("transfer status polling timed out after 30 seconds")
+	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
 }
 
 func uploadToS3(httpClient *http.Client, uploadUrl string, file io.Reader) error {
@@ -106,7 +123,8 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, conte
 		return err
 	}
 
-	success, message, err := PollTransferStatus(ac, "upload", response.ID)
+	timeout := calcPollTimeout(1, int64(len(content)))
+	success, message, err := PollTransferStatus(ac, "upload", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -150,8 +168,14 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 	}
 
 	// Poll transfer status for each upload
+	var totalBytes int64
+	for _, c := range contents {
+		totalBytes += int64(len(c))
+	}
+	timeout := calcPollTimeout(len(contents), totalBytes)
+
 	for _, resp := range responses {
-		success, message, err := PollTransferStatus(ac, "upload", resp.ID)
+		success, message, err := PollTransferStatus(ac, "upload", resp.ID, timeout)
 		if err != nil {
 			return fmt.Errorf("upload transfer status check failed for %s: %w", resp.Name, err)
 		}
@@ -397,7 +421,8 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 		return err
 	}
 
-	success, message, err := PollTransferStatus(ac, "download", downloadResponse.ID)
+	timeout := calcPollTimeout(1, int64(len(content)))
+	success, message, err := PollTransferStatus(ac, "download", downloadResponse.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -459,7 +484,8 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return fmt.Errorf("failed to extract downloaded archive: %w", err)
 	}
 
-	success, message, err := PollTransferStatus(ac, "download", response.ID)
+	timeout := calcPollTimeout(len(remotePaths), int64(len(content)))
+	success, message, err := PollTransferStatus(ac, "download", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
 	}

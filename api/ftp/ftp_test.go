@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
@@ -69,7 +70,7 @@ func TestPollTransferStatus(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			success, message, err := PollTransferStatus(ac, "upload", "test-id")
+			success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantSuccess, success)
 			assert.Equal(t, tt.wantMessage, message)
