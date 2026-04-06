@@ -343,11 +343,9 @@ func saveDownloadedContent(content []byte, dest, remotePath string, recursive bo
 	}
 
 	if recursive {
+		defer func() { _ = utils.DeleteFile(filePath) }()
 		if err := utils.Unzip(filePath, dest); err != nil {
 			return fmt.Errorf("failed to extract downloaded folder: %w", err)
-		}
-		if err := utils.DeleteFile(filePath); err != nil {
-			return fmt.Errorf("failed to clean up temporary zip file: %w", err)
 		}
 	}
 
@@ -455,11 +453,10 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	if err := utils.SaveFile(zipPath, content); err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
+	defer func() { _ = utils.DeleteFile(zipPath) }()
+
 	if err := utils.Unzip(zipPath, dest); err != nil {
 		return fmt.Errorf("failed to extract downloaded archive: %w", err)
-	}
-	if err := utils.DeleteFile(zipPath); err != nil {
-		return fmt.Errorf("failed to clean up temporary zip file: %w", err)
 	}
 
 	success, message, err := PollTransferStatus(ac, "download", response.ID)
