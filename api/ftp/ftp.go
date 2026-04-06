@@ -174,14 +174,19 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 	}
 	timeout := calcPollTimeout(len(contents), totalBytes)
 
+	var failures []string
 	for _, resp := range responses {
 		success, message, err := PollTransferStatus(ac, "upload", resp.ID, timeout)
 		if err != nil {
-			return fmt.Errorf("upload transfer status check failed for %s: %w", resp.Name, err)
+			failures = append(failures, fmt.Sprintf("%s: %v", resp.Name, err))
+			continue
 		}
 		if !success {
-			return fmt.Errorf("upload failed for %s: %s", resp.Name, message)
+			failures = append(failures, fmt.Sprintf("%s: %s", resp.Name, message))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(failures), strings.Join(failures, "\n  "))
 	}
 
 	return nil
