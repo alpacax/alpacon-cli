@@ -31,15 +31,6 @@ const (
 	perMBPollTimeout   = 5 * time.Second
 )
 
-// calcPollTimeout returns a dynamic poll timeout based on file count and total size.
-// Base 30s + 10s per file + 5s per MB.
-func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
-	timeout := basePollTimeout +
-		time.Duration(fileCount)*perFilePollTimeout +
-		time.Duration(totalBytes/(1024*1024))*perMBPollTimeout
-	return timeout
-}
-
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
 // timeout controls how long to poll before giving up.
@@ -533,4 +524,13 @@ func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname strin
 	}
 
 	return downloadSingleFile(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, recursive)
+}
+
+// calcPollTimeout returns a dynamic poll timeout based on file count and total size.
+// Base 30s + 10s per file + 5s per MB.
+func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
+	timeout := basePollTimeout +
+		time.Duration(fileCount)*perFilePollTimeout +
+		time.Duration(totalBytes/(1024*1024))*perMBPollTimeout
+	return timeout
 }
