@@ -40,6 +40,9 @@ This command requires staff or superuser privileges.`,
 		if len(args) > 0 {
 			email = args[0]
 		} else {
+			if !utils.IsInteractiveShell() {
+				utils.CliErrorWithExit("email argument is required in non-interactive mode")
+			}
 			email = utils.PromptForRequiredInput("Email: ")
 		}
 
