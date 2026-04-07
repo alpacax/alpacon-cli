@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -600,4 +602,122 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 	assert.Contains(t, err.Error(), "client error: 403")
 	// Should fail on first attempt, not retry
 	assert.Equal(t, int32(1), requestCount.Load())
+}
+
+func TestDownloadFile_InputValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []string
+		wantErr string
+	}{
+		{"empty sources", []string{}, "no source paths provided"},
+		{"mixed servers", []string{"server-a:/path/file1.txt", "server-b:/path/file2.txt"}, "all sources must be on the same server"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := DownloadFile(&client.AlpaconClient{}, tt.sources, "/tmp/dest", "", "", false)
+			assert.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestDownloadFile_SpaceInPath(t *testing.T) {
+	// Verify that a path with spaces is preserved as a single path,
+	// not split by whitespace (the old strings.Fields bug).
+	serverResp := api.ListResponse[server.ServerDetails]{
+		Count:   1,
+		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/api/servers/servers"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(serverResp)
+		case r.URL.Path == "/api/webftp/downloads/" && r.Method == http.MethodPost:
+			// The download API should receive the full path with spaces
+			var req DownloadRequest
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &req)
+			assert.Equal(t, "/path/my file.txt", req.Path)
+			// Return an error to stop the flow — we only care about path parsing
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	sources := []string{"my-server:/path/my file.txt"}
+	// Error expected since the mock doesn't complete the full flow,
+	// but the key assertion is that the path was not split.
+	_ = DownloadFile(ac, sources, "/tmp/dest", "", "", false)
+}
+
+func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
+	serverResp := api.ListResponse[server.ServerDetails]{
+		Count:   1,
+		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
+	}
+
+	tests := []struct {
+		name        string
+		sources     []string
+		expectBulk  bool
+	}{
+		{
+			name:       "single source routes to single download",
+			sources:    []string{"my-server:/path/file.txt"},
+			expectBulk: false,
+		},
+		{
+			name:       "multiple sources route to bulk download",
+			sources:    []string{"my-server:/path/file1.txt", "my-server:/path/file2.txt"},
+			expectBulk: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var hitSingle, hitBulk bool
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case r.URL.Path == "/api/webftp/downloads/bulk/" && r.Method == http.MethodPost:
+					hitBulk = true
+					w.WriteHeader(http.StatusBadRequest)
+				case r.URL.Path == "/api/webftp/downloads/" && r.Method == http.MethodPost:
+					hitSingle = true
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{
+				HTTPClient: ts.Client(),
+				BaseURL:    ts.URL,
+			}
+
+			// Error expected since mock doesn't complete the flow
+			_ = DownloadFile(ac, tt.sources, "/tmp/dest", "", "", false)
+
+			if tt.expectBulk {
+				assert.True(t, hitBulk, "expected bulk download API to be called")
+				assert.False(t, hitSingle, "single download API should not be called")
+			} else {
+				assert.True(t, hitSingle, "expected single download API to be called")
+				assert.False(t, hitBulk, "bulk download API should not be called")
+			}
+		})
+	}
 }

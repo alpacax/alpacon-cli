@@ -498,16 +498,26 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	return nil
 }
 
-// DownloadFile downloads files from a remote server. Uses the bulk API for multiple files,
-// or the single-file API for a single file.
-// NOTE: src is currently expected to contain a single server:path string. The internal
-// strings.Fields splitting does not support paths with spaces. If multi-file download
-// is needed, change src to []string for safety.
-func DownloadFile(ac *client.AlpaconClient, src, dest, username, groupname string, recursive bool) error {
-	serverName, remotePathStr := utils.SplitPath(src)
+// DownloadFile downloads files from a remote server. Each source should be in
+// "server:/path" format. Uses the bulk API for multiple files, or the
+// single-file API for a single file.
+func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("no source paths provided")
+	}
 
-	trimmedPathStr := strings.Trim(remotePathStr, "\"")
-	remotePaths := strings.Fields(trimmedPathStr)
+	serverName, firstPath := utils.SplitPath(sources[0])
+
+	// Extract remote paths and validate all sources are on the same server
+	remotePaths := make([]string, 0, len(sources))
+	remotePaths = append(remotePaths, strings.Trim(firstPath, "\""))
+	for _, src := range sources[1:] {
+		name, p := utils.SplitPath(src)
+		if name != serverName {
+			return fmt.Errorf("all sources must be on the same server (got %q and %q)", serverName, name)
+		}
+		remotePaths = append(remotePaths, strings.Trim(p, "\""))
+	}
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {

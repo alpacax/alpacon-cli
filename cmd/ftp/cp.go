@@ -126,7 +126,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			serverName, _ := utils.SplitPath(sources[0])
-			err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+			err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -141,16 +141,18 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+						return downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
 					},
 				})
 
 				if err != nil {
-					utils.CliErrorWithExit("Failed to download from '%s': %s", sources[0], err)
+					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)
 					return
 				}
 			}
-			utils.CliSuccess("Downloaded %s to %s", sources[0], dest)
+			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
 			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
@@ -279,11 +281,12 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	return nil
 }
 
-func downloadObject(client *client.AlpaconClient, src, dest, username, groupname string, recursive bool) error {
+func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool) error {
 	// Extract server name for better error messages
-	serverName, remotePath := utils.SplitPath(src)
+	serverName, remotePath := utils.SplitPath(sources[0])
+	srcDisplay := strings.Join(sources, ", ")
 
-	err := ftp.DownloadFile(client, src, dest, username, groupname, recursive)
+	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive)
 	if err != nil {
 		// Parse error and provide specific guidance
 		errStr := err.Error()
@@ -294,14 +297,14 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 				"  • File exists: alpacon exec %s 'ls -la %s'\n"+
 				"  • You have read permissions for the file\n"+
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
-				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), src, dest)
+				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), srcDisplay, dest)
 		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
 			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
 				"  • Download as file owner: alpacon cp -u OWNER %s %s\n"+
 				"  • Check file permissions: alpacon exec %s 'ls -la %s'",
-				remotePath, serverName, src, dest, src, dest, serverName, remotePath)
+				remotePath, serverName, srcDisplay, dest, srcDisplay, dest, serverName, remotePath)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
 			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
 				"Please check:\n"+
