@@ -323,19 +323,11 @@ func TestInviteUser(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost {
-					t.Errorf("expected POST, got %s", r.Method)
-				}
-				if r.URL.Path != inviteUserURL {
-					t.Errorf("expected path %q, got %q", inviteUserURL, r.URL.Path)
-				}
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, inviteUserURL, r.URL.Path)
 				var req UserInviteRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					t.Errorf("failed to decode request body: %v", err)
-				}
-				if req.Email != "test@example.com" {
-					t.Errorf("expected email %q, got %q", "test@example.com", req.Email)
-				}
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				assert.Equal(t, "test@example.com", req.Email)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.response))
