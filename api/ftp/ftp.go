@@ -74,11 +74,12 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
 }
 
-func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader) error {
+func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size int64) error {
 	req, err := http.NewRequest(http.MethodPut, uploadURL, file)
 	if err != nil {
 		return err
 	}
+	req.ContentLength = size
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -104,7 +105,7 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file 
 	}
 
 	if response.UploadURL != "" {
-		if err := uploadToS3(ac.HTTPClient, response.UploadURL, file); err != nil {
+		if err := uploadToS3(ac.HTTPClient, response.UploadURL, file, size); err != nil {
 			return err
 		}
 	}
@@ -146,7 +147,7 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 	for i, resp := range responses {
 		ids = append(ids, resp.ID)
 		if resp.UploadURL != "" {
-			if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i]); err != nil {
+			if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i], sizes[i]); err != nil {
 				return fmt.Errorf("failed to upload %s to storage: %w", resp.Name, err)
 			}
 		}

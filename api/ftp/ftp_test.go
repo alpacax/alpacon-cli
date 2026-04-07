@@ -92,7 +92,7 @@ func TestUploadToS3(t *testing.T) {
 	defer ts.Close()
 
 	content := []byte("test file content")
-	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader(content))
+	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader(content), int64(len(content)))
 
 	require.NoError(t, err)
 	assert.Equal(t, http.MethodPut, receivedMethod)
@@ -105,7 +105,7 @@ func TestUploadToS3_Failure(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader([]byte("data")))
+	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader([]byte("data")), int64(len("data")))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "403")
 }
