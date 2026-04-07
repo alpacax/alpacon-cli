@@ -38,7 +38,7 @@ This command requires staff or superuser privileges.`,
 		}
 
 		if alpaconClient.Privileges == "general" {
-			utils.CliErrorWithExit("Insufficient permissions to invite users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
+			utils.CliErrorWithExit("Insufficient permissions to invite users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions.")
 		}
 
 		var email string

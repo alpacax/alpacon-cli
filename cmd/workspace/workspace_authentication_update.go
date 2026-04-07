@@ -22,18 +22,14 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	alpacon ws auth update`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("this command requires an interactive terminal")
+			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
-		isSaaS, err := config.IsSaaS()
-		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
-		}
-		if !isSaaS {
+		if cfg.AccessToken == "" {
 			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
 		}
 

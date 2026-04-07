@@ -17,7 +17,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	alpacon ws preferences update`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if !utils.IsInteractiveShell() {
-			utils.CliErrorWithExit("this command requires an interactive terminal")
+			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
