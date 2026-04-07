@@ -5,6 +5,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -23,13 +24,17 @@ This command requires staff or superuser privileges.`,
   alpacon user invite`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		saas, err := config.IsSaaS()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+		if !saas {
+			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		if alpaconClient.AccessToken == "" {
-			utils.CliErrorWithExit("user invite is only available for Alpacon Cloud workspaces")
 		}
 
 		if alpaconClient.Privileges == "general" {

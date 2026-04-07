@@ -21,6 +21,18 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	alpacon workspace authentication update
 	alpacon ws auth update`,
 	Run: func(cmd *cobra.Command, args []string) {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+		saas, err := config.IsSaaS()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+		if !saas {
+			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -36,10 +48,6 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		if err != nil {
 			err = utils.HandleCommonErrors(err, "", utils.ErrorHandlerCallbacks{
 				OnMFARequired: func(_ string) error {
-					cfg, loadErr := config.LoadConfig()
-					if loadErr != nil {
-						return fmt.Errorf("failed to load configuration: %w", loadErr)
-					}
 					mfaURL, mfaErr := mfa.GetWorkspaceSecurityMFALink(alpaconClient, cfg.WorkspaceName)
 					if mfaErr != nil {
 						return mfaErr

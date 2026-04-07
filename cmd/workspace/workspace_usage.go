@@ -22,6 +22,13 @@ var workspaceUsageCmd = &cobra.Command{
 		if err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
+		saas, err := config.IsSaaS()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+		if !saas {
+			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
