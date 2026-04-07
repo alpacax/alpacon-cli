@@ -92,7 +92,7 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader) error
 	return nil
 }
 
-func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, content []byte) error {
+func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
 	respBody, err := ac.SendPostRequest(uploadAPIURL, request)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, conte
 	}
 
 	if response.UploadURL != "" {
-		if err := uploadToS3(ac.HTTPClient, response.UploadURL, bytes.NewReader(content)); err != nil {
+		if err := uploadToS3(ac.HTTPClient, response.UploadURL, file); err != nil {
 			return err
 		}
 	}
@@ -114,7 +114,7 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, conte
 		return err
 	}
 
-	timeout := calcPollTimeout(1, int64(len(content)))
+	timeout := calcPollTimeout(1, size)
 	success, message, err := PollTransferStatus(ac, "upload", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
@@ -126,7 +126,7 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, conte
 	return nil
 }
 
-func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, contents [][]byte) error {
+func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, files []io.Reader, sizes []int64) error {
 	respBody, err := ac.SendPostRequest(uploadBulkAPIURL, request)
 	if err != nil {
 		return err
@@ -137,8 +137,8 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 		return err
 	}
 
-	if len(responses) != len(contents) {
-		return fmt.Errorf("server returned %d upload slots but %d files were provided", len(responses), len(contents))
+	if len(responses) != len(files) {
+		return fmt.Errorf("server returned %d upload slots but %d files were provided", len(responses), len(files))
 	}
 
 	// Upload each file to S3
@@ -146,7 +146,7 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 	for i, resp := range responses {
 		ids = append(ids, resp.ID)
 		if resp.UploadURL != "" {
-			if err := uploadToS3(ac.HTTPClient, resp.UploadURL, bytes.NewReader(contents[i])); err != nil {
+			if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i]); err != nil {
 				return fmt.Errorf("failed to upload %s to storage: %w", resp.Name, err)
 			}
 		}
@@ -160,10 +160,10 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, con
 
 	// Poll transfer status for each upload
 	var totalBytes int64
-	for _, c := range contents {
-		totalBytes += int64(len(c))
+	for _, s := range sizes {
+		totalBytes += s
 	}
-	timeout := calcPollTimeout(len(contents), totalBytes)
+	timeout := calcPollTimeout(len(files), totalBytes)
 
 	var failures []string
 	for _, resp := range responses {
@@ -194,7 +194,13 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	}
 
 	if len(src) == 1 {
-		content, err := utils.ReadFileFromPath(src[0])
+		f, err := os.Open(src[0])
+		if err != nil {
+			return err
+		}
+		defer func() { _ = f.Close() }()
+
+		stat, err := f.Stat()
 		if err != nil {
 			return err
 		}
@@ -211,24 +217,43 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 			Groupname:      groupname,
 			AllowOverwrite: allowOverwrite,
 		}
-		return executeSingleUpload(ac, request, content)
+		return executeSingleUpload(ac, request, readOnly{f}, stat.Size())
 	}
 
 	if !strings.HasSuffix(remotePath, "/") {
 		remotePath += "/"
 	}
 
-	// TODO: consider streaming upload for large files to avoid loading all contents into memory
 	names := make([]string, len(src))
-	contents := make([][]byte, len(src))
+	files := make([]io.ReadCloser, len(src))
+	sizes := make([]int64, len(src))
 	for i, filePath := range src {
-		content, err := utils.ReadFileFromPath(filePath)
+		f, err := os.Open(filePath)
 		if err != nil {
+			for j := 0; j < i; j++ {
+				_ = files[j].Close()
+			}
+			return err
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			for j := 0; j < i; j++ {
+				_ = files[j].Close()
+			}
 			return err
 		}
 		names[i] = filepath.Base(filePath)
-		contents[i] = content
+		files[i] = f
+		sizes[i] = stat.Size()
 	}
+	defer func() {
+		for _, f := range files {
+			if f != nil {
+				_ = f.Close()
+			}
+		}
+	}()
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d files...", len(src)))
 	spinner.Start()
@@ -243,7 +268,11 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		AllowOverwrite: allowOverwrite,
 	}
 
-	return executeBulkUpload(ac, request, contents)
+	readers := make([]io.Reader, len(files))
+	for i, f := range files {
+		readers[i] = readOnly{f}
+	}
+	return executeBulkUpload(ac, request, readers, sizes)
 }
 
 // UploadFolder uploads local folders to a remote server.
@@ -282,18 +311,20 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 			AllowOverwrite: allowOverwrite,
 			AllowUnzip:     true,
 		}
-		return executeSingleUpload(ac, request, zipBytes)
+		return executeSingleUpload(ac, request, bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	}
 
 	names := make([]string, len(src))
-	contents := make([][]byte, len(src))
+	readers := make([]io.Reader, len(src))
+	sizes := make([]int64, len(src))
 	for i, folderPath := range src {
 		zipBytes, err := utils.Zip(folderPath)
 		if err != nil {
 			return err
 		}
 		names[i] = filepath.Base(folderPath) + ".zip"
-		contents[i] = zipBytes
+		readers[i] = bytes.NewReader(zipBytes)
+		sizes[i] = int64(len(zipBytes))
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
@@ -310,7 +341,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		AllowUnzip:     true,
 	}
 
-	return executeBulkUpload(ac, request, contents)
+	return executeBulkUpload(ac, request, readers, sizes)
 }
 
 func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte, error) {
@@ -476,7 +507,11 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	}
 
 	// Save zip and extract contents
-	zipPath := filepath.Join(dest, filepath.Base(response.Name))
+	name := response.Name
+	if name == "" {
+		name = "download.zip"
+	}
+	zipPath := filepath.Join(dest, filepath.Base(name))
 	if err := utils.SaveFile(zipPath, content); err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}

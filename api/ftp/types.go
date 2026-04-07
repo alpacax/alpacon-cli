@@ -1,8 +1,14 @@
 package ftp
 
 import (
+	"io"
+
 	"github.com/alpacax/alpacon-cli/api/types"
 )
+
+// readOnly wraps an io.Reader to hide io.ReadCloser so that
+// http.NewRequest does not close the underlying file handle.
+type readOnly struct{ io.Reader }
 
 type DownloadRequest struct {
 	Path         string `json:"path"`

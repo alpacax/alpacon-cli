@@ -159,9 +159,10 @@ func TestExecuteBulkUpload(t *testing.T) {
 		Groupname:      "developers",
 		AllowOverwrite: true,
 	}
-	contents := [][]byte{[]byte("content1"), []byte("content2")}
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
 
-	err := executeBulkUpload(ac, request, contents)
+	err := executeBulkUpload(ac, request, files, sizes)
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"file1.txt", "file2.txt"}, bulkReq.Names)
@@ -217,7 +218,9 @@ func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
 		AllowOverwrite: false,
 	}
 
-	err := executeBulkUpload(ac, request, [][]byte{[]byte("content")})
+	files := []io.Reader{bytes.NewReader([]byte("content"))}
+	sizes := []int64{int64(len("content"))}
+	err := executeBulkUpload(ac, request, files, sizes)
 	require.NoError(t, err)
 	assert.False(t, bulkReq.AllowOverwrite)
 }
@@ -262,7 +265,9 @@ func TestExecuteBulkUpload_WithUnzip(t *testing.T) {
 		AllowUnzip:     true,
 	}
 
-	err := executeBulkUpload(ac, request, [][]byte{[]byte("zipdata")})
+	files := []io.Reader{bytes.NewReader([]byte("zipdata"))}
+	sizes := []int64{int64(len("zipdata"))}
+	err := executeBulkUpload(ac, request, files, sizes)
 	require.NoError(t, err)
 	assert.True(t, bulkReq.AllowUnzip)
 	assert.True(t, bulkReq.AllowOverwrite)
@@ -390,7 +395,7 @@ func TestExecuteSingleUpload(t *testing.T) {
 		AllowOverwrite: true,
 	}
 
-	err := executeSingleUpload(ac, request, []byte("content1"))
+	err := executeSingleUpload(ac, request, bytes.NewReader([]byte("content1")), int64(len("content1")))
 	require.NoError(t, err)
 
 	assert.Equal(t, "file1.txt", uploadReq.Name)
@@ -443,7 +448,7 @@ func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
 		Server: "server-id",
 	}
 
-	err := executeSingleUpload(ac, request, []byte("content"))
+	err := executeSingleUpload(ac, request, bytes.NewReader([]byte("content")), int64(len("content")))
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
 }
@@ -489,7 +494,7 @@ func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
 		AllowUnzip:     true,
 	}
 
-	err := executeSingleUpload(ac, request, []byte("zipdata"))
+	err := executeSingleUpload(ac, request, bytes.NewReader([]byte("zipdata")), int64(len("zipdata")))
 	require.NoError(t, err)
 	assert.True(t, uploadReq.AllowUnzip)
 	assert.True(t, uploadReq.AllowOverwrite)
@@ -532,7 +537,9 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 		Server: "server-id",
 	}
 
-	err := executeBulkUpload(ac, request, [][]byte{[]byte("content")})
+	files := []io.Reader{bytes.NewReader([]byte("content"))}
+	sizes := []int64{int64(len("content"))}
+	err := executeBulkUpload(ac, request, files, sizes)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "disk full")
 }
@@ -563,7 +570,9 @@ func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
 		Server: "server-id",
 	}
 
-	err := executeBulkUpload(ac, request, [][]byte{[]byte("content1"), []byte("content2")})
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
+	err := executeBulkUpload(ac, request, files, sizes)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "1 upload slots but 2 files")
 }
