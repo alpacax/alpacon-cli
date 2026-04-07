@@ -79,6 +79,16 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 - **Table output**: API response → `*Attributes` struct projection → `utils.PrintTable()`. All list commands follow this pattern
 - **Pagination**: `api.FetchAllPages[T]` (generics) handles all pagination internally. `cmd/` layer never sees pagination
 - **Dual auth tokens**: `AccessToken` (Auth0 Bearer JWT) takes priority; `Token` (legacy API key) is fallback. Set in `client.setHTTPHeader()`
+- **SaaS vs self-hosted detection**: Use `config.IsSaaS()` (package-level function in `config/config.go`) to detect deployment type. Returns `true` when `AccessToken` is present (Auth0 login = Alpacon Cloud). Add early-exit guards before `NewAlpaconAPIClient()` in commands that are SaaS-only or self-hosted-only:
+  ```go
+  isSaaS, err := config.IsSaaS()
+  if err != nil {
+      utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+  }
+  if !isSaaS {
+      utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
+  }
+  ```
 - **CLI output helpers**: `utils.CliError*/CliInfo*/CliWarning` all write to stderr. stdout is reserved for data output (tables, JSON)
 - **Group commands**: Use `RunE` (not `Run`) to show help + return error when no subcommand is given
 - **Version injection**: `utils.Version` is set via `-ldflags` at build time by GoReleaser. Local builds default to `"dev"`
@@ -154,6 +164,10 @@ _ = json.NewEncoder(w).Encode(resp)
   - **Websh**—the browser-based terminal feature (proper noun). Never "WebSH" or "websh" in prose. Use `websh` only in code and CLI commands
   - **Alpamon**—the agent (proper noun)
   - **Auth0**—third-party service (their capitalization)
+- Deployment type terminology in user-facing messages:
+  - OnPrem deployments → **"self-hosted workspaces"** (never "OnPrem" or "on-premise")
+  - SaaS deployments → **"Alpacon Cloud workspaces"** (never "SaaS" or "cloud")
+  - Example: `"This command is only available on Alpacon Cloud workspaces."`
 - Use em-dashes (`—`) without surrounding spaces: `word—word`, not `word — word`
 
 ## Important notes
