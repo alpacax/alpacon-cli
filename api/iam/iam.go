@@ -15,6 +15,7 @@ const (
 	groupURL      = "/api/iam/groups/"
 	membershipURL = "/api/iam/memberships/"
 	usernameURL   = "/api/iam/username/"
+	inviteUserURL = "/api/workspaces/users/invite/"
 )
 
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
@@ -76,6 +77,11 @@ func GetGroupDetail(ac *client.AlpaconClient, groupId string) ([]byte, error) {
 	}
 
 	return responseBody, nil
+}
+
+func InviteUser(ac *client.AlpaconClient, request UserInviteRequest) error {
+	_, err := ac.SendPostRequest(inviteUserURL, request)
+	return err
 }
 
 func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) error {
@@ -306,6 +312,42 @@ func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
 	}
 
 	return responseBody, nil
+}
+
+func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "-", nil))
+	if err != nil {
+		return nil, err
+	}
+
+	var user CurrentUserResponse
+	err = json.Unmarshal(responseBody, &user)
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembership, error) {
+	params := map[string]string{
+		"user": userID,
+	}
+
+	members, err := api.FetchAllPages[MemberDetailResponse](ac, membershipURL, params)
+	if err != nil {
+		return nil, err
+	}
+
+	var groups []GroupMembership
+	for _, m := range members {
+		groups = append(groups, GroupMembership{
+			Name: m.GroupName,
+			Role: m.Role,
+		})
+	}
+
+	return groups, nil
 }
 
 func HandleUsernameRequired() (*SetUsernameResponse, error) {

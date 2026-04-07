@@ -119,6 +119,27 @@ type MemberDeleteRequest struct {
 	User  string `json:"user"`
 }
 
+type UserInviteRequest struct {
+	Email string `json:"email"`
+}
+
+type CurrentUserResponse struct {
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Email         string `json:"email"`
+	Phone         string `json:"phone"`
+	UID           int    `json:"uid"`
+	Shell         string `json:"shell"`
+	HomeDirectory string `json:"home_directory"`
+	IsStaff       bool   `json:"is_staff"`
+	IsSuperuser   bool   `json:"is_superuser"`
+}
+
+type GroupMembership struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
 type SetUsernameRequest struct {
 	Username string `json:"username"`
 }
