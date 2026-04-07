@@ -21,6 +21,10 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 	alpacon workspace access-control update
 	alpacon ws acl update`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if !utils.IsInteractiveShell() {
+			utils.CliErrorWithExit("this command requires an interactive terminal")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
