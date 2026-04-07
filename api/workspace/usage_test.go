@@ -90,8 +90,8 @@ func TestGetUsageEstimate(t *testing.T) {
 				"plan_name":    "Essentials",
 				"sub_total":    "360000",
 			},
-			"services":  map[string]any{},
-			"metadata":  nil,
+			"services": map[string]any{},
+			"metadata": nil,
 		})
 	}))
 	defer ts.Close()

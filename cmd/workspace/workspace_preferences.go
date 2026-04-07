@@ -10,8 +10,8 @@ import (
 var workspacePreferencesCmd = &cobra.Command{
 	Use:     "preferences",
 	Aliases: []string{"prefs"},
-	Short: "Retrieve workspace preferences",
-	Long:  "Display the current workspace preferences including language, timezone, and other settings.",
+	Short:   "Retrieve workspace preferences",
+	Long:    "Display the current workspace preferences including language, timezone, and other settings.",
 	Example: `
 	alpacon workspace preferences
 	alpacon ws preferences`,

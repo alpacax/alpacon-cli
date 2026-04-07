@@ -13,7 +13,7 @@ import (
 func TestGetMFAMethods(t *testing.T) {
 	expected := map[string]any{
 		"allowed_mfa_methods": []any{"email", "otp"},
-		"passkey_as_mfa":     false,
+		"passkey_as_mfa":      false,
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -12,10 +12,10 @@ import (
 
 func TestGetAccessControl(t *testing.T) {
 	expected := map[string]any{
-		"allow_sudo_with_mfa":      true,
-		"allow_direct_root":        false,
-		"allow_tunnel_by_default":  true,
-		"allow_editor_by_default":  true,
+		"allow_sudo_with_mfa":       true,
+		"allow_direct_root":         false,
+		"allow_tunnel_by_default":   true,
+		"allow_editor_by_default":   true,
 		"home_directory_permission": "750",
 	}
 

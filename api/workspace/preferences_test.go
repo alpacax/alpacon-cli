@@ -12,14 +12,14 @@ import (
 
 func TestGetPreferences(t *testing.T) {
 	expected := map[string]any{
-		"language":            "ko",
-		"timezone":            "Asia/Seoul",
-		"invite_ttl":          float64(172800),
+		"language":              "ko",
+		"timezone":              "Asia/Seoul",
+		"invite_ttl":            float64(172800),
 		"websh_session_timeout": float64(3600),
-		"auto_agent_upgrade":  true,
-		"package_proxy":       nil,
-		"front_url":           "https://example.alpacon.io",
-		"country":             "KR",
+		"auto_agent_upgrade":    true,
+		"package_proxy":         nil,
+		"front_url":             "https://example.alpacon.io",
+		"country":               "KR",
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
