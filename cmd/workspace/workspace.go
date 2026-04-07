@@ -35,4 +35,5 @@ func init() {
 	WorkspaceCmd.AddCommand(workspaceAccessControlCmd)
 	WorkspaceCmd.AddCommand(workspaceAuthenticationCmd)
 	WorkspaceCmd.AddCommand(workspaceMFAMethodsCmd)
+	WorkspaceCmd.AddCommand(workspaceUsageCmd)
 }

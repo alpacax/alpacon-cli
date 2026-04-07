@@ -257,6 +257,17 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	return respBody, nil
 }
 
+// SendGetRequestToURL sends a GET request to an absolute URL (e.g., an external service)
+// using the client's authentication headers.
+func (ac *AlpaconClient) SendGetRequestToURL(absoluteURL string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, absoluteURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req = ac.setHTTPHeader(req)
+	return ac.sendRequest(req)
+}
+
 // This function returns response for custom error handling in each function, unlike direct error throwing in sendRequest.
 func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
