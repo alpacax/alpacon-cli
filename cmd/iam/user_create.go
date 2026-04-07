@@ -25,7 +25,7 @@ var userCreateCmd = &cobra.Command{
 		}
 
 		if alpaconClient.AccessToken != "" {
-			utils.CliErrorWithExit("user create is only available for on-premise workspaces. Use 'alpacon user invite' instead.")
+			utils.CliErrorWithExit("user create is only available for self-hosted workspaces. Use 'alpacon user invite' instead")
 		}
 
 		if alpaconClient.Privileges == "general" {
