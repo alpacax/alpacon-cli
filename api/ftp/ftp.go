@@ -21,8 +21,10 @@ const (
 	uploadAPIURL         = "/api/webftp/uploads/"
 	uploadBulkAPIURL     = "/api/webftp/uploads/bulk/"
 	uploadBulkTriggerURL = "/api/webftp/uploads/bulk-upload/"
+	uploadStatusURL      = "/api/webftp/uploads/%s/status/"
 	downloadAPIURL       = "/api/webftp/downloads/"
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
+	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
 	// Polling configuration for transfer status
 	pollInterval       = 2 * time.Second
@@ -38,9 +40,9 @@ const (
 func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout time.Duration) (bool, string, error) {
 	var statusURL string
 	if transferType == "upload" {
-		statusURL = fmt.Sprintf("%s%s/status/", uploadAPIURL, id)
+		statusURL = fmt.Sprintf(uploadStatusURL, id)
 	} else {
-		statusURL = fmt.Sprintf("%s%s/status/", downloadAPIURL, id)
+		statusURL = fmt.Sprintf(downloadStatusURL, id)
 	}
 
 	maxRetries := int(timeout / pollInterval)
