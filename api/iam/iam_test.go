@@ -11,6 +11,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetUserList_Pagination(t *testing.T) {
@@ -295,6 +296,53 @@ func TestGetUserList_StatusMapping(t *testing.T) {
 		if u.LDAPStatus != expected[i].ldap {
 			t.Errorf("user[%d] ldap_status: expected %q, got %q", i, expected[i].ldap, u.LDAPStatus)
 		}
+	}
+}
+
+func TestInviteUser(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		response   string
+		wantErr    bool
+	}{
+		{
+			name:       "success",
+			statusCode: http.StatusOK,
+			response:   `{"detail": ["User invitation sent."]}`,
+			wantErr:    false,
+		},
+		{
+			name:       "user already exists",
+			statusCode: http.StatusBadRequest,
+			response:   `{"detail": "user already exists in workspace"}`,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, inviteUserURL, r.URL.Path)
+				var req UserInviteRequest
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+				assert.Equal(t, "test@example.com", req.Email)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := InviteUser(ac, UserInviteRequest{Email: "test@example.com"})
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }
 

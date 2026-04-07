@@ -24,6 +24,10 @@ var userCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		if alpaconClient.AccessToken != "" {
+			utils.CliErrorWithExit("user create is only available for self-hosted workspaces. Use 'alpacon user invite' instead")
+		}
+
 		if alpaconClient.Privileges == "general" {
 			utils.CliErrorWithExit("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
