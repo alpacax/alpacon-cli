@@ -37,11 +37,16 @@ Remote paths use the format [USER@]SERVER:/path.`,
   alpacon cp -u admin /local/file.txt my-server:/remote/path/
 
   # Specify groupname
-  alpacon cp -g developers /local/file.txt my-server:/remote/path/`,
+  alpacon cp -g developers /local/file.txt my-server:/remote/path/
+
+  # Upload without overwriting existing files
+  alpacon cp --no-overwrite /local/file.txt my-server:/remote/path/`,
 	Run: func(cmd *cobra.Command, args []string) {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
 		recursive, _ := cmd.Flags().GetBool("recursive")
+		noOverwrite, _ := cmd.Flags().GetBool("no-overwrite")
+		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
 			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
@@ -93,7 +98,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, _ := utils.SplitPath(dest)
-			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -108,7 +113,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
 					},
 				})
 
@@ -121,7 +126,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			serverName, _ := utils.SplitPath(sources[0])
-			err := downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+			err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -136,16 +141,18 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return downloadObject(alpaconClient, sources[0], dest, username, groupname, recursive)
+						return downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
 					},
 				})
 
 				if err != nil {
-					utils.CliErrorWithExit("Failed to download from '%s': %s", sources[0], err)
+					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)
 					return
 				}
 			}
-			utils.CliSuccess("Downloaded %s to %s", sources[0], dest)
+			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
+			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
 			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
@@ -160,6 +167,7 @@ func init() {
 	var username, groupname string
 
 	CpCmd.Flags().BoolP("recursive", "r", false, "Recursively copy directories")
+	CpCmd.Flags().BoolP("no-overwrite", "n", false, "Do not overwrite existing files on the server")
 	CpCmd.Flags().StringVarP(&username, "username", "u", "", "Specify username")
 	CpCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Specify groupname")
 }
@@ -205,7 +213,9 @@ func validatePaths(sources []string, dest string) error {
 	}
 
 	// Check for invalid remote path format
-	allPaths := append(sources, dest)
+	allPaths := make([]string, 0, len(sources)+1)
+	allPaths = append(allPaths, sources...)
+	allPaths = append(allPaths, dest)
 	for _, path := range allPaths {
 		if isRemotePath(path) {
 			if !strings.Contains(path, ":") {
@@ -230,16 +240,16 @@ func validatePaths(sources []string, dest string) error {
 	return nil
 }
 
-func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive bool) error {
+func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool) error {
 	var err error
 
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
-		err = ftp.UploadFolder(client, src, dest, username, groupname)
+		err = ftp.UploadFolder(client, src, dest, username, groupname, allowOverwrite)
 	} else {
-		err = ftp.UploadFile(client, src, dest, username, groupname)
+		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite)
 	}
 	if err != nil {
 		// Parse error and provide specific guidance
@@ -271,11 +281,12 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	return nil
 }
 
-func downloadObject(client *client.AlpaconClient, src, dest, username, groupname string, recursive bool) error {
+func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool) error {
 	// Extract server name for better error messages
-	serverName, remotePath := utils.SplitPath(src)
+	serverName, remotePath := utils.SplitPath(sources[0])
+	srcDisplay := strings.Join(sources, ", ")
 
-	err := ftp.DownloadFile(client, src, dest, username, groupname, recursive)
+	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive)
 	if err != nil {
 		// Parse error and provide specific guidance
 		errStr := err.Error()
@@ -286,14 +297,14 @@ func downloadObject(client *client.AlpaconClient, src, dest, username, groupname
 				"  • File exists: alpacon exec %s 'ls -la %s'\n"+
 				"  • You have read permissions for the file\n"+
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
-				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), src, dest)
+				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), srcDisplay, dest)
 		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
 			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
 				"  • Download as file owner: alpacon cp -u OWNER %s %s\n"+
 				"  • Check file permissions: alpacon exec %s 'ls -la %s'",
-				remotePath, serverName, src, dest, src, dest, serverName, remotePath)
+				remotePath, serverName, srcDisplay, dest, srcDisplay, dest, serverName, remotePath)
 		} else if strings.Contains(errStr, "server not found") || strings.Contains(errStr, "unknown host") {
 			utils.CliErrorWithExit("Server '%s' not found.\n\n"+
 				"Please check:\n"+
