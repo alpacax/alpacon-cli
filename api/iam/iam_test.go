@@ -11,6 +11,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetUserList_Pagination(t *testing.T) {
@@ -344,11 +345,10 @@ func TestInviteUser(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			err := InviteUser(ac, UserInviteRequest{Email: "test@example.com"})
 
-			if tt.wantErr && err == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
