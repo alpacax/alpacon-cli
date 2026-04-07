@@ -87,7 +87,12 @@ func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string)
 	}
 
 	var mfaResp mfaResponse
-	_ = json.Unmarshal(responseBody, &mfaResp)
+	if err := json.Unmarshal(responseBody, &mfaResp); err != nil {
+		return "", fmt.Errorf("failed to parse MFA URL response: %w", err)
+	}
+	if mfaResp.MfaURL == "" {
+		return "", fmt.Errorf("MFA URL is empty in server response")
+	}
 
 	return mfaResp.MfaURL, nil
 }

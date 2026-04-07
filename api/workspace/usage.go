@@ -36,26 +36,50 @@ func GetPaymentAPIBaseURL(workspaceURL string) (string, error) {
 }
 
 // GetWorkspaceID retrieves the workspace UUID from the payment API by matching schema_name.
+// It follows pagination until the workspace is found or all pages are exhausted.
 func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName string) (string, error) {
 	listURL := paymentBaseURL + paymentWorkspacesURL
-	body, err := ac.SendGetRequestToURL(listURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to list workspaces from payment API: %w", err)
-	}
 
-	var response struct {
-		Results []struct {
-			ID         string `json:"id"`
-			SchemaName string `json:"schema_name"`
-		} `json:"results"`
-	}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("failed to parse workspace list: %w", err)
-	}
+	for listURL != "" {
+		body, err := ac.SendGetRequestToURL(listURL)
+		if err != nil {
+			return "", fmt.Errorf("failed to list workspaces from payment API: %w", err)
+		}
 
-	for _, ws := range response.Results {
-		if ws.SchemaName == workspaceName {
-			return ws.ID, nil
+		var response struct {
+			Next    string `json:"next"`
+			Results []struct {
+				ID         string `json:"id"`
+				SchemaName string `json:"schema_name"`
+			} `json:"results"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			return "", fmt.Errorf("failed to parse workspace list: %w", err)
+		}
+
+		for _, ws := range response.Results {
+			if ws.SchemaName == workspaceName {
+				return ws.ID, nil
+			}
+		}
+
+		if response.Next == "" {
+			break
+		}
+
+		// Resolve relative next URLs against the current URL.
+		parsedNext, err := url.Parse(response.Next)
+		if err != nil {
+			return "", fmt.Errorf("failed to parse next page URL: %w", err)
+		}
+		if parsedNext.IsAbs() {
+			listURL = parsedNext.String()
+		} else {
+			parsedCurrent, err := url.Parse(listURL)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse current page URL: %w", err)
+			}
+			listURL = parsedCurrent.ResolveReference(parsedNext).String()
 		}
 	}
 
