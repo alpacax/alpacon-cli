@@ -130,6 +130,21 @@ func LoadConfig() (Config, error) {
 	return config, nil
 }
 
+// IsSaaS returns true if the workspace is an Alpacon Cloud (SaaS) deployment authenticated
+// via Auth0. OnPrem deployments use a legacy API token and return false.
+func IsSaaS() (bool, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return false, err
+	}
+	return cfg.AccessToken != "", nil
+}
+
+// IsSaaS returns true if the config represents an Alpacon Cloud (SaaS) deployment.
+func (c Config) IsSaaS() bool {
+	return c.AccessToken != ""
+}
+
 // GetSmuxConfig returns a ready-to-use smux configuration.
 func GetSmuxConfig() *smux.Config {
 	config := smux.DefaultConfig()

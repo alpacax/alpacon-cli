@@ -73,6 +73,30 @@ func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, err
 	return GetMFALink(ac, serverID, cfg.WorkspaceName)
 }
 
+// GetWorkspaceSecurityMFALink returns an MFA URL for workspace security settings.
+// Uses location "cli" so the mfa-success page notifies the backend,
+// enabling CheckMFACompletion polling to detect when MFA is done.
+func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string) (string, error) {
+	params := map[string]string{
+		"location":  "cli",
+		"workspace": workspaceName,
+	}
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
+	if err != nil {
+		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
+	}
+
+	var mfaResp mfaResponse
+	if err := json.Unmarshal(responseBody, &mfaResp); err != nil {
+		return "", fmt.Errorf("failed to parse MFA URL response: %w", err)
+	}
+	if mfaResp.MfaURL == "" {
+		return "", fmt.Errorf("MFA URL is empty in server response")
+	}
+
+	return mfaResp.MfaURL, nil
+}
+
 func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
 	params := map[string]string{
 		"location":  "cli",

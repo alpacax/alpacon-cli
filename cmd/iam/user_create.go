@@ -3,6 +3,7 @@ package iam
 import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -19,13 +20,17 @@ var userCreateCmd = &cobra.Command{
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 
+		isSaaS, err := config.IsSaaS()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+		if isSaaS {
+			utils.CliErrorWithExit("This command is only available for self-hosted workspaces. Use 'alpacon user invite' instead.")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		if alpaconClient.AccessToken != "" {
-			utils.CliErrorWithExit("user create is only available for self-hosted workspaces. Use 'alpacon user invite' instead")
 		}
 
 		if alpaconClient.Privileges == "general" {
