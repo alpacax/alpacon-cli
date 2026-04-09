@@ -18,17 +18,12 @@ var workspaceUsageCmd = &cobra.Command{
 	alpacon workspace usage
 	alpacon ws usage`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		isSaaS, err := config.IsSaaS()
+		cfg, err := config.LoadConfig()
 		if err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
-		if !isSaaS {
+		if !cfg.IsSaaS() {
 			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
-		}
-
-		cfg, err := config.LoadConfig()
-		if err != nil {
-			utils.CliErrorWithExit("Failed to load configuration: %s.", err)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

@@ -140,6 +140,11 @@ func IsSaaS() (bool, error) {
 	return cfg.AccessToken != "", nil
 }
 
+// IsSaaS returns true if the config represents an Alpacon Cloud (SaaS) deployment.
+func (c Config) IsSaaS() bool {
+	return c.AccessToken != ""
+}
+
 // GetSmuxConfig returns a ready-to-use smux configuration.
 func GetSmuxConfig() *smux.Config {
 	config := smux.DefaultConfig()

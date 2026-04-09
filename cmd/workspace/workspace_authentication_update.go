@@ -25,11 +25,11 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
-		isSaaS, err := config.IsSaaS()
+		cfg, err := config.LoadConfig()
 		if err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
-		if !isSaaS {
+		if !cfg.IsSaaS() {
 			utils.CliErrorWithExit("This command is only available on Alpacon Cloud workspaces.")
 		}
 
@@ -48,10 +48,6 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		if err != nil {
 			err = utils.HandleCommonErrors(err, "", utils.ErrorHandlerCallbacks{
 				OnMFARequired: func(_ string) error {
-					cfg, loadErr := config.LoadConfig()
-					if loadErr != nil {
-						return fmt.Errorf("failed to load configuration: %w", loadErr)
-					}
 					mfaURL, mfaErr := mfa.GetWorkspaceSecurityMFALink(alpaconClient, cfg.WorkspaceName)
 					if mfaErr != nil {
 						return mfaErr

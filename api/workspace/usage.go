@@ -65,7 +65,7 @@ func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName stri
 			}
 		}
 
-		if response.Next == nil {
+		if response.Next == nil || *response.Next == 0 {
 			break
 		}
 		page = *response.Next
