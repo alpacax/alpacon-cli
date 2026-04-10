@@ -26,13 +26,15 @@ var serverCreateCmd = &cobra.Command{
 	Short: "Register a new server with a registration token",
 	Long: `
 	Register a new server by selecting a registration token and generating an installation guide.
-	The guide includes the alpamon register command to run on your server.
+	The guide includes the Alpamon register command to run on your server.
 
 	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
-	Example: `alpacon server create
-alpacon server create --platform debian --token prod-token
-alpacon server create --platform rhel --token prod-token --name my-server`,
+	Example: `
+	alpacon server create
+	alpacon server create --platform debian --token prod-token
+	alpacon server create --platform rhel --token prod-token --name my-server
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

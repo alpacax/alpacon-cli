@@ -31,7 +31,9 @@ var serverTokenRegenerateCmd = &cobra.Command{
 	Regenerate the registration token with the given name.
 	The old token is revoked and a new one is issued. The new token is shown only once—save it immediately.
 	`,
-	Example: `alpacon server token regenerate my-token`,
+	Example: `
+	alpacon server token regenerate my-token
+	`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		tokenName := args[0]
