@@ -24,4 +24,5 @@ func init() {
 	ServerCmd.AddCommand(serverCreateCmd)
 	ServerCmd.AddCommand(serverDeleteCmd)
 	ServerCmd.AddCommand(serverUpdateCmd)
+	ServerCmd.AddCommand(serverTokenCmd)
 }

@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	serverURL = "/api/servers/servers/"
+	serverURL                = "/api/servers/servers/"
+	registrationTokenURL     = "/api/servers/registration-tokens/"
+	registrationGuideURL     = "/api/servers/registration-methods/token-install/guide/"
 )
 
 func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
@@ -123,9 +125,9 @@ func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 	return responseBody, nil
 }
 
-func CreateServer(ac *client.AlpaconClient, serverRequest ServerRequest) (ServerCreatedResponse, error) {
+func CreateRegistrationToken(ac *client.AlpaconClient, req RegistrationTokenRequest) (ServerCreatedResponse, error) {
 	var response ServerCreatedResponse
-	responseBody, err := ac.SendPostRequest(serverURL, serverRequest)
+	responseBody, err := ac.SendPostRequest(registrationTokenURL, req)
 	if err != nil {
 		return ServerCreatedResponse{}, err
 	}
@@ -136,4 +138,70 @@ func CreateServer(ac *client.AlpaconClient, serverRequest ServerRequest) (Server
 	}
 
 	return response, nil
+}
+
+func GetRegistrationTokenByName(ac *client.AlpaconClient, name string) (RegistrationTokenDetails, error) {
+	params := map[string]string{"search": name}
+	body, err := ac.SendGetRequest(utils.BuildURL(registrationTokenURL, "", params))
+	if err != nil {
+		return RegistrationTokenDetails{}, err
+	}
+
+	var response api.ListResponse[RegistrationTokenDetails]
+	if err = json.Unmarshal(body, &response); err != nil {
+		return RegistrationTokenDetails{}, err
+	}
+
+	for _, t := range response.Results {
+		if t.Name == name {
+			return t, nil
+		}
+	}
+
+	return RegistrationTokenDetails{}, errors.New("no registration token found with the given name")
+}
+
+func DeleteRegistrationToken(ac *client.AlpaconClient, tokenID string) error {
+	_, err := ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, tokenID, nil))
+	return err
+}
+
+func RegenerateRegistrationToken(ac *client.AlpaconClient, name string) (ServerCreatedResponse, error) {
+	existing, err := GetRegistrationTokenByName(ac, name)
+	if err != nil {
+		return ServerCreatedResponse{}, err
+	}
+
+	if err = DeleteRegistrationToken(ac, existing.ID); err != nil {
+		return ServerCreatedResponse{}, err
+	}
+
+	return CreateRegistrationToken(ac, RegistrationTokenRequest{
+		Name:          existing.Name,
+		AllowedGroups: existing.AllowedGroups,
+	})
+}
+
+func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetails, error) {
+	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
+}
+
+func GetRegistrationGuide(ac *client.AlpaconClient, platform, serverName, tokenID string) (string, error) {
+	req := RegistrationMethodGuideRequest{
+		Platform:          platform,
+		ServerName:        serverName,
+		RegistrationToken: tokenID,
+	}
+
+	body, err := ac.SendPostRequest(registrationGuideURL, req)
+	if err != nil {
+		return "", err
+	}
+
+	var response RegistrationMethodGuideResponse
+	if err = json.Unmarshal(body, &response); err != nil {
+		return "", err
+	}
+
+	return response.Content, nil
 }

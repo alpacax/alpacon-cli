@@ -14,18 +14,44 @@ type ServerAttributes struct {
 	Owner     string `json:"owner"`
 }
 
-type ServerRequest struct {
-	Name     string   `json:"name"`
-	Platform string   `json:"platform"`
-	Groups   []string `json:"groups"`
+// RegistrationTokenRequest is used to create a new server registration token.
+type RegistrationTokenRequest struct {
+	Name          string   `json:"name"`
+	AllowedGroups []string `json:"allowed_groups,omitempty"`
 }
 
+// ServerCreatedResponse holds the result after creating a server registration token.
+// The Key field is only returned once at creation time.
 type ServerCreatedResponse struct {
-	Name         string   `json:"name"`
-	ID           string   `json:"id"`
-	Instruction1 string   `json:"instruction_1"`
-	Instruction2 string   `json:"instruction_2"`
-	Groups       []string `json:"groups"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	AllowedGroups []string `json:"allowed_groups"`
+	Key           string   `json:"key"`
+	AddedAt       string   `json:"added_at"`
+}
+
+// RegistrationTokenDetails is used when listing or looking up existing tokens.
+// The Key field is not included—it is only available at creation time.
+type RegistrationTokenDetails struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	AllowedGroups []string `json:"allowed_groups"`
+	Enabled       bool     `json:"enabled"`
+	AddedAt       string   `json:"added_at"`
+}
+
+// RegistrationMethodGuideRequest is the request body for the guide API.
+type RegistrationMethodGuideRequest struct {
+	Platform          string `json:"platform"`
+	ServerName        string `json:"server_name,omitempty"`
+	RegistrationToken string `json:"registration_token,omitempty"`
+}
+
+// RegistrationMethodGuideResponse is the response from the guide API.
+// Content contains the rendered installation guide with the actual token key embedded.
+type RegistrationMethodGuideResponse struct {
+	MethodID string `json:"method_id"`
+	Content  string `json:"content"`
 }
 
 type ServerStatus struct {
