@@ -112,6 +112,9 @@ var platforms = []struct {
 }
 
 func selectPlatform() string {
+	if !utils.IsInteractiveShell() {
+		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: debian, rhel, darwin.")
+	}
 	fmt.Fprintln(os.Stderr, "What is the server's OS?")
 	for i, p := range platforms {
 		fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, p.label)
@@ -128,6 +131,9 @@ func selectPlatform() string {
 }
 
 func promptForServerName() string {
+	if !utils.IsInteractiveShell() {
+		return ""
+	}
 	fmt.Fprintln(os.Stderr, "Server name (optional—hostname will be used if not specified):")
 	return strings.TrimSpace(utils.PromptForInput("Server Name: "))
 }
@@ -135,6 +141,9 @@ func promptForServerName() string {
 // selectOrCreateToken lists existing registration tokens and lets the user pick one
 // or create a new one. Returns the selected or newly created token UUID.
 func selectOrCreateToken(ac *client.AlpaconClient) string {
+	if !utils.IsInteractiveShell() {
+		utils.CliErrorWithExit("Non-interactive mode requires --token or --new-token.")
+	}
 	tokens, err := server.ListRegistrationTokens(ac)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to retrieve registration tokens: %s.", err)
