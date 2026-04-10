@@ -145,17 +145,12 @@ func CreateRegistrationToken(ac *client.AlpaconClient, req RegistrationTokenRequ
 
 func GetRegistrationTokenByName(ac *client.AlpaconClient, name string) (RegistrationTokenDetails, error) {
 	params := map[string]string{"search": name}
-	body, err := ac.SendGetRequest(utils.BuildURL(registrationTokenURL, "", params))
+	tokens, err := api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, params)
 	if err != nil {
 		return RegistrationTokenDetails{}, err
 	}
 
-	var response api.ListResponse[RegistrationTokenDetails]
-	if err = json.Unmarshal(body, &response); err != nil {
-		return RegistrationTokenDetails{}, err
-	}
-
-	for _, t := range response.Results {
+	for _, t := range tokens {
 		if t.Name == name {
 			return t, nil
 		}

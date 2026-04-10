@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -60,12 +62,10 @@ func init() {
 // resolvePlatform returns the platform value from --platform flag or interactively.
 func resolvePlatform(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("platform") {
-		for _, p := range platforms {
-			if p.value == createPlatform {
-				return createPlatform
-			}
+		if !slices.Contains(validPlatforms, createPlatform) {
+			utils.CliErrorWithExit("Invalid platform %q. Valid values: debian, rhel, darwin.", createPlatform)
 		}
-		utils.CliErrorWithExit("Invalid platform %q. Valid values: debian, rhel, darwin.", createPlatform)
+		return createPlatform
 	}
 	return selectPlatform()
 }
@@ -102,31 +102,18 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 	return selectOrCreateToken(ac)
 }
 
-var platforms = []struct {
-	label string
-	value string
-}{
-	{"Debian family (Ubuntu, Debian)", "debian"},
-	{"RedHat family (RHEL, CentOS, Fedora, Amazon/Rocky/Oracle Linux)", "rhel"},
-	{"macOS (Apple Silicon, Intel)", "darwin"},
-}
+var validPlatforms = []string{"debian", "rhel", "darwin"}
 
 func selectPlatform() string {
 	if !utils.IsInteractiveShell() {
 		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: debian, rhel, darwin.")
 	}
-	fmt.Fprintln(os.Stderr, "What is the server's OS?")
-	for i, p := range platforms {
-		fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, p.label)
-	}
-
 	for {
-		input := strings.TrimSpace(utils.PromptForRequiredInput("OS: "))
-		idx := utils.SplitAndParseInt(input)
-		if len(idx) == 1 && idx[0] >= 1 && idx[0] <= len(platforms) {
-			return platforms[idx[0]-1].value
+		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput("Platform (debian, rhel, darwin): ")))
+		if slices.Contains(validPlatforms, platform) {
+			return platform
 		}
-		utils.CliWarning("Invalid selection. Enter a number between 1 and %d.", len(platforms))
+		utils.CliWarning("Invalid platform. Valid values: debian, rhel, darwin.")
 	}
 }
 
@@ -162,9 +149,9 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 			return createNewToken(ac)
 		}
 
-		idx := utils.SplitAndParseInt(input)
-		if len(idx) == 1 && idx[0] >= 1 && idx[0] <= len(tokens) {
-			return tokens[idx[0]-1].ID
+		idx, err := strconv.Atoi(input)
+		if err == nil && idx >= 1 && idx <= len(tokens) {
+			return tokens[idx-1].ID
 		}
 		utils.CliWarning("Invalid selection. Enter a number from the list or '+' to create a new token.")
 	}
