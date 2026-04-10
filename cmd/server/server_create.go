@@ -25,7 +25,7 @@ var serverCreateCmd = &cobra.Command{
 	Register a new server by selecting a registration token and generating an installation guide.
 	The guide includes the alpamon register command to run on your server.
 
-	When --platform and --token are provided, the command runs non-interactively.
+	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
 	Example: `alpacon server create
 alpacon server create --platform debian --token prod-token

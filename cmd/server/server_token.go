@@ -24,24 +24,24 @@ var serverTokenCmd = &cobra.Command{
 }
 
 var serverTokenRegenerateCmd = &cobra.Command{
-	Use:     "regenerate SERVER",
+	Use:     "regenerate TOKEN",
 	Aliases: []string{"regen"},
-	Short:   "Regenerate a registration token for a server",
+	Short:   "Regenerate a registration token",
 	Long: `
-	Regenerate the registration token for the given server.
+	Regenerate the registration token with the given name.
 	The old token is revoked and a new one is issued. The new token is shown only once—save it immediately.
 	`,
-	Example: `alpacon server token regenerate my-server`,
+	Example: `alpacon server token regenerate my-token`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		serverName := args[0]
+		tokenName := args[0]
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		response, err := server.RegenerateRegistrationToken(alpaconClient, serverName)
+		response, err := server.RegenerateRegistrationToken(alpaconClient, tokenName)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to regenerate the registration token: %s.", err)
 		}
@@ -56,11 +56,11 @@ func init() {
 
 func printRegistrationTokenInfo(response server.ServerCreatedResponse) {
 	fmt.Fprintln(os.Stderr)
-	utils.PrintHeader("Server registration token created")
+	utils.PrintHeader("Registration token regenerated")
 	fmt.Fprintf(os.Stderr, "Name:  %s\n", response.Name)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Registration token (shown only once—save it now):")
 	fmt.Fprintln(os.Stderr, utils.Green(response.Key))
 	fmt.Fprintln(os.Stderr)
-	utils.CliWarning("Use this token to register an Alpamon agent. After leaving this page, you cannot retrieve the token again.")
+	utils.CliWarning("Use this token to register an Alpamon agent. After exiting, you cannot retrieve the token again.")
 }

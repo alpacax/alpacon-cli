@@ -172,14 +172,22 @@ func RegenerateRegistrationToken(ac *client.AlpaconClient, name string) (ServerC
 		return ServerCreatedResponse{}, err
 	}
 
-	if err = DeleteRegistrationToken(ac, existing.ID); err != nil {
-		return ServerCreatedResponse{}, err
-	}
-
-	return CreateRegistrationToken(ac, RegistrationTokenRequest{
+	created, err := CreateRegistrationToken(ac, RegistrationTokenRequest{
 		Name:          existing.Name,
 		AllowedGroups: existing.AllowedGroups,
 	})
+	if err != nil {
+		return ServerCreatedResponse{}, err
+	}
+
+	if err = DeleteRegistrationToken(ac, existing.ID); err != nil {
+		if rollbackErr := DeleteRegistrationToken(ac, created.ID); rollbackErr != nil {
+			return ServerCreatedResponse{}, fmt.Errorf("delete old registration token: %w; rollback new registration token: %v", err, rollbackErr)
+		}
+		return ServerCreatedResponse{}, fmt.Errorf("delete old registration token: %w", err)
+	}
+
+	return created, nil
 }
 
 func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetails, error) {
