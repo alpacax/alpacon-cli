@@ -33,7 +33,7 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 		}
 
 		var results []EventDetails
-		for i := 0; i < 25; i++ {
+		for i := range 25 {
 			results = append(results, EventDetails{
 				ID:          fmt.Sprintf("evt-%d", i),
 				Server:      types.ServerSummary{Name: "test-server"},
@@ -98,6 +98,27 @@ func TestPollCommandExecution(t *testing.T) {
 			wantStatus:     "error",
 			wantResult:     "done",
 			wantRequests:   1,
+		},
+		{
+			name:           "queued then delivered then running then success",
+			statusSequence: []string{"queued", "delivered", "running", "success"},
+			wantStatus:     "success",
+			wantResult:     "done",
+			wantRequests:   4,
+		},
+		{
+			name:           "scheduled then queued then success",
+			statusSequence: []string{"scheduled", "queued", "success"},
+			wantStatus:     "success",
+			wantResult:     "done",
+			wantRequests:   3,
+		},
+		{
+			name:           "verifying then running then success",
+			statusSequence: []string{"verifying", "running", "success"},
+			wantStatus:     "success",
+			wantResult:     "done",
+			wantRequests:   3,
 		},
 	}
 
