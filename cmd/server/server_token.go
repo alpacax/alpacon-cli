@@ -54,7 +54,7 @@ func init() {
 	serverTokenCmd.AddCommand(serverTokenRegenerateCmd)
 }
 
-func printRegistrationTokenInfo(response server.ServerCreatedResponse) {
+func printRegistrationTokenInfo(response server.RegistrationTokenCreatedResponse) {
 	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Registration token regenerated")
 	fmt.Fprintf(os.Stderr, "Name:  %s\n", response.Name)

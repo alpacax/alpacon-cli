@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -88,7 +89,10 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 	if cmd.Flags().Changed("token") {
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
 		if err != nil {
-			utils.CliErrorWithExit("Registration token %q not found: %s.", createTokenName, err)
+			if errors.Is(err, server.ErrRegistrationTokenNotFound) {
+				utils.CliErrorWithExit("Registration token %q not found.", createTokenName)
+			}
+			utils.CliErrorWithExit("Failed to retrieve registration token %q: %s.", createTokenName, err)
 		}
 		return token.ID
 	}

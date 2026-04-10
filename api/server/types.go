@@ -20,9 +20,9 @@ type RegistrationTokenRequest struct {
 	AllowedGroups []string `json:"allowed_groups,omitempty"`
 }
 
-// ServerCreatedResponse holds the result after creating a server registration token.
+// RegistrationTokenCreatedResponse holds the result after creating a server registration token.
 // The Key field is only returned once at creation time.
-type ServerCreatedResponse struct {
+type RegistrationTokenCreatedResponse struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups"`

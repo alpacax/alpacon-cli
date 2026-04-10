@@ -156,7 +156,7 @@ func TestGetServerNameByID(t *testing.T) {
 }
 
 func TestCreateRegistrationToken(t *testing.T) {
-	want := ServerCreatedResponse{
+	want := RegistrationTokenCreatedResponse{
 		ID:   "token-uuid-abc",
 		Name: "new-server",
 		Key:  "alpacax_sometoken",
@@ -263,7 +263,7 @@ func TestRegenerateRegistrationToken(t *testing.T) {
 				t.Error("CreateRegistrationToken called after DeleteRegistrationToken")
 			}
 			createCalled = true
-			resp := ServerCreatedResponse{ID: newID, Name: tokName, Key: newKey}
+			resp := RegistrationTokenCreatedResponse{ID: newID, Name: tokName, Key: newKey}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
 
