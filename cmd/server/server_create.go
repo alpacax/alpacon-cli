@@ -47,11 +47,12 @@ var serverCreateCmd = &cobra.Command{
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
+		guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
+		}
+
 		if createJSON {
-			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
-			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			if err := enc.Encode(guide); err != nil {
@@ -60,12 +61,7 @@ var serverCreateCmd = &cobra.Command{
 			return
 		}
 
-		guide, err := server.GetRegistrationGuide(alpaconClient, platform, serverName, tokenID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
-		}
-
-		displayGuide(guide)
+		displayGuideFromJSON(guide)
 	},
 }
 
@@ -189,8 +185,30 @@ func createTokenAndWarn(ac *client.AlpaconClient, name string) string {
 	return response.ID
 }
 
-func displayGuide(content string) {
+func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
 	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Installation guide")
-	fmt.Fprintln(os.Stderr, content)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  Platform : %s\n", guide.PlatformLabel)
+	if guide.ServerName != "" {
+		fmt.Fprintf(os.Stderr, "  Server   : %s\n", guide.ServerName)
+	}
+	fmt.Fprintf(os.Stderr, "  URL      : %s\n", guide.AlpaconURL)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Alpamon"))
+	fmt.Fprintln(os.Stderr)
+	for _, installCmd := range guide.InstallCommands {
+		fmt.Fprintln(os.Stderr, installCmd)
+	}
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Register"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.RegisterCommand)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Verify"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
 }
