@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ var (
 	createName         string
 	createTokenName    string
 	createNewTokenName string
+	createJSON         bool
 )
 
 var serverCreateCmd = &cobra.Command{
@@ -45,6 +47,19 @@ var serverCreateCmd = &cobra.Command{
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
+		if createJSON {
+			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+			if err != nil {
+				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(guide); err != nil {
+				utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+			}
+			return
+		}
+
 		guide, err := server.GetRegistrationGuide(alpaconClient, platform, serverName, tokenID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
@@ -59,6 +74,7 @@ func init() {
 	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
+	serverCreateCmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
 }
 
 // resolvePlatform returns the platform value from --platform flag or interactively.

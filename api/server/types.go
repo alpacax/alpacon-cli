@@ -54,6 +54,21 @@ type RegistrationMethodGuideResponse struct {
 	Content  string `json:"content"`
 }
 
+// RegistrationMethodGuideJsonResponse is the structured JSON response from the guide API
+// when response_type=json is requested.
+type RegistrationMethodGuideJsonResponse struct {
+	MethodID         string   `json:"method_id"`
+	Platform         string   `json:"platform"`
+	PlatformLabel    string   `json:"platform_label"`
+	AlpaconURL       string   `json:"alpacon_url"`
+	PackageProxy     *string  `json:"package_proxy"`
+	AllowSudoWithMFA bool     `json:"allow_sudo_with_mfa"`
+	TokenKey         string   `json:"token_key"`
+	ServerName       string   `json:"server_name"`
+	InstallCommands  []string `json:"install_commands"`
+	RegisterCommand  string   `json:"register_command"`
+}
+
 type ServerStatus struct {
 	Code     string           `json:"code"`
 	Icon     string           `json:"icon"`

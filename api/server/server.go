@@ -211,3 +211,24 @@ func GetRegistrationGuide(ac *client.AlpaconClient, platform, serverName, tokenI
 
 	return response.Content, nil
 }
+
+func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
+	req := RegistrationMethodGuideRequest{
+		Platform:          platform,
+		ServerName:        serverName,
+		RegistrationToken: tokenID,
+	}
+
+	url := utils.BuildURL(registrationGuideURL, "", map[string]string{"response_type": "json"})
+	body, err := ac.SendPostRequest(url, req)
+	if err != nil {
+		return RegistrationMethodGuideJsonResponse{}, err
+	}
+
+	var response RegistrationMethodGuideJsonResponse
+	if err = json.Unmarshal(body, &response); err != nil {
+		return RegistrationMethodGuideJsonResponse{}, err
+	}
+
+	return response, nil
+}
