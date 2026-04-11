@@ -23,6 +23,11 @@ var (
 	createJSON         bool
 )
 
+var (
+	validPlatforms     = []string{"debian", "rhel", "darwin"}
+	validPlatformsList = strings.Join(validPlatforms, ", ")
+)
+
 var serverCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Register a new server with a registration token",
@@ -66,7 +71,7 @@ var serverCreateCmd = &cobra.Command{
 }
 
 func init() {
-	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "target OS platform: debian, rhel, darwin")
+	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s", validPlatformsList))
 	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
@@ -78,7 +83,7 @@ func init() {
 func resolvePlatform(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("platform") {
 		if !slices.Contains(validPlatforms, createPlatform) {
-			utils.CliErrorWithExit("Invalid platform %q. Valid values: debian, rhel, darwin.", createPlatform)
+			utils.CliErrorWithExit("Invalid platform %q. Valid values: %s.", createPlatform, validPlatformsList)
 		}
 		return createPlatform
 	}
@@ -114,18 +119,16 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 	return selectOrCreateToken(ac)
 }
 
-var validPlatforms = []string{"debian", "rhel", "darwin"}
-
 func selectPlatform() string {
 	if !utils.IsInteractiveShell() {
-		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: debian, rhel, darwin.")
+		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", validPlatformsList)
 	}
 	for {
-		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput("Platform (debian, rhel, darwin): ")))
+		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput(fmt.Sprintf("Platform (%s): ", validPlatformsList))))
 		if slices.Contains(validPlatforms, platform) {
 			return platform
 		}
-		utils.CliWarning("Invalid platform. Valid values: debian, rhel, darwin.")
+		utils.CliWarning("Invalid platform. Valid values: %s.", validPlatformsList)
 	}
 }
 
