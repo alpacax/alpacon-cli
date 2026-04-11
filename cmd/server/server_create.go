@@ -148,6 +148,11 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 		utils.CliErrorWithExit("Failed to retrieve registration tokens: %s.", err)
 	}
 
+	if len(tokens) == 0 {
+		utils.CliInfo("No existing tokens. Creating a new one.")
+		return createNewToken(ac)
+	}
+
 	fmt.Fprintln(os.Stderr, "Select a registration token:")
 	for i, t := range tokens {
 		fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, t.Name)
