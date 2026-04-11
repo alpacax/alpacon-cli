@@ -192,26 +192,6 @@ func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetail
 	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
 }
 
-func GetRegistrationGuide(ac *client.AlpaconClient, platform, serverName, tokenID string) (string, error) {
-	req := RegistrationMethodGuideRequest{
-		Platform:          platform,
-		ServerName:        serverName,
-		RegistrationToken: tokenID,
-	}
-
-	body, err := ac.SendPostRequest(registrationGuideURL, req)
-	if err != nil {
-		return "", err
-	}
-
-	var response RegistrationMethodGuideResponse
-	if err = json.Unmarshal(body, &response); err != nil {
-		return "", err
-	}
-
-	return response.Content, nil
-}
-
 func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
 	req := RegistrationMethodGuideRequest{
 		Platform:          platform,

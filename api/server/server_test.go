@@ -210,32 +210,6 @@ func TestListRegistrationTokens(t *testing.T) {
 	}
 }
 
-func TestGetRegistrationGuide(t *testing.T) {
-	const wantContent = "Step 1: Install Alpamon\ncurl -s ... | sudo bash"
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		if !strings.Contains(r.URL.Path, "token-install") {
-			t.Errorf("expected token-install in path, got %s", r.URL.Path)
-		}
-		resp := RegistrationMethodGuideResponse{MethodID: "token-install", Content: wantContent}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	got, err := GetRegistrationGuide(ac, "debian", "my-server", "token-uuid-abc")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != wantContent {
-		t.Errorf("expected %q, got %q", wantContent, got)
-	}
-}
-
 func TestRegenerateRegistrationToken(t *testing.T) {
 	const (
 		oldID   = "old-token-uuid"

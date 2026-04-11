@@ -47,15 +47,7 @@ type RegistrationMethodGuideRequest struct {
 	RegistrationToken string `json:"registration_token,omitempty"`
 }
 
-// RegistrationMethodGuideResponse is the response from the guide API.
-// Content contains the rendered installation guide with the actual token key embedded.
-type RegistrationMethodGuideResponse struct {
-	MethodID string `json:"method_id"`
-	Content  string `json:"content"`
-}
-
-// RegistrationMethodGuideJsonResponse is the structured JSON response from the guide API
-// when response_type=json is requested.
+// RegistrationMethodGuideJsonResponse is the structured JSON response from the guide API.
 type RegistrationMethodGuideJsonResponse struct {
 	MethodID         string   `json:"method_id"`
 	Platform         string   `json:"platform"`
