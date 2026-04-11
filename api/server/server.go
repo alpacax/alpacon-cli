@@ -159,35 +159,6 @@ func GetRegistrationTokenByName(ac *client.AlpaconClient, name string) (Registra
 	return RegistrationTokenDetails{}, ErrRegistrationTokenNotFound
 }
 
-func DeleteRegistrationToken(ac *client.AlpaconClient, tokenID string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, tokenID, nil))
-	return err
-}
-
-func RegenerateRegistrationToken(ac *client.AlpaconClient, name string) (RegistrationTokenCreatedResponse, error) {
-	existing, err := GetRegistrationTokenByName(ac, name)
-	if err != nil {
-		return RegistrationTokenCreatedResponse{}, err
-	}
-
-	created, err := CreateRegistrationToken(ac, RegistrationTokenRequest{
-		Name:          existing.Name,
-		AllowedGroups: existing.AllowedGroups,
-	})
-	if err != nil {
-		return RegistrationTokenCreatedResponse{}, err
-	}
-
-	if err = DeleteRegistrationToken(ac, existing.ID); err != nil {
-		if rollbackErr := DeleteRegistrationToken(ac, created.ID); rollbackErr != nil {
-			return RegistrationTokenCreatedResponse{}, fmt.Errorf("delete old registration token %s: %w; rollback new registration token %s: %v", existing.ID, err, created.ID, rollbackErr)
-		}
-		return RegistrationTokenCreatedResponse{}, fmt.Errorf("delete old registration token: %w", err)
-	}
-
-	return created, nil
-}
-
 func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetails, error) {
 	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
 }

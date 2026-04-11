@@ -210,67 +210,6 @@ func TestListRegistrationTokens(t *testing.T) {
 	}
 }
 
-func TestRegenerateRegistrationToken(t *testing.T) {
-	const (
-		oldID   = "old-token-uuid"
-		newID   = "new-token-uuid"
-		newKey  = "alpacax_newkey"
-		tokName = "prod-token"
-	)
-
-	var createCalled, deleteCalled bool
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "search="):
-			// GetRegistrationTokenByName
-			resp := api.ListResponse[RegistrationTokenDetails]{
-				Count:   1,
-				Results: []RegistrationTokenDetails{{ID: oldID, Name: tokName}},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case r.Method == http.MethodPost:
-			// CreateRegistrationToken — must happen before delete
-			if deleteCalled {
-				t.Error("CreateRegistrationToken called after DeleteRegistrationToken")
-			}
-			createCalled = true
-			resp := RegistrationTokenCreatedResponse{ID: newID, Name: tokName, Key: newKey}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-
-		case r.Method == http.MethodDelete:
-			// DeleteRegistrationToken
-			if !createCalled {
-				t.Error("DeleteRegistrationToken called before CreateRegistrationToken")
-			}
-			deleteCalled = true
-			w.WriteHeader(http.StatusNoContent)
-
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	got, err := RegenerateRegistrationToken(ac, tokName)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !createCalled {
-		t.Error("CreateRegistrationToken was not called")
-	}
-	if !deleteCalled {
-		t.Error("DeleteRegistrationToken was not called")
-	}
-	if got.ID != newID || got.Key != newKey {
-		t.Errorf("unexpected response: %+v", got)
-	}
-}
-
 func TestDeleteServer(t *testing.T) {
 	const serverID = "delete-server-id"
 	var deleteCalled bool
