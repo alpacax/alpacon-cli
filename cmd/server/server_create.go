@@ -71,6 +71,7 @@ func init() {
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
 	serverCreateCmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
+	serverCreateCmd.MarkFlagsMutuallyExclusive("token", "new-token")
 }
 
 // resolvePlatform returns the platform value from --platform flag or interactively.
@@ -95,11 +96,8 @@ func resolveName(cmd *cobra.Command) string {
 // resolveTokenID returns a token UUID from flags or interactively.
 // --token: look up existing token by name
 // --new-token: create a new token with the given name and show its key
-// (mutually exclusive; interactive selection used when neither is set)
+// (mutual exclusion enforced by Cobra; interactive selection used when neither is set)
 func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
-	if cmd.Flags().Changed("token") && cmd.Flags().Changed("new-token") {
-		utils.CliErrorWithExit("--token and --new-token are mutually exclusive.")
-	}
 	if cmd.Flags().Changed("token") {
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
 		if err != nil {
