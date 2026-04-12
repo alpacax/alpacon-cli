@@ -1,11 +1,14 @@
 package cmd
 
 import (
-	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/google/go-github/v71/github"
 	"github.com/spf13/cobra"
 )
 
@@ -15,23 +18,48 @@ var versionCmd = &cobra.Command{
 	Long:  "Displays the current version of the CLI and checks if there is an available update.",
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.CliInfo("Current version: %s", utils.Version)
-		release, err := getLatestRelease()
+		tagName, htmlURL, err := getLatestRelease()
 		if err != nil {
 			utils.CliWarning("Could not check for updates: %s", err)
 			return
 		}
-		releaseVersion := strings.TrimPrefix(release.GetTagName(), "v")
+		releaseVersion := strings.TrimPrefix(tagName, "v")
 		if releaseVersion != utils.Version {
-			utils.CliWarning("Upgrade available: %s -> %s\nVisit %s for release notes.", utils.Version, releaseVersion, release.GetHTMLURL())
+			utils.CliWarning("Upgrade available: %s -> %s\nVisit %s for release notes.", utils.Version, releaseVersion, htmlURL)
 		} else {
 			utils.CliInfo("You are up to date!")
 		}
 	},
 }
 
-func getLatestRelease() (*github.RepositoryRelease, error) {
-	ghClient := github.NewClient(nil)
-	ctx := context.Background()
-	release, _, err := ghClient.Repositories.GetLatestRelease(ctx, "alpacax", "alpacon-cli")
-	return release, err
+type githubRelease struct {
+	TagName string `json:"tag_name"`
+	HTMLURL string `json:"html_url"`
+}
+
+func getLatestRelease() (tagName, htmlURL string, err error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/alpacax/alpacon-cli/releases/latest", nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", utils.GetUserAgent())
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("GitHub API returned %s", resp.Status)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
+		return "", "", err
+	}
+
+	return release.TagName, release.HTMLURL, nil
 }

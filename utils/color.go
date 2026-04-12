@@ -1,30 +1,37 @@
 package utils
 
-import (
-	"github.com/gookit/color"
+import "fmt"
+
+const (
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiBlue   = "\033[34m"
 )
 
-// Green converts a string to green color in the console with bold text.
+// Green returns a bold green string for terminal output.
 func Green(value string) string {
-	return color.New(color.FgGreen, color.Bold).Sprint(value)
+	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiGreen, value, ansiReset)
 }
 
-// Yellow converts a string to yellow color in the console with bold text.
+// Yellow returns a bold yellow string for terminal output.
 func Yellow(value string) string {
-	return color.New(color.FgYellow, color.Bold).Sprint(value)
+	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiYellow, value, ansiReset)
 }
 
-// Blue converts a string to blue color in the console with bold text.
+// Blue returns a bold blue string for terminal output.
 func Blue(value string) string {
-	return color.New(color.FgBlue, color.Bold).Sprint(value)
+	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiBlue, value, ansiReset)
 }
 
-// Red converts a string to red color in the console with bold text.
+// Red returns a bold red string for terminal output.
 func Red(value string) string {
-	return color.New(color.FgRed, color.Bold).Sprint(value)
+	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiRed, value, ansiReset)
 }
 
-// Bold converts a string to bold text in the console.
+// Bold returns a bold string for terminal output.
 func Bold(value string) string {
-	return color.New(color.Bold).Sprint(value)
+	return fmt.Sprintf("%s%s%s", ansiBold, value, ansiReset)
 }
