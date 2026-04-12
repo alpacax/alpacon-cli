@@ -7,17 +7,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"golang.org/x/term"
 	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 func ShowLogo() {
@@ -363,9 +364,13 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	return u.String()
 }
 
+var uuidRegex = regexp.MustCompile(
+	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$` +
+		`|^[0-9a-fA-F]{32}$`,
+)
+
 func IsUUID(str string) bool {
-	_, err := uuid.Parse(str)
-	return err == nil
+	return uuidRegex.MatchString(str)
 }
 
 // ProcessEditedData facilitates user modifications to original data,
