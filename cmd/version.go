@@ -53,7 +53,7 @@ func getLatestRelease() (tagName, htmlURL string, err error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("GitHub API returned %d", resp.StatusCode)
+		return "", "", fmt.Errorf("GitHub API returned %s", resp.Status)
 	}
 
 	var release githubRelease
