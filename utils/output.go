@@ -102,7 +102,7 @@ func PrintJson(body []byte) {
 	if OutputFormat == OutputFormatJSON {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
-			CliErrorWithExit("Parsing data: Expected a json format")
+			CliErrorWithExit("Parsing data: Expected a JSON format.")
 		}
 		_, _ = fmt.Fprintln(os.Stdout, buf.String())
 		return
@@ -111,7 +111,7 @@ func PrintJson(body []byte) {
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, body, "", "    ")
 	if err != nil {
-		CliErrorWithExit("Parsing data: Expected a json format")
+		CliErrorWithExit("Parsing data: Expected a JSON format.")
 	}
 
 	formattedJson := strings.ReplaceAll(prettyJSON.String(), "\\n", "\n")
