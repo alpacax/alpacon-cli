@@ -54,6 +54,7 @@ func TestPrintTable_JSONOutput(t *testing.T) {
 		got = captureStdout(t, func() { PrintTable(items) })
 	})
 	assert.JSONEq(t, `[{"name":"alpha","id":1},{"name":"beta","id":2}]`, strings.TrimSpace(got))
+	assert.Contains(t, got, "\n  ")
 }
 
 func TestPrintTable_JSONOutput_EmptySlice(t *testing.T) {
@@ -87,16 +88,14 @@ func TestPrintTable_TableOutput(t *testing.T) {
 }
 
 func TestPrintJson_JSONOutput(t *testing.T) {
-	pretty := []byte(`{
-  "name": "alpha",
-  "id": 1
-}`)
+	compact := []byte(`{"name":"alpha","id":1}`)
 	var got string
 	withFormat("json", func() {
-		got = captureStdout(t, func() { PrintJson(pretty) })
+		got = captureStdout(t, func() { PrintJson(compact) })
 	})
-	assert.Equal(t, `{"name":"alpha","id":1}`, strings.TrimSpace(got))
-	assert.NotContains(t, got, "\n  ")
+	assert.JSONEq(t, `{"name":"alpha","id":1}`, got)
+	assert.Contains(t, got, "\n  \"name\": \"alpha\"")
+	assert.Contains(t, got, "\n  \"id\": 1")
 }
 
 func TestPrintJson_TableOutput(t *testing.T) {

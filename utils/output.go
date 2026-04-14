@@ -30,7 +30,7 @@ func PrintTable(slice any) {
 			fmt.Fprintln(os.Stdout, "[]")
 			return
 		}
-		data, err := json.Marshal(slice)
+		data, err := json.MarshalIndent(slice, "", "  ")
 		if err != nil {
 			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
 		}
@@ -95,7 +95,7 @@ func PrintTable(slice any) {
 func PrintJson(body []byte) {
 	if OutputFormat == "json" {
 		var buf bytes.Buffer
-		if err := json.Compact(&buf, body); err != nil {
+		if err := json.Indent(&buf, body, "", "  "); err != nil {
 			CliErrorWithExit("Parsing data: Expected a json format")
 		}
 		fmt.Fprintln(os.Stdout, buf.String())
