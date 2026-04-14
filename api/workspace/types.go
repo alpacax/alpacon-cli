@@ -9,7 +9,7 @@ type Workspace struct {
 
 // WorkspaceListEntry is used for displaying workspace information in a table.
 type WorkspaceListEntry struct {
-	Name    string
-	Region  string
-	Current string
+	Name    string `json:"name"    table:"Name"`
+	Region  string `json:"region"  table:"Region"`
+	Current string `json:"current" table:"Current"`
 }
