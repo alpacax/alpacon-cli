@@ -1,113 +1,220 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
+var (
+	createPlatform     string
+	createName         string
+	createTokenName    string
+	createNewTokenName string
+	createJSON         bool
+)
+
+var (
+	validPlatforms     = []string{"debian", "rhel", "darwin"}
+	validPlatformsList = strings.Join(validPlatforms, ", ")
+)
+
 var serverCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a new server",
+	Short: "Register a new server with a registration token",
 	Long: `
-	Create a new server with specific configurations. This command allows you to set up a server with a unique name, 
-	choose a platform, and define access permissions for different groups. 
-	`,
-	Example: `alpacon server create`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Register a new server by selecting a registration token and generating an installation guide.
+	The guide includes the Alpamon register command to run on your server.
 
+	When --platform and either --token or --new-token are provided, the command runs non-interactively.
+	`,
+	Example: `
+	alpacon server create
+	alpacon server create --platform debian --token prod-token
+	alpacon server create --platform rhel --token prod-token --name my-server
+	`,
+	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		groupList, err := iam.GetGroupList(alpaconClient)
+		platform := resolvePlatform(cmd)
+		serverName := resolveName(cmd)
+		tokenID := resolveTokenID(cmd, alpaconClient)
+
+		guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the group list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
 		}
 
-		serverRequest := promptForServer(alpaconClient, groupList)
-
-		response, err := server.CreateServer(alpaconClient, serverRequest)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new server: %s.", err)
+		if createJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(guide); err != nil {
+				utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+			}
+			return
 		}
 
-		installServerInfo(response)
+		displayGuideFromJSON(guide)
 	},
 }
 
-func promptForServer(ac *client.AlpaconClient, groupList []iam.GroupAttributes) server.ServerRequest {
-	var serverRequest server.ServerRequest
-
-	serverRequest.Name = utils.PromptForRequiredInput("Server Name: ")
-	serverRequest.Platform = promptForPlatform()
-
-	displayGroups(groupList)
-
-	serverRequest.Groups = selectAndConvertGroups(ac, groupList)
-
-	return serverRequest
+func init() {
+	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s", validPlatformsList))
+	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
+	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
+	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
+	serverCreateCmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
+	serverCreateCmd.MarkFlagsMutuallyExclusive("token", "new-token")
 }
 
-func promptForPlatform() string {
+// resolvePlatform returns the platform value from --platform flag or interactively.
+func resolvePlatform(cmd *cobra.Command) string {
+	if cmd.Flags().Changed("platform") {
+		if !slices.Contains(validPlatforms, createPlatform) {
+			utils.CliErrorWithExit("Invalid platform %q. Valid values: %s.", createPlatform, validPlatformsList)
+		}
+		return createPlatform
+	}
+	return selectPlatform()
+}
+
+// resolveName returns the server name from --name flag or interactively.
+func resolveName(cmd *cobra.Command) string {
+	if cmd.Flags().Changed("name") {
+		return createName
+	}
+	return promptForServerName()
+}
+
+// resolveTokenID returns a token UUID from flags or interactively.
+// --token: look up existing token by name
+// --new-token: create a new token with the given name and show its key
+// (mutual exclusion enforced by Cobra; interactive selection used when neither is set)
+func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
+	if cmd.Flags().Changed("token") {
+		token, err := server.GetRegistrationTokenByName(ac, createTokenName)
+		if err != nil {
+			if errors.Is(err, server.ErrRegistrationTokenNotFound) {
+				utils.CliErrorWithExit("Registration token %q not found.", createTokenName)
+			}
+			utils.CliErrorWithExit("Failed to retrieve registration token %q: %s.", createTokenName, err)
+		}
+		return token.ID
+	}
+	if cmd.Flags().Changed("new-token") {
+		return createTokenAndWarn(ac, createNewTokenName)
+	}
+	return selectOrCreateToken(ac)
+}
+
+func selectPlatform() string {
+	if !utils.IsInteractiveShell() {
+		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", validPlatformsList)
+	}
 	for {
-		platform := utils.PromptForInput("Platform (debian, rhel): ")
-		if strings.ToLower(platform) == "debian" || strings.ToLower(platform) == "rhel" {
+		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput(fmt.Sprintf("Platform (%s): ", validPlatformsList))))
+		if slices.Contains(validPlatforms, platform) {
 			return platform
 		}
-		utils.CliWarning("Invalid platform. Please choose 'debian' or 'rhel'.")
+		utils.CliWarning("Invalid platform. Valid values: %s.", validPlatformsList)
 	}
 }
 
-func displayGroups(groupList []iam.GroupAttributes) {
-	fmt.Fprintln(os.Stderr, "Groups:")
-	for i, group := range groupList {
-		fmt.Fprintf(os.Stderr, "[%d] %s\n", i+1, group.Name)
+func promptForServerName() string {
+	if !utils.IsInteractiveShell() {
+		return ""
 	}
+	fmt.Fprintln(os.Stderr, "Server name (optional—hostname will be used if not specified):")
+	return strings.TrimSpace(utils.PromptForInput("Server Name: "))
 }
 
-func selectAndConvertGroups(ac *client.AlpaconClient, groupList []iam.GroupAttributes) []string {
-	chosenGroups := utils.PromptForRequiredInput("Select groups (e.g., 1,2): ")
-	intGroups := utils.SplitAndParseInt(chosenGroups)
+// selectOrCreateToken lists existing registration tokens and lets the user pick one
+// or create a new one. Returns the selected or newly created token UUID.
+func selectOrCreateToken(ac *client.AlpaconClient) string {
+	if !utils.IsInteractiveShell() {
+		utils.CliErrorWithExit("Non-interactive mode requires --token or --new-token.")
+	}
+	tokens, err := server.ListRegistrationTokens(ac)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to retrieve registration tokens: %s.", err)
+	}
 
-	var groupIDs []string
+	if len(tokens) == 0 {
+		utils.CliInfo("No existing tokens. Creating a new one.")
+		return createNewToken(ac)
+	}
 
-	for _, groupIndex := range intGroups {
-		if groupIndex < 1 || groupIndex > len(groupList) {
-			utils.CliErrorWithExit("Invalid group index: %d. Please choose a number between 1 and %d from the list above", groupIndex, len(groupList))
+	fmt.Fprintln(os.Stderr, "Select a registration token:")
+	for i, t := range tokens {
+		fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, t.Name)
+	}
+	fmt.Fprintln(os.Stderr, "  [+] Create new token")
+
+	for {
+		input := strings.TrimSpace(utils.PromptForRequiredInput("Token: "))
+
+		if input == "+" {
+			return createNewToken(ac)
 		}
 
-		groupID, err := iam.GetGroupIDByName(ac, groupList[groupIndex-1].Name)
-		if err != nil {
-			utils.CliErrorWithExit("Group '%s' not found. Please verify the group exists and try again", groupList[groupIndex-1].Name)
+		idx, err := strconv.Atoi(input)
+		if err == nil && idx >= 1 && idx <= len(tokens) {
+			return tokens[idx-1].ID
 		}
-
-		groupIDs = append(groupIDs, groupID)
+		utils.CliWarning("Invalid selection. Enter a number from the list or '+' to create a new token.")
 	}
-
-	return groupIDs
 }
 
-func installServerInfo(response server.ServerCreatedResponse) {
-	fmt.Fprintln(os.Stderr)
-	utils.PrintHeader("Connecting server to alpacon")
-	fmt.Fprintln(os.Stderr, "We provide two ways to connect your server to alpacon.")
-	fmt.Fprintln(os.Stderr, "Please follow one of the following steps to install the \"alpamon\" agent on your server.")
-
-	printMethod("Simply use our install script:", response.Instruction1)
-	printMethod("Or, do it manually (If you've followed the script above, this is not required):", response.Instruction2)
-	utils.CliWarning("After leaving this page, you cannot obtain the script again for security.")
+func createNewToken(ac *client.AlpaconClient) string {
+	name := utils.PromptForRequiredInput("Token name: ")
+	return createTokenAndWarn(ac, name)
 }
 
-func printMethod(header, instruction string) {
-	fmt.Fprintln(os.Stderr, utils.Green(header))
+func createTokenAndWarn(ac *client.AlpaconClient, name string) string {
+	response, err := server.CreateRegistrationToken(ac, server.RegistrationTokenRequest{Name: name})
+	if err != nil {
+		utils.CliErrorWithExit("Failed to create the registration token: %s.", err)
+	}
+	utils.CliWarning("New token created. Save the key now—it will not be shown again: %s", utils.Green(response.Key))
+	return response.ID
+}
+
+func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, instruction)
+	utils.PrintHeader("Installation guide")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  Platform : %s\n", guide.PlatformLabel)
+	if guide.ServerName != "" {
+		fmt.Fprintf(os.Stderr, "  Server   : %s\n", guide.ServerName)
+	}
+	fmt.Fprintf(os.Stderr, "  URL      : %s\n", guide.AlpaconURL)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Alpamon"))
+	fmt.Fprintln(os.Stderr)
+	for _, installCmd := range guide.InstallCommands {
+		fmt.Fprintln(os.Stderr, installCmd)
+	}
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Register"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.RegisterCommand)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Verify"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
 }

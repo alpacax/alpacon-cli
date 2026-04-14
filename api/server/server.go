@@ -11,8 +11,13 @@ import (
 )
 
 const (
-	serverURL = "/api/servers/servers/"
+	serverURL            = "/api/servers/servers/"
+	registrationTokenURL = "/api/servers/registration-tokens/"
+	registrationGuideURL = "/api/servers/registration-methods/token-install/guide/"
 )
+
+// ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
+var ErrRegistrationTokenNotFound = errors.New("no registration token found with the given name")
 
 func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 	servers, err := api.FetchAllPages[ServerDetails](ac, serverURL, nil)
@@ -123,16 +128,57 @@ func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 	return responseBody, nil
 }
 
-func CreateServer(ac *client.AlpaconClient, serverRequest ServerRequest) (ServerCreatedResponse, error) {
-	var response ServerCreatedResponse
-	responseBody, err := ac.SendPostRequest(serverURL, serverRequest)
+func CreateRegistrationToken(ac *client.AlpaconClient, req RegistrationTokenRequest) (RegistrationTokenCreatedResponse, error) {
+	var response RegistrationTokenCreatedResponse
+	responseBody, err := ac.SendPostRequest(registrationTokenURL, req)
 	if err != nil {
-		return ServerCreatedResponse{}, err
+		return RegistrationTokenCreatedResponse{}, err
 	}
 
 	err = json.Unmarshal(responseBody, &response)
 	if err != nil {
-		return ServerCreatedResponse{}, err
+		return RegistrationTokenCreatedResponse{}, err
+	}
+
+	return response, nil
+}
+
+func GetRegistrationTokenByName(ac *client.AlpaconClient, name string) (RegistrationTokenDetails, error) {
+	params := map[string]string{"search": name}
+	tokens, err := api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, params)
+	if err != nil {
+		return RegistrationTokenDetails{}, err
+	}
+
+	for _, t := range tokens {
+		if t.Name == name {
+			return t, nil
+		}
+	}
+
+	return RegistrationTokenDetails{}, ErrRegistrationTokenNotFound
+}
+
+func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetails, error) {
+	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
+}
+
+func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
+	req := RegistrationMethodGuideRequest{
+		Platform:          platform,
+		ServerName:        serverName,
+		RegistrationToken: tokenID,
+	}
+
+	url := utils.BuildURL(registrationGuideURL, "", map[string]string{"response_type": "json"})
+	body, err := ac.SendPostRequest(url, req)
+	if err != nil {
+		return RegistrationMethodGuideJsonResponse{}, err
+	}
+
+	var response RegistrationMethodGuideJsonResponse
+	if err = json.Unmarshal(body, &response); err != nil {
+		return RegistrationMethodGuideJsonResponse{}, err
 	}
 
 	return response, nil

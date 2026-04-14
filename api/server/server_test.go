@@ -155,11 +155,11 @@ func TestGetServerNameByID(t *testing.T) {
 	}
 }
 
-func TestCreateServer(t *testing.T) {
-	want := ServerCreatedResponse{
-		ID:           "new-server-id",
-		Name:         "new-server",
-		Instruction1: "curl -fsSL install.sh | sh",
+func TestCreateRegistrationToken(t *testing.T) {
+	want := RegistrationTokenCreatedResponse{
+		ID:   "token-uuid-abc",
+		Name: "new-server",
+		Key:  "alpacax_sometoken",
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,12 +172,41 @@ func TestCreateServer(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	got, err := CreateServer(ac, ServerRequest{Name: "new-server", Platform: "linux"})
+	got, err := CreateRegistrationToken(ac, RegistrationTokenRequest{Name: "new-server"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.ID != want.ID || got.Name != want.Name {
+	if got.ID != want.ID || got.Name != want.Name || got.Key != want.Key {
 		t.Errorf("unexpected response: %+v", got)
+	}
+}
+
+func TestListRegistrationTokens(t *testing.T) {
+	tokens := []RegistrationTokenDetails{
+		{ID: "uuid-1", Name: "prod-token", Enabled: true},
+		{ID: "uuid-2", Name: "dev-token", Enabled: true},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		resp := api.ListResponse[RegistrationTokenDetails]{Count: 2, Results: tokens}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	got, err := ListRegistrationTokens(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 tokens, got %d", len(got))
+	}
+	if got[0].Name != "prod-token" || got[1].Name != "dev-token" {
+		t.Errorf("unexpected token names: %v", got)
 	}
 }
 
