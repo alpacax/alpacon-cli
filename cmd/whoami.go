@@ -38,8 +38,6 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 	Example: `  alpacon whoami
   alpacon whoami --output json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		jsonOutput := utils.OutputFormat == utils.OutputFormatJSON
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' to authenticate.")
@@ -57,7 +55,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			utils.CliWarning("Could not create authenticated API client: %s", err)
 			utils.CliWarning("Showing local config only. Server fields are unavailable.")
 			warnIfExpiringSoon(cfg)
-			printWhoami(output, jsonOutput)
+			printWhoami(output)
 			return
 		}
 
@@ -65,7 +63,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		if err != nil {
 			utils.CliWarning("Could not fetch user info: %s", err)
 			warnIfExpiringSoon(cfg)
-			printWhoami(output, jsonOutput)
+			printWhoami(output)
 			return
 		}
 
@@ -85,7 +83,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		}
 
 		warnIfExpiringSoon(cfg)
-		printWhoami(output, jsonOutput)
+		printWhoami(output)
 	},
 }
 
@@ -191,8 +189,8 @@ func formatGroups(groups []iam.GroupMembership) string {
 	return strings.Join(parts, ", ")
 }
 
-func printWhoami(output whoamiOutput, jsonOutput bool) {
-	if jsonOutput {
+func printWhoami(output whoamiOutput) {
+	if utils.OutputFormat == utils.OutputFormatJSON {
 		body, err := json.Marshal(output)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
