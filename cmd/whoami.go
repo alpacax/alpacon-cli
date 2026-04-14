@@ -36,9 +36,9 @@ var whoamiCmd = &cobra.Command{
 and permissions. Useful for verifying context before running infrastructure
 commands, especially for AI agents and operators managing multiple workspaces.`,
 	Example: `  alpacon whoami
-  alpacon whoami --json`,
+  alpacon whoami --output json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		jsonFlag, _ := cmd.Flags().GetBool("json")
+		jsonOutput := utils.OutputFormat == "json"
 
 		cfg, err := config.LoadConfig()
 		if err != nil {
@@ -57,7 +57,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			utils.CliWarning("Could not create authenticated API client: %s", err)
 			utils.CliWarning("Showing local config only. Server fields are unavailable.")
 			warnIfExpiringSoon(cfg)
-			printWhoami(output, jsonFlag)
+			printWhoami(output, jsonOutput)
 			return
 		}
 
@@ -65,7 +65,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		if err != nil {
 			utils.CliWarning("Could not fetch user info: %s", err)
 			warnIfExpiringSoon(cfg)
-			printWhoami(output, jsonFlag)
+			printWhoami(output, jsonOutput)
 			return
 		}
 
@@ -85,12 +85,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		}
 
 		warnIfExpiringSoon(cfg)
-		printWhoami(output, jsonFlag)
+		printWhoami(output, jsonOutput)
 	},
-}
-
-func init() {
-	whoamiCmd.Flags().Bool("json", false, "Output in JSON format")
 }
 
 func getAuthMethod(cfg config.Config) string {
@@ -197,9 +193,11 @@ func formatGroups(groups []iam.GroupMembership) string {
 
 func printWhoami(output whoamiOutput, jsonOutput bool) {
 	if jsonOutput {
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		_ = encoder.Encode(output)
+		body, err := json.Marshal(output)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
+		}
+		utils.PrintJson(body)
 		return
 	}
 
