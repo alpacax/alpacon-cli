@@ -38,6 +38,15 @@ tunnels, and manage certificates — all with zero-trust authentication, MFA,
 session recording, and role-based access controls.
 
 Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		switch utils.OutputFormat {
+		case utils.OutputFormatTable, utils.OutputFormatJSON:
+			return nil
+		default:
+			return fmt.Errorf("invalid --output value %q (expected %q or %q)",
+				utils.OutputFormat, utils.OutputFormatTable, utils.OutputFormatJSON)
+		}
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.ShowLogo()
 		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
@@ -53,7 +62,7 @@ func Execute() {
 func init() {
 	// Global output format flag
 	RootCmd.PersistentFlags().StringVar(
-		&utils.OutputFormat, "output", "table",
+		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",
 	)
 

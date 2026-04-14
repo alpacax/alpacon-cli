@@ -38,7 +38,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 	Example: `  alpacon whoami
   alpacon whoami --output json`,
 	Run: func(cmd *cobra.Command, args []string) {
-		jsonOutput := utils.OutputFormat == "json"
+		jsonOutput := utils.OutputFormat == utils.OutputFormatJSON
 
 		cfg, err := config.LoadConfig()
 		if err != nil {

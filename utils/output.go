@@ -14,7 +14,13 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 )
 
-// OutputFormat holds the value of the --output persistent flag ("table" | "json").
+// Valid values for the --output persistent flag.
+const (
+	OutputFormatTable = "table"
+	OutputFormatJSON  = "json"
+)
+
+// OutputFormat holds the value of the --output persistent flag.
 // Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
 
@@ -25,7 +31,7 @@ func PrintTable(slice any) {
 		CliErrorWithExit("Parsing data: Expected a list format.")
 	}
 
-	if OutputFormat == "json" {
+	if OutputFormat == OutputFormatJSON {
 		if s.IsNil() || s.Len() == 0 {
 			_, _ = fmt.Fprintln(os.Stdout, "[]")
 			return
@@ -93,7 +99,7 @@ func PrintTable(slice any) {
 }
 
 func PrintJson(body []byte) {
-	if OutputFormat == "json" {
+	if OutputFormat == OutputFormatJSON {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
 			CliErrorWithExit("Parsing data: Expected a json format")
