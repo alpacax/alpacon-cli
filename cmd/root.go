@@ -51,6 +51,12 @@ func Execute() {
 }
 
 func init() {
+	// Global output format flag
+	RootCmd.PersistentFlags().StringVarP(
+		&utils.OutputFormat, "output", "o", "table",
+		"Output format: table or json",
+	)
+
 	// version
 	RootCmd.AddCommand(versionCmd)
 
