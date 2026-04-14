@@ -23,6 +23,12 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdout = w
+	// Restore stdout and close the pipe even if fn panics (second Close is harmless).
+	t.Cleanup(func() {
+		os.Stdout = old
+		_ = w.Close()
+		_ = r.Close()
+	})
 
 	done := make(chan string, 1)
 	go func() {
