@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -161,6 +162,72 @@ func GetRegistrationTokenByName(ac *client.AlpaconClient, name string) (Registra
 
 func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetails, error) {
 	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
+}
+
+// groupSummary is a minimal projection used to build a UUID→name map for group display.
+// Keeping it local avoids importing api/iam and pulling in its heavier GroupResponse type.
+type groupSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// buildGroupUUIDToNameMap fetches all IAM groups and returns a UUID→name map.
+// On failure it returns an empty map so callers never block on a group-lookup error.
+func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
+	groups, err := api.FetchAllPages[groupSummary](ac, "/api/iam/groups/", nil)
+	if err != nil {
+		return map[string]string{}
+	}
+	m := make(map[string]string, len(groups))
+	for _, g := range groups {
+		m[g.ID] = g.Name
+	}
+	return m
+}
+
+// DeleteRegistrationToken resolves a token name to its ID and sends a DELETE request.
+func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
+	token, err := GetRegistrationTokenByName(ac, tokenName)
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, token.ID, nil))
+	return err
+}
+
+// GetRegistrationTokenAttributes returns all registration tokens projected for table/JSON display.
+// Group UUIDs are resolved to group names using a single batched lookup; on lookup failure,
+// UUIDs are shown as-is and the overall list is not blocked.
+func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTokenAttributes, error) {
+	tokens, err := ListRegistrationTokens(ac)
+	if err != nil {
+		return nil, err
+	}
+
+	groupMap := buildGroupUUIDToNameMap(ac)
+
+	var out []RegistrationTokenAttributes
+	for _, t := range tokens {
+		names := make([]string, 0, len(t.AllowedGroups))
+		for _, id := range t.AllowedGroups {
+			if n, ok := groupMap[id]; ok {
+				names = append(names, n)
+			} else {
+				names = append(names, id)
+			}
+		}
+		expires := "never"
+		if t.ExpiresAt != nil {
+			expires = *t.ExpiresAt
+		}
+		out = append(out, RegistrationTokenAttributes{
+			Name:          t.Name,
+			AllowedGroups: strings.Join(names, ", "),
+			ExpiresAt:     expires,
+			Enabled:       t.Enabled,
+		})
+	}
+	return out, nil
 }
 
 func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
