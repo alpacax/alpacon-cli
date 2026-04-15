@@ -14,11 +14,34 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 )
 
+// Valid values for the --output persistent flag.
+const (
+	OutputFormatTable = "table"
+	OutputFormatJSON  = "json"
+)
+
+// OutputFormat holds the value of the --output persistent flag.
+// Bound by cmd/root.go; read by PrintTable and PrintJson.
+var OutputFormat string
+
 func PrintTable(slice any) {
 	s := reflect.ValueOf(slice)
 
 	if s.Kind() != reflect.Slice {
 		CliErrorWithExit("Parsing data: Expected a list format.")
+	}
+
+	if OutputFormat == OutputFormatJSON {
+		if s.IsNil() || s.Len() == 0 {
+			_, _ = fmt.Fprintln(os.Stdout, "[]")
+			return
+		}
+		data, err := json.MarshalIndent(slice, "", "  ")
+		if err != nil {
+			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
+		}
+		_, _ = fmt.Fprintln(os.Stdout, string(data))
+		return
 	}
 
 	writer, cleanup := WriteToPager()
@@ -76,10 +99,19 @@ func PrintTable(slice any) {
 }
 
 func PrintJson(body []byte) {
+	if OutputFormat == OutputFormatJSON {
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, body, "", "  "); err != nil {
+			CliErrorWithExit("Parsing data: Expected a JSON format.")
+		}
+		_, _ = fmt.Fprintln(os.Stdout, buf.String())
+		return
+	}
+
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, body, "", "    ")
 	if err != nil {
-		CliErrorWithExit("Parsing data: Expected a json format")
+		CliErrorWithExit("Parsing data: Expected a JSON format.")
 	}
 
 	formattedJson := strings.ReplaceAll(prettyJSON.String(), "\\n", "\n")
