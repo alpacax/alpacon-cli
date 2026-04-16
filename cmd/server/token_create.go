@@ -95,7 +95,7 @@ func resolveGroupIDs(ac *client.AlpaconClient, entries []string) ([]string, erro
 		} else {
 			id, err := iamAPI.GetGroupIDByName(ac, entry)
 			if err != nil {
-				return nil, fmt.Errorf("group %q not found: %w", entry, err)
+				return nil, fmt.Errorf("failed to resolve group %q: %w", entry, err)
 			}
 			ids = append(ids, id)
 		}

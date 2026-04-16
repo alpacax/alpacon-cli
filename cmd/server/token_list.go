@@ -12,7 +12,7 @@ var tokenListCmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List server registration tokens",
 	Long: `Display all server registration tokens.
-Tokens are used by alpamon to self-register servers without manual intervention.`,
+Tokens are used by Alpamon to self-register servers without manual intervention.`,
 	Example: `
     alpacon server token ls
     alpacon server token list

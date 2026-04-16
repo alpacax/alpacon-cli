@@ -9,7 +9,7 @@ import (
 var tokenCmd = &cobra.Command{
 	Use:   "token",
 	Short: "Manage server registration tokens",
-	Long:  "Create, list, and delete registration tokens used by servers to self-register via alpamon.",
+	Long:  "Create, list, and delete registration tokens used by servers to self-register via Alpamon.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := cmd.Help(); err != nil {
 			return err
