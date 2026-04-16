@@ -15,10 +15,19 @@ const (
 	serverURL            = "/api/servers/servers/"
 	registrationTokenURL = "/api/servers/registration-tokens/"
 	registrationGuideURL = "/api/servers/registration-methods/token-install/guide/"
+	// iamGroupURL is intentionally duplicated from api/iam to avoid an import cycle.
+	iamGroupURL = "/api/iam/groups/"
 )
 
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
 var ErrRegistrationTokenNotFound = errors.New("no registration token found with the given name")
+
+// groupSummary is a minimal projection used to build a UUID→name map for group display.
+// Keeping it local avoids importing api/iam and pulling in its heavier GroupResponse type.
+type groupSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
 
 func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 	servers, err := api.FetchAllPages[ServerDetails](ac, serverURL, nil)
@@ -164,18 +173,10 @@ func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetail
 	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
 }
 
-// groupSummary is a minimal projection used to build a UUID→name map for group display.
-// Keeping it local avoids importing api/iam and pulling in its heavier GroupResponse type.
-type groupSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
 // buildGroupUUIDToNameMap fetches all IAM groups and returns a UUID→name map.
 // On failure it returns an empty map so callers never block on a group-lookup error.
 func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
-	// "/api/iam/groups/" is intentionally duplicated from api/iam to avoid an import cycle.
-	groups, err := api.FetchAllPages[groupSummary](ac, "/api/iam/groups/", nil)
+	groups, err := api.FetchAllPages[groupSummary](ac, iamGroupURL, nil)
 	if err != nil {
 		return map[string]string{}
 	}

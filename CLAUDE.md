@@ -120,6 +120,10 @@ Use: "exec [USER@]SERVER COMMAND... [flags]"
 - `Long`: Document SSH-like `user@host` syntax where supported
 - `Example`: Use realistic values (e.g., `my-server`, not `[SERVER_NAME]`)
 
+### Go declaration order
+
+Top-level declarations within a file must follow: `const → var → type → func`. Private helper types belong in the `type` block, never between functions.
+
 ### Error handling
 
 - golangci-lint `errcheck` is enabled—all error returns must be explicitly handled
