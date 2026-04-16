@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	iamAPI "github.com/alpacax/alpacon-cli/api/iam"
 	serverAPI "github.com/alpacax/alpacon-cli/api/server"
@@ -87,6 +88,7 @@ func init() {
 func resolveGroupIDs(ac *client.AlpaconClient, entries []string) ([]string, error) {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
 		}
