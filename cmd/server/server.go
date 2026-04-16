@@ -14,7 +14,7 @@ var ServerCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon server list', 'alpacon server create', 'alpacon server describe', 'alpacon server update', or 'alpacon server delete'. Run 'alpacon server --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon server list', 'alpacon server create', 'alpacon server describe', 'alpacon server update', 'alpacon server delete', or 'alpacon server token'. Run 'alpacon server --help' for more information")
 	},
 }
 
@@ -24,4 +24,5 @@ func init() {
 	ServerCmd.AddCommand(serverCreateCmd)
 	ServerCmd.AddCommand(serverDeleteCmd)
 	ServerCmd.AddCommand(serverUpdateCmd)
+	ServerCmd.AddCommand(tokenCmd)
 }
