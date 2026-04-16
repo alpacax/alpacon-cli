@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -244,8 +245,7 @@ func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
 
 func TestCreateRegistrationToken_WithoutExpiresAt(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body := make([]byte, r.ContentLength)
-		_, _ = r.Body.Read(body)
+		body, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(body), "expires_at") {
 			t.Errorf("expected no expires_at in body, got: %s", body)
 		}
