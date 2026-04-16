@@ -24,7 +24,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		groups, _ := cmd.Flags().GetStringSlice("groups")
 		expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
 
-		interactive := !cmd.Flags().Changed("name")
+		interactive := name == ""
 
 		if name == "" {
 			name = utils.PromptForRequiredInput("Token name: ")

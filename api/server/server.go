@@ -174,6 +174,7 @@ type groupSummary struct {
 // buildGroupUUIDToNameMap fetches all IAM groups and returns a UUID→name map.
 // On failure it returns an empty map so callers never block on a group-lookup error.
 func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
+	// "/api/iam/groups/" is intentionally duplicated from api/iam to avoid an import cycle.
 	groups, err := api.FetchAllPages[groupSummary](ac, "/api/iam/groups/", nil)
 	if err != nil {
 		return map[string]string{}
@@ -204,7 +205,17 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 		return nil, err
 	}
 
-	groupMap := buildGroupUUIDToNameMap(ac)
+	needsGroups := false
+	for _, t := range tokens {
+		if len(t.AllowedGroups) > 0 {
+			needsGroups = true
+			break
+		}
+	}
+	groupMap := map[string]string{}
+	if needsGroups {
+		groupMap = buildGroupUUIDToNameMap(ac)
+	}
 
 	var out []RegistrationTokenAttributes
 	for _, t := range tokens {
