@@ -47,6 +47,9 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 			Name:          name,
 			AllowedGroups: groupIDs,
 		}
+		if expiresInDays < 0 {
+			utils.CliErrorWithExit("--expires-in-days must be 0 (no expiry) or a positive number, got %d.", expiresInDays)
+		}
 		if expiresInDays > 0 {
 			req.ExpiresAt = utils.TimeFormat(expiresInDays)
 		}
