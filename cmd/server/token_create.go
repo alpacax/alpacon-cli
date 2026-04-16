@@ -35,12 +35,12 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("connection to Alpacon API failed: %s. consider re-logging.", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		groupIDs, err := resolveGroupIDs(alpaconClient, groups)
 		if err != nil {
-			utils.CliErrorWithExit("failed to resolve groups: %s.", err)
+			utils.CliErrorWithExit("Failed to resolve groups: %s.", err)
 		}
 
 		req := serverAPI.RegistrationTokenRequest{
@@ -53,13 +53,13 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 
 		resp, err := serverAPI.CreateRegistrationToken(alpaconClient, req)
 		if err != nil {
-			utils.CliErrorWithExit("failed to create registration token: %s.", err)
+			utils.CliErrorWithExit("Failed to create registration token: %s.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			data, err := json.Marshal(resp)
 			if err != nil {
-				utils.CliErrorWithExit("failed to marshal response: %s.", err)
+				utils.CliErrorWithExit("Failed to marshal response: %s.", err)
 			}
 			utils.PrintJson(data)
 		}
