@@ -15,7 +15,8 @@ const (
 	serverURL            = "/api/servers/servers/"
 	registrationTokenURL = "/api/servers/registration-tokens/"
 	registrationGuideURL = "/api/servers/registration-methods/token-install/guide/"
-	// iamGroupURL is intentionally duplicated from api/iam to avoid an import cycle.
+	// iamGroupURL is duplicated from api/iam so this package can build a lean
+	// UUID→name projection without pulling in the full iam.GroupResponse type.
 	iamGroupURL = "/api/iam/groups/"
 )
 
@@ -174,10 +175,12 @@ func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetail
 }
 
 // buildGroupUUIDToNameMap fetches all IAM groups and returns a UUID→name map.
-// On failure it returns an empty map so callers never block on a group-lookup error.
+// On failure it emits a one-time warning and returns an empty map so callers
+// never block on a group-lookup error; the list still renders with raw UUIDs.
 func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
 	groups, err := api.FetchAllPages[groupSummary](ac, iamGroupURL, nil)
 	if err != nil {
+		utils.CliWarning("Could not resolve group names; showing UUIDs instead: %s", err)
 		return map[string]string{}
 	}
 	m := make(map[string]string, len(groups))
@@ -218,7 +221,7 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 		groupMap = buildGroupUUIDToNameMap(ac)
 	}
 
-	var out []RegistrationTokenAttributes
+	out := make([]RegistrationTokenAttributes, 0, len(tokens))
 	for _, t := range tokens {
 		names := make([]string, 0, len(t.AllowedGroups))
 		for _, id := range t.AllowedGroups {
