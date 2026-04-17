@@ -6,9 +6,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
-// Spinner displays an animated spinner with a message
+// Spinner displays an animated spinner with a message.
+// Output is suppressed when stderr is not a terminal (e.g., piped or redirected),
+// so automated/CI environments get clean logs without ANSI artifacts.
 type Spinner struct {
 	message  string
 	frames   []string
@@ -18,6 +22,7 @@ type Spinner struct {
 	doneCh   chan struct{}
 	mu       sync.Mutex
 	running  bool
+	enabled  bool
 }
 
 // NewSpinner creates a new spinner with the given message
@@ -30,11 +35,18 @@ func NewSpinner(message string) *Spinner {
 		interval: 100 * time.Millisecond,
 		stopCh:   make(chan struct{}),
 		doneCh:   make(chan struct{}),
+		enabled:  term.IsTerminal(int(os.Stderr.Fd())),
 	}
 }
 
 // Start begins the spinner animation
 func (s *Spinner) Start() {
+	if !s.enabled {
+		// Print a static message so users still see progress in non-TTY output
+		fmt.Fprintln(os.Stderr, s.message)
+		return
+	}
+
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -86,6 +98,10 @@ func (s *Spinner) Start() {
 
 // Stop stops the spinner animation
 func (s *Spinner) Stop() {
+	if !s.enabled {
+		return
+	}
+
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
