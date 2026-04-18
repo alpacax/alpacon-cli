@@ -11,8 +11,9 @@ import (
 )
 
 // Spinner displays an animated spinner with a message.
-// Output is suppressed when stderr is not a terminal (e.g., piped or redirected),
-// so automated/CI environments get clean logs without ANSI artifacts.
+// When stderr is not a terminal (e.g., piped or redirected), the spinner
+// animation is replaced with a single static progress line so logs stay
+// clean without ANSI artifacts.
 type Spinner struct {
 	message  string
 	frames   []string
@@ -41,12 +42,6 @@ func NewSpinner(message string) *Spinner {
 
 // Start begins the spinner animation
 func (s *Spinner) Start() {
-	if !s.enabled {
-		// Print a static message so users still see progress in non-TTY output
-		fmt.Fprintln(os.Stderr, s.message)
-		return
-	}
-
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -54,6 +49,12 @@ func (s *Spinner) Start() {
 	}
 	s.running = true
 	s.mu.Unlock()
+
+	if !s.enabled {
+		// Print a static message so users still see progress in non-TTY output
+		fmt.Fprintln(os.Stderr, s.message)
+		return
+	}
 
 	go func() {
 		defer close(s.doneCh)
@@ -98,10 +99,6 @@ func (s *Spinner) Start() {
 
 // Stop stops the spinner animation
 func (s *Spinner) Stop() {
-	if !s.enabled {
-		return
-	}
-
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
@@ -109,6 +106,10 @@ func (s *Spinner) Stop() {
 	}
 	s.running = false
 	s.mu.Unlock()
+
+	if !s.enabled {
+		return
+	}
 
 	close(s.stopCh)
 	<-s.doneCh
