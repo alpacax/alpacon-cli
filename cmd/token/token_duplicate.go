@@ -9,7 +9,7 @@ import (
 
 var tokenDuplicateCmd = &cobra.Command{
 	Use:   "duplicate TOKEN",
-	Short: "Duplicate an API token with its scopes and ACL rules",
+	Short: "Duplicate an api token with its scopes and ACL rules",
 	Long: `
 	Creates a copy of an existing API token, including all scopes and ACL rules
 	(Command, Server, File). The source token is identified by name or UUID.
