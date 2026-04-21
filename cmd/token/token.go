@@ -13,7 +13,7 @@ var TokenCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon token create', 'alpacon token list', 'alpacon token delete', or 'alpacon token acl' to manage API tokens. Run 'alpacon token --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon token create', 'alpacon token list', 'alpacon token delete', 'alpacon token duplicate', or 'alpacon token acl' to manage API tokens. Run 'alpacon token --help' for more information")
 	},
 }
 
@@ -21,6 +21,7 @@ func init() {
 	TokenCmd.AddCommand(tokenCreateCmd)
 	TokenCmd.AddCommand(tokenListCmd)
 	TokenCmd.AddCommand(tokenDeleteCmd)
+	TokenCmd.AddCommand(tokenDuplicateCmd)
 
 	// ACL
 	TokenCmd.AddCommand(AclCmd)
