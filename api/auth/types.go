@@ -18,6 +18,10 @@ type APITokenRequest struct {
 	ExpiresAt *string `json:"expires_at"`
 }
 
+type APITokenDuplicateRequest struct {
+	Name string `json:"name,omitempty"`
+}
+
 type APITokenResponse struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
