@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -162,5 +163,57 @@ func TestDeleteAPIToken(t *testing.T) {
 	}
 	if !deleteCalled {
 		t.Error("DELETE request was not sent")
+	}
+}
+
+func TestDuplicateAPIToken(t *testing.T) {
+	const wantKey = "duplicated-token-key-xyz"
+
+	tests := []struct {
+		name     string
+		copyName string
+		wantBody bool
+	}{
+		{"with name", "my-token-copy", true},
+		{"without name", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", r.Method)
+				}
+				if !strings.Contains(r.URL.Path, "/duplicate") {
+					t.Errorf("expected path to contain /duplicate, got %s", r.URL.Path)
+				}
+
+				var body map[string]string
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if tt.wantBody {
+					if body["name"] != tt.copyName {
+						t.Errorf("expected body name %q, got %q", tt.copyName, body["name"])
+					}
+				} else {
+					if _, ok := body["name"]; ok {
+						t.Errorf("expected no name field in body, but found %q", body["name"])
+					}
+				}
+
+				resp := APITokenResponse{ID: "new-token-id", Name: "copy", Key: wantKey}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			key, err := DuplicateAPIToken(ac, "source-token-id", tt.copyName)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if key != wantKey {
+				t.Errorf("expected key %q, got %q", wantKey, key)
+			}
+		})
 	}
 }
