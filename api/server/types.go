@@ -15,9 +15,11 @@ type ServerAttributes struct {
 }
 
 // RegistrationTokenRequest is used to create a new server registration token.
+// ExpiresAt is an RFC3339 timestamp; omit to create a non-expiring token.
 type RegistrationTokenRequest struct {
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups,omitempty"`
+	ExpiresAt     *string  `json:"expires_at,omitempty"`
 }
 
 // RegistrationTokenCreatedResponse holds the result after creating a server registration token.
@@ -27,6 +29,7 @@ type RegistrationTokenCreatedResponse struct {
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups"`
 	Key           string   `json:"key"`
+	ExpiresAt     *string  `json:"expires_at"`
 	AddedAt       string   `json:"added_at"`
 }
 
@@ -37,7 +40,18 @@ type RegistrationTokenDetails struct {
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups"`
 	Enabled       bool     `json:"enabled"`
+	ExpiresAt     *string  `json:"expires_at"`
 	AddedAt       string   `json:"added_at"`
+}
+
+// RegistrationTokenAttributes is the table/JSON projection used by 'server token ls'.
+// AllowedGroups is rendered as a comma-separated list of group names (UUIDs when the name cannot be resolved),
+// and ExpiresAt is rendered as the raw timestamp or "never" when the token does not expire.
+type RegistrationTokenAttributes struct {
+	Name          string `json:"name"`
+	AllowedGroups string `json:"allowed_groups" table:"Allowed Groups"`
+	ExpiresAt     string `json:"expires_at" table:"Expires At"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // RegistrationMethodGuideRequest is the request body for the guide API.

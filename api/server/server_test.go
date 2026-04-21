@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -207,6 +209,237 @@ func TestListRegistrationTokens(t *testing.T) {
 	}
 	if got[0].Name != "prod-token" || got[1].Name != "dev-token" {
 		t.Errorf("unexpected token names: %v", got)
+	}
+}
+
+func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
+	expiresAt := "2026-12-31T00:00:00Z"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		var req RegistrationTokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if req.ExpiresAt == nil || *req.ExpiresAt != expiresAt {
+			t.Errorf("expected expires_at %q, got %v", expiresAt, req.ExpiresAt)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(RegistrationTokenCreatedResponse{
+			ID:        "tok-uuid",
+			Name:      "x",
+			Key:       "alpacax_key",
+			ExpiresAt: &expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := CreateRegistrationToken(ac, RegistrationTokenRequest{Name: "x", ExpiresAt: &expiresAt})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateRegistrationToken_WithoutExpiresAt(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "expires_at") {
+			t.Errorf("expected no expires_at in body, got: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(RegistrationTokenCreatedResponse{ID: "tok-uuid", Name: "x", Key: "alpacax_key"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := CreateRegistrationToken(ac, RegistrationTokenRequest{Name: "x"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeleteRegistrationToken_ByName_Success(t *testing.T) {
+	const tokenID = "tok-uuid-abc"
+	var deleteCalled bool
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "search=") {
+			resp := api.ListResponse[RegistrationTokenDetails]{
+				Count:   1,
+				Results: []RegistrationTokenDetails{{ID: tokenID, Name: "target-token", Enabled: true}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			deleteCalled = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	if err := DeleteRegistrationToken(ac, "target-token"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !deleteCalled {
+		t.Error("DELETE request was not sent")
+	}
+}
+
+func TestDeleteRegistrationToken_ByName_NotFound(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := api.ListResponse[RegistrationTokenDetails]{Count: 0, Results: []RegistrationTokenDetails{}}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	err := DeleteRegistrationToken(ac, "ghost")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrRegistrationTokenNotFound) {
+		t.Errorf("expected ErrRegistrationTokenNotFound, got %v", err)
+	}
+}
+
+func TestGetRegistrationTokenAttributes_MapsGroupNames(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			type groupItem struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}
+			resp := api.ListResponse[groupItem]{
+				Count: 2,
+				Results: []groupItem{
+					{ID: "uuid-g1", Name: "dev"},
+					{ID: "uuid-g2", Name: "ops"},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		// registration tokens
+		resp := api.ListResponse[RegistrationTokenDetails]{
+			Count: 1,
+			Results: []RegistrationTokenDetails{
+				{ID: "tok-1", Name: "my-token", AllowedGroups: []string{"uuid-g1", "uuid-g2"}, Enabled: true},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(attrs) != 1 {
+		t.Fatalf("expected 1 attribute, got %d", len(attrs))
+	}
+	if attrs[0].AllowedGroups != "dev, ops" {
+		t.Errorf("expected AllowedGroups %q, got %q", "dev, ops", attrs[0].AllowedGroups)
+	}
+}
+
+func TestGetRegistrationTokenAttributes_FallsBackToUUID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		resp := api.ListResponse[RegistrationTokenDetails]{
+			Count: 1,
+			Results: []RegistrationTokenDetails{
+				{ID: "tok-1", Name: "my-token", AllowedGroups: []string{"uuid-g1"}, Enabled: true},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(attrs) != 1 {
+		t.Fatalf("expected 1 attribute, got %d", len(attrs))
+	}
+	if attrs[0].AllowedGroups != "uuid-g1" {
+		t.Errorf("expected AllowedGroups %q, got %q", "uuid-g1", attrs[0].AllowedGroups)
+	}
+}
+
+func TestGetRegistrationTokenAttributes_ExpiresNever(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			resp := api.ListResponse[struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}]{Count: 0}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		resp := api.ListResponse[RegistrationTokenDetails]{
+			Count: 1,
+			Results: []RegistrationTokenDetails{
+				{ID: "tok-1", Name: "no-expire-token", AllowedGroups: nil, ExpiresAt: nil, Enabled: true},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(attrs) != 1 {
+		t.Fatalf("expected 1 attribute, got %d", len(attrs))
+	}
+	if attrs[0].ExpiresAt != "never" {
+		t.Errorf("expected ExpiresAt %q, got %q", "never", attrs[0].ExpiresAt)
+	}
+}
+
+func TestGetRegistrationTokenAttributes_EmptyList(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
+			resp := api.ListResponse[struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			}]{Count: 0}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		resp := api.ListResponse[RegistrationTokenDetails]{Count: 0, Results: []RegistrationTokenDetails{}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	attrs, err := GetRegistrationTokenAttributes(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(attrs) != 0 {
+		t.Errorf("expected empty slice, got %d items", len(attrs))
 	}
 }
 
