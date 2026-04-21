@@ -17,11 +17,10 @@ import (
 )
 
 const (
-	loginURL              = "/api/auth/login/"
-	logoutURL             = "/api/auth/logout/"
-	tokenURL              = "/api/auth/tokens/"
-	statusURL             = "/api/status/"
-	duplicateTokenBaseURL = "/api/tokens/"
+	loginURL  = "/api/auth/login/"
+	logoutURL = "/api/auth/logout/"
+	tokenURL  = "/api/auth/tokens/"
+	statusURL = "/api/status/"
 )
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
@@ -167,7 +166,7 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 }
 
 func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, error) {
-	url := utils.BuildURL(duplicateTokenBaseURL, tokenID+"/duplicate", nil)
+	url := utils.BuildURL(tokenURL, tokenID+"/duplicate", nil)
 	req := APITokenDuplicateRequest{Name: name}
 	resp, err := ac.SendPostRequest(url, req)
 	if err != nil {
