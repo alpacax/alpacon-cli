@@ -189,7 +189,11 @@ func TestDuplicateAPIToken(t *testing.T) {
 				}
 
 				var body map[string]string
-				_ = json.NewDecoder(r.Body).Decode(&body)
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("failed to decode request body: %v", err)
+					http.Error(w, "invalid request body", http.StatusBadRequest)
+					return
+				}
 				if tt.wantBody {
 					if body["name"] != tt.copyName {
 						t.Errorf("expected body name %q, got %q", tt.copyName, body["name"])
