@@ -165,6 +165,22 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 	return nil
 }
 
+func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, error) {
+	url := utils.BuildURL(tokenURL, tokenID+"/duplicate", nil)
+	req := APITokenDuplicateRequest{Name: name}
+	resp, err := ac.SendPostRequest(url, req)
+	if err != nil {
+		return "", err
+	}
+
+	var response APITokenResponse
+	if err = json.Unmarshal(resp, &response); err != nil {
+		return "", err
+	}
+
+	return response.Key, nil
+}
+
 func Logout(ac *client.AlpaconClient) error {
 	_, err := ac.SendPostRequest(logoutURL, nil)
 	if err != nil {
