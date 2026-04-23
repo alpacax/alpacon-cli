@@ -295,19 +295,25 @@ func TestGetTokenScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(scopes) != 2 {
-		t.Fatalf("expected 2 scopes, got %d", len(scopes))
+	if len(scopes) != 3 {
+		t.Fatalf("expected 3 scopes, got %d", len(scopes))
 	}
-	if scopes[0].Name != "server" {
-		t.Errorf("expected name %q, got %q", "server", scopes[0].Name)
+	if scopes[0].Name != "*" {
+		t.Errorf("expected wildcard name %q, got %q", "*", scopes[0].Name)
 	}
-	if scopes[0].Actions != "read, create" {
-		t.Errorf("expected actions %q, got %q", "read, create", scopes[0].Actions)
+	if scopes[0].Actions != "(matches all scopes)" {
+		t.Errorf("expected wildcard actions %q, got %q", "(matches all scopes)", scopes[0].Actions)
 	}
-	if scopes[0].ACL != "server" {
-		t.Errorf("expected ACL %q, got %q", "server", scopes[0].ACL)
+	if scopes[1].Name != "server" {
+		t.Errorf("expected name %q, got %q", "server", scopes[1].Name)
 	}
-	if scopes[1].ACL != "" {
-		t.Errorf("expected empty ACL, got %q", scopes[1].ACL)
+	if scopes[1].Actions != "read, create" {
+		t.Errorf("expected actions %q, got %q", "read, create", scopes[1].Actions)
+	}
+	if scopes[1].ACL != "server" {
+		t.Errorf("expected ACL %q, got %q", "server", scopes[1].ACL)
+	}
+	if scopes[2].ACL != "" {
+		t.Errorf("expected empty ACL, got %q", scopes[2].ACL)
 	}
 }

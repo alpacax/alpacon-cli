@@ -196,6 +196,13 @@ func GetTokenScopes(ac *client.AlpaconClient) ([]TokenScopeAttributes, error) {
 	}
 
 	var result []TokenScopeAttributes
+	for _, w := range response.Wildcards {
+		result = append(result, TokenScopeAttributes{
+			Name:    w,
+			Actions: "(matches all scopes)",
+			ACL:     "",
+		})
+	}
 	for _, r := range response.Resources {
 		result = append(result, TokenScopeAttributes{
 			Name:    r.Name,
