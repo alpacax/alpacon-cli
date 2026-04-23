@@ -467,3 +467,22 @@ func CommandConfirm() bool {
 func IsInteractiveShell() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
+
+// SplitAndTrim splits s by sep, trims whitespace from each element, and drops empty entries.
+// Returns nil when the input is empty or yields no non-empty elements.
+func SplitAndTrim(s, sep string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, sep)
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}

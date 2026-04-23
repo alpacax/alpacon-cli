@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -17,10 +18,11 @@ import (
 )
 
 const (
-	loginURL  = "/api/auth/login/"
-	logoutURL = "/api/auth/logout/"
-	tokenURL  = "/api/auth/tokens/"
-	statusURL = "/api/status/"
+	loginURL       = "/api/auth/login/"
+	logoutURL      = "/api/auth/logout/"
+	tokenURL       = "/api/auth/tokens/"
+	tokenScopesURL = "/api/auth/tokens/scopes/"
+	statusURL      = "/api/status/"
 )
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
@@ -129,6 +131,7 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 			Enabled:   token.Enabled,
 			UpdatedAt: utils.TimeUtils(token.UpdatedAt),
 			ExpiresAt: utils.TimeUtils(token.ExpiresAt),
+			Scopes:    strings.Join(token.Scopes, ", "),
 		})
 	}
 	return tokenList, nil
@@ -179,6 +182,35 @@ func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, 
 	}
 
 	return response.Key, nil
+}
+
+func GetTokenScopes(ac *client.AlpaconClient) ([]TokenScopeAttributes, error) {
+	resp, err := ac.SendGetRequest(tokenScopesURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var response TokenScopesResponse
+	if err = json.Unmarshal(resp, &response); err != nil {
+		return nil, err
+	}
+
+	var result []TokenScopeAttributes
+	for _, w := range response.Wildcards {
+		result = append(result, TokenScopeAttributes{
+			Name:    w,
+			Actions: "",
+			ACL:     "",
+		})
+	}
+	for _, r := range response.Resources {
+		result = append(result, TokenScopeAttributes{
+			Name:    r.Name,
+			Actions: strings.Join(r.Actions, ", "),
+			ACL:     strings.Join(r.ACL, ", "),
+		})
+	}
+	return result, nil
 }
 
 func Logout(ac *client.AlpaconClient) error {
