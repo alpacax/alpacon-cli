@@ -129,23 +129,66 @@ func TestGetAPITokenIDByName(t *testing.T) {
 func TestCreateAPIToken(t *testing.T) {
 	const wantKey = "secret-api-key-xyz"
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-		resp := APITokenResponse{ID: "new-token-id", Name: "ci-token", Key: wantKey, UpdatedAt: time.Now()}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	key, err := CreateAPIToken(ac, APITokenRequest{Name: "ci-token"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	tests := []struct {
+		name       string
+		request    APITokenRequest
+		wantScopes []string
+	}{
+		{
+			name:       "no scopes — field omitted",
+			request:    APITokenRequest{Name: "ci-token"},
+			wantScopes: nil,
+		},
+		{
+			name:       "with scopes",
+			request:    APITokenRequest{Name: "ci-token", Scopes: []string{"server:read", "command:create"}},
+			wantScopes: []string{"server:read", "command:create"},
+		},
 	}
-	if key != wantKey {
-		t.Errorf("expected key %q, got %q", wantKey, key)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("expected POST, got %s", r.Method)
+				}
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("failed to decode body: %v", err)
+				}
+				if tt.wantScopes == nil {
+					if _, ok := body["scopes"]; ok {
+						t.Errorf("expected scopes field to be omitted, but it was present")
+					}
+				} else {
+					raw, ok := body["scopes"]
+					if !ok {
+						t.Errorf("expected scopes field in body, but missing")
+					} else {
+						var got []string
+						if err := json.Unmarshal(raw, &got); err != nil {
+							t.Errorf("failed to unmarshal scopes: %v", err)
+						}
+						if len(got) != len(tt.wantScopes) {
+							t.Errorf("expected scopes %v, got %v", tt.wantScopes, got)
+						}
+					}
+				}
+				resp := APITokenResponse{ID: "new-token-id", Name: "ci-token", Key: wantKey, UpdatedAt: time.Now()}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			key, err := CreateAPIToken(ac, tt.request)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if key != wantKey {
+				t.Errorf("expected key %q, got %q", wantKey, key)
+			}
+		})
 	}
 }
 
