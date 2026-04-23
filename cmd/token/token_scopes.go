@@ -9,7 +9,7 @@ import (
 
 var tokenScopesCmd = &cobra.Command{
 	Use:   "scopes",
-	Short: "List available scopes for API tokens",
+	Short: "List available scopes for api tokens",
 	Long: `
 	Lists all scope resources and their actions that the current user
 	has RBAC permission to grant when creating an API token.
