@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -154,7 +155,7 @@ func TestCreateAPIToken(t *testing.T) {
 				}
 				var body map[string]json.RawMessage
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Errorf("failed to decode body: %v", err)
+					t.Fatalf("failed to decode body: %v", err)
 				}
 				if tt.wantScopes == nil {
 					if _, ok := body["scopes"]; ok {
@@ -167,9 +168,9 @@ func TestCreateAPIToken(t *testing.T) {
 					} else {
 						var got []string
 						if err := json.Unmarshal(raw, &got); err != nil {
-							t.Errorf("failed to unmarshal scopes: %v", err)
+							t.Fatalf("failed to unmarshal scopes: %v", err)
 						}
-						if len(got) != len(tt.wantScopes) {
+						if !reflect.DeepEqual(got, tt.wantScopes) {
 							t.Errorf("expected scopes %v, got %v", tt.wantScopes, got)
 						}
 					}
