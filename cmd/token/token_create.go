@@ -74,8 +74,6 @@ func promptForToken() (auth.APITokenRequest, error) {
 	tokenRequest.Name = utils.PromptForRequiredInput("Token name: ")
 	if utils.PromptForBool("Set expiration for token?") {
 		tokenRequest.ExpiresAt = utils.TimeFormat(utils.PromptForIntInput("Valid days for the token (default: 30): ", 30))
-	} else {
-		tokenRequest.ExpiresAt = nil
 	}
 	scopes := utils.PromptForListInput("Scopes (comma-separated, default *): ")
 	if len(scopes) > 0 {

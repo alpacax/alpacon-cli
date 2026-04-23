@@ -12,7 +12,7 @@ var tokenScopesCmd = &cobra.Command{
 	Short: "List available scopes for api tokens",
 	Long: `
 	Lists all scope resources and their actions that the current user
-	has RBAC permission to grant when creating an API token.
+	has permission to grant when creating an API token.
 	`,
 	Example: `alpacon token scopes`,
 	Run: func(cmd *cobra.Command, args []string) {
