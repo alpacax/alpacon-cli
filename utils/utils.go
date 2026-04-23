@@ -481,5 +481,8 @@ func SplitAndTrim(s, sep string) []string {
 			result = append(result, trimmed)
 		}
 	}
+	if len(result) == 0 {
+		return nil
+	}
 	return result
 }
