@@ -301,8 +301,8 @@ func TestGetTokenScopes(t *testing.T) {
 	if scopes[0].Name != "*" {
 		t.Errorf("expected wildcard name %q, got %q", "*", scopes[0].Name)
 	}
-	if scopes[0].Actions != "(matches all scopes)" {
-		t.Errorf("expected wildcard actions %q, got %q", "(matches all scopes)", scopes[0].Actions)
+	if scopes[0].Actions != "" {
+		t.Errorf("expected empty wildcard actions, got %q", scopes[0].Actions)
 	}
 	if scopes[1].Name != "server" {
 		t.Errorf("expected name %q, got %q", "server", scopes[1].Name)

@@ -26,6 +26,14 @@ var tokenScopesCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to retrieve available scopes: %s.", err)
 		}
 
+		if utils.OutputFormat != utils.OutputFormatJSON {
+			for i := range scopes {
+				if scopes[i].Actions == "" {
+					scopes[i].Actions = "(matches all scopes)"
+				}
+			}
+		}
+
 		utils.PrintTable(scopes)
 	},
 }
