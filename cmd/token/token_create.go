@@ -1,6 +1,8 @@
 package token
 
 import (
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -11,14 +13,19 @@ var tokenCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new api token",
 	Long: `
-	Generates a new API token for accessing the server. 
-	This command allows you to create a token by specifying options such as token name, expiration, and limits
+	Generates a new API token for accessing the server.
+	This command allows you to create a token by specifying options such as token name, expiration, and scopes.
 	`,
-	Example: `alpacon token create`,
+	Example: `
+	alpacon token create
+	alpacon token create --name ci-token --scopes "server:read,command:create"
+	alpacon token create --name deploy-token --scopes "*"
+	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		name, _ := cmd.Flags().GetString("name")
 		limit, _ := cmd.Flags().GetBool("limit")
 		expiresAt, _ := cmd.Flags().GetInt("expiration-in-days")
+		scopesStr, _ := cmd.Flags().GetString("scopes")
 
 		var tokenRequest auth.APITokenRequest
 		var err error
@@ -33,6 +40,14 @@ var tokenCreateCmd = &cobra.Command{
 
 			if limit && expiresAt > 0 {
 				tokenRequest.ExpiresAt = utils.TimeFormat(expiresAt)
+			}
+
+			if scopesStr != "" {
+				for _, s := range strings.Split(scopesStr, ",") {
+					if trimmed := strings.TrimSpace(s); trimmed != "" {
+						tokenRequest.Scopes = append(tokenRequest.Scopes, trimmed)
+					}
+				}
 			}
 		}
 
@@ -59,6 +74,7 @@ func init() {
 	tokenCreateCmd.Flags().StringVarP(&name, "name", "n", "", "A name to remember the token easily.")
 	tokenCreateCmd.Flags().BoolVarP(&limit, "limit", "l", true, "Set to true to apply usage limits.")
 	tokenCreateCmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "This token can be used by the specified time. (in days)")
+	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,command:create"). Omit to default to full access.`)
 }
 
 func promptForToken() (auth.APITokenRequest, error) {
@@ -68,6 +84,10 @@ func promptForToken() (auth.APITokenRequest, error) {
 		tokenRequest.ExpiresAt = utils.TimeFormat(utils.PromptForIntInput("Valid days for the token (default: 30): ", 30))
 	} else {
 		tokenRequest.ExpiresAt = nil
+	}
+	scopes := utils.PromptForListInput("Scopes (comma-separated, default *): ")
+	if len(scopes) > 0 {
+		tokenRequest.Scopes = scopes
 	}
 	return tokenRequest, nil
 }
