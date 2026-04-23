@@ -1,8 +1,6 @@
 package token
 
 import (
-	"strings"
-
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -42,13 +40,7 @@ var tokenCreateCmd = &cobra.Command{
 				tokenRequest.ExpiresAt = utils.TimeFormat(expiresAt)
 			}
 
-			if scopesStr != "" {
-				for _, s := range strings.Split(scopesStr, ",") {
-					if trimmed := strings.TrimSpace(s); trimmed != "" {
-						tokenRequest.Scopes = append(tokenRequest.Scopes, trimmed)
-					}
-				}
-			}
+			tokenRequest.Scopes = utils.SplitAndTrim(scopesStr, ",")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

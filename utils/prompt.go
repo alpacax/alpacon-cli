@@ -113,16 +113,7 @@ func PromptForIntInput(promptText string, defaultValue int) int {
 }
 
 func PromptForListInput(promptText string) []string {
-	inputStr := PromptForInput(promptText)
-	inputList := strings.Split(inputStr, ",")
-	for i, item := range inputList {
-		inputList[i] = strings.TrimSpace(item)
-	}
-	if len(inputList) == 1 && inputList[0] == "" {
-		return []string{}
-	}
-
-	return inputList
+	return SplitAndTrim(PromptForInput(promptText), ",")
 }
 
 func PromptForRequiredListInput(promptText string) []string {
