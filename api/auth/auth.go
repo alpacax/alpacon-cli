@@ -184,6 +184,28 @@ func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, 
 	return response.Key, nil
 }
 
+func GetTokenScopes(ac *client.AlpaconClient) ([]TokenScopeAttributes, error) {
+	resp, err := ac.SendGetRequest(tokenScopesURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var response TokenScopesResponse
+	if err = json.Unmarshal(resp, &response); err != nil {
+		return nil, err
+	}
+
+	var result []TokenScopeAttributes
+	for _, r := range response.Resources {
+		result = append(result, TokenScopeAttributes{
+			Name:    r.Name,
+			Actions: strings.Join(r.Actions, ", "),
+			ACL:     strings.Join(r.ACL, ", "),
+		})
+	}
+	return result, nil
+}
+
 func Logout(ac *client.AlpaconClient) error {
 	_, err := ac.SendPostRequest(logoutURL, nil)
 	if err != nil {

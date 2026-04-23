@@ -225,3 +225,45 @@ func TestDuplicateAPIToken(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTokenScopes(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if !strings.HasSuffix(r.URL.Path, "/scopes/") {
+			t.Errorf("expected path ending /scopes/, got %s", r.URL.Path)
+		}
+		resp := TokenScopesResponse{
+			Resources: []TokenScopeResource{
+				{Name: "server", Actions: []string{"read", "create"}, ACL: []string{"server"}},
+				{Name: "command", Actions: []string{"create", "delete"}, ACL: []string{}},
+			},
+			Wildcards: []string{"*"},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	scopes, err := GetTokenScopes(ac)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("expected 2 scopes, got %d", len(scopes))
+	}
+	if scopes[0].Name != "server" {
+		t.Errorf("expected name %q, got %q", "server", scopes[0].Name)
+	}
+	if scopes[0].Actions != "read, create" {
+		t.Errorf("expected actions %q, got %q", "read, create", scopes[0].Actions)
+	}
+	if scopes[0].ACL != "server" {
+		t.Errorf("expected ACL %q, got %q", "server", scopes[0].ACL)
+	}
+	if scopes[1].ACL != "" {
+		t.Errorf("expected empty ACL, got %q", scopes[1].ACL)
+	}
+}
