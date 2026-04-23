@@ -32,8 +32,9 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := 0; i < 100; i++ {
 				results = append(results, APITokenResponse{
-					ID:   fmt.Sprintf("tid-%d", i),
-					Name: fmt.Sprintf("token-%d", i),
+					ID:     fmt.Sprintf("tid-%d", i),
+					Name:   fmt.Sprintf("token-%d", i),
+					Scopes: []string{"server:read", "command:create"},
 				})
 			}
 		case "2":
@@ -75,6 +76,9 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 	}
 	if len(tokens) != 150 {
 		t.Errorf("expected 150 tokens, got %d", len(tokens))
+	}
+	if tokens[0].Scopes != "server:read, command:create" {
+		t.Errorf("expected scopes %q, got %q", "server:read, command:create", tokens[0].Scopes)
 	}
 }
 
