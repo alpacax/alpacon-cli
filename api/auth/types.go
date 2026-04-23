@@ -54,7 +54,7 @@ type TokenScopeResource struct {
 }
 
 type TokenScopeAttributes struct {
-	Resource string `json:"name" table:"Resource"`
-	Actions  string `json:"actions" table:"Actions"`
-	ACL      string `json:"acl" table:"ACL"`
+	Name    string `json:"name" table:"Resource"`
+	Actions string `json:"actions" table:"Actions"`
+	ACL     string `json:"acl" table:"ACL"`
 }
