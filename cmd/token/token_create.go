@@ -9,7 +9,7 @@ import (
 
 var tokenCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a new api token",
+	Short: "Create a new API token",
 	Long: `
 	Generates a new API token for accessing the server.
 	This command allows you to create a token by specifying options such as token name, expiration, and scopes.

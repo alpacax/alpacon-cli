@@ -9,7 +9,7 @@ import (
 
 var tokenScopesCmd = &cobra.Command{
 	Use:   "scopes",
-	Short: "List available scopes for api tokens",
+	Short: "List available scopes for API tokens",
 	Long: `
 	Lists all scope resources and their actions that the current user
 	has permission to grant when creating an API token.
