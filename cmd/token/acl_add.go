@@ -2,8 +2,6 @@ package token
 
 import "github.com/spf13/cobra"
 
-// aclAddCmd is kept for backward compatibility.
-// Delegates to the same handler as 'acl command add'.
 var aclAddCmd = &cobra.Command{
 	Use:        "add",
 	Short:      "Add a command ACL rule to a token (deprecated: use 'acl command add')",

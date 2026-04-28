@@ -2,8 +2,6 @@ package token
 
 import "github.com/spf13/cobra"
 
-// aclListCmd is kept for backward compatibility.
-// Delegates to the same handler as 'acl command ls'.
 var aclListCmd = &cobra.Command{
 	Use:        "ls TOKEN",
 	Aliases:    []string{"list"},

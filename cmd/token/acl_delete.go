@@ -2,8 +2,6 @@ package token
 
 import "github.com/spf13/cobra"
 
-// aclDeleteCmd is kept for backward compatibility.
-// Delegates to the same handler as 'acl command delete'.
 var aclDeleteCmd = &cobra.Command{
 	Use:        "delete ACL-ID",
 	Aliases:    []string{"rm"},

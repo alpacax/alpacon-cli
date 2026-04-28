@@ -1,7 +1,7 @@
 package token
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/security"
@@ -71,7 +71,7 @@ Use --server for a single server or --servers for bulk operations.`,
 		}); err != nil {
 			utils.CliErrorWithExit("Failed to bulk-add server ACLs: %v.", err)
 		}
-		utils.CliSuccess("Server ACLs added: token %s can access %s", tokenArg, fmt.Sprintf("[%s]", serversCSV))
+		utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
 	},
 }
 
