@@ -1,5 +1,11 @@
 package security
 
+const (
+	FileAclActionUpload   = "upload"
+	FileAclActionDownload = "download"
+	FileAclActionAll      = "*"
+)
+
 type CommandAclRequest struct {
 	Token     string `json:"token"`
 	Command   string `json:"command"`
@@ -43,12 +49,6 @@ type ServerAclAttributes struct {
 	TokenName  string `json:"token_name"  table:"Token"`
 	ServerName string `json:"server_name" table:"Server"`
 }
-
-const (
-	FileAclActionUpload   = "upload"
-	FileAclActionDownload = "download"
-	FileAclActionAll      = "*"
-)
 
 type FileAclRequest struct {
 	Token     string `json:"token"`
