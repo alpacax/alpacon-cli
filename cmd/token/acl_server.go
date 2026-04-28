@@ -7,11 +7,10 @@ import (
 
 	serverapi "github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-func resolveServerIDs(ac *client.AlpaconClient, names []string) []string {
+func resolveServerIDs(ac *client.AlpaconClient, names []string) ([]string, error) {
 	serverIDs := make([]string, len(names))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -24,8 +23,10 @@ func resolveServerIDs(ac *client.AlpaconClient, names []string) []string {
 			id, err := serverapi.GetServerIDByName(ac, n)
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil && firstErr == nil {
-				firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
+				}
 				return
 			}
 			serverIDs[idx] = id
@@ -33,10 +34,7 @@ func resolveServerIDs(ac *client.AlpaconClient, names []string) []string {
 	}
 	wg.Wait()
 
-	if firstErr != nil {
-		utils.CliErrorWithExit("%v.", firstErr)
-	}
-	return serverIDs
+	return serverIDs, firstErr
 }
 
 var aclServerCmd = &cobra.Command{

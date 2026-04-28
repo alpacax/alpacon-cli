@@ -63,7 +63,10 @@ Use --server for a single server or --servers for bulk operations.`,
 			utils.CliErrorWithExit("--servers must contain at least one server name.")
 		}
 
-		serverIDs := resolveServerIDs(alpaconClient, names)
+		serverIDs, err := resolveServerIDs(alpaconClient, names)
+		if err != nil {
+			utils.CliErrorWithExit("%v.", err)
+		}
 
 		if err = security.BulkAddServerAcl(alpaconClient, security.ServerAclBulkRequest{
 			Token:   tokenID,

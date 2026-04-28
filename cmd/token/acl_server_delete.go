@@ -41,7 +41,10 @@ to multiple servers at once using --servers (bulk delete).`,
 			}
 
 			names := utils.SplitAndTrim(serversCSV, ",")
-			serverIDs := resolveServerIDs(alpaconClient, names)
+			serverIDs, err := resolveServerIDs(alpaconClient, names)
+			if err != nil {
+				utils.CliErrorWithExit("%v.", err)
+			}
 
 			if err = security.BulkDeleteServerAcl(alpaconClient, security.ServerAclBulkRequest{
 				Token:   tokenID,
@@ -57,7 +60,7 @@ to multiple servers at once using --servers (bulk delete).`,
 			utils.ConfirmAction("Delete server ACL '%s'?", arg)
 		}
 		if err = security.DeleteServerAcl(alpaconClient, arg); err != nil {
-			utils.CliErrorWithExit("Failed to delete server ACL: %s.", err)
+			utils.CliErrorWithExit("Failed to delete server ACL: %v.", err)
 		}
 		utils.CliSuccess("Server ACL deleted: %s", arg)
 	},
