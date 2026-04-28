@@ -127,6 +127,63 @@ func TestGetAPITokenIDByName(t *testing.T) {
 	}
 }
 
+func TestResolveTokenID(t *testing.T) {
+	const (
+		validUUID = "550e8400-e29b-41d4-a716-446655440000"
+		tokenName = "ci-token"
+		tokenID   = "token-uuid-abc"
+	)
+
+	tests := []struct {
+		name      string
+		input     string
+		count     int
+		wantID    string
+		wantHTTP  bool
+		wantErr   bool
+	}{
+		{"uuid fast-path — no HTTP request", validUUID, 0, validUUID, false, false},
+		{"name found", tokenName, 1, tokenID, true, false},
+		{"name not found", "ghost-token", 0, "", true, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var httpCalled bool
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpCalled = true
+				var results []APITokenResponse
+				if tt.count > 0 {
+					results = append(results, APITokenResponse{ID: tt.wantID, Name: tt.input})
+				}
+				resp := api.ListResponse[APITokenResponse]{Count: tt.count, Results: results}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			id, err := ResolveTokenID(ac, tt.input)
+
+			if tt.wantHTTP != httpCalled {
+				t.Errorf("HTTP called = %v, want %v", httpCalled, tt.wantHTTP)
+			}
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if id != tt.wantID {
+					t.Errorf("expected id %q, got %q", tt.wantID, id)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateAPIToken(t *testing.T) {
 	const wantKey = "secret-api-key-xyz"
 
