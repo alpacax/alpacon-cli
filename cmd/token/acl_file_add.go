@@ -42,7 +42,7 @@ func runFileAclAdd(cmd *cobra.Command, args []string) {
 	groupname, _ := cmd.Flags().GetString("groupname")
 
 	if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
-		utils.CliErrorWithExit("--action must be one of: upload, download, *")
+		utils.CliErrorWithExit("--action must be one of: upload, download, *.")
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
