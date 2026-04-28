@@ -9,7 +9,7 @@ import (
 )
 
 var aclCommandAddCmd = &cobra.Command{
-	Use:   "add",
+	Use:   "add TOKEN",
 	Short: "Add a command ACL rule to a token",
 	Long: `Define which server-side shell commands an API token is allowed to execute
 via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").
@@ -19,35 +19,27 @@ command string is matched.
 
 Username semantics: "" = token owner only, "*" = any user, exact name = match only.
 Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.`,
-	Example: `  alpacon token acl command add --token=my-api-token --command="whoami"
-  alpacon token acl command add --token=my-api-token --command="docker *" --username=root
-  alpacon token acl command add --token=my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
-	Run: runCommandAclAdd,
+	Example: `  alpacon token acl command add my-api-token --command="whoami"
+  alpacon token acl command add my-api-token --command="docker *" --username=root
+  alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
+	Args: cobra.ExactArgs(1),
+	Run:  runCommandAclAdd,
 }
 
 func init() {
-	aclCommandAddCmd.Flags().StringP("token", "t", "", "Token name or ID")
 	aclCommandAddCmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
 	aclCommandAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
 	aclCommandAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
 }
 
-func runCommandAclAdd(cmd *cobra.Command, _ []string) {
-	token, _ := cmd.Flags().GetString("token")
+func runCommandAclAdd(cmd *cobra.Command, args []string) {
+	tokenArg := args[0]
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")
 
-	var req security.CommandAclRequest
-	if token == "" || command == "" {
-		req = promptForCommandAcl()
-	} else {
-		req = security.CommandAclRequest{
-			Token:     token,
-			Command:   command,
-			Username:  username,
-			Groupname: groupname,
-		}
+	if command == "" {
+		utils.CliErrorWithExit("--command is required.")
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -55,22 +47,20 @@ func runCommandAclAdd(cmd *cobra.Command, _ []string) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	originalToken := req.Token
-	req.Token, err = auth.ResolveTokenID(alpaconClient, req.Token)
+	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
 	if err != nil {
-		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
+		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
 	}
 
+	req := security.CommandAclRequest{
+		Token:     tokenID,
+		Command:   command,
+		Username:  username,
+		Groupname: groupname,
+	}
 	if err = security.AddCommandAcl(alpaconClient, req); err != nil {
 		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL added to token %s: %s", originalToken, req.Command)
-}
-
-func promptForCommandAcl() security.CommandAclRequest {
-	return security.CommandAclRequest{
-		Token:   utils.PromptForRequiredInput("Token ID or name: "),
-		Command: utils.PromptForRequiredInput("Command: "),
-	}
+	utils.CliSuccess("Command ACL added to token %s: %s", tokenArg, command)
 }
