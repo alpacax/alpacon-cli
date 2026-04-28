@@ -55,6 +55,7 @@ func runCommandAclAdd(cmd *cobra.Command, _ []string) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
+	originalToken := req.Token
 	req.Token, err = auth.ResolveTokenID(alpaconClient, req.Token)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
@@ -64,7 +65,7 @@ func runCommandAclAdd(cmd *cobra.Command, _ []string) {
 		utils.CliErrorWithExit("Failed to add the command ACL: %v.", err)
 	}
 
-	utils.CliSuccess("Command ACL added to token %s: %s", req.Token, req.Command)
+	utils.CliSuccess("Command ACL added to token %s: %s", originalToken, req.Command)
 }
 
 func promptForCommandAcl() security.CommandAclRequest {
