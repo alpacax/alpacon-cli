@@ -32,7 +32,7 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
 		if path == "" || action == "" {
 			utils.CliErrorWithExit("--path and --action are required.")
 		}
-		if action != "upload" && action != "download" && action != "*" {
+		if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
 			utils.CliErrorWithExit("--action must be one of: upload, download, *")
 		}
 

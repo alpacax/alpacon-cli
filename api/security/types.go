@@ -48,6 +48,14 @@ type ServerAclAttributes struct {
 	ServerName string `json:"server_name" table:"Server"`
 }
 
+// ── FileACL actions ───────────────────────────────────────────────────────────
+
+const (
+	FileAclActionUpload   = "upload"
+	FileAclActionDownload = "download"
+	FileAclActionAll      = "*"
+)
+
 // ── FileACL ───────────────────────────────────────────────────────────────────
 
 type FileAclRequest struct {
