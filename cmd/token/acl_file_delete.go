@@ -28,7 +28,7 @@ var aclFileDeleteCmd = &cobra.Command{
 		}
 
 		if err = security.DeleteFileAcl(alpaconClient, aclID); err != nil {
-			utils.CliErrorWithExit("Failed to delete file ACL: %s.", err)
+			utils.CliErrorWithExit("Failed to delete file ACL: %v.", err)
 		}
 
 		utils.CliSuccess("File ACL deleted: %s", aclID)

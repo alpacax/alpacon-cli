@@ -35,7 +35,7 @@ func runCommandAclDelete(cmd *cobra.Command, args []string) {
 	}
 
 	if err = security.DeleteCommandAcl(alpaconClient, aclID); err != nil {
-		utils.CliErrorWithExit("Failed to delete command ACL: %s.", err)
+		utils.CliErrorWithExit("Failed to delete command ACL: %v.", err)
 	}
 
 	utils.CliSuccess("Command ACL deleted: %s", aclID)
