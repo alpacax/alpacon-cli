@@ -3,7 +3,6 @@ package token
 import (
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/security"
-	serverapi "github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -42,14 +41,7 @@ to multiple servers at once using --servers (bulk delete).`,
 			}
 
 			names := utils.SplitAndTrim(serversCSV, ",")
-			serverIDs := make([]string, 0, len(names))
-			for _, name := range names {
-				id, err := serverapi.GetServerIDByName(alpaconClient, name)
-				if err != nil {
-					utils.CliErrorWithExit("Failed to resolve server '%s': %v.", name, err)
-				}
-				serverIDs = append(serverIDs, id)
-			}
+			serverIDs := resolveServerIDs(alpaconClient, names)
 
 			if err = security.BulkDeleteServerAcl(alpaconClient, security.ServerAclBulkDeleteRequest{
 				Token:   tokenID,

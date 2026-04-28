@@ -2,9 +2,42 @@ package token
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 
+	serverapi "github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+func resolveServerIDs(ac *client.AlpaconClient, names []string) []string {
+	serverIDs := make([]string, len(names))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var firstErr error
+
+	for i, name := range names {
+		wg.Add(1)
+		go func(idx int, n string) {
+			defer wg.Done()
+			id, err := serverapi.GetServerIDByName(ac, n)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
+				return
+			}
+			serverIDs[idx] = id
+		}(i, name)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		utils.CliErrorWithExit("%v.", firstErr)
+	}
+	return serverIDs
+}
 
 var aclServerCmd = &cobra.Command{
 	Use:   "server",
