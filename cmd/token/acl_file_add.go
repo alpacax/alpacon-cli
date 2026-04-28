@@ -22,42 +22,7 @@ Groupname semantics: "" = no group restriction, "*" = any group, exact name = ma
   alpacon token acl file add my-api-token --path "/var/log/*" --action download --username root
   alpacon token acl file add my-api-token --path "*" --action "*" --username "*" --groupname "*"`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		tokenArg := args[0]
-		path, _ := cmd.Flags().GetString("path")
-		action, _ := cmd.Flags().GetString("action")
-		username, _ := cmd.Flags().GetString("username")
-		groupname, _ := cmd.Flags().GetString("groupname")
-
-		if path == "" || action == "" {
-			utils.CliErrorWithExit("--path and --action are required.")
-		}
-		if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
-			utils.CliErrorWithExit("--action must be one of: upload, download, *")
-		}
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve token: %v.", err)
-		}
-
-		if err = security.AddFileAcl(alpaconClient, security.FileAclRequest{
-			Token:     tokenID,
-			Path:      path,
-			Action:    action,
-			Username:  username,
-			Groupname: groupname,
-		}); err != nil {
-			utils.CliErrorWithExit("Failed to add file ACL: %v.", err)
-		}
-
-		utils.CliSuccess("File ACL added to token %s: %s [%s]", tokenArg, path, action)
-	},
+	Run:  runFileAclAdd,
 }
 
 func init() {
@@ -65,4 +30,41 @@ func init() {
 	aclFileAddCmd.Flags().String("action", "", "Allowed action: upload, download, or *")
 	aclFileAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
 	aclFileAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+}
+
+func runFileAclAdd(cmd *cobra.Command, args []string) {
+	tokenArg := args[0]
+	path, _ := cmd.Flags().GetString("path")
+	action, _ := cmd.Flags().GetString("action")
+	username, _ := cmd.Flags().GetString("username")
+	groupname, _ := cmd.Flags().GetString("groupname")
+
+	if path == "" || action == "" {
+		utils.CliErrorWithExit("--path and --action are required.")
+	}
+	if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
+		utils.CliErrorWithExit("--action must be one of: upload, download, *")
+	}
+
+	alpaconClient, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+	}
+
+	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to resolve token: %v.", err)
+	}
+
+	if err = security.AddFileAcl(alpaconClient, security.FileAclRequest{
+		Token:     tokenID,
+		Path:      path,
+		Action:    action,
+		Username:  username,
+		Groupname: groupname,
+	}); err != nil {
+		utils.CliErrorWithExit("Failed to add file ACL: %v.", err)
+	}
+
+	utils.CliSuccess("File ACL added to token %s: %s [%s]", tokenArg, path, action)
 }
