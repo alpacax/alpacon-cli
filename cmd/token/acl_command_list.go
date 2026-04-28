@@ -26,11 +26,9 @@ func runCommandAclList(_ *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	if !utils.IsUUID(tokenID) {
-		tokenID, err = auth.GetAPITokenIDByName(alpaconClient, tokenID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve command ACLs: %s.", err)
-		}
+	tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to retrieve command ACLs: %s.", err)
 	}
 
 	acls, err := security.GetCommandAclList(alpaconClient, tokenID)

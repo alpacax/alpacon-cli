@@ -23,11 +23,9 @@ var aclServerListCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if !utils.IsUUID(tokenID) {
-			tokenID, err = auth.GetAPITokenIDByName(alpaconClient, tokenID)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve server ACLs: %s.", err)
-			}
+		tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to retrieve server ACLs: %s.", err)
 		}
 
 		acls, err := security.GetServerAclList(alpaconClient, tokenID)

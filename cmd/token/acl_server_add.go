@@ -38,12 +38,9 @@ Use --server for a single server or --servers for bulk operations.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		tokenID := tokenArg
-		if !utils.IsUUID(tokenID) {
-			tokenID, err = auth.GetAPITokenIDByName(alpaconClient, tokenArg)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to resolve token: %v.", err)
-			}
+		tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to resolve token: %v.", err)
 		}
 
 		if serverName != "" {

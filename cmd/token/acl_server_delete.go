@@ -36,12 +36,9 @@ to multiple servers at once using --servers (bulk delete).`,
 				utils.ConfirmAction("Revoke server ACLs for token '%s' on servers [%s]?", arg, serversCSV)
 			}
 
-			tokenID := arg
-			if !utils.IsUUID(tokenID) {
-				tokenID, err = auth.GetAPITokenIDByName(alpaconClient, arg)
-				if err != nil {
-					utils.CliErrorWithExit("Failed to resolve token: %v.", err)
-				}
+			tokenID, err := auth.ResolveTokenID(alpaconClient, arg)
+			if err != nil {
+				utils.CliErrorWithExit("Failed to resolve token: %v.", err)
 			}
 
 			names := utils.SplitAndTrim(serversCSV, ",")

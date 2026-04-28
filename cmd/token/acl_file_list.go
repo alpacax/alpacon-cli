@@ -23,11 +23,9 @@ var aclFileListCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if !utils.IsUUID(tokenID) {
-			tokenID, err = auth.GetAPITokenIDByName(alpaconClient, tokenID)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve file ACLs: %s.", err)
-			}
+		tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to retrieve file ACLs: %s.", err)
 		}
 
 		acls, err := security.GetFileAclList(alpaconClient, tokenID)
