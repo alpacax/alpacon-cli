@@ -30,6 +30,7 @@ func init() {
 	aclCommandAddCmd.Flags().StringP("command", "c", "", "Server-side shell command (supports * wildcard)")
 	aclCommandAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
 	aclCommandAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+	_ = aclCommandAddCmd.MarkFlagRequired("command")
 }
 
 func runCommandAclAdd(cmd *cobra.Command, args []string) {
@@ -37,10 +38,6 @@ func runCommandAclAdd(cmd *cobra.Command, args []string) {
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")
-
-	if command == "" {
-		utils.CliErrorWithExit("--command is required.")
-	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {

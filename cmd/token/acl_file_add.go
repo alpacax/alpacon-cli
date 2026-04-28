@@ -30,6 +30,8 @@ func init() {
 	aclFileAddCmd.Flags().String("action", "", "Allowed action: upload, download, or *")
 	aclFileAddCmd.Flags().String("username", "", `Username restriction: "" = token owner only, "*" = any user`)
 	aclFileAddCmd.Flags().String("groupname", "", `Groupname restriction: "" = no restriction, "*" = any group`)
+	_ = aclFileAddCmd.MarkFlagRequired("path")
+	_ = aclFileAddCmd.MarkFlagRequired("action")
 }
 
 func runFileAclAdd(cmd *cobra.Command, args []string) {
@@ -39,9 +41,6 @@ func runFileAclAdd(cmd *cobra.Command, args []string) {
 	username, _ := cmd.Flags().GetString("username")
 	groupname, _ := cmd.Flags().GetString("groupname")
 
-	if path == "" || action == "" {
-		utils.CliErrorWithExit("--path and --action are required.")
-	}
 	if action != security.FileAclActionUpload && action != security.FileAclActionDownload && action != security.FileAclActionAll {
 		utils.CliErrorWithExit("--action must be one of: upload, download, *")
 	}
