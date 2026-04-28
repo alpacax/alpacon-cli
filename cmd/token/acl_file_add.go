@@ -47,7 +47,7 @@ func runFileAclAdd(cmd *cobra.Command, args []string) {
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %v. Consider re-logging.", err)
 	}
 
 	tokenID, err := auth.ResolveTokenID(alpaconClient, tokenArg)
