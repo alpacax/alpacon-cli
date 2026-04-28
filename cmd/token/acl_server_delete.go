@@ -41,6 +41,9 @@ to multiple servers at once using --servers (bulk delete).`,
 			}
 
 			names := utils.SplitAndTrim(serversCSV, ",")
+			if len(names) == 0 {
+				utils.CliErrorWithExit("--servers must contain at least one server name.")
+			}
 			serverIDs, err := resolveServerIDs(alpaconClient, names)
 			if err != nil {
 				utils.CliErrorWithExit("%v.", err)
