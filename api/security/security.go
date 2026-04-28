@@ -23,20 +23,12 @@ func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclRe
 
 func AddCommandAcl(ac *client.AlpaconClient, request CommandAclRequest) error {
 	_, err := ac.SendPostRequest(commandAclURL, request)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func DeleteCommandAcl(ac *client.AlpaconClient, commandAclId string) error {
 	_, err := ac.SendDeleteRequest(utils.BuildURL(commandAclURL, commandAclId, nil))
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func GetServerAclList(ac *client.AlpaconClient, tokenID string) ([]ServerAclAttributes, error) {
@@ -66,7 +58,7 @@ func BulkAddServerAcl(ac *client.AlpaconClient, request ServerAclBulkRequest) er
 	return err
 }
 
-func BulkDeleteServerAcl(ac *client.AlpaconClient, request ServerAclBulkDeleteRequest) error {
+func BulkDeleteServerAcl(ac *client.AlpaconClient, request ServerAclBulkRequest) error {
 	_, err := ac.SendPostRequest(serverAclBulkDelURL, request)
 	return err
 }

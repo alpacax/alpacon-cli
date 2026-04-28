@@ -43,7 +43,7 @@ to multiple servers at once using --servers (bulk delete).`,
 			names := utils.SplitAndTrim(serversCSV, ",")
 			serverIDs := resolveServerIDs(alpaconClient, names)
 
-			if err = security.BulkDeleteServerAcl(alpaconClient, security.ServerAclBulkDeleteRequest{
+			if err = security.BulkDeleteServerAcl(alpaconClient, security.ServerAclBulkRequest{
 				Token:   tokenID,
 				Servers: serverIDs,
 			}); err != nil {

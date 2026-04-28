@@ -29,11 +29,6 @@ type ServerAclBulkRequest struct {
 	Servers []string `json:"servers"` // server UUIDs
 }
 
-type ServerAclBulkDeleteRequest struct {
-	Token   string   `json:"token"`
-	Servers []string `json:"servers"` // server UUIDs
-}
-
 type serverAclServer struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
