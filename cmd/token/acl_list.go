@@ -1,46 +1,15 @@
 package token
 
-import (
-	"github.com/alpacax/alpacon-cli/api/auth"
-	"github.com/alpacax/alpacon-cli/api/security"
-	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
+// aclListCmd is kept for backward compatibility.
+// Delegates to the same handler as 'acl command ls'.
 var aclListCmd = &cobra.Command{
-	Use:     "ls",
-	Aliases: []string{"list"},
-	Short:   "Display all command ACLs for an API token",
-	Long: `
-	This command displays all command access control lists (ACLs) registered to an API token. 
-	It shows details such as the token name and the commands associated with each ACL.
-	`,
-	Example: `
-	alpacon token acl ls my-api-token
-	alpacon token acl list my-api-token
-	`,
-	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		tokenId := args[0]
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		if !utils.IsUUID(tokenId) {
-			tokenId, err = auth.GetAPITokenIDByName(alpaconClient, tokenId)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve the command acl: %s.", err)
-			}
-		}
-
-		commandAcl, err := security.GetCommandAclList(alpaconClient, tokenId)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the command acl: %s.", err)
-		}
-
-		utils.PrintTable(commandAcl)
-	},
+	Use:        "ls TOKEN",
+	Aliases:    []string{"list"},
+	Short:      "List command ACL rules for a token (deprecated: use 'acl command ls')",
+	Deprecated: "use 'alpacon token acl command ls' instead",
+	Hidden:     true,
+	Args:       cobra.ExactArgs(1),
+	Run:        runCommandAclList,
 }
