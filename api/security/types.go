@@ -1,7 +1,5 @@
 package security
 
-// ── CommandACL ────────────────────────────────────────────────────────────────
-
 type CommandAclRequest struct {
 	Token     string `json:"token"`
 	Command   string `json:"command"`
@@ -16,8 +14,6 @@ type CommandAclResponse struct {
 	Username  string `json:"username"   table:"Username"`
 	Groupname string `json:"groupname"  table:"Groupname"`
 }
-
-// ── ServerACL ─────────────────────────────────────────────────────────────────
 
 type ServerAclRequest struct {
 	Token  string `json:"token"`
@@ -48,15 +44,11 @@ type ServerAclAttributes struct {
 	ServerName string `json:"server_name" table:"Server"`
 }
 
-// ── FileACL actions ───────────────────────────────────────────────────────────
-
 const (
 	FileAclActionUpload   = "upload"
 	FileAclActionDownload = "download"
 	FileAclActionAll      = "*"
 )
-
-// ── FileACL ───────────────────────────────────────────────────────────────────
 
 type FileAclRequest struct {
 	Token     string `json:"token"`
