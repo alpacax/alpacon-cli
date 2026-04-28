@@ -22,6 +22,7 @@ Create, list, and modify ACL rules to fine-tune command execution permissions.`,
 }
 
 func init() {
+	AclCmd.AddCommand(aclCommandCmd)
 	AclCmd.AddCommand(aclListCmd)
 	AclCmd.AddCommand(aclAddCmd)
 	AclCmd.AddCommand(aclDeleteCmd)
