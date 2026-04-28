@@ -2,27 +2,34 @@ package token
 
 import (
 	"errors"
+
 	"github.com/spf13/cobra"
 )
 
 var AclCmd = &cobra.Command{
 	Use:   "acl",
-	Short: "Manage command access for API tokens",
-	Long: `Configure access control for API tokens, specifying which server-side shell commands
-each token can execute via websh or exec (e.g., "whoami", "systemctl status *").
+	Short: "Manage access control for API tokens",
+	Long: `Configure fine-grained access control for API tokens.
 
-Create, list, and modify ACL rules to fine-tune command execution permissions.`,
+Three independent ACL types enforce deny-by-default:
+  command  — which shell commands the token can execute via websh/exec
+  server   — which servers the token can access
+  file     — which file paths the token can read/write via cp
+
+If no ACL rule exists for a given type, that access is denied entirely.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon token acl list', 'alpacon token acl add', or 'alpacon token acl delete' to manage access control rules. Run 'alpacon token acl --help' for more information")
+		_ = cmd.Help()
+		return errors.New("a subcommand is required. Run 'alpacon token acl --help' for more information")
 	},
 }
 
 func init() {
-	AclCmd.AddCommand(aclListCmd)
+	AclCmd.AddCommand(aclCommandCmd)
+	AclCmd.AddCommand(aclServerCmd)
+	AclCmd.AddCommand(aclFileCmd)
+
+	// Legacy top-level aliases (deprecated, hidden)
 	AclCmd.AddCommand(aclAddCmd)
+	AclCmd.AddCommand(aclListCmd)
 	AclCmd.AddCommand(aclDeleteCmd)
 }

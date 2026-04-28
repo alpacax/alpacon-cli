@@ -159,6 +159,13 @@ func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, er
 	return response.Results[0].ID, nil
 }
 
+func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
+	if utils.IsUUID(nameOrID) {
+		return nameOrID, nil
+	}
+	return GetAPITokenIDByName(ac, nameOrID)
+}
+
 func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 	_, err := ac.SendDeleteRequest(utils.BuildURL(tokenURL, tokenID, nil))
 	if err != nil {
