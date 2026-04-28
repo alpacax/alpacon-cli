@@ -25,12 +25,12 @@ var aclServerListCmd = &cobra.Command{
 
 		tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve server ACLs: %s.", err)
+			utils.CliErrorWithExit("Failed to resolve token: %v.", err)
 		}
 
 		acls, err := security.GetServerAclList(alpaconClient, tokenID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve server ACLs: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve server ACLs: %v.", err)
 		}
 
 		utils.PrintTable(acls)

@@ -25,12 +25,12 @@ var aclFileListCmd = &cobra.Command{
 
 		tokenID, err = auth.ResolveTokenID(alpaconClient, tokenID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve file ACLs: %s.", err)
+			utils.CliErrorWithExit("Failed to resolve token: %v.", err)
 		}
 
 		acls, err := security.GetFileAclList(alpaconClient, tokenID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve file ACLs: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve file ACLs: %v.", err)
 		}
 
 		utils.PrintTable(acls)

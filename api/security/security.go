@@ -14,9 +14,9 @@ const (
 	fileAclURL          = "/api/security/file-acl/"
 )
 
-func GetCommandAclList(ac *client.AlpaconClient, tokenId string) ([]CommandAclResponse, error) {
+func GetCommandAclList(ac *client.AlpaconClient, tokenID string) ([]CommandAclResponse, error) {
 	params := map[string]string{
-		"token": tokenId,
+		"token": tokenID,
 	}
 	return api.FetchAllPages[CommandAclResponse](ac, commandAclURL, params)
 }
