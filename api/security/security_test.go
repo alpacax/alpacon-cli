@@ -28,7 +28,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 		var results []CommandAclResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, CommandAclResponse{
 					ID:        fmt.Sprintf("acl-%d", i),
 					TokenName: "my-token",
@@ -36,7 +36,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, CommandAclResponse{
 					ID:        fmt.Sprintf("acl-p2-%d", i),
 					TokenName: "my-token",
@@ -92,7 +92,7 @@ func TestGetServerAclList_Pagination(t *testing.T) {
 		var results []serverAclResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, serverAclResponse{
 					ID:        fmt.Sprintf("sacl-%d", i),
 					Token:     "token-id-1",
@@ -101,7 +101,7 @@ func TestGetServerAclList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 30; i++ {
+			for i := range 30 {
 				results = append(results, serverAclResponse{
 					ID:        fmt.Sprintf("sacl-p2-%d", i),
 					Token:     "token-id-1",
@@ -143,5 +143,70 @@ func TestGetServerAclList_Pagination(t *testing.T) {
 	}
 	if acls[0].ServerName != "server-0" {
 		t.Errorf("expected server name 'server-0', got %q", acls[0].ServerName)
+	}
+}
+
+func TestGetFileAclList_Pagination(t *testing.T) {
+	var requestCount atomic.Int32
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := requestCount.Add(1)
+		if count > 3 {
+			t.Errorf("infinite loop detected: request #%d", count)
+			return
+		}
+
+		page := r.URL.Query().Get("page")
+		var results []FileAclResponse
+		switch page {
+		case "1", "":
+			for i := range 100 {
+				results = append(results, FileAclResponse{
+					ID:        fmt.Sprintf("facl-%d", i),
+					TokenName: "my-token",
+					Path:      fmt.Sprintf("/home/deploy/%d/*", i),
+					Action:    "upload",
+				})
+			}
+		case "2":
+			for i := range 20 {
+				results = append(results, FileAclResponse{
+					ID:        fmt.Sprintf("facl-p2-%d", i),
+					TokenName: "my-token",
+					Path:      "/tmp/*",
+					Action:    "*",
+				})
+			}
+		}
+
+		var next int
+		if page == "1" || page == "" {
+			next = 2
+		}
+		resp := api.ListResponse[FileAclResponse]{
+			Count:   120,
+			Next:    next,
+			Results: results,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	acls, err := GetFileAclList(ac, "token-id-1")
+	if err != nil {
+		t.Fatalf("GetFileAclList error: %v", err)
+	}
+
+	if int(requestCount.Load()) != 2 {
+		t.Errorf("expected 2 requests, got %d", requestCount.Load())
+	}
+	if len(acls) != 120 {
+		t.Errorf("expected 120 ACLs, got %d", len(acls))
 	}
 }

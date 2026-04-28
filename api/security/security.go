@@ -75,3 +75,18 @@ func DeleteServerAcl(ac *client.AlpaconClient, serverAclID string) error {
 	_, err := ac.SendDeleteRequest(utils.BuildURL(serverAclURL, serverAclID, nil))
 	return err
 }
+
+func GetFileAclList(ac *client.AlpaconClient, tokenID string) ([]FileAclResponse, error) {
+	params := map[string]string{"token": tokenID}
+	return api.FetchAllPages[FileAclResponse](ac, fileAclURL, params)
+}
+
+func AddFileAcl(ac *client.AlpaconClient, request FileAclRequest) error {
+	_, err := ac.SendPostRequest(fileAclURL, request)
+	return err
+}
+
+func DeleteFileAcl(ac *client.AlpaconClient, fileAclID string) error {
+	_, err := ac.SendDeleteRequest(utils.BuildURL(fileAclURL, fileAclID, nil))
+	return err
+}
