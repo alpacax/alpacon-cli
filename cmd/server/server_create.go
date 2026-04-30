@@ -35,6 +35,8 @@ var serverCreateCmd = &cobra.Command{
 	Register a new server by selecting a registration token and generating an installation guide.
 	The guide includes the Alpamon register command to run on your server.
 
+	Supported platforms: debian, rhel, darwin, windows.
+
 	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
 	Example: `
@@ -42,7 +44,6 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
 	alpacon server create --platform windows --token prod-token
-	alpacon server create --platform windows --token prod-token --name win-server-01
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
