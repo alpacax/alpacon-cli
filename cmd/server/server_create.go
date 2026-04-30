@@ -43,6 +43,7 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
+	alpacon server create --platform darwin --token prod-token
 	alpacon server create --platform windows --token prod-token
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
