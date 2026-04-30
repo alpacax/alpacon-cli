@@ -197,7 +197,7 @@ $ alpacon server delete [SERVER NAME]
 $ alpacon server rm [SERVER NAME]
 
 Server Name:
-Platform(debian, rhel):
+Platform(debian, rhel, darwin, windows):
 Groups:
 [1] alpacon
 [2] auditors
