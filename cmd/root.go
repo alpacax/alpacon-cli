@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"net/url"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	"github.com/alpacax/alpacon-cli/cmd/audit"
@@ -24,6 +24,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/webhook"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -48,8 +49,7 @@ Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		utils.ShowLogo()
-		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
+		utils.ShowLogo(buildWelcomeLines())
 	},
 }
 
@@ -138,4 +138,35 @@ func init() {
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)
+}
+
+// buildWelcomeLines composes the right-side text lines rendered next to the
+// Pacabot art when `alpacon` is invoked with no subcommand. Three lines:
+// version, workspace URL (or login prompt), help hint.
+func buildWelcomeLines() []string {
+	header := fmt.Sprintf("alpacon %s", utils.GetCLIVersion())
+	helpHint := "'alpacon --help' for commands"
+
+	cfg, err := config.LoadConfig()
+	if err != nil || (cfg.AccessToken == "" && cfg.Token == "") {
+		return []string{
+			header,
+			"Not logged in — run 'alpacon login'",
+			helpHint,
+		}
+	}
+
+	host := stripScheme(cfg.WorkspaceURL)
+	if host == "" {
+		host = cfg.WorkspaceName
+	}
+	return []string{header, host, helpHint}
+}
+
+func stripScheme(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
