@@ -79,8 +79,11 @@ func ShowLogo(rightLines []string) {
 			maxRight = n
 		}
 	}
+	// Default to the stacked layout when terminal size is unknown — we'd
+	// rather print a clean vertical layout than risk wrapping text into
+	// the middle of the pixel art.
 	cols, _, err := term.GetSize(int(os.Stderr.Fd()))
-	inline := err != nil || cols >= artWidth+maxRight+1
+	inline := err == nil && cols >= artWidth+maxRight+1
 
 	// Body cells render as spaces with BG=cyan in color mode; in plain mode
 	// we substitute █ glyphs so the art stays visible without ANSI codes.

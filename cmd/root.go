@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
-	"strings"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	"github.com/alpacax/alpacon-cli/cmd/audit"
@@ -150,10 +151,10 @@ func buildWelcomeLines() []string {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		// "file does not exist" → expected case, treat as not logged in.
+		// Missing config file → expected case, treat as not logged in.
 		// Other errors (permissions, malformed JSON) surface so the user
 		// can act on them instead of seeing a misleading login prompt.
-		if strings.Contains(err.Error(), "does not exist") {
+		if errors.Is(err, os.ErrNotExist) {
 			return []string{header, "Not logged in — run 'alpacon login'", helpHint}
 		}
 		return []string{header, "Config read error — run 'alpacon login' to reset", helpHint}
