@@ -17,20 +17,23 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
 
-// ShowLogo renders the Pacabot mascot with up to 4 lines of text. When the
-// terminal is wide enough the text sits to the right of the art; otherwise
-// it falls back to rendering text below the art so wrapped lines don't
-// break the half-block pixel art rendering.
+// ShowLogo renders the Pacabot mascot with up to 3 lines of text. When the
+// terminal is wide enough the text sits to the right of the art (lines 1-3
+// align with art rows 1-3); otherwise it falls back to rendering text below
+// the art so wrapped lines don't break the half-block pixel art rendering.
 //
-// Pixel art ported from strategy/brand-assets/pacabot/pacabot.sh. Body cells
-// (full-block █) use FG+BG cyan so the cell background fills any inter-line
-// gap. Edges (▄ ▀) stay FG-only — ▄ glyph extends below the em-box in most
-// fonts (filling the gap below), while ▀ is reserved for the eye and mouth
-// where the half-pixel gap is intentional.
+// Pixel art ported from strategy/brand-assets/pacabot/pacabot.sh. In color
+// mode, body cells render as spaces with BG=cyan so the cell background
+// fills any inter-line gap. In plain mode (no TTY / NO_COLOR), body cells
+// substitute █ glyphs so the silhouette stays visible without ANSI codes.
+// Edge half-blocks (▄ ▀) are kept in both modes — they define the shape:
+// ▄ corners and ! bar bottom (FG cyan, glyph extends below the em-box in
+// most fonts), and ▀ for the eye (grey on cyan) and the mouth (grey FG).
 // Brand colors: primary #27AAE1, secondary #58595B.
 func ShowLogo(rightLines []string) {
 	useColor := os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stderr.Fd()))
@@ -67,7 +70,7 @@ func ShowLogo(rightLines []string) {
 	const artWidth = 22
 	maxRight := 0
 	for _, line := range rightLines {
-		if n := len(line); n > maxRight {
+		if n := utf8.RuneCountInString(line); n > maxRight {
 			maxRight = n
 		}
 	}

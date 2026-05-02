@@ -156,14 +156,14 @@ func buildWelcomeLines() []string {
 		}
 	}
 
-	host := stripScheme(cfg.WorkspaceURL)
+	host := hostFromURL(cfg.WorkspaceURL)
 	if host == "" {
 		host = cfg.WorkspaceName
 	}
 	return []string{header, host, helpHint}
 }
 
-func stripScheme(rawURL string) string {
+func hostFromURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
 		return rawURL
