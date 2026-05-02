@@ -48,6 +48,11 @@ func ShowLogo(rightLines []string) {
 		r = "\033[0m"
 	}
 
+	// Clamp to 3 lines so inline and stacked layouts behave consistently
+	// regardless of how many lines the caller provides.
+	if len(rightLines) > 3 {
+		rightLines = rightLines[:3]
+	}
 	for len(rightLines) < 3 {
 		rightLines = append(rightLines, "")
 	}

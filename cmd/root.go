@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	"github.com/alpacax/alpacon-cli/cmd/audit"
@@ -142,18 +143,23 @@ func init() {
 
 // buildWelcomeLines composes the right-side text lines rendered next to the
 // Pacabot art when `alpacon` is invoked with no subcommand. Three lines:
-// version, workspace URL (or login prompt), help hint.
+// version, workspace URL (or login prompt / config error), help hint.
 func buildWelcomeLines() []string {
 	header := fmt.Sprintf("alpacon %s", utils.GetCLIVersion())
 	helpHint := "'alpacon --help' for commands"
 
 	cfg, err := config.LoadConfig()
-	if err != nil || (cfg.AccessToken == "" && cfg.Token == "") {
-		return []string{
-			header,
-			"Not logged in — run 'alpacon login'",
-			helpHint,
+	if err != nil {
+		// "file does not exist" → expected case, treat as not logged in.
+		// Other errors (permissions, malformed JSON) surface so the user
+		// can act on them instead of seeing a misleading login prompt.
+		if strings.Contains(err.Error(), "does not exist") {
+			return []string{header, "Not logged in — run 'alpacon login'", helpHint}
 		}
+		return []string{header, "Config read error — run 'alpacon login' to reset", helpHint}
+	}
+	if cfg.AccessToken == "" && cfg.Token == "" {
+		return []string{header, "Not logged in — run 'alpacon login'", helpHint}
 	}
 
 	host := hostFromURL(cfg.WorkspaceURL)
