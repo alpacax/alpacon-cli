@@ -17,22 +17,102 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
 
-func ShowLogo() {
-	alpaconLogo := `
-     (` + "`" + `-')  _           _  (` + "`" + `-') (` + "`" + `-')  _                      <-. (` + "`" + `-')_
-     (OO ).-/    <-.    \-.(OO ) (OO ).-/  _             .->      \( OO) )
-     / ,---.   ,--. )   _.'    \ / ,---.   \-,-----.(` + "`" + `-')----. ,--./ ,--/
-     | \ /` + ".`" + `\  |  (` + "`" + `-')(_...--'' | \ /` + ".`" + `\   |  .--./( OO).-.  '|   \ |  |
-     '-'|_.' | |  |OO )|  |_.' | '-'|_.' | /_) (` + "`" + `-')( _) | |  ||  . '|  |)
-    (|  .-.  |(|  '__ ||  .___.'(|  .-.  | ||  |OO ) \|  |)|  ||  |\    |
-     |  | |  | |     |'|  |      |  | |  |(_'  '--'\  '  '-'  '|  | \   |
-     ` + "`" + `--' ` + "`" + `--' ` + "`" + `-----' ` + "`" + `--'      ` + "`" + `--' ` + "`" + `--'   ` + "`" + `-----'   ` + "`" + `-----' ` + "`" + `--'  ` + "`" + `--'
-    `
-	fmt.Fprintln(os.Stderr, alpaconLogo)
+// ShowLogo renders the Pacabot mascot with up to 3 lines of text. When the
+// terminal is wide enough the text sits to the right of the art (lines 1-3
+// align with art rows 1-3); otherwise it falls back to rendering text below
+// the art so wrapped lines don't break the half-block pixel art rendering.
+//
+// Pixel art ported from strategy/brand-assets/pacabot/pacabot.sh. In color
+// mode, body cells render as spaces with BG=cyan so the cell background
+// fills any inter-line gap. In plain mode (no TTY / NO_COLOR), body cells
+// substitute █ glyphs so the silhouette stays visible without ANSI codes.
+// Edge half-blocks (▄ ▀) are kept in both modes — they define the shape:
+// ▄ corners and ! bar bottom (FG cyan, glyph extends below the em-box in
+// most fonts), and ▀ for the eye (grey on cyan) and the mouth (grey FG).
+// Brand colors: primary #27AAE1, secondary #58595B.
+func ShowLogo(rightLines []string) {
+	useColor := os.Getenv("NO_COLOR") == "" && term.IsTerminal(int(os.Stderr.Fd()))
+
+	var p, pb, s, a, b, r string
+	if useColor {
+		p = "\033[38;2;39;170;225m"               // primary cyan FG (edges)
+		pb = "\033[48;2;39;170;225m"              // primary cyan BG (solid body — applied to spaces)
+		s = "\033[38;2;88;89;91m"                 // secondary grey FG (mouth + tagline)
+		a = "\033[38;2;88;89;91;48;2;39;170;225m" // grey on cyan (eye)
+		b = "\033[1m"                             // bold
+		r = "\033[0m"
+	}
+
+	// Clamp to 3 lines so inline and stacked layouts behave consistently
+	// regardless of how many lines the caller provides.
+	if len(rightLines) > 3 {
+		rightLines = rightLines[:3]
+	}
+	for len(rightLines) < 3 {
+		rightLines = append(rightLines, "")
+	}
+
+	header := rightLines[0]
+	if header != "" {
+		header = b + p + header + r
+	}
+	tinted := func(line string) string {
+		if line == "" {
+			return ""
+		}
+		return s + line + r
+	}
+
+	// Art occupies columns 0..22 (visual). If the terminal is too narrow to
+	// fit the longest right-side line beside the art, wrapped text would
+	// render between art rows and break the pixel art. Detect and fall back
+	// to printing text below the art.
+	const artWidth = 22
+	maxRight := 0
+	for _, line := range rightLines {
+		if n := utf8.RuneCountInString(line); n > maxRight {
+			maxRight = n
+		}
+	}
+	// Default to the stacked layout when terminal size is unknown — we'd
+	// rather print a clean vertical layout than risk wrapping text into
+	// the middle of the pixel art.
+	cols, _, err := term.GetSize(int(os.Stderr.Fd()))
+	inline := err == nil && cols >= artWidth+maxRight+1
+
+	// Body cells render as spaces with BG=cyan in color mode; in plain mode
+	// we substitute █ glyphs so the art stays visible without ANSI codes.
+	bodyEar, bodyEleven, bodyTen, bodyEight, bodyTwo, bodyBar := "  ", "           ", "          ", "        ", "  ", " "
+	if !useColor {
+		bodyEar, bodyEleven, bodyTen, bodyEight, bodyTwo, bodyBar = "██", "███████████", "██████████", "████████", "██", "█"
+	}
+
+	fmt.Fprintln(os.Stderr)
+	if inline {
+		fmt.Fprintf(os.Stderr, "   %s%s%s  %s%s%s      %s%s%s      %s\n", pb, bodyEar, r, pb, bodyEar, r, pb, bodyBar, r, header)
+		fmt.Fprintf(os.Stderr, " %s%s%s   %s▄%s      %s\n", pb, bodyEleven, r, p, r, tinted(rightLines[1]))
+		fmt.Fprintf(os.Stderr, " %s%s%s%s▀%s%s%s%s%s▄%s         %s\n", pb, bodyEight, r, a, r, pb, bodyTwo, r, p, r, tinted(rightLines[2]))
+		fmt.Fprintf(os.Stderr, "  %s%s%s%s▀%s\n", pb, bodyTen, r, s, r)
+	} else {
+		fmt.Fprintf(os.Stderr, "   %s%s%s  %s%s%s      %s%s%s\n", pb, bodyEar, r, pb, bodyEar, r, pb, bodyBar, r)
+		fmt.Fprintf(os.Stderr, " %s%s%s   %s▄%s\n", pb, bodyEleven, r, p, r)
+		fmt.Fprintf(os.Stderr, " %s%s%s%s▀%s%s%s%s%s▄%s\n", pb, bodyEight, r, a, r, pb, bodyTwo, r, p, r)
+		fmt.Fprintf(os.Stderr, "  %s%s%s%s▀%s\n", pb, bodyTen, r, s, r)
+		if header != "" {
+			fmt.Fprintf(os.Stderr, "\n  %s\n", header)
+		}
+		for _, line := range rightLines[1:] {
+			if line != "" {
+				fmt.Fprintf(os.Stderr, "  %s\n", tinted(line))
+			}
+		}
+	}
+	fmt.Fprintln(os.Stderr)
 }
 
 func ReadFileFromPath(filePath string) ([]byte, error) {

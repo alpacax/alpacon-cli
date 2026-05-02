@@ -115,7 +115,9 @@ func LoadConfig() (Config, error) {
 	file, err := os.Open(configFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Config{}, fmt.Errorf("config file does not exist: %v", configFile)
+			// Wrap with %w so callers can detect the missing-config case
+			// via errors.Is(err, os.ErrNotExist).
+			return Config{}, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
 		}
 		return Config{}, fmt.Errorf("failed to open config file: %v", err)
 	}

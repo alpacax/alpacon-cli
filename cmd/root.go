@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
@@ -24,6 +26,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/webhook"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -48,8 +51,7 @@ Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		utils.ShowLogo()
-		fmt.Fprintln(os.Stderr, "Welcome to Alpacon CLI! Use 'alpacon [command]' to execute a specific command or 'alpacon help' to see all available commands.")
+		utils.ShowLogo(buildWelcomeLines())
 	},
 }
 
@@ -138,4 +140,40 @@ func init() {
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)
+}
+
+// buildWelcomeLines composes the right-side text lines rendered next to the
+// Pacabot art when `alpacon` is invoked with no subcommand. Three lines:
+// version, workspace URL (or login prompt / config error), help hint.
+func buildWelcomeLines() []string {
+	header := fmt.Sprintf("alpacon %s", utils.GetCLIVersion())
+	helpHint := "'alpacon --help' for commands"
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// Missing config file → expected case, treat as not logged in.
+		// Other errors (permissions, malformed JSON) surface so the user
+		// can act on them instead of seeing a misleading login prompt.
+		if errors.Is(err, os.ErrNotExist) {
+			return []string{header, "Not logged in — run 'alpacon login'", helpHint}
+		}
+		return []string{header, "Config read error — run 'alpacon login' to reset", helpHint}
+	}
+	if cfg.AccessToken == "" && cfg.Token == "" {
+		return []string{header, "Not logged in — run 'alpacon login'", helpHint}
+	}
+
+	host := hostFromURL(cfg.WorkspaceURL)
+	if host == "" {
+		host = cfg.WorkspaceName
+	}
+	return []string{header, host, helpHint}
+}
+
+func hostFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Host
 }
