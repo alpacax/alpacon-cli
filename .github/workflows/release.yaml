@@ -8,7 +8,27 @@ on:
 permissions: {}
 
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Create GitHub Release with auto notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — skipping."
+          else
+            gh release create "${GITHUB_REF_NAME}" --generate-notes
+          fi
+
   build-and-test:
+    needs: [create-release]
     permissions:
       contents: read
     uses: ./.github/workflows/build-and-test.yaml
