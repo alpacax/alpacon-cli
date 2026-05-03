@@ -23,9 +23,16 @@ jobs:
         run: |
           if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
             echo "Release ${GITHUB_REF_NAME} already exists — skipping."
-          else
-            gh release create "${GITHUB_REF_NAME}" --generate-notes
+            exit 0
           fi
+          # Tags with a SemVer pre-release suffix (e.g. v1.2.3-rc1, v1.2.3-beta.1)
+          # are published as prereleases so they don't surface as the latest
+          # release to end users.
+          prerelease_flag=""
+          case "${GITHUB_REF_NAME}" in
+            *-*) prerelease_flag="--prerelease" ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" --generate-notes ${prerelease_flag}
 
   build-and-test:
     needs: [create-release]
