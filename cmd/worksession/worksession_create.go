@@ -202,4 +202,5 @@ func init() {
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
 	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit")
+	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }
