@@ -44,6 +44,18 @@ func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestParseExpiryFlag_ZeroDuration(t *testing.T) {
+	_, err := parseExpiryFlag("0s", "")
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+}
+
+func TestParseExpiryFlag_NegativeDuration(t *testing.T) {
+	_, err := parseExpiryFlag("-1h", "")
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+}
+
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	err := validateAgentScopes("agent", []string{"command", "websh"})
 	assert.Error(t, err)

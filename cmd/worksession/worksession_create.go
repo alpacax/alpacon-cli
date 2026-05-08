@@ -65,6 +65,10 @@ var workSessionCreateCmd = &cobra.Command{
 			}
 		}
 
+		if requesterType != "user" && requesterType != "agent" {
+			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
+		}
+
 		scopeList := splitCSV(scopes)
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
 			utils.CliErrorWithExit("Invalid --scopes: %s", err)
@@ -122,6 +126,9 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 		d, err := time.ParseDuration(expiresIn)
 		if err != nil {
 			return "", fmt.Errorf("invalid --expires-in value %q: %w", expiresIn, err)
+		}
+		if d <= 0 {
+			return "", fmt.Errorf("invalid --expires-in value %q: must be a positive duration", expiresIn)
 		}
 		return time.Now().UTC().Add(d).Format(time.RFC3339), nil
 	}
