@@ -2,7 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
-	"fmt"
+	"path"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -69,20 +69,17 @@ func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
 }
 
 func ActivateWorkSession(ac *client.AlpaconClient, id string) error {
-	url := fmt.Sprintf("%s%s/activate/", workSessionURL, id)
-	_, err := ac.SendPostRequest(url, struct{}{})
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "activate"), nil), struct{}{})
 	return err
 }
 
 func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
-	url := fmt.Sprintf("%s%s/complete/", workSessionURL, id)
-	_, err := ac.SendPostRequest(url, struct{}{})
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "complete"), nil), struct{}{})
 	return err
 }
 
 func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) error {
-	url := fmt.Sprintf("%s%s/extend/", workSessionURL, id)
-	_, err := ac.SendPostRequest(url, req)
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "extend"), nil), req)
 	return err
 }
 
