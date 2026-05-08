@@ -187,7 +187,9 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 			return errors.New("work session was completed unexpectedly")
 		}
 		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
-		time.Sleep(interval)
+		if attempt < maxAttempts {
+			time.Sleep(interval)
+		}
 	}
 	return fmt.Errorf("timed out waiting for approval after %d attempts", maxAttempts)
 }
