@@ -9,6 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type describeRow struct {
+	Field string `table:"Field"`
+	Value string `table:"Value"`
+}
+
 var workSessionDescribeCmd = &cobra.Command{
 	Use:     "describe SESSION_ID",
 	Aliases: []string{"desc"},
@@ -58,10 +63,6 @@ var workSessionDescribeCmd = &cobra.Command{
 			completedAt = utils.TimeUtils(*session.CompletedAt)
 		}
 
-		type describeRow struct {
-			Field string `table:"Field"`
-			Value string `table:"Value"`
-		}
 		rows := []describeRow{
 			{"ID", session.ID},
 			{"Description", session.Description},
