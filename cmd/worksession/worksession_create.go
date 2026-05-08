@@ -3,6 +3,7 @@ package worksession
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,10 +39,8 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 	if requesterType != "agent" {
 		return nil
 	}
-	for _, s := range scopes {
-		if s == "websh" {
-			return errors.New("scope \"websh\" is not allowed for agent requester type")
-		}
+	if slices.Contains(scopes, "websh") {
+		return errors.New("scope \"websh\" is not allowed for agent requester type")
 	}
 	return nil
 }
