@@ -8,12 +8,12 @@ import (
 )
 
 var workSessionListCmd = &cobra.Command{
-	Use:     "list",
-	Aliases: []string{"ls"},
+	Use:     "ls",
+	Aliases: []string{"list"},
 	Short:   "List work sessions",
-	Example: `  alpacon work-session list
+	Example: `  alpacon work-session ls
   alpacon work-session ls --status active
-  alpacon work-session list --requester-type agent`,
+  alpacon work-session ls --requester-type agent`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
