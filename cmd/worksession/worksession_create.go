@@ -30,18 +30,21 @@ var workSessionCreateCmd = &cobra.Command{
 	Example: `  alpacon work-session create --purpose "nginx fix" --scopes command,websh --servers web-01 --expires-in 2h
   alpacon work-session create --purpose "deploy" --scopes command --servers web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait`,
 	Run: func(cmd *cobra.Command, args []string) {
+		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {
 			if !utils.IsInteractiveShell() {
 				utils.CliErrorWithExit("Non-interactive mode requires --purpose.")
 			}
 			purpose = utils.PromptForRequiredInput("Purpose: ")
 		}
+		scopes = strings.TrimSpace(scopes)
 		if scopes == "" {
 			if !utils.IsInteractiveShell() {
 				utils.CliErrorWithExit("Non-interactive mode requires --scopes.")
 			}
 			scopes = utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): ")
 		}
+		servers = strings.TrimSpace(servers)
 		if servers == "" {
 			if !utils.IsInteractiveShell() {
 				utils.CliErrorWithExit("Non-interactive mode requires --servers.")
@@ -70,6 +73,9 @@ var workSessionCreateCmd = &cobra.Command{
 		}
 
 		scopeList := splitCSV(scopes)
+		if len(scopeList) == 0 {
+			utils.CliErrorWithExit("--scopes must contain at least one valid scope.")
+		}
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
 			utils.CliErrorWithExit("Invalid --scopes: %s", err)
 		}
@@ -80,6 +86,9 @@ var workSessionCreateCmd = &cobra.Command{
 		}
 
 		serverList := splitCSV(servers)
+		if len(serverList) == 0 {
+			utils.CliErrorWithExit("--servers must contain at least one valid server name.")
+		}
 		serverIDs := make([]string, 0, len(serverList))
 		for _, name := range serverList {
 			id, err := server.GetServerIDByName(ac, name)
@@ -116,6 +125,8 @@ var workSessionCreateCmd = &cobra.Command{
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
 // and returns an RFC3339 expires_at string.
 func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
+	expiresIn = strings.TrimSpace(expiresIn)
+	expiresAt = strings.TrimSpace(expiresAt)
 	if expiresIn != "" && expiresAt != "" {
 		return "", errors.New("--expires-in and --expires-at are mutually exclusive")
 	}
