@@ -25,6 +25,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/webftp"
 	"github.com/alpacax/alpacon-cli/cmd/webhook"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -137,6 +138,9 @@ func init() {
 
 	// webftp
 	RootCmd.AddCommand(webftp.WebFTPCmd)
+
+	// work-session
+	RootCmd.AddCommand(worksession.WorkSessionCmd)
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)

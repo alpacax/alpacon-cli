@@ -232,8 +232,9 @@ func TimeFormat(value int) *string {
 }
 
 func TruncateString(str string, num int) string {
-	if len(str) > num {
-		return str[:num] + "..."
+	runes := []rune(str)
+	if len(runes) > num {
+		return string(runes[:num]) + "..."
 	}
 	return str
 }
