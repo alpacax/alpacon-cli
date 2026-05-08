@@ -38,7 +38,7 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType string) 
 			Status:      s.Status,
 			Scopes:      strings.Join(s.Scopes, ", "),
 			Servers:     strings.Join(serverNames, ", "),
-			ExpiresAt:   utils.TimeUtils(s.ExpiresAt),
+			ExpiresAt:   s.ExpiresAt.Local().Format("2006-01-02 15:04"),
 		})
 	}
 	return result, nil

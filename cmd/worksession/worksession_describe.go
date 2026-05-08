@@ -56,11 +56,11 @@ var workSessionDescribeCmd = &cobra.Command{
 		}
 		startedAt := ""
 		if session.StartedAt != nil {
-			startedAt = utils.TimeUtils(*session.StartedAt)
+			startedAt = session.StartedAt.Local().Format("2006-01-02 15:04")
 		}
 		completedAt := ""
 		if session.CompletedAt != nil {
-			completedAt = utils.TimeUtils(*session.CompletedAt)
+			completedAt = session.CompletedAt.Local().Format("2006-01-02 15:04")
 		}
 
 		rows := []describeRow{
@@ -72,10 +72,10 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Servers", strings.Join(serverNames, ", ")},
 			{"Created by", createdBy},
 			{"Assigned user", assignedUser},
-			{"Expires at", utils.TimeUtils(session.ExpiresAt)},
+			{"Expires at", session.ExpiresAt.Local().Format("2006-01-02 15:04")},
 			{"Started at", startedAt},
 			{"Completed at", completedAt},
-			{"Added at", utils.TimeUtils(session.AddedAt)},
+			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
 		}
 
 		utils.PrintTable(rows)
