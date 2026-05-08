@@ -172,6 +172,12 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 			return nil
 		case "rejected":
 			return errors.New("work session was rejected")
+		case "expired":
+			return errors.New("work session expired while waiting for approval")
+		case "revoked":
+			return errors.New("work session was revoked")
+		case "completed":
+			return errors.New("work session was completed unexpectedly")
 		}
 		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
 		time.Sleep(interval)
