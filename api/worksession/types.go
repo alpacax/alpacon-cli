@@ -24,11 +24,11 @@ type WorkSession struct {
 
 type WorkSessionAttributes struct {
 	ID          string `json:"id"          table:"ID"`
-	Description string `json:"description" table:"Description"`
 	Status      string `json:"status"      table:"Status"`
 	Scopes      string `json:"scopes"      table:"Scopes"`
 	Servers     string `json:"servers"     table:"Servers"`
 	ExpiresAt   string `json:"expires_at"  table:"Expires At"`
+	Description string `json:"description" table:"Description"`
 }
 
 type WorkSessionCreateRequest struct {

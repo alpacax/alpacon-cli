@@ -34,7 +34,7 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType string) 
 		}
 		result = append(result, WorkSessionAttributes{
 			ID:          s.ID,
-			Description: s.Description,
+			Description: utils.TruncateString(s.Description, 70),
 			Status:      s.Status,
 			Scopes:      strings.Join(s.Scopes, ", "),
 			Servers:     strings.Join(serverNames, ", "),
