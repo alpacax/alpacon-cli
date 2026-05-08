@@ -39,7 +39,7 @@ var workSessionExtendCmd = &cobra.Command{
 }
 
 func init() {
-	workSessionExtendCmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "Additional duration (e.g. 2h)")
+	workSessionExtendCmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "New expiry set to now + duration (e.g. 2h)")
 	workSessionExtendCmd.Flags().StringVar(&extendExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339)")
 	WorkSessionCmd.AddCommand(workSessionExtendCmd)
 }

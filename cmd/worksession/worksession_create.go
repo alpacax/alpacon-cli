@@ -113,6 +113,9 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 		}
 		return time.Now().UTC().Add(d).Format(time.RFC3339), nil
 	}
+	if _, err := time.Parse(time.RFC3339, expiresAt); err != nil {
+		return "", fmt.Errorf("invalid --expires-at value %q: must be RFC3339 format", expiresAt)
+	}
 	return expiresAt, nil
 }
 
@@ -148,9 +151,6 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 	const interval = 10 * time.Second
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
-		time.Sleep(interval)
-
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			return fmt.Errorf("polling failed: %w", err)
@@ -161,6 +161,8 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 		case "rejected":
 			return errors.New("work session was rejected")
 		}
+		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
+		time.Sleep(interval)
 	}
 	return fmt.Errorf("timed out waiting for approval after %d attempts", maxAttempts)
 }

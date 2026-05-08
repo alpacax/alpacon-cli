@@ -47,7 +47,7 @@ func TestGetWorkSessionList(t *testing.T) {
 	assert.Len(t, list, 1)
 	assert.Equal(t, "ses-1", list[0].ID)
 	assert.Equal(t, "active", list[0].Status)
-	assert.Contains(t, list[0].Scopes, "command")
+	assert.Equal(t, "command, websh", list[0].Scopes)
 	assert.Equal(t, "web-01", list[0].Servers)
 }
 

@@ -85,3 +85,7 @@ func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExten
 	_, err := ac.SendPostRequest(url, req)
 	return err
 }
+
+func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
+	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
+}

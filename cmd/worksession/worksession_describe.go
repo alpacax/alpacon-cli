@@ -23,7 +23,7 @@ var workSessionDescribeCmd = &cobra.Command{
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			body, err := ac.SendGetRequest(utils.BuildURL("/api/work-sessions/sessions/", args[0], nil))
+			body, err := wsapi.GetWorkSessionRaw(ac, args[0])
 			if err != nil {
 				utils.CliErrorWithExit("Failed to retrieve work session: %s.", err)
 			}
