@@ -55,7 +55,7 @@ var workSessionCreateCmd = &cobra.Command{
 
 		scopeList := splitCSV(scopes)
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
-			utils.CliErrorWithExit("Invalid scope for agent: %s.", err)
+			utils.CliErrorWithExit("Invalid --scopes: %s", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -126,7 +126,7 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 		return nil
 	}
 	if slices.Contains(scopes, "websh") {
-		return errors.New("scope \"websh\" is not allowed for agent requester type")
+		return errors.New("\"websh\" is not allowed for agent sessions")
 	}
 	return nil
 }
@@ -168,7 +168,7 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 }
 
 func init() {
-	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose / description (required)")
+	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose")
 	workSessionCreateCmd.Flags().StringVar(&scopes, "scopes", "", "Comma-separated scopes (command, websh, webftp, editor, tunnel, sudo)")
 	workSessionCreateCmd.Flags().StringVar(&servers, "servers", "", "Comma-separated server names")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")

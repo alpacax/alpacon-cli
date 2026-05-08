@@ -47,7 +47,7 @@ func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	err := validateAgentScopes("agent", []string{"command", "websh"})
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "websh"))
+	assert.True(t, strings.Contains(err.Error(), "\"websh\" is not allowed"))
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
