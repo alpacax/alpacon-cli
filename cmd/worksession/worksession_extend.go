@@ -21,7 +21,15 @@ var workSessionExtendCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
 		if err != nil {
-			utils.CliErrorWithExit("Invalid expiry: %s.", err)
+			if extendExpiresIn == "" && extendExpiresAt == "" {
+				extendExpiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
+				expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
+				if err != nil {
+					utils.CliErrorWithExit("Invalid expiry: %s.", err)
+				}
+			} else {
+				utils.CliErrorWithExit("Invalid expiry: %s.", err)
+			}
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
