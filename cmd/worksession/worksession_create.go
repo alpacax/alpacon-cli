@@ -174,8 +174,8 @@ func splitCSV(s string) []string {
 	return result
 }
 
-// pollForApproval polls GET /work-sessions/sessions/{id}/ every 10 seconds
-// until status is "approved" or 30 attempts are exhausted.
+// pollForApproval polls every 10 seconds until the session is approved/active,
+// a terminal status is reached (rejected/expired/revoked/completed), or attempts are exhausted.
 func pollForApproval(ac *client.AlpaconClient, id string) error {
 	const maxAttempts = 30
 	const interval = 10 * time.Second

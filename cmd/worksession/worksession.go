@@ -15,7 +15,7 @@ var WorkSessionCmd = &cobra.Command{
 	Use:     "work-session",
 	Aliases: []string{"session"},
 	Short:   "Create and manage work sessions",
-	Long:    "Create, inspect, and manage work sessions — the approval-gated units that group Websh, WebFTP, and exec access on Alpacon.",
+	Long:    "Create, inspect, and manage work sessions—the approval-gated units that group Websh, WebFTP, and exec access on Alpacon.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := cmd.Help(); err != nil {
 			return err
