@@ -26,6 +26,3 @@ var workSessionCompleteCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	WorkSessionCmd.AddCommand(workSessionCompleteCmd)
-}

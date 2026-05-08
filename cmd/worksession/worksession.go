@@ -27,4 +27,9 @@ var WorkSessionCmd = &cobra.Command{
 func init() {
 	WorkSessionCmd.AddCommand(workSessionListCmd)
 	WorkSessionCmd.AddCommand(workSessionCreateCmd)
+	WorkSessionCmd.AddCommand(workSessionDescribeCmd)
+	WorkSessionCmd.AddCommand(workSessionActivateCmd)
+	WorkSessionCmd.AddCommand(workSessionCompleteCmd)
+	WorkSessionCmd.AddCommand(workSessionExtendCmd)
 }
+

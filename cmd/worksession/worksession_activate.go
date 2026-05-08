@@ -26,6 +26,3 @@ var workSessionActivateCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	WorkSessionCmd.AddCommand(workSessionActivateCmd)
-}

@@ -81,6 +81,3 @@ var workSessionDescribeCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	WorkSessionCmd.AddCommand(workSessionDescribeCmd)
-}
