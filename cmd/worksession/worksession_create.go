@@ -31,18 +31,30 @@ var workSessionCreateCmd = &cobra.Command{
   alpacon work-session create --purpose "deploy" --scopes command --servers web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if purpose == "" {
+			if !utils.IsInteractiveShell() {
+				utils.CliErrorWithExit("Non-interactive mode requires --purpose.")
+			}
 			purpose = utils.PromptForRequiredInput("Purpose: ")
 		}
 		if scopes == "" {
+			if !utils.IsInteractiveShell() {
+				utils.CliErrorWithExit("Non-interactive mode requires --scopes.")
+			}
 			scopes = utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): ")
 		}
 		if servers == "" {
+			if !utils.IsInteractiveShell() {
+				utils.CliErrorWithExit("Non-interactive mode requires --servers.")
+			}
 			servers = utils.PromptForRequiredInput("Servers (comma-separated server names): ")
 		}
 
 		expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
 		if err != nil {
 			if expiresIn == "" && expiresAt == "" {
+				if !utils.IsInteractiveShell() {
+					utils.CliErrorWithExit("Non-interactive mode requires --expires-in or --expires-at.")
+				}
 				expiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
 				expiresAtVal, err = parseExpiryFlag(expiresIn, "")
 				if err != nil {

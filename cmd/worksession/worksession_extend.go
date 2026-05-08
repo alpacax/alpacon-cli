@@ -22,6 +22,9 @@ var workSessionExtendCmd = &cobra.Command{
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
 		if err != nil {
 			if extendExpiresIn == "" && extendExpiresAt == "" {
+				if !utils.IsInteractiveShell() {
+					utils.CliErrorWithExit("Non-interactive mode requires --expires-in or --expires-at.")
+				}
 				extendExpiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
 				expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
 				if err != nil {
