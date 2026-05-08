@@ -175,7 +175,7 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 			return fmt.Errorf("polling failed: %w", err)
 		}
 		switch s.Status {
-		case "approved":
+		case "approved", "active":
 			return nil
 		case "rejected":
 			return errors.New("work session was rejected")
