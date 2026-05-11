@@ -21,12 +21,13 @@ import (
 
 // StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
-	ServerName string
-	LocalPort  string // Use "0" to auto-assign the local port.
-	RemotePort string
-	Username   string
-	Groupname  string
-	Verbose    bool
+	ServerName    string
+	LocalPort     string // Use "0" to auto-assign the local port.
+	RemotePort    string
+	Username      string
+	Groupname     string
+	Verbose       bool
+	WorkSessionID string // Optional work-session UUID to attach to the tunnel.
 }
 
 type streamSession interface {
@@ -87,7 +88,7 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
 	}
 
-	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort)
+	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
