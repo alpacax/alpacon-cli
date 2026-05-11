@@ -147,6 +147,40 @@ func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
 }
 
+// SetActiveWorkSession persists the work-session UUID for the current workspace.
+// Pass "" to clear the entry for the current workspace.
+func SetActiveWorkSession(uuid string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %v", err)
+	}
+	if cfg.WorkspaceName == "" {
+		return fmt.Errorf("no active workspace; run 'alpacon login' first")
+	}
+	if cfg.ActiveWorkSessions == nil {
+		cfg.ActiveWorkSessions = map[string]string{}
+	}
+	if uuid == "" {
+		delete(cfg.ActiveWorkSessions, cfg.WorkspaceName)
+	} else {
+		cfg.ActiveWorkSessions[cfg.WorkspaceName] = uuid
+	}
+	return saveConfig(&cfg)
+}
+
+// GetActiveWorkSession returns the active work-session UUID for the current workspace.
+// Returns "" (no error) when no session is set or the config is missing the map.
+func GetActiveWorkSession() (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "", err
+	}
+	if cfg.ActiveWorkSessions == nil {
+		return "", nil
+	}
+	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
+}
+
 // GetSmuxConfig returns a ready-to-use smux configuration.
 func GetSmuxConfig() *smux.Config {
 	config := smux.DefaultConfig()
