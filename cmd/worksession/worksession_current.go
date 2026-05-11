@@ -1,10 +1,8 @@
 package worksession
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -31,23 +29,6 @@ func RunCurrent(ac *client.AlpaconClient) (string, *wsapi.WorkSession, error) {
 	return uuid, ws, nil
 }
 
-// projectWorkSessionAttributes mirrors GetWorkSessionList's projection so the
-// `current` table output matches the columns and formatting of `ls`.
-func projectWorkSessionAttributes(ws *wsapi.WorkSession) wsapi.WorkSessionAttributes {
-	serverNames := make([]string, len(ws.Servers))
-	for i, srv := range ws.Servers {
-		serverNames[i] = srv.Name
-	}
-	return wsapi.WorkSessionAttributes{
-		ID:          ws.ID,
-		Description: utils.TruncateString(ws.Description, 70),
-		Status:      ws.Status,
-		Scopes:      strings.Join(ws.Scopes, ", "),
-		Servers:     strings.Join(serverNames, ", "),
-		ExpiresAt:   ws.ExpiresAt.Local().Format("2006-01-02 15:04"),
-	}
-}
-
 var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
 	Short:   "Show the active work-session for the current workspace",
@@ -57,6 +38,26 @@ var workSessionCurrentCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
 		}
+
+		// JSON mode: fetch raw server response and print as-is to preserve all fields and key order.
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			uuid, err := config.GetActiveWorkSession()
+			if err != nil {
+				return err
+			}
+			if uuid == "" {
+				_, _ = fmt.Fprintln(os.Stdout, "null")
+				return nil
+			}
+			body, err := wsapi.GetWorkSessionRaw(ac, uuid)
+			if err != nil {
+				return fmt.Errorf("active work-session %s no longer accessible: %w. Run 'alpacon work-session use --unset' to clear", uuid, err)
+			}
+			utils.PrintJson(body)
+			return nil
+		}
+
+		// Table mode: use RunCurrent (parsed) so we can project the row consistently with `ls`.
 		uuid, ws, err := RunCurrent(ac)
 		if err != nil {
 			if uuid != "" {
@@ -65,19 +66,10 @@ var workSessionCurrentCmd = &cobra.Command{
 			return err
 		}
 		if uuid == "" {
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				_, _ = fmt.Fprintln(os.Stdout, "null")
-			} else {
-				utils.CliInfo("No active work-session.")
-			}
+			utils.CliInfo("No active work-session.")
 			return nil
 		}
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(ws)
-		}
-		utils.PrintTable([]wsapi.WorkSessionAttributes{projectWorkSessionAttributes(ws)})
+		utils.PrintTable([]wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)})
 		return nil
 	},
 }
