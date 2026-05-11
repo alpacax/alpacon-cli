@@ -64,20 +64,21 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 	return eventList, nil
 }
 
-func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string) (string, error) {
+func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (string, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return "", err
 	}
 
 	commandRequest := &CommandRequest{
-		Shell:     "system",
-		Line:      command,
-		Env:       env,
-		Username:  username,
-		Groupname: groupname,
-		Server:    serverID,
-		RunAfter:  []string{},
+		Shell:       "system",
+		Line:        command,
+		Env:         env,
+		Username:    username,
+		Groupname:   groupname,
+		Server:      serverID,
+		RunAfter:    []string{},
+		WorkSession: workSessionID,
 	}
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {

@@ -41,6 +41,7 @@ type CommandRequest struct {
 	ScheduledAt *time.Time        `json:"scheduled_at"`
 	Server      string            `json:"server"`
 	RunAfter    []string          `json:"run_after"`
+	WorkSession string            `json:"work_session,omitempty"`
 }
 
 type CommandResponse struct {

@@ -142,7 +142,7 @@ Note: All flags must be placed before the server name.
 				}
 			}
 			command := strings.Join(commandArgs, " ")
-			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env)
+			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, "")
 			if err != nil {
 				utils.CliErrorWithExit("%s", err)
 			}

@@ -8,12 +8,13 @@ import (
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
-	Username  string
-	Groupname string
-	Server    string
-	Command   string
-	ShowHelp  bool
-	Err       string
+	Username      string
+	Groupname     string
+	WorkSessionID string
+	Server        string
+	Command       string
+	ShowHelp      bool
+	Err           string
 }
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
@@ -31,8 +32,8 @@ type RemoteExecArgs struct {
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
-		username, groupname, server string
-		commandParts                []string
+		username, groupname, workSessionID, server string
+		commandParts                               []string
 	)
 
 	for i := 0; i < len(args); i++ {
@@ -76,6 +77,15 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
+		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
+			var errMsg string
+			// Long-only flag: pass the flag name itself as the "short" sentinel
+			// so extractFlagValue's attached-value branch (-uroot style) is
+			// never matched; only the --flag=value and --flag value forms apply.
+			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
@@ -93,10 +103,11 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	}
 
 	return RemoteExecArgs{
-		Username:  username,
-		Groupname: groupname,
-		Server:    server,
-		Command:   strings.Join(commandParts, " "),
+		Username:      username,
+		Groupname:     groupname,
+		WorkSessionID: workSessionID,
+		Server:        server,
+		Command:       strings.Join(commandParts, " "),
 	}
 }
 
