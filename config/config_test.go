@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupTestConfig overrides the home directory so tests write to a temp dir.
@@ -164,4 +165,18 @@ func TestSwitchWorkspace_NoExistingConfig(t *testing.T) {
 
 	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
 	assert.Error(t, err)
+}
+
+func TestLoadConfig_LegacyWithoutActiveWorkSessions(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	cfgDir := filepath.Join(tmpHome, ConfigFileDir)
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	legacy := `{"workspace_url":"https://ws.example.com","workspace_name":"ws-a"}`
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(legacy), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.ActiveWorkSessions)
 }
