@@ -3,9 +3,24 @@ package worksession
 import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+// MarkActive decorates the row whose ID matches activeUUID with a "*" marker
+// in its Active column. No-op when activeUUID is empty or no row matches.
+// Exported for unit testing; safe to call with a nil/empty slice.
+func MarkActive(rows []wsapi.WorkSessionAttributes, activeUUID string) {
+	if activeUUID == "" {
+		return
+	}
+	for i := range rows {
+		if rows[i].ID == activeUUID {
+			rows[i].Active = "*"
+		}
+	}
+}
 
 var workSessionListCmd = &cobra.Command{
 	Use:     "ls",
@@ -28,6 +43,10 @@ var workSessionListCmd = &cobra.Command{
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve work sessions: %s.", err)
 		}
+
+		// Best-effort active-session decoration; ignore config errors so listing still works.
+		activeUUID, _ := config.GetActiveWorkSession()
+		MarkActive(sessions, activeUUID)
 
 		utils.PrintTable(sessions)
 	},
