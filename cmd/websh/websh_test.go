@@ -1,12 +1,14 @@
 package websh
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommandParsing(t *testing.T) {
@@ -310,45 +312,14 @@ func TestIsNotFoundError(t *testing.T) {
 }
 
 func executeTestCommand(args []string) (string, string, string, []string, bool, bool, map[string]string) {
-	var (
-		share, readOnly                 bool
-		username, groupname, serverName string
-		commandArgs                     []string
-	)
-
-	env := make(map[string]string)
-
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "-s" || args[i] == "--share":
-			share = true
-		case args[i] == "-h" || args[i] == "--help":
-			return username, groupname, serverName, commandArgs, share, readOnly, env
-		case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
-			username, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
-			groupname, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "--env"):
-			i = extractEnvValue(args, i, env)
-		case strings.HasPrefix(args[i], "--read-only"):
-			var value string
-			value, i = extractValue(args, i)
-			if value == "" || strings.TrimSpace(strings.ToLower(value)) == "true" {
-				readOnly = true
-			} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
-				readOnly = false
-			} else {
-				utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
-			}
-		default:
-			if serverName == "" {
-				serverName = args[i]
-			} else {
-				commandArgs = append(commandArgs, args[i:]...)
-				i = len(args)
-			}
-		}
+	parsed, err := ParseWebshArgs(args)
+	if err != nil && errors.Is(err, errHelpRequested) {
+		return parsed.Username, parsed.Groupname, parsed.ServerName, parsed.CommandArgs,
+			parsed.Share, parsed.ReadOnly, parsed.Env
 	}
+
+	username := parsed.Username
+	serverName := parsed.ServerName
 
 	// Parse SSH-like syntax for user@host (same logic as in the main command)
 	if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
@@ -359,5 +330,27 @@ func executeTestCommand(args []string) (string, string, string, []string, bool, 
 		serverName = sshTarget.Host
 	}
 
-	return username, groupname, serverName, commandArgs, share, readOnly, env
+	return username, parsed.Groupname, serverName, parsed.CommandArgs, parsed.Share, parsed.ReadOnly, parsed.Env
+}
+
+func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
+	got, err := ParseWebshArgs([]string{"--work-session", "ses-abc", "my-server"})
+	require.NoError(t, err)
+	assert.Equal(t, "ses-abc", got.WorkSessionID)
+	assert.Equal(t, "my-server", got.ServerName)
+}
+
+func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
+	got, err := ParseWebshArgs([]string{"--work-session=ses-abc", "my-server"})
+	require.NoError(t, err)
+	assert.Equal(t, "ses-abc", got.WorkSessionID)
+	assert.Equal(t, "my-server", got.ServerName)
+}
+
+func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
+	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
+	require.NoError(t, err)
+	assert.Equal(t, "my-server", got.ServerName)
+	assert.Equal(t, "", got.WorkSessionID)
+	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
 }

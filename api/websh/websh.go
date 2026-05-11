@@ -124,8 +124,21 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	return response, nil
 }
 
+// BuildSessionRequest assembles the JSON body for a websh session create call.
+// Empty workSessionID is omitted from the wire request via omitempty on the field.
+func BuildSessionRequest(serverID, username, groupname string, rows, cols int, workSessionID string) *SessionRequest {
+	return &SessionRequest{
+		Server:      serverID,
+		Username:    username,
+		Groupname:   groupname,
+		Rows:        rows,
+		Cols:        cols,
+		WorkSession: workSessionID,
+	}
+}
+
 // Create new websh session
-func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool) (SessionResponse, error) {
+func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return SessionResponse{}, err
@@ -136,13 +149,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 		return SessionResponse{}, err
 	}
 
-	sessionRequest := &SessionRequest{
-		Server:    serverID,
-		Username:  username,
-		Groupname: groupname,
-		Rows:      height,
-		Cols:      width,
-	}
+	sessionRequest := BuildSessionRequest(serverID, username, groupname, height, width, workSessionID)
 
 	responseBody, err := ac.SendPostRequest(sessionsBaseURL, sessionRequest)
 	if err != nil {

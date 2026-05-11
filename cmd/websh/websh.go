@@ -1,6 +1,7 @@
 package websh
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,9 +13,70 @@ import (
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+// errHelpRequested signals that -h/--help was encountered during parsing.
+// Callers should print help text and exit cleanly.
+var errHelpRequested = errors.New("help requested")
+
+// WebshArgs is the parsed form of the websh command's manually-parsed args.
+type WebshArgs struct {
+	Username      string
+	Groupname     string
+	ServerName    string
+	CommandArgs   []string
+	Share         bool
+	ReadOnly      bool
+	WorkSessionID string
+	Env           map[string]string
+}
+
+// ParseWebshArgs parses the manually-disabled flag args for `alpacon websh`.
+// Returns errHelpRequested when -h/--help is encountered so callers can print
+// help and exit without further processing.
+//
+// NOTE: order matters — `--read-only` must be checked before `-r` style prefixes
+// would, and `--work-session` must be checked before generic flag fallthrough.
+func ParseWebshArgs(args []string) (WebshArgs, error) {
+	res := WebshArgs{Env: map[string]string{}}
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-s" || args[i] == "--share":
+			res.Share = true
+		case args[i] == "-h" || args[i] == "--help":
+			return res, errHelpRequested
+		case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
+			res.Username, i = extractValue(args, i)
+		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
+			res.Groupname, i = extractValue(args, i)
+		case strings.HasPrefix(args[i], "--env"):
+			i = extractEnvValue(args, i, res.Env)
+		case strings.HasPrefix(args[i], "--read-only"):
+			var value string
+			value, i = extractValue(args, i)
+			if value == "" || strings.TrimSpace(strings.ToLower(value)) == "true" {
+				res.ReadOnly = true
+			} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
+				res.ReadOnly = false
+			} else {
+				utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
+			}
+		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
+			res.WorkSessionID, i = extractValue(args, i)
+		default:
+			if res.ServerName == "" {
+				res.ServerName = args[i]
+			} else {
+				res.CommandArgs = append(res.CommandArgs, args[i:]...)
+				i = len(args)
+			}
+		}
+	}
+	return res, nil
+}
 
 var WebshCmd = &cobra.Command{
 	Use:   "websh [flags] [USER@]SERVER [COMMAND]",
@@ -62,6 +124,9 @@ Flags:
   --env="KEY"                        Use the current shell's value for 'KEY'.
   -s, --share                        Share the terminal via a temporary link.
   --read-only=[true|false]           Set shared session to read-only (default: false).
+  --work-session [UUID]              Attach this session to a work-session.
+                                     Overrides the workspace's active session
+                                     set via 'alpacon work-session use'.
 
 Note: All flags must be placed before the server name.
       Everything after the server name is treated as the remote command.`,
@@ -71,46 +136,22 @@ Note: All flags must be placed before the server name.
 	// Flags after the server name are intentionally treated as remote command args.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
-		var (
-			username, groupname, serverName string
-			commandArgs                     []string
-			share, readOnly                 bool
-		)
-
-		env := make(map[string]string)
-
-		for i := 0; i < len(args); i++ {
-			switch {
-			case args[i] == "-s" || args[i] == "--share":
-				share = true
-			case args[i] == "-h" || args[i] == "--help":
+		parsed, err := ParseWebshArgs(args)
+		if err != nil {
+			if errors.Is(err, errHelpRequested) {
 				_ = cmd.Help()
 				return
-			case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
-				username, i = extractValue(args, i)
-			case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
-				groupname, i = extractValue(args, i)
-			case strings.HasPrefix(args[i], "--env"):
-				i = extractEnvValue(args, i, env)
-			case strings.HasPrefix(args[i], "--read-only"):
-				var value string
-				value, i = extractValue(args, i)
-				if value == "" || strings.TrimSpace(strings.ToLower(value)) == "true" {
-					readOnly = true
-				} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
-					readOnly = false
-				} else {
-					utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
-				}
-			default:
-				if serverName == "" {
-					serverName = args[i]
-				} else {
-					commandArgs = append(commandArgs, args[i:]...)
-					i = len(args)
-				}
 			}
+			utils.CliErrorWithExit("%s", err)
 		}
+
+		username := parsed.Username
+		groupname := parsed.Groupname
+		serverName := parsed.ServerName
+		commandArgs := parsed.CommandArgs
+		share := parsed.Share
+		readOnly := parsed.ReadOnly
+		env := parsed.Env
 
 		if serverName == "" {
 			utils.CliErrorWithExit("Server name is required.")
@@ -129,6 +170,12 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
+		workSessionID, err := worksession.Resolve(parsed.WorkSessionID)
+		if err != nil {
+			utils.CliErrorWithExit("%s", err)
+		}
+		worksession.AnnounceIfActive(workSessionID)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -142,13 +189,13 @@ Note: All flags must be placed before the server name.
 				}
 			}
 			command := strings.Join(commandArgs, " ")
-			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, "")
+			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
 			if err != nil {
 				utils.CliErrorWithExit("%s", err)
 			}
 			fmt.Println(result)
 		} else {
-			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
+			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -164,7 +211,7 @@ Note: All flags must be placed before the server name.
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly)
+						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 						return err
 					},
 				})
