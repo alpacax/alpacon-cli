@@ -23,7 +23,7 @@ type WorkSession struct {
 }
 
 type WorkSessionAttributes struct {
-	// Active is the active-session marker (" *" for the workspace's active session, empty otherwise).
+	// Active is the active-session marker ("*" for the workspace's active session, empty otherwise).
 	// Decorated by cmd/worksession.MarkActive; hidden from JSON output via the "-" tag.
 	Active      string `json:"-"           table:" "`
 	ID          string `json:"id"          table:"ID"`

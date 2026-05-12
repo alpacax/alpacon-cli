@@ -56,8 +56,6 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 		flagWorkSession, _ := cmd.Flags().GetString("work-session")
 		allowOverwrite := !noOverwrite
 
-		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
-
 		if len(args) < 2 {
 			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
@@ -95,6 +93,10 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 			utils.CliErrorWithExit("%s", err.Error())
 			return
 		}
+
+		// Resolve and announce after argument/path validation so stderr stays
+		// clean on early usage errors.
+		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

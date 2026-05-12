@@ -38,17 +38,17 @@ func RunUnset() error {
 }
 
 var workSessionUseCmd = &cobra.Command{
-	Use:   "use [UUID]",
+	Use:   "use SESSION_ID",
 	Short: "Set or clear the active work-session for the current workspace",
-	Long: `Set the active work-session UUID for the current workspace.
+	Long: `Set the active work-session for the current workspace by passing its SESSION_ID.
 Subsequent exec/websh/cp/tunnel commands attach to this session unless overridden with --work-session.
-Use --unset to clear.`,
+Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 	Example: `  alpacon work-session use ses-abc123
   alpacon work-session use --unset`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if unsetActiveWorkSession {
 			if len(args) > 0 {
-				return errors.New("--unset cannot be combined with a UUID argument")
+				return errors.New("--unset cannot be combined with a SESSION_ID argument")
 			}
 			cur, _ := config.GetActiveWorkSession()
 			if err := RunUnset(); err != nil {
@@ -63,7 +63,7 @@ Use --unset to clear.`,
 		}
 
 		if len(args) != 1 {
-			return errors.New("UUID argument is required (or pass --unset)")
+			return errors.New("SESSION_ID argument is required (or pass --unset)")
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

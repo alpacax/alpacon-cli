@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -188,9 +187,10 @@ func (c *runCommandBodyCapture) snapshot() (hadKey bool, ws string, seen bool) {
 // newRunCommandBodyCaptureServer returns a test server that:
 //   - responds to GET /api/servers/servers/?name=... with a 1-item server list
 //   - captures the POST body for /api/events/commands/ and returns a minimal
-//     CommandResponse list, then 404s further GETs (PollCommandExecution keeps
-//     looping; the caller runs RunCommand in a goroutine and ignores the
-//     return value, asserting only on the captured POST body).
+//     CommandResponse list
+//   - responds to PollCommandExecution's GET /api/events/commands/{id}/ with
+//     a terminal status so RunCommand returns synchronously instead of
+//     leaving a long-running goroutine behind.
 func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +213,15 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
 			return
 		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{
+				ID:     "cmd-1",
+				Status: "completed",
+				Result: "done",
+			})
+			return
+		}
 		http.NotFound(w, r)
 	}))
 }
@@ -224,16 +233,8 @@ func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	// PollCommandExecution loops on 404; we only care about the captured
-	// POST body, so run RunCommand in a goroutine and drop its result.
-	go func() {
-		_, _ = RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
-	}()
-
-	require.Eventually(t, func() bool {
-		_, _, seen := capture.snapshot()
-		return seen
-	}, 2*time.Second, 10*time.Millisecond, "POST must reach the test server")
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
+	require.NoError(t, err)
 
 	hadKey, ws, _ := capture.snapshot()
 	require.True(t, hadKey, "body must contain work_session field when ID is set")
@@ -247,14 +248,8 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	go func() {
-		_, _ = RunCommand(ac, "server-x", "ls", "", "", nil, "")
-	}()
-
-	require.Eventually(t, func() bool {
-		_, _, seen := capture.snapshot()
-		return seen
-	}, 2*time.Second, 10*time.Millisecond, "POST must reach the test server")
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	require.NoError(t, err)
 
 	hadKey, _, _ := capture.snapshot()
 	assert.False(t, hadKey, "body must omit work_session field when ID is empty")

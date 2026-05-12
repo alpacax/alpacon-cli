@@ -8,10 +8,18 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Resolve returns the work-session UUID, with the flag taking precedence over config.
+// WorkSessionEnvVar is the environment variable consulted as a fallback when
+// no --work-session flag is given. Resolution order: flag > env var > config.
+const WorkSessionEnvVar = "ALPACON_WORK_SESSION"
+
+// Resolve returns the work-session UUID, preferring the flag, then the
+// ALPACON_WORK_SESSION env var, then the workspace's active work-session.
 func Resolve(flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
+	}
+	if env := os.Getenv(WorkSessionEnvVar); env != "" {
+		return env, nil
 	}
 	return config.GetActiveWorkSession()
 }

@@ -41,8 +41,10 @@ var workSessionCurrentCmd = &cobra.Command{
 	},
 }
 
-// printCurrentRaw writes the server's raw JSON response so all fields and key
-// order are preserved verbatim for the consumer.
+// printCurrentRaw renders the server's JSON response through utils.PrintJson.
+// All fields and the server's key order are preserved; whitespace and
+// indentation are normalized to match the project-wide --output json
+// convention (pretty-printed, 2-space indent).
 func printCurrentRaw() error {
 	uuid, err := config.GetActiveWorkSession()
 	if err != nil {
