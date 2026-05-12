@@ -248,7 +248,7 @@ func TestCommandParsing(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.testName, func(t *testing.T) {
-			username, groupname, serverName, commandArgs, share, readOnly, env := executeTestCommand(tc.args)
+			username, groupname, serverName, commandArgs, share, readOnly, env := executeTestCommand(t, tc.args)
 
 			assert.Equal(t, tc.expectUsername, username, "Mismatch in username")
 			assert.Equal(t, tc.expectGroupname, groupname, "Mismatch in groupname")
@@ -311,12 +311,14 @@ func TestIsNotFoundError(t *testing.T) {
 	}
 }
 
-func executeTestCommand(args []string) (string, string, string, []string, bool, bool, map[string]string) {
+func executeTestCommand(t *testing.T, args []string) (string, string, string, []string, bool, bool, map[string]string) {
+	t.Helper()
 	parsed, err := ParseWebshArgs(args)
-	if err != nil && errors.Is(err, errHelpRequested) {
+	if errors.Is(err, errHelpRequested) {
 		return parsed.Username, parsed.Groupname, parsed.ServerName, parsed.CommandArgs,
 			parsed.Share, parsed.ReadOnly, parsed.Env
 	}
+	require.NoError(t, err)
 
 	username := parsed.Username
 	serverName := parsed.ServerName

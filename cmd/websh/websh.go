@@ -55,18 +55,38 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case strings.HasPrefix(args[i], "--env"):
 			i = extractEnvValue(args, i, res.Env)
 		case strings.HasPrefix(args[i], "--read-only"):
-			var value string
-			value, i = extractValue(args, i)
-			normalized := strings.TrimSpace(strings.ToLower(value))
-			if value == "" || normalized == "true" {
-				res.ReadOnly = true
-			} else if normalized == "false" {
-				res.ReadOnly = false
+			if strings.Contains(args[i], "=") {
+				parts := strings.SplitN(args[i], "=", 2)
+				normalized := strings.TrimSpace(strings.ToLower(parts[1]))
+				if normalized == "" || normalized == "true" {
+					res.ReadOnly = true
+				} else if normalized == "false" {
+					res.ReadOnly = false
+				} else {
+					return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
+				}
 			} else {
-				return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
+				// Boolean form: --read-only without =.
+				// Peek ahead only for explicit "true"/"false"; otherwise treat as true.
+				if i+1 < len(args) {
+					next := strings.TrimSpace(strings.ToLower(args[i+1]))
+					if next == "true" || next == "false" {
+						res.ReadOnly = next == "true"
+						i++
+					} else {
+						res.ReadOnly = true
+					}
+				} else {
+					res.ReadOnly = true
+				}
 			}
 		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
-			res.WorkSessionID, i = extractValue(args, i)
+			ws, newI := extractValue(args, i)
+			if ws == "" {
+				return res, fmt.Errorf("--work-session requires a value")
+			}
+			res.WorkSessionID = ws
+			i = newI
 		default:
 			if res.ServerName == "" {
 				res.ServerName = args[i]
