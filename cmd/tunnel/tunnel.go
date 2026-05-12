@@ -87,7 +87,7 @@ func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
 	cmd.Flags().StringVarP(&flags.username, "username", "u", "", "Username for the tunnel")
 	cmd.Flags().StringVarP(&flags.groupname, "groupname", "g", "", "Groupname for the tunnel")
 	cmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Show connection logs")
-	cmd.Flags().StringVar(&flags.workSessionID, "work-session", "", "Attach this tunnel to a work-session (overrides 'work-session use').")
+	cmd.Flags().StringVar(&flags.workSessionID, "work-session", "", "Attach this tunnel to a work-session (overrides 'work-session use')")
 
 	if err := cmd.MarkFlagRequired("local"); err != nil {
 		panic(err)

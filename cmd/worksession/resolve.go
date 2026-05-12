@@ -8,8 +8,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Resolve returns the work-session UUID to use for an operation.
-// Precedence: flag > config. Returns "" when nothing is set.
+// Resolve returns the work-session UUID, with the flag taking precedence over config.
 func Resolve(flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
@@ -17,8 +16,7 @@ func Resolve(flagValue string) (string, error) {
 	return config.GetActiveWorkSession()
 }
 
-// AnnounceIfActive prints "Using work-session <uuid>" to stderr when uuid != "".
-// Stderr keeps stdout clean for --output json consumers and shell pipelines.
+// AnnounceIfActive prints "Using work-session <uuid>" to stderr when uuid is non-empty.
 func AnnounceIfActive(uuid string) {
 	if uuid == "" {
 		return
@@ -26,8 +24,7 @@ func AnnounceIfActive(uuid string) {
 	fmt.Fprintf(os.Stderr, "Using work-session %s\n", uuid)
 }
 
-// ResolveAndAnnounce resolves the work-session UUID (flag > config), announces it
-// on stderr if non-empty, and exits the process on resolution error.
+// ResolveAndAnnounce resolves the work-session UUID, announces it, and exits on error.
 func ResolveAndAnnounce(flagValue string) string {
 	uuid, err := Resolve(flagValue)
 	if err != nil {

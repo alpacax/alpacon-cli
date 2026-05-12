@@ -180,7 +180,7 @@ func init() {
 	CpCmd.Flags().BoolP("no-overwrite", "n", false, "Do not overwrite existing files on the server")
 	CpCmd.Flags().StringVarP(&username, "username", "u", "", "Specify username")
 	CpCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Specify groupname")
-	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use').")
+	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use')")
 }
 
 // isRemotePath determines if the given path is a remote server path.

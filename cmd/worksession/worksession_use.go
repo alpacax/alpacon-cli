@@ -23,7 +23,7 @@ func RunUse(ac *client.AlpaconClient, uuid string) (string, error) {
 		return "", err
 	}
 	if ws.Status != activeWorkSessionStatus {
-		return "", fmt.Errorf("work session %s is in '%s' state and cannot be used", uuid, ws.Status)
+		return "", fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
 	}
 	if err := config.SetActiveWorkSession(uuid); err != nil {
 		return "", err
