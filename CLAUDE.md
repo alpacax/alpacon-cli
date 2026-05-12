@@ -177,7 +177,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 ## Important notes
 
-- **Go version**: 1.25.7 (specified in go.mod)
+- **Go version**: 1.25.10 (specified in go.mod)
 - **Linter**: golangci-lint v2 with errcheck, govet, ineffassign, staticcheck, unused (see `.golangci.yml`)
 - **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`)
 - **Alias**: `alpacon` can also be invoked as `ac`
