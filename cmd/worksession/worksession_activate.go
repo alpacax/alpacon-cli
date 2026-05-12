@@ -25,4 +25,3 @@ var workSessionActivateCmd = &cobra.Command{
 		utils.CliSuccess("Work session %s activated.", args[0])
 	},
 }
-
