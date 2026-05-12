@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,7 +143,6 @@ func IsSaaS() (bool, error) {
 	return cfg.AccessToken != "", nil
 }
 
-// IsSaaS returns true if the config represents an Alpacon Cloud (SaaS) deployment.
 func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
 }
@@ -155,7 +155,7 @@ func SetActiveWorkSession(uuid string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 	if cfg.WorkspaceName == "" {
-		return fmt.Errorf("no active workspace; run 'alpacon login' first")
+		return errors.New("no active workspace; run 'alpacon login' first")
 	}
 	current := ""
 	if cfg.ActiveWorkSessions != nil {
@@ -176,10 +176,13 @@ func SetActiveWorkSession(uuid string) error {
 }
 
 // GetActiveWorkSession returns the active work-session UUID for the current workspace.
-// Returns "" (no error) when no session is set or the config is missing the map.
+// Returns "" (no error) when no session is set, the config is missing the map, or no config file exists.
 func GetActiveWorkSession() (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
 		return "", err
 	}
 	if cfg.ActiveWorkSessions == nil {

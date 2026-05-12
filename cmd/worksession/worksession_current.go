@@ -15,11 +15,16 @@ var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
 	Short:   "Show the active work-session for the current workspace",
 	Example: `  alpacon work-session current`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			return printCurrentRaw()
+			if err := printCurrentRaw(); err != nil {
+				utils.CliErrorWithExit("%s", err)
+			}
+			return
 		}
-		return printCurrentTable()
+		if err := printCurrentTable(); err != nil {
+			utils.CliErrorWithExit("%s", err)
+		}
 	},
 }
 

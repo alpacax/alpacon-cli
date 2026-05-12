@@ -1,7 +1,6 @@
 package worksession
 
 import (
-	"errors"
 	"fmt"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -23,41 +22,40 @@ Subsequent exec/websh/cp/tunnel commands attach to this session unless overridde
 Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 	Example: `  alpacon work-session use ses-abc123
   alpacon work-session use --unset`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		if unsetActiveWorkSession {
 			if len(args) > 0 {
-				return errors.New("--unset cannot be combined with a SESSION_ID argument")
+				utils.CliErrorWithExit("--unset cannot be combined with a SESSION_ID argument")
 			}
 			// Treat missing config / no active workspace / empty entry as already-unset
 			// so --unset is a true no-op and never surfaces a confusing config error.
 			if cur, err := config.GetActiveWorkSession(); err != nil || cur == "" {
 				utils.CliInfo("No active work-session to unset.")
-				return nil
+				return
 			}
 			if err := RunUnset(); err != nil {
-				return err
+				utils.CliErrorWithExit("%s", err)
 			}
 			utils.CliSuccess("Active work-session cleared.")
-			return nil
+			return
 		}
 
 		if len(args) != 1 {
-			return errors.New("SESSION_ID argument is required (or pass --unset)")
+			utils.CliErrorWithExit("SESSION_ID argument is required (or pass --unset)")
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 		desc, err := RunUse(ac, args[0])
 		if err != nil {
-			return err
+			utils.CliErrorWithExit("%s", err)
 		}
 		if desc != "" {
 			utils.CliSuccess("Active work-session set to %s (%s).", args[0], desc)
 		} else {
 			utils.CliSuccess("Active work-session set to %s.", args[0])
 		}
-		return nil
 	},
 }
 
