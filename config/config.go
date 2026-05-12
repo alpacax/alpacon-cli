@@ -152,7 +152,7 @@ func (c Config) IsSaaS() bool {
 func SetActiveWorkSession(uuid string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %v", err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 	if cfg.WorkspaceName == "" {
 		return fmt.Errorf("no active workspace; run 'alpacon login' first")
