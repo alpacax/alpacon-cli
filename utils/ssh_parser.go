@@ -54,20 +54,3 @@ func IsRemoteTarget(target string) bool {
 func IsLocalTarget(target string) bool {
 	return !IsRemoteTarget(target)
 }
-
-// FormatSSHTarget formats an SSHTarget back into a string representation
-func FormatSSHTarget(target SSHTarget) string {
-	result := ""
-
-	if target.User != "" {
-		result = target.User + "@"
-	}
-
-	result += target.Host
-
-	if target.Path != "" {
-		result += ":" + target.Path
-	}
-
-	return result
-}

@@ -208,21 +208,6 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 	return response.Results[0].ID, nil
 }
 
-func GetUserNameByID(ac *client.AlpaconClient, userID string) (string, error) {
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, userID, nil))
-	if err != nil {
-		return "", err
-	}
-
-	var response UserDetailAttributes
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return "", err
-	}
-
-	return response.Username, nil
-}
-
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
 	params := map[string]string{
 		"name": groupName,
