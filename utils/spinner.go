@@ -114,16 +114,3 @@ func (s *Spinner) Stop() {
 	close(s.stopCh)
 	<-s.doneCh
 }
-
-// StopWithMessage stops the spinner and prints a final message
-func (s *Spinner) StopWithMessage(message string) {
-	s.Stop()
-	fmt.Fprintln(os.Stderr, message)
-}
-
-// UpdateMessage updates the spinner message while running
-func (s *Spinner) UpdateMessage(message string) {
-	s.mu.Lock()
-	s.message = message
-	s.mu.Unlock()
-}

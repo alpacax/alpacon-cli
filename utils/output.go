@@ -7,11 +7,8 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"text/tabwriter"
 	"unicode"
-
-	"github.com/olekukonko/tablewriter"
-	"github.com/olekukonko/tablewriter/renderer"
-	"github.com/olekukonko/tablewriter/tw"
 )
 
 // Valid values for the --output persistent flag.
@@ -47,55 +44,29 @@ func PrintTable(slice any) {
 	writer, cleanup := WriteToPager()
 	defer cleanup()
 
-	table := tablewriter.NewTable(writer,
-		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
-			Borders: tw.BorderNone,
-			Settings: tw.Settings{
-				Separators: tw.Separators{
-					BetweenRows:    tw.Off,
-					BetweenColumns: tw.Off,
-				},
-				Lines: tw.Lines{
-					ShowHeaderLine: tw.Off,
-				},
-			},
-		})),
-		tablewriter.WithConfig(tablewriter.Config{
-			Header: tw.CellConfig{
-				Formatting: tw.CellFormatting{AutoFormat: tw.On},
-				Alignment:  tw.CellAlignment{Global: tw.AlignLeft},
-				Padding:    tw.CellPadding{Global: tw.Padding{Left: "", Right: "   "}},
-			},
-			Row: tw.CellConfig{
-				Formatting: tw.CellFormatting{AutoWrap: tw.WrapNone},
-				Alignment:  tw.CellAlignment{Global: tw.AlignLeft},
-				Padding:    tw.CellPadding{Global: tw.Padding{Left: "", Right: "   "}},
-			},
-			Behavior: tw.Behavior{TrimSpace: tw.On},
-		}),
-	)
+	tw := tabwriter.NewWriter(writer, 0, 0, 3, ' ', 0)
 
-	headers := make([]string, s.Type().Elem().NumField())
-	for i := 0; i < s.Type().Elem().NumField(); i++ {
+	numFields := s.Type().Elem().NumField()
+	headers := make([]string, numFields)
+	for i := 0; i < numFields; i++ {
 		field := s.Type().Elem().Field(i)
 		if tag := field.Tag.Get("table"); tag != "" {
-			headers[i] = tag
+			headers[i] = strings.ToUpper(tag)
 		} else {
-			headers[i] = camelToWords(field.Name)
+			headers[i] = strings.ToUpper(camelToWords(field.Name))
 		}
 	}
-	table.Header(headers)
+	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
 
 	for i := 0; i < s.Len(); i++ {
-		row := make([]string, s.Type().Elem().NumField())
-		for j := 0; j < s.Type().Elem().NumField(); j++ {
-			value := s.Index(i).Field(j)
-			row[j] = fmt.Sprintf("%v", value)
+		row := make([]string, numFields)
+		for j := 0; j < numFields; j++ {
+			row[j] = fmt.Sprintf("%v", s.Index(i).Field(j))
 		}
-		_ = table.Append(row)
+		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
 
-	_ = table.Render()
+	_ = tw.Flush()
 }
 
 func PrintJson(body []byte) {
