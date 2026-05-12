@@ -34,46 +34,60 @@ var workSessionCurrentCmd = &cobra.Command{
 	Short:   "Show the active work-session for the current workspace",
 	Example: `  alpacon work-session current`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// JSON mode: fetch raw server response and print as-is to preserve all fields and key order.
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			uuid, err := config.GetActiveWorkSession()
-			if err != nil {
-				return err
-			}
-			if uuid == "" {
-				_, _ = fmt.Fprintln(os.Stdout, "null")
-				return nil
-			}
-			ac, err := client.NewAlpaconAPIClient()
-			if err != nil {
-				return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-			}
-			body, err := wsapi.GetWorkSessionRaw(ac, uuid)
-			if err != nil {
-				return fmt.Errorf("active work-session %s no longer accessible: %w (run 'alpacon work-session use --unset' to clear)", uuid, err)
-			}
-			utils.PrintJson(body)
-			return nil
+			return printCurrentRaw()
 		}
-
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-		}
-		uuid, ws, err := RunCurrent(ac)
-		if err != nil {
-			if uuid != "" {
-				return fmt.Errorf("active work-session %s no longer accessible: %w (run 'alpacon work-session use --unset' to clear)", uuid, err)
-			}
-			return err
-		}
-		if uuid == "" {
-			utils.CliInfo("No active work-session.")
-			return nil
-		}
-		row := wsapi.ProjectAttributes(ws)
-		row.Active = "*"
-		utils.PrintTable([]wsapi.WorkSessionAttributes{row})
-		return nil
+		return printCurrentTable()
 	},
+}
+
+// printCurrentRaw writes the server's raw JSON response so all fields and key
+// order are preserved verbatim for the consumer.
+func printCurrentRaw() error {
+	uuid, err := config.GetActiveWorkSession()
+	if err != nil {
+		return err
+	}
+	if uuid == "" {
+		_, _ = fmt.Fprintln(os.Stdout, "null")
+		return nil
+	}
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+	}
+	body, err := wsapi.GetWorkSessionRaw(ac, uuid)
+	if err != nil {
+		return staleActiveSessionError(uuid, err)
+	}
+	utils.PrintJson(body)
+	return nil
+}
+
+// printCurrentTable projects the active session through ProjectAttributes so
+// the columns stay consistent with 'work-session ls', and marks the active row.
+func printCurrentTable() error {
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+	}
+	uuid, ws, err := RunCurrent(ac)
+	if err != nil {
+		if uuid != "" {
+			return staleActiveSessionError(uuid, err)
+		}
+		return err
+	}
+	if uuid == "" {
+		utils.CliInfo("No active work-session.")
+		return nil
+	}
+	row := wsapi.ProjectAttributes(ws)
+	row.Active = "*"
+	utils.PrintTable([]wsapi.WorkSessionAttributes{row})
+	return nil
+}
+
+func staleActiveSessionError(uuid string, cause error) error {
+	return fmt.Errorf("active work-session %s no longer accessible: %w (run 'alpacon work-session use --unset' to clear)", uuid, cause)
 }
