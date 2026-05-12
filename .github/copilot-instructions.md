@@ -26,6 +26,8 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - delete → `Aliases: []string{"rm"}`
 - describe → `Aliases: []string{"desc"}`
 - Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)
+- **Group commands**: `RunE`—returns error to trigger help when no subcommand is given
+- **Leaf commands**: `Run` + `utils.CliErrorWithExit`—preserves colored output; `RunE` would print plain text and may append usage on error
 
 ## Code review guidelines
 
