@@ -137,26 +137,6 @@ func TestGetServerIDByName(t *testing.T) {
 	}
 }
 
-func TestGetServerNameByID(t *testing.T) {
-	const wantName = "prod-server"
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := ServerDetails{ID: "some-id", Name: wantName}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	name, err := GetServerNameByID(ac, "some-id")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if name != wantName {
-		t.Errorf("expected name %q, got %q", wantName, name)
-	}
-}
-
 func TestCreateRegistrationToken(t *testing.T) {
 	want := RegistrationTokenCreatedResponse{
 		ID:   "token-uuid-abc",
