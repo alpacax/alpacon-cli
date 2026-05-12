@@ -11,6 +11,8 @@ type Config struct {
 	AccessTokenExpiresAt string            `json:"access_token_expires_at,omitempty"`
 	BaseDomain           string            `json:"base_domain,omitempty"`
 	Insecure             bool              `json:"insecure"`
+	// ActiveWorkSessions maps workspace name to active work-session UUID.
+	// Nil (not an empty map) when the key is absent from the JSON config file.
 	ActiveWorkSessions   map[string]string `json:"active_work_sessions,omitempty"`
 }
 
