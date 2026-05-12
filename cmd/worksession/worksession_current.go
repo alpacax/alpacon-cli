@@ -68,21 +68,24 @@ func printCurrentRaw() error {
 
 // printCurrentTable projects the active session through ProjectAttributes so
 // the columns stay consistent with 'work-session ls', and marks the active row.
+// Reads config before constructing the API client so the command stays offline-safe
+// when no work-session is configured.
 func printCurrentTable() error {
-	ac, err := client.NewAlpaconAPIClient()
+	uuid, err := config.GetActiveWorkSession()
 	if err != nil {
-		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
-	}
-	uuid, ws, err := RunCurrent(ac)
-	if err != nil {
-		if uuid != "" {
-			return staleActiveSessionError(uuid, err)
-		}
 		return err
 	}
 	if uuid == "" {
 		utils.CliInfo("No active work-session.")
 		return nil
+	}
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
+	}
+	ws, err := wsapi.GetWorkSession(ac, uuid)
+	if err != nil {
+		return staleActiveSessionError(uuid, err)
 	}
 	row := wsapi.ProjectAttributes(ws)
 	row.Active = "*"

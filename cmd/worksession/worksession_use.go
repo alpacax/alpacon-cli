@@ -50,15 +50,17 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 			if len(args) > 0 {
 				return errors.New("--unset cannot be combined with a SESSION_ID argument")
 			}
-			cur, _ := config.GetActiveWorkSession()
+			// Treat missing config / no active workspace / empty entry as already-unset
+			// so --unset is a true no-op and never surfaces a confusing config error.
+			cur, err := config.GetActiveWorkSession()
+			if err != nil || cur == "" {
+				utils.CliInfo("No active work-session to unset.")
+				return nil
+			}
 			if err := RunUnset(); err != nil {
 				return err
 			}
-			if cur == "" {
-				utils.CliInfo("No active work-session to unset.")
-			} else {
-				utils.CliSuccess("Active work-session cleared.")
-			}
+			utils.CliSuccess("Active work-session cleared.")
 			return nil
 		}
 

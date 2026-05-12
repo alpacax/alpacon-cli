@@ -57,12 +57,13 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case strings.HasPrefix(args[i], "--read-only"):
 			var value string
 			value, i = extractValue(args, i)
-			if value == "" || strings.TrimSpace(strings.ToLower(value)) == "true" {
+			normalized := strings.TrimSpace(strings.ToLower(value))
+			if value == "" || normalized == "true" {
 				res.ReadOnly = true
-			} else if strings.TrimSpace(strings.ToLower(value)) == "false" {
+			} else if normalized == "false" {
 				res.ReadOnly = false
 			} else {
-				utils.CliErrorWithExit("The 'read only' value must be either 'true' or 'false'.")
+				return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
 			}
 		case args[i] == "--work-session" || strings.HasPrefix(args[i], "--work-session="):
 			res.WorkSessionID, i = extractValue(args, i)
