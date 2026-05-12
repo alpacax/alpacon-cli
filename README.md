@@ -177,6 +177,7 @@ Available Commands:
   user        Manage User resources
   version     Displays the current CLI version.
   websh       Open a websh terminal or execute a command on a server
+  work-session  Create and manage work sessions
 ```
 ### Examples of use cases
 
@@ -292,6 +293,38 @@ $ alpacon websh --share --read-only=true my-server
 # Join an existing shared session
 $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 ```
+
+
+
+#### Work sessions
+
+Work sessions are approval-gated units that group Websh, exec, file transfer, and tunnel access under a single reviewable context. Once a session is active, all subsequent commands attach to it automatically.
+
+```bash
+# List work sessions
+$ alpacon work-session ls
+
+# Show the currently active work-session
+$ alpacon work-session current
+
+# Set the active work-session for your workspace
+$ alpacon work-session use ses-abc123
+
+# Clear the active work-session
+$ alpacon work-session use --unset
+
+# Attach a specific session to a single command (overrides the active session)
+$ alpacon websh my-server --work-session ses-abc123
+$ alpacon exec my-server "uptime" --work-session ses-abc123
+$ alpacon tunnel my-server -l 9000 -r 8082 --work-session ses-abc123
+$ alpacon cp localfile.txt my-server:/tmp/ --work-session ses-abc123
+
+# Use ALPACON_WORK_SESSION env var instead of repeating the flag
+$ export ALPACON_WORK_SESSION=ses-abc123
+$ alpacon exec my-server "uptime"
+```
+
+Session resolution order: `--work-session` flag > `ALPACON_WORK_SESSION` env var > active session set via `work-session use`.
 
 
 
