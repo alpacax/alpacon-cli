@@ -10,8 +10,9 @@ builds:
       - CGO_ENABLED=0
     flags:
       - -trimpath
+      - -buildvcs=false
     ldflags:
-      - -s -w -buildvcs=false -X github.com/alpacax/alpacon-cli/utils.Version={{.Version}}
+      - -s -w -X github.com/alpacax/alpacon-cli/utils.Version={{.Version}}
     goos:
       - linux
       - darwin
