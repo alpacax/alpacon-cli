@@ -58,11 +58,12 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
 				normalized := strings.TrimSpace(strings.ToLower(parts[1]))
-				if normalized == "" || normalized == "true" {
+				switch normalized {
+				case "", "true":
 					res.ReadOnly = true
-				} else if normalized == "false" {
+				case "false":
 					res.ReadOnly = false
-				} else {
+				default:
 					return res, fmt.Errorf("the --read-only value must be either 'true' or 'false'")
 				}
 			} else {
