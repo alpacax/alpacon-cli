@@ -68,8 +68,6 @@ func printCurrentRaw() error {
 
 // printCurrentTable projects the active session through ProjectAttributes so
 // the columns stay consistent with 'work-session ls', and marks the active row.
-// Reads config before constructing the API client so the command stays offline-safe
-// when no work-session is configured.
 func printCurrentTable() error {
 	uuid, err := config.GetActiveWorkSession()
 	if err != nil {
