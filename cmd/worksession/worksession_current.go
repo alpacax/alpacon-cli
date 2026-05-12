@@ -69,7 +69,9 @@ var workSessionCurrentCmd = &cobra.Command{
 			utils.CliInfo("No active work-session.")
 			return nil
 		}
-		utils.PrintTable([]wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)})
+		row := wsapi.ProjectAttributes(ws)
+		row.Active = "*"
+		utils.PrintTable([]wsapi.WorkSessionAttributes{row})
 		return nil
 	},
 }

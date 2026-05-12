@@ -157,6 +157,13 @@ func SetActiveWorkSession(uuid string) error {
 	if cfg.WorkspaceName == "" {
 		return fmt.Errorf("no active workspace; run 'alpacon login' first")
 	}
+	current := ""
+	if cfg.ActiveWorkSessions != nil {
+		current = cfg.ActiveWorkSessions[cfg.WorkspaceName]
+	}
+	if current == uuid {
+		return nil
+	}
 	if cfg.ActiveWorkSessions == nil {
 		cfg.ActiveWorkSessions = map[string]string{}
 	}

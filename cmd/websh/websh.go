@@ -170,11 +170,7 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
-		workSessionID, err := worksession.Resolve(parsed.WorkSessionID)
-		if err != nil {
-			utils.CliErrorWithExit("%s", err)
-		}
-		worksession.AnnounceIfActive(workSessionID)
+		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

@@ -56,15 +56,7 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 		flagWorkSession, _ := cmd.Flags().GetString("work-session")
 		allowOverwrite := !noOverwrite
 
-		// Resolve the work-session UUID exactly once (flag > config) and announce
-		// it before any API call so the user knows which session this transfer
-		// will be attached to.
-		workSessionID, err := worksession.Resolve(flagWorkSession)
-		if err != nil {
-			utils.CliErrorWithExit("%s", err)
-			return
-		}
-		worksession.AnnounceIfActive(workSessionID)
+		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
 
 		if len(args) < 2 {
 			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +

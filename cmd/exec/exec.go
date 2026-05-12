@@ -67,12 +67,7 @@ Flags:
 			return
 		}
 
-		workSessionID, err := worksession.Resolve(parsed.WorkSessionID)
-		if err != nil {
-			utils.CliErrorWithExit("%s", err)
-			return
-		}
-		worksession.AnnounceIfActive(workSessionID)
+		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

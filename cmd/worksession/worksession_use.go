@@ -22,9 +22,6 @@ func RunUse(ac *client.AlpaconClient, uuid string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if ws == nil {
-		return "", fmt.Errorf("work session not found: %s", uuid)
-	}
 	if ws.Status != activeWorkSessionStatus {
 		return "", fmt.Errorf("work session %s is in '%s' state and cannot be used", uuid, ws.Status)
 	}

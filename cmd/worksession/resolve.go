@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // Resolve returns the work-session UUID to use for an operation.
@@ -23,4 +24,15 @@ func AnnounceIfActive(uuid string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Using work-session %s\n", uuid)
+}
+
+// ResolveAndAnnounce resolves the work-session UUID (flag > config), announces it
+// on stderr if non-empty, and exits the process on resolution error.
+func ResolveAndAnnounce(flagValue string) string {
+	uuid, err := Resolve(flagValue)
+	if err != nil {
+		utils.CliErrorWithExit("%s", err)
+	}
+	AnnounceIfActive(uuid)
+	return uuid
 }
