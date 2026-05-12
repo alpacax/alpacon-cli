@@ -17,6 +17,7 @@ func Resolve(flagValue string) (string, error) {
 }
 
 // AnnounceIfActive prints "Using work-session <uuid>" to stderr when uuid is non-empty.
+// Stderr keeps stdout clean for --output json.
 func AnnounceIfActive(uuid string) {
 	if uuid == "" {
 		return
