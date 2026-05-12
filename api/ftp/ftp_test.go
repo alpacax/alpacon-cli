@@ -675,9 +675,9 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		sources     []string
-		expectBulk  bool
+		name       string
+		sources    []string
+		expectBulk bool
 	}{
 		{
 			name:       "single source routes to single download",
@@ -735,10 +735,10 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 // when present and omitted when empty, on the single upload create-request.
 func TestExecuteSingleUpload_WorkSession(t *testing.T) {
 	tests := []struct {
-		name             string
-		workSessionID    string
-		wantKeyPresent   bool
-		wantWorkSession  string
+		name            string
+		workSessionID   string
+		wantKeyPresent  bool
+		wantWorkSession string
 	}{
 		{"empty work-session is omitted from body", "", false, ""},
 		{"work-session ID is sent on POST body", "ws-uuid-123", true, "ws-uuid-123"},
