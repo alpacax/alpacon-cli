@@ -11,6 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var workSessionCurrentCmd = &cobra.Command{
+	Use:     "current",
+	Short:   "Show the active work-session for the current workspace",
+	Example: `  alpacon work-session current`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			return printCurrentRaw()
+		}
+		return printCurrentTable()
+	},
+}
+
 // RunCurrent returns the active work-session UUID and the fetched session detail
 // for the current workspace. Returns ("", nil, nil) when nothing is set.
 // Returns (uuid, nil, err) when the UUID is set but the server cannot resolve it.
@@ -27,18 +39,6 @@ func RunCurrent(ac *client.AlpaconClient) (string, *wsapi.WorkSession, error) {
 		return uuid, nil, err
 	}
 	return uuid, ws, nil
-}
-
-var workSessionCurrentCmd = &cobra.Command{
-	Use:     "current",
-	Short:   "Show the active work-session for the current workspace",
-	Example: `  alpacon work-session current`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			return printCurrentRaw()
-		}
-		return printCurrentTable()
-	},
 }
 
 // printCurrentRaw renders the server's JSON response through utils.PrintJson.

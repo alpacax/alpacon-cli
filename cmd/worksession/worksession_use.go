@@ -15,28 +15,6 @@ const activeWorkSessionStatus = "active"
 
 var unsetActiveWorkSession bool
 
-// RunUse validates the work-session via the server, then stores it in config.
-// Returns the human-readable description on success.
-func RunUse(ac *client.AlpaconClient, uuid string) (string, error) {
-	ws, err := wsapi.GetWorkSession(ac, uuid)
-	if err != nil {
-		return "", err
-	}
-	if ws.Status != activeWorkSessionStatus {
-		return "", fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
-	}
-	if err := config.SetActiveWorkSession(uuid); err != nil {
-		return "", err
-	}
-	return ws.Description, nil
-}
-
-// RunUnset clears the active work-session for the current workspace.
-// Idempotent — no error when nothing is set.
-func RunUnset() error {
-	return config.SetActiveWorkSession("")
-}
-
 var workSessionUseCmd = &cobra.Command{
 	Use:   "use SESSION_ID",
 	Short: "Set or clear the active work-session for the current workspace",
@@ -81,6 +59,28 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 		}
 		return nil
 	},
+}
+
+// RunUse validates the work-session via the server, then stores it in config.
+// Returns the human-readable description on success.
+func RunUse(ac *client.AlpaconClient, uuid string) (string, error) {
+	ws, err := wsapi.GetWorkSession(ac, uuid)
+	if err != nil {
+		return "", err
+	}
+	if ws.Status != activeWorkSessionStatus {
+		return "", fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
+	}
+	if err := config.SetActiveWorkSession(uuid); err != nil {
+		return "", err
+	}
+	return ws.Description, nil
+}
+
+// RunUnset clears the active work-session for the current workspace.
+// Idempotent — no error when nothing is set.
+func RunUnset() error {
+	return config.SetActiveWorkSession("")
 }
 
 func init() {
