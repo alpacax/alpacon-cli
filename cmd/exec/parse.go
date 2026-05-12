@@ -79,9 +79,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			}
 		case arg == "--work-session" || strings.HasPrefix(arg, "--work-session="):
 			var errMsg string
-			// Long-only flag: pass the flag name itself as the "short" sentinel
-			// so extractFlagValue's attached-value branch (-uroot style) is
-			// never matched; only the --flag=value and --flag value forms apply.
+			// No short form: pass the long name as sentinel to disable attached-value parsing.
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}

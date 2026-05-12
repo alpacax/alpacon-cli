@@ -28,9 +28,8 @@ var workSessionCurrentCmd = &cobra.Command{
 	},
 }
 
-// RunCurrent returns the active work-session UUID and the fetched session detail
-// for the current workspace. Returns ("", nil, nil) when nothing is set.
-// Returns (uuid, nil, err) when the UUID is set but the server cannot resolve it.
+// RunCurrent returns the active work-session UUID and its server-side details.
+// Returns ("", nil, nil) when nothing is set, or (uuid, nil, err) if set but unreachable.
 func RunCurrent(ac *client.AlpaconClient) (string, *wsapi.WorkSession, error) {
 	uuid, err := config.GetActiveWorkSession()
 	if err != nil {
@@ -46,10 +45,7 @@ func RunCurrent(ac *client.AlpaconClient) (string, *wsapi.WorkSession, error) {
 	return uuid, ws, nil
 }
 
-// printCurrentRaw renders the server's JSON response through utils.PrintJson.
-// All fields and the server's key order are preserved; whitespace and
-// indentation are normalized to match the project-wide --output json
-// convention (pretty-printed, 2-space indent).
+// printCurrentRaw outputs the active session as raw JSON without field projection.
 func printCurrentRaw() error {
 	uuid, err := config.GetActiveWorkSession()
 	if err != nil {

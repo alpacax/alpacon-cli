@@ -22,7 +22,6 @@ import (
 // Callers should print help text and exit cleanly.
 var errHelpRequested = errors.New("help requested")
 
-// WebshArgs is the parsed form of the websh command's manually-parsed args.
 type WebshArgs struct {
 	Username      string
 	Groupname     string
@@ -34,12 +33,11 @@ type WebshArgs struct {
 	Env           map[string]string
 }
 
-// ParseWebshArgs parses the manually-disabled flag args for `alpacon websh`.
-// Returns errHelpRequested when -h/--help is encountered so callers can print
-// help and exit without further processing.
+// ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode).
+// Returns errHelpRequested when -h/--help is seen.
 //
-// NOTE: order matters — `--read-only` must be checked before `-r` style prefixes
-// would, and `--work-session` must be checked before generic flag fallthrough.
+// NOTE: --read-only must be checked before generic -r prefixes, and
+// --work-session before the default fallthrough.
 func ParseWebshArgs(args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {

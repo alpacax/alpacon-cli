@@ -130,9 +130,7 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 }
 
 func runTunnel(cmd *cobra.Command, args []string) {
-	// Write the resolved value back into tunnelFlags so the retry path inside
-	// handleTunnelStartError (which re-invokes tunnelFlags.toStartOptions)
-	// reuses the same UUID without re-resolving or re-announcing.
+	// Write resolved value back so handleTunnelStartError's retry reuses the same UUID.
 	tunnelFlags.workSessionID = worksession.ResolveAndAnnounce(tunnelFlags.workSessionID)
 
 	var sigChan <-chan os.Signal
