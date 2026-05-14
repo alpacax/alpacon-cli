@@ -117,6 +117,11 @@ func TestFormatDetails_Command(t *testing.T) {
 			wsapi.TimelineItem{Type: "command", Denied: true, Line: "sudo su"},
 			"[denied] sudo su",
 		},
+		{
+			"unknown (nil success)",
+			wsapi.TimelineItem{Type: "command", Line: "some-cmd"},
+			"[unknown] some-cmd",
+		},
 	}
 	for _, tc := range tests {
 		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)

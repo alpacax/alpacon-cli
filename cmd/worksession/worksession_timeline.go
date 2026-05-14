@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -135,8 +136,9 @@ func recordingBadge(n int) string {
 }
 
 func recordingPreview(raw string) string {
-	for _, line := range strings.SplitN(raw, "\n", 50) {
-		line = ansiEscape.ReplaceAllString(line, "")
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for i := 0; i < 50 && scanner.Scan(); i++ {
+		line := ansiEscape.ReplaceAllString(scanner.Text(), "")
 		// Strip trailing CR from CRLF line endings before overwrite handling.
 		line = strings.TrimRight(line, "\r")
 		// \r moves cursor to line start; take only the last overwritten segment
@@ -248,16 +250,24 @@ func formatType(t string) string {
 	}
 }
 
+func ansiStrip(s string) string {
+	return ansiEscape.ReplaceAllString(s, "")
+}
+
 func formatDetails(item *wsapi.TimelineItem) string {
 	switch item.Type {
 	case "command":
-		status := "ok"
+		status := "unknown"
 		if item.Denied {
 			status = "denied"
-		} else if item.Success != nil && !*item.Success {
-			status = "failed"
+		} else if item.Success != nil {
+			if *item.Success {
+				status = "ok"
+			} else {
+				status = "failed"
+			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(item.Line, 60))
+		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(ansiStrip(item.Line), 60))
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
@@ -277,15 +287,15 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return sessionState(item.ClosedAt)
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", item.Name, formatSize(item.Size))
+		return fmt.Sprintf("↑ %s (%s)", ansiStrip(item.Name), formatSize(item.Size))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", item.Name, formatSize(item.Size))
+		return fmt.Sprintf("↓ %s (%s)", ansiStrip(item.Name), formatSize(item.Size))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(*item.Command, 40))
+			detail += fmt.Sprintf(" — %s", utils.TruncateString(ansiStrip(*item.Command), 40))
 		}
 		return detail
 

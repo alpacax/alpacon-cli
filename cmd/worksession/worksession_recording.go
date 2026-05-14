@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ansiEscape matches ANSI/VT escape sequences: CSI (full parameter/intermediate byte ranges), OSC (BEL or ST), and Fe sequences.
-var ansiEscape = regexp.MustCompile(`\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[@-Z\\-_])`)
+// ansiEscape matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/PM/APC string controls (ST), and Fe sequences.
+var ansiEscape = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[P^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[@-Z\\-_])`)
 
 var recordingIndex int
 
