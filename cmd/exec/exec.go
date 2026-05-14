@@ -1,8 +1,11 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -78,6 +81,11 @@ Flags:
 		env := make(map[string]string)
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 		if err != nil {
+			var remoteErr *event.RemoteCommandError
+			if errors.As(err, &remoteErr) {
+				fmt.Println(result)
+				os.Exit(1)
+			}
 			utils.CliErrorWithExit("%s", err)
 			return
 		}

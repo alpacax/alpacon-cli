@@ -104,6 +104,10 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 		return fmt.Sprintf("command failed with status: %s", result.Status), nil
 	}
 
+	if result.Success != nil && !*result.Success {
+		return result.Result, &RemoteCommandError{Output: result.Result}
+	}
+
 	return result.Result, nil
 }
 

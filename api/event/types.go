@@ -6,6 +6,16 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 )
 
+// RemoteCommandError is returned when the remote command completed but exited
+// with a non-zero status. Output holds the captured stdout/stderr.
+type RemoteCommandError struct {
+	Output string
+}
+
+func (e *RemoteCommandError) Error() string {
+	return "remote command exited with non-zero status"
+}
+
 type EventAttributes struct {
 	Server      string `json:"server"`
 	Shell       string `json:"shell"`

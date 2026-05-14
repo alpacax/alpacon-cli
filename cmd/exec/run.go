@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -17,6 +18,10 @@ import (
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
 	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
+		var remoteErr *event.RemoteCommandError
+		if errors.As(err, &remoteErr) {
+			return result, remoteErr
+		}
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {
 				return mfa.HandleMFAError(ac, srv)
@@ -35,6 +40,10 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 		})
 		if err != nil {
+			var remoteErr *event.RemoteCommandError
+			if errors.As(err, &remoteErr) {
+				return result, remoteErr
+			}
 			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
 		}
 	}
