@@ -137,6 +137,7 @@ func recordingBadge(n int) string {
 
 func recordingPreview(raw string) string {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for i := 0; i < 50 && scanner.Scan(); i++ {
 		line := ansiEscape.ReplaceAllString(scanner.Text(), "")
 		// Strip trailing CR from CRLF line endings before overwrite handling.
