@@ -204,9 +204,14 @@ Note: All flags must be placed before the server name.
 					return
 				}
 			}
-			command := strings.Join(commandArgs, " ")
+			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
 			if err != nil {
+				var remoteErr *event.RemoteCommandError
+				if errors.As(err, &remoteErr) {
+					fmt.Println(result)
+					os.Exit(1)
+				}
 				utils.CliErrorWithExit("%s", err)
 			}
 			fmt.Println(result)

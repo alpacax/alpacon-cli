@@ -301,7 +301,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args: []string{"server", "echo", "hello world"},
 			expected: RemoteExecArgs{
 				Server:  "server",
-				Command: "echo hello world",
+				Command: "echo 'hello world'",
 			},
 		},
 		{
@@ -309,7 +309,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args: []string{"server", "bash", "-c", "echo 'hello world'"},
 			expected: RemoteExecArgs{
 				Server:  "server",
-				Command: "bash -c echo 'hello world'",
+				Command: `bash -c 'echo '\''hello world'\'''`,
 			},
 		},
 		{
@@ -317,7 +317,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args: []string{"server", "bash", "-c", `echo "hello world"`},
 			expected: RemoteExecArgs{
 				Server:  "server",
-				Command: `bash -c echo "hello world"`,
+				Command: `bash -c 'echo "hello world"'`,
 			},
 		},
 		{
@@ -344,7 +344,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			expected: RemoteExecArgs{
 				Username: "root",
 				Server:   "db-server",
-				Command:  "docker exec -it postgres psql -U myproject -d myproject -c SELECT 1;",
+				Command:  "docker exec -it postgres psql -U myproject -d myproject -c 'SELECT 1;'",
 			},
 		},
 		{
@@ -376,7 +376,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args: []string{"server", "awk", "{print $1}", "/var/log/access.log"},
 			expected: RemoteExecArgs{
 				Server:  "server",
-				Command: "awk {print $1} /var/log/access.log",
+				Command: "awk '{print $1}' /var/log/access.log",
 			},
 		},
 		{
@@ -392,7 +392,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args: []string{"server", "--", "curl", "-s", "-H", "Authorization: Bearer token123", "http://localhost:8080/api/health"},
 			expected: RemoteExecArgs{
 				Server:  "server",
-				Command: "curl -s -H Authorization: Bearer token123 http://localhost:8080/api/health",
+				Command: "curl -s -H 'Authorization: Bearer token123' http://localhost:8080/api/health",
 			},
 		},
 		{
