@@ -55,7 +55,7 @@ func HandleCommandResult(result string, err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			fmt.Println(result)
+			fmt.Println(remoteErr.Output)
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)

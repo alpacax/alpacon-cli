@@ -109,7 +109,10 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	}
 }
 
-// ShellJoin reassembles tokenized command parts into a shell-safe string.
+// ShellJoin reassembles tokenized command parts into a single string,
+// quoting only parts that contain whitespace or single quotes so that
+// argument boundaries are preserved. Shell metacharacters (|, ;, $, *, etc.)
+// are passed through intentionally so the remote shell can interpret them.
 func ShellJoin(parts []string) string {
 	out := make([]string, len(parts))
 	for i, p := range parts {
