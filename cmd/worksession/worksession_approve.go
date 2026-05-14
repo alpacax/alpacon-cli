@@ -1,6 +1,8 @@
 package worksession
 
 import (
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -43,6 +45,10 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 		if len(approveServers) > 0 {
 			serverIDs := make([]string, 0, len(approveServers))
 			for _, name := range approveServers {
+				name = strings.TrimSpace(name)
+				if name == "" {
+					continue
+				}
 				id, err := server.GetServerIDByName(ac, name)
 				if err != nil {
 					utils.CliErrorWithExit("Server %q not found: %s.", name, err)
