@@ -539,6 +539,15 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 			expectedServer:  "server",
 			expectedCommand: `bash -c 'echo it'\''s done'`,
 		},
+		{
+			// Single token with spaces — entire command passed as one quoted CLI argument,
+			// e.g. alpacon exec server "ls -la /var/log". Must be returned unchanged
+			// so the remote shell interprets it as a command with arguments.
+			name:            "single-token command with spaces",
+			args:            []string{"server", "ls -la /var/log"},
+			expectedServer:  "server",
+			expectedCommand: "ls -la /var/log",
+		},
 	}
 
 	for _, tt := range tests {

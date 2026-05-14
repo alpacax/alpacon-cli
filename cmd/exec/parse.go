@@ -109,11 +109,14 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	}
 }
 
-// ShellJoin reassembles tokenized command parts into a single string,
-// quoting only parts that contain whitespace or single quotes so that
-// argument boundaries are preserved. Shell metacharacters (|, ;, $, *, etc.)
-// are passed through intentionally so the remote shell can interpret them.
+// ShellJoin reassembles tokenized command parts into a single string.
+// Parts containing whitespace or single quotes are re-quoted to preserve
+// argument boundaries; metacharacters pass through for the remote shell.
+// A single-element slice is returned as-is (already a formed command line).
 func ShellJoin(parts []string) string {
+	if len(parts) == 1 {
+		return parts[0]
+	}
 	out := make([]string, len(parts))
 	for i, p := range parts {
 		out[i] = shellQuote(p)
