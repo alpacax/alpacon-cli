@@ -51,7 +51,6 @@ type WorkSessionApproveRequest struct {
 	AdjustedServers []string `json:"adjusted_servers,omitempty"`
 }
 
-
 // TimelineItem represents a single event in a work session's activity timeline.
 // All event types share this struct; type-specific fields are zero-valued for other types.
 type TimelineItem struct {
