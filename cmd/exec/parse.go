@@ -122,6 +122,9 @@ func ShellJoin(parts []string) string {
 // Whitespace signals that the local shell stripped outer quotes from a multi-word arg;
 // metacharacters (|, $, *, etc.) pass through so the remote shell can interpret them.
 func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
 	if !strings.ContainsAny(s, " \t\n'") {
 		return s
 	}
