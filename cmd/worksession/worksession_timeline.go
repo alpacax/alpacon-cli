@@ -95,11 +95,14 @@ func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]st
 }
 
 func formatTimestamp(ts string) string {
-	ts = strings.ReplaceAll(ts, "T", " ")
-	if idx := strings.IndexAny(ts, ".+Z"); idx != -1 {
-		ts = ts[:idx]
+	date, rest, found := strings.Cut(ts, "T")
+	if !found {
+		return ts
 	}
-	return ts
+	if idx := strings.IndexAny(rest, ".+Z"); idx != -1 {
+		rest = rest[:idx]
+	}
+	return date + " " + rest
 }
 
 func formatType(t string) string {
