@@ -3,8 +3,10 @@ package worksession
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -47,7 +49,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, true)
 		}()
 		go func() {
 			defer wg.Done()
@@ -68,7 +70,7 @@ var workSessionTimelineCmd = &cobra.Command{
 
 		recordingsBySession, recordings := buildRecordingIndex(items)
 
-		var rows []wsapi.TimelineAttributes
+		rows := make([]wsapi.TimelineAttributes, 0)
 		for i := range items {
 			if items[i].Type == "websh_record" {
 				continue
@@ -96,9 +98,16 @@ var workSessionTimelineCmd = &cobra.Command{
 			return
 		}
 
-		utils.PrintTable(rows)
+		writer, cleanup := utils.WriteToPager()
+		defer cleanup()
+		tw := tabwriter.NewWriter(writer, 0, 0, 3, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "TIME\tTYPE\tSERVER\tUSER\tDETAILS")
+		for _, row := range rows {
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", row.Time, row.Type, row.Server, row.User, row.Details)
+		}
+		_ = tw.Flush()
 		if !noRecords && len(recordings) > 0 {
-			printRecordingsSection(recordings, serverMap)
+			printRecordingsSectionTo(writer, recordings, serverMap)
 		}
 	},
 }
@@ -159,15 +168,15 @@ func resolveServer(serverID *string, serverMap map[string]string) string {
 	return *serverID
 }
 
-func printRecordingsSection(recordings []wsapi.TimelineItem, serverMap map[string]string) {
-	fmt.Printf("\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
+func printRecordingsSectionTo(w io.Writer, recordings []wsapi.TimelineItem, serverMap map[string]string) {
+	_, _ = fmt.Fprintf(w, "\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
 	for i, rec := range recordings {
-		fmt.Printf("[%d]  %s  %s\n", i+1, resolveTimestamp(rec.Timestamp), resolveServer(rec.ServerID, serverMap))
+		_, _ = fmt.Fprintf(w, "[%d]  %s  %s\n", i+1, resolveTimestamp(rec.Timestamp), resolveServer(rec.ServerID, serverMap))
 		if preview := recordingPreview(rec.MaskedRecord); preview != "" {
-			fmt.Printf("     %s\n", preview)
+			_, _ = fmt.Fprintf(w, "     %s\n", preview)
 		}
 		if i < len(recordings)-1 {
-			fmt.Println()
+			_, _ = fmt.Fprintln(w)
 		}
 	}
 }
