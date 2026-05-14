@@ -3,6 +3,7 @@ package worksession
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -28,14 +29,30 @@ var workSessionTimelineCmd = &cobra.Command{
 
 		id := args[0]
 
-		items, err := wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve work session timeline: %s.", err)
+		var (
+			items       []wsapi.TimelineItem
+			session     *wsapi.WorkSession
+			timelineErr error
+			wg          sync.WaitGroup
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
+		}()
+		go func() {
+			defer wg.Done()
+			session, _ = wsapi.GetWorkSession(ac, id)
+		}()
+		wg.Wait()
+
+		if timelineErr != nil {
+			utils.CliErrorWithExit("Failed to retrieve work session timeline: %s.", timelineErr)
 		}
 
 		// Build server name map from session detail for human-readable server names.
 		serverMap := map[string]string{}
-		if session, serr := wsapi.GetWorkSession(ac, id); serr == nil {
+		if session != nil {
 			for _, s := range session.Servers {
 				serverMap[s.ID] = s.Name
 			}
@@ -120,30 +137,21 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(item.Line, 60))
 
 	case "websh_session":
-		state := "opened"
-		if item.ClosedAt != nil {
-			state = "closed"
-		}
+		state := sessionState(item.ClosedAt)
 		if item.ClientType != "" {
 			return fmt.Sprintf("%s (client: %s)", state, item.ClientType)
 		}
 		return state
 
 	case "tunnel_session":
-		state := "opened"
-		if item.ClosedAt != nil {
-			state = "closed"
-		}
+		state := sessionState(item.ClosedAt)
 		if item.TargetPort != nil {
 			return fmt.Sprintf("port %d %s", *item.TargetPort, state)
 		}
 		return state
 
 	case "ftp_session":
-		if item.ClosedAt != nil {
-			return "closed"
-		}
-		return "opened"
+		return sessionState(item.ClosedAt)
 
 	case "file_upload":
 		return fmt.Sprintf("↑ %s (%s)", item.Name, formatSize(item.Size))
@@ -164,6 +172,13 @@ func formatDetails(item *wsapi.TimelineItem) string {
 	default:
 		return ""
 	}
+}
+
+func sessionState(closedAt *string) string {
+	if closedAt != nil {
+		return "closed"
+	}
+	return "opened"
 }
 
 func formatSize(bytes int64) string {
