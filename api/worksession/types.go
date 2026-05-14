@@ -46,6 +46,12 @@ type WorkSessionExtendRequest struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+type WorkSessionApproveRequest struct {
+	AdjustedScopes  []string `json:"adjusted_scopes,omitempty"`
+	AdjustedServers []string `json:"adjusted_servers,omitempty"`
+}
+
+
 // TimelineItem represents a single event in a work session's activity timeline.
 // All event types share this struct; type-specific fields are zero-valued for other types.
 type TimelineItem struct {
