@@ -46,7 +46,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, true)
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
 		}()
 		go func() {
 			defer wg.Done()
@@ -87,9 +87,9 @@ var workSessionTimelineCmd = &cobra.Command{
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			recList := recordings
-			if noRecords {
-				recList = nil
+			var recList []wsapi.TimelineItem
+			if !noRecords {
+				recList = recordings
 			}
 			outputTimelineJSON(rows, recList, serverMap)
 			return
@@ -125,8 +125,8 @@ func recordingBadge(n int) string {
 }
 
 func recordingPreview(raw string) string {
-	content := ansiEscape.ReplaceAllString(raw, "")
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range strings.SplitN(raw, "\n", 50) {
+		line = ansiEscape.ReplaceAllString(line, "")
 		// \r moves cursor to line start; take only the last overwritten segment
 		if idx := strings.LastIndex(line, "\r"); idx != -1 {
 			line = line[idx+1:]
@@ -183,7 +183,10 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.Time
 		"timeline":   rows,
 		"recordings": recEntries,
 	}
-	b, _ := json.MarshalIndent(out, "", "  ")
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		utils.CliErrorWithExit("Failed to serialize timeline: %s.", err)
+	}
 	fmt.Println(string(b))
 }
 
@@ -210,8 +213,6 @@ func formatTimestamp(ts string) string {
 
 func formatType(t string) string {
 	switch t {
-	case "command":
-		return "command"
 	case "websh_session":
 		return "websh"
 	case "tunnel_session":
