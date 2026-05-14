@@ -3,6 +3,7 @@ package worksession
 import (
 	"encoding/json"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -109,12 +110,8 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 }
 
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
-	include := "true"
-	if !includeRecords {
-		include = "false"
-	}
 	url := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), map[string]string{
-		"include_records": include,
+		"include_records": strconv.FormatBool(includeRecords),
 	})
 	body, err := ac.SendGetRequest(url)
 	if err != nil {
