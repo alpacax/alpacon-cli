@@ -33,4 +33,5 @@ func init() {
 	WorkSessionCmd.AddCommand(workSessionExtendCmd)
 	WorkSessionCmd.AddCommand(workSessionUseCmd)
 	WorkSessionCmd.AddCommand(workSessionCurrentCmd)
+	WorkSessionCmd.AddCommand(workSessionTimelineCmd)
 }

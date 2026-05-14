@@ -92,3 +92,22 @@ func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExten
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }
+
+func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
+	include := "true"
+	if !includeRecords {
+		include = "false"
+	}
+	url := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), map[string]string{
+		"include_records": include,
+	})
+	body, err := ac.SendGetRequest(url)
+	if err != nil {
+		return nil, err
+	}
+	var resp TimelineResponse
+	if err = json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Results, nil
+}
