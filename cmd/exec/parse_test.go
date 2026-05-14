@@ -479,6 +479,78 @@ func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
 	assert.Contains(t, parsed.Command, "--work-session")
 }
 
+// TestParseRemoteExecArgs_ShellQuoting verifies that multi-word arguments
+// (e.g. the script body in bash -c '...') are re-quoted after the OS shell
+// strips the surrounding quotes during tokenization. Without this, strings.Join
+// loses the arg boundary and the server's sh fails with a syntax error (issue #164).
+func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
+	tests := []struct {
+		name             string
+		args             []string
+		expectedUsername string
+		expectedServer   string
+		expectedCommand  string
+	}{
+		{
+			// Exact reproduction of issue #164 symptom 3.
+			// User types: alpacon exec root@r770-1 bash -c 'for i in 1 2 3; do echo "line-$i"; done'
+			// OS shell strips the outer single quotes; CLI receives the for-loop body as one token.
+			name:             "bash -c for loop body (issue #164)",
+			args:             []string{"root@r770-1", "bash", "-c", `for i in 1 2 3; do echo "line-$i"; done`},
+			expectedUsername: "root",
+			expectedServer:   "r770-1",
+			expectedCommand:  `bash -c 'for i in 1 2 3; do echo "line-$i"; done'`,
+		},
+		{
+			// Simpler variant: stdout check from issue #164 symptom 1.
+			// User types: alpacon exec root@r770-1 bash -c 'echo hello-stdout'
+			name:             "bash -c simple echo",
+			args:             []string{"root@r770-1", "bash", "-c", "echo hello-stdout"},
+			expectedUsername: "root",
+			expectedServer:   "r770-1",
+			expectedCommand:  "bash -c 'echo hello-stdout'",
+		},
+		{
+			// Exit-code check from issue #164 symptom 2.
+			// User types: alpacon exec root@r770-1 bash -c 'echo before-fail; exit 1'
+			name:            "bash -c with exit code",
+			args:            []string{"server", "bash", "-c", "echo before-fail; exit 1"},
+			expectedServer:  "server",
+			expectedCommand: "bash -c 'echo before-fail; exit 1'",
+		},
+		{
+			// Non-bash interpreter with a multi-word script body.
+			name:            "python3 -c with spaces",
+			args:            []string{"server", "python3", "-c", "import sys; print(sys.version)"},
+			expectedServer:  "server",
+			expectedCommand: "python3 -c 'import sys; print(sys.version)'",
+		},
+		{
+			// Args with no special characters must not be quoted (no behavior change).
+			name:            "plain command — no quoting needed",
+			args:            []string{"server", "docker", "ps"},
+			expectedServer:  "server",
+			expectedCommand: "docker ps",
+		},
+		{
+			// Arg contains an internal single quote — must be escaped as '\''
+			name:            "arg with internal single quote",
+			args:            []string{"server", "bash", "-c", "echo it's done"},
+			expectedServer:  "server",
+			expectedCommand: `bash -c 'echo it'\''s done'`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.expectedServer, result.Server, "Server")
+			assert.Equal(t, tt.expectedUsername, result.Username, "Username")
+			assert.Equal(t, tt.expectedCommand, result.Command, "Command")
+		})
+	}
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string
