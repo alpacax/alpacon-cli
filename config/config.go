@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -142,9 +143,52 @@ func IsSaaS() (bool, error) {
 	return cfg.AccessToken != "", nil
 }
 
-// IsSaaS returns true if the config represents an Alpacon Cloud (SaaS) deployment.
 func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
+}
+
+// SetActiveWorkSession persists the work-session UUID for the current workspace.
+// Pass "" to clear the entry for the current workspace.
+func SetActiveWorkSession(uuid string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg.WorkspaceName == "" {
+		return errors.New("no active workspace; run 'alpacon login' first")
+	}
+	current := ""
+	if cfg.ActiveWorkSessions != nil {
+		current = cfg.ActiveWorkSessions[cfg.WorkspaceName]
+	}
+	if current == uuid {
+		return nil
+	}
+	if cfg.ActiveWorkSessions == nil {
+		cfg.ActiveWorkSessions = map[string]string{}
+	}
+	if uuid == "" {
+		delete(cfg.ActiveWorkSessions, cfg.WorkspaceName)
+	} else {
+		cfg.ActiveWorkSessions[cfg.WorkspaceName] = uuid
+	}
+	return saveConfig(&cfg)
+}
+
+// GetActiveWorkSession returns the active work-session UUID for the current workspace.
+// Returns "" (no error) when no session is set, the config is missing the map, or no config file exists.
+func GetActiveWorkSession() (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if cfg.ActiveWorkSessions == nil {
+		return "", nil
+	}
+	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
 }
 
 // GetSmuxConfig returns a ready-to-use smux configuration.

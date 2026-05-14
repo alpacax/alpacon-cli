@@ -188,7 +188,8 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 
 // UploadFile uploads local files to a remote server.
 // Uses the single upload API for one file, or the bulk API for multiple files.
-func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool) error {
+// workSessionID is optional; when non-empty it is attached to the request body.
+func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool, workSessionID string) error {
 	serverName, remotePath := utils.SplitPath(dest)
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
@@ -219,6 +220,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 			Username:       username,
 			Groupname:      groupname,
 			AllowOverwrite: allowOverwrite,
+			WorkSession:    workSessionID,
 		}
 		return executeSingleUpload(ac, request, readOnly{f}, stat.Size())
 	}
@@ -269,6 +271,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		Username:       username,
 		Groupname:      groupname,
 		AllowOverwrite: allowOverwrite,
+		WorkSession:    workSessionID,
 	}
 
 	readers := make([]io.Reader, len(files))
@@ -281,7 +284,8 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 // UploadFolder uploads local folders to a remote server.
 // Each folder is zipped before upload and extracted on the server side.
 // Uses the single upload API for one folder, or the bulk API for multiple folders.
-func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool) error {
+// workSessionID is optional; when non-empty it is attached to the request body.
+func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool, workSessionID string) error {
 	serverName, remotePath := utils.SplitPath(dest)
 
 	// Folder uploads always target a directory; ensure trailing slash so the
@@ -313,6 +317,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 			Groupname:      groupname,
 			AllowOverwrite: allowOverwrite,
 			AllowUnzip:     true,
+			WorkSession:    workSessionID,
 		}
 		return executeSingleUpload(ac, request, bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	}
@@ -342,6 +347,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		Groupname:      groupname,
 		AllowOverwrite: allowOverwrite,
 		AllowUnzip:     true,
+		WorkSession:    workSessionID,
 	}
 
 	return executeBulkUpload(ac, request, readers, sizes)
@@ -412,7 +418,7 @@ func saveDownloadedContent(content []byte, dest, remotePath string, recursive bo
 	return nil
 }
 
-func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType string, recursive bool) error {
+func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) error {
 	downloadRequest := &DownloadRequest{
 		Path:         remotePath,
 		Name:         filepath.Base(remotePath),
@@ -420,6 +426,7 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 		Username:     username,
 		Groupname:    groupname,
 		ResourceType: resourceType,
+		WorkSession:  workSessionID,
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %s...", filepath.Base(remotePath)))
@@ -470,16 +477,17 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 }
 
 // downloadBulk downloads multiple remote files as a single zip archive using the bulk API.
-func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID, username, groupname string) error {
+func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID, username, groupname, workSessionID string) error {
 	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %d files...", len(remotePaths)))
 	spinner.Start()
 	defer spinner.Stop()
 
 	request := &BulkDownloadRequest{
-		Path:      remotePaths,
-		Server:    serverID,
-		Username:  username,
-		Groupname: groupname,
+		Path:        remotePaths,
+		Server:      serverID,
+		Username:    username,
+		Groupname:   groupname,
+		WorkSession: workSessionID,
 	}
 
 	respBody, err := ac.SendPostRequest(downloadBulkAPIURL, request)
@@ -539,7 +547,8 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 // DownloadFile downloads files from a remote server. Each source should be in
 // "server:/path" format. Uses the bulk API for multiple files, or the
 // single-file API for a single file.
-func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool) error {
+// workSessionID is optional; when non-empty it is attached to the request body.
+func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) error {
 	if len(sources) == 0 {
 		return fmt.Errorf("no source paths provided")
 	}
@@ -563,7 +572,7 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 	}
 
 	if len(remotePaths) > 1 {
-		return downloadBulk(ac, remotePaths, dest, serverID, username, groupname)
+		return downloadBulk(ac, remotePaths, dest, serverID, username, groupname, workSessionID)
 	}
 
 	resourceType := "file"
@@ -571,7 +580,7 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 		resourceType = "folder"
 	}
 
-	return downloadSingleFile(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, recursive)
+	return downloadSingleFile(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, workSessionID, recursive)
 }
 
 // calcPollTimeout returns a dynamic poll timeout based on file count and total size.

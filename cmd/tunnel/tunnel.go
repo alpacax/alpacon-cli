@@ -10,17 +10,19 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	tunnelruntime "github.com/alpacax/alpacon-cli/pkg/tunnel/runtime"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
 type tunnelFlagValues struct {
-	localPort  string
-	remotePort string
-	username   string
-	groupname  string
-	verbose    bool
+	localPort     string
+	remotePort    string
+	username      string
+	groupname     string
+	verbose       bool
+	workSessionID string
 }
 
 type tunnelCommandRuntime interface {
@@ -45,6 +47,9 @@ var TunnelCmd = &cobra.Command{
 
 	Use '--' before the local command so Alpacon parses tunnel flags and forwards
 	the rest to the local program exactly as provided.
+
+	Use --work-session to attach this tunnel to a specific work-session. This
+	overrides the workspace's active work-session set via 'alpacon work-session use'.
 	`,
 	Example: `
 	# Forward local 9000 to remote 8082
@@ -58,6 +63,9 @@ var TunnelCmd = &cobra.Command{
 
 	# Specify username and groupname for the tunnel
 	alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
+
+	# Attach the tunnel to a work-session
+	alpacon tunnel my-server -l 9000 -r 8082 --work-session 11111111-2222-3333-4444-555555555555
 
 	# Run psql with attached tunnel session
 	alpacon tunnel prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
@@ -79,6 +87,7 @@ func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
 	cmd.Flags().StringVarP(&flags.username, "username", "u", "", "Username for the tunnel")
 	cmd.Flags().StringVarP(&flags.groupname, "groupname", "g", "", "Groupname for the tunnel")
 	cmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Show connection logs")
+	cmd.Flags().StringVar(&flags.workSessionID, "work-session", "", "Attach this tunnel to a work-session (overrides 'work-session use')")
 
 	if err := cmd.MarkFlagRequired("local"); err != nil {
 		panic(err)
@@ -90,12 +99,13 @@ func bindTunnelFlags(cmd *cobra.Command, flags *tunnelFlagValues) {
 
 func (f tunnelFlagValues) toStartOptions(serverName string) tunnelruntime.StartOptions {
 	return tunnelruntime.StartOptions{
-		ServerName: serverName,
-		LocalPort:  f.localPort,
-		RemotePort: f.remotePort,
-		Username:   f.username,
-		Groupname:  f.groupname,
-		Verbose:    f.verbose,
+		ServerName:    serverName,
+		LocalPort:     f.localPort,
+		RemotePort:    f.remotePort,
+		Username:      f.username,
+		Groupname:     f.groupname,
+		Verbose:       f.verbose,
+		WorkSessionID: f.workSessionID,
 	}
 }
 
@@ -120,6 +130,9 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 }
 
 func runTunnel(cmd *cobra.Command, args []string) {
+	// Write resolved value back so handleTunnelStartError's retry reuses the same UUID.
+	tunnelFlags.workSessionID = worksession.ResolveAndAnnounce(tunnelFlags.workSessionID)
+
 	var sigChan <-chan os.Signal
 	if cmd.ArgsLenAtDash() < 0 {
 		ch := make(chan os.Signal, 1)

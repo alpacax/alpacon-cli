@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -23,7 +24,10 @@ All flags must be placed before the server name.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
-  -g, --groupname [GROUP_NAME]  Specify the group name for command execution.`,
+  -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
+  --work-session [UUID]         Attach this command to a work-session.
+                                Overrides the workspace's active session set via
+                                'alpacon work-session use'.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps
@@ -63,6 +67,8 @@ Flags:
 			return
 		}
 
+		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -70,7 +76,7 @@ Flags:
 		}
 
 		env := make(map[string]string)
-		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env)
+		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 			return

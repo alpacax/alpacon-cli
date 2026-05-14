@@ -458,6 +458,27 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 	}
 }
 
+func TestParseRemoteExecArgs_WorkSessionFlag(t *testing.T) {
+	parsed := ParseRemoteExecArgs([]string{"--work-session", "ses-abc", "my-server", "ls"})
+	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
+	assert.Equal(t, "my-server", parsed.Server)
+	assert.Equal(t, "ls", parsed.Command)
+}
+
+func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
+	parsed := ParseRemoteExecArgs([]string{"--work-session=ses-abc", "my-server", "ls"})
+	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
+	assert.Equal(t, "my-server", parsed.Server)
+	assert.Equal(t, "ls", parsed.Command)
+}
+
+func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
+	parsed := ParseRemoteExecArgs([]string{"my-server", "--", "ls", "--work-session", "fake"})
+	assert.Equal(t, "", parsed.WorkSessionID)
+	assert.Equal(t, "my-server", parsed.Server)
+	assert.Contains(t, parsed.Command, "--work-session")
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // setupTestConfig overrides the home directory so tests write to a temp dir.
@@ -164,4 +165,68 @@ func TestSwitchWorkspace_NoExistingConfig(t *testing.T) {
 
 	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
 	assert.Error(t, err)
+}
+
+func TestLoadConfig_LegacyWithoutActiveWorkSessions(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	cfgDir := filepath.Join(tmpHome, ConfigFileDir)
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	legacy := `{"workspace_url":"https://ws.example.com","workspace_name":"ws-a"}`
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte(legacy), 0600))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Nil(t, cfg.ActiveWorkSessions)
+}
+
+func TestActiveWorkSession_RoundTrip(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+
+	require.NoError(t, SetActiveWorkSession("uuid-1"))
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-1", got)
+}
+
+func TestActiveWorkSession_UnsetRemovesKey(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-1"))
+	require.NoError(t, SetActiveWorkSession(""))
+
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "", got)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	_, exists := cfg.ActiveWorkSessions["ws-a"]
+	assert.False(t, exists, "key should be removed from map on unset")
+}
+
+func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-A"))
+
+	require.NoError(t, SwitchWorkspace("https://ws-b.example.com", "ws-b"))
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "", got, "switching workspace should yield empty active session for new workspace")
+
+	require.NoError(t, SetActiveWorkSession("uuid-B"))
+
+	require.NoError(t, SwitchWorkspace("https://ws-a.example.com", "ws-a"))
+	got, err = GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-A", got, "switching back should restore original active session")
 }

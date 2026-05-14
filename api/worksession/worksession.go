@@ -27,21 +27,27 @@ func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType string) 
 	}
 
 	var result []WorkSessionAttributes
-	for _, s := range sessions {
-		serverNames := make([]string, len(s.Servers))
-		for i, srv := range s.Servers {
-			serverNames[i] = srv.Name
-		}
-		result = append(result, WorkSessionAttributes{
-			ID:          s.ID,
-			Description: utils.TruncateString(s.Description, 70),
-			Status:      s.Status,
-			Scopes:      strings.Join(s.Scopes, ", "),
-			Servers:     strings.Join(serverNames, ", "),
-			ExpiresAt:   s.ExpiresAt.Local().Format("2006-01-02 15:04"),
-		})
+	for i := range sessions {
+		result = append(result, ProjectAttributes(&sessions[i]))
 	}
 	return result, nil
+}
+
+// ProjectAttributes converts a full WorkSession into the WorkSessionAttributes
+// shape used by table outputs (ls, current). Single source of truth for column projection.
+func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
+	serverNames := make([]string, len(ws.Servers))
+	for i, srv := range ws.Servers {
+		serverNames[i] = srv.Name
+	}
+	return WorkSessionAttributes{
+		ID:          ws.ID,
+		Description: utils.TruncateString(ws.Description, 70),
+		Status:      ws.Status,
+		Scopes:      strings.Join(ws.Scopes, ", "),
+		Servers:     strings.Join(serverNames, ", "),
+		ExpiresAt:   ws.ExpiresAt.Local().Format("2006-01-02 15:04"),
+	}
 }
 
 func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (*WorkSession, error) {

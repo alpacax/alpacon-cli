@@ -25,4 +25,3 @@ var workSessionCompleteCmd = &cobra.Command{
 		utils.CliSuccess("Work session %s completed.", args[0])
 	},
 }
-

@@ -323,7 +323,7 @@ func TestDownloadBulk(t *testing.T) {
 
 	dest := t.TempDir()
 
-	err := downloadBulk(ac, []string{"/path/file1.txt", "/path/file2.txt"}, dest, "server-id", "admin", "developers")
+	err := downloadBulk(ac, []string{"/path/file1.txt", "/path/file2.txt"}, dest, "server-id", "admin", "developers", "")
 	require.NoError(t, err)
 
 	// Verify request body
@@ -624,7 +624,7 @@ func TestDownloadFile_InputValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := DownloadFile(&client.AlpaconClient{}, tt.sources, "/tmp/dest", "", "", false)
+			err := DownloadFile(&client.AlpaconClient{}, tt.sources, "/tmp/dest", "", "", false, "")
 			assert.ErrorContains(t, err, tt.wantErr)
 		})
 	}
@@ -665,7 +665,7 @@ func TestDownloadFile_SpaceInPath(t *testing.T) {
 	sources := []string{"my-server:/path/my file.txt"}
 	// Error expected since the mock doesn't complete the full flow,
 	// but the key assertion is that the path was not split.
-	_ = DownloadFile(ac, sources, "/tmp/dest", "", "", false)
+	_ = DownloadFile(ac, sources, "/tmp/dest", "", "", false, "")
 }
 
 func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
@@ -675,9 +675,9 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		sources     []string
-		expectBulk  bool
+		name       string
+		sources    []string
+		expectBulk bool
 	}{
 		{
 			name:       "single source routes to single download",
@@ -718,7 +718,7 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 			}
 
 			// Error expected since mock doesn't complete the flow
-			_ = DownloadFile(ac, tt.sources, "/tmp/dest", "", "", false)
+			_ = DownloadFile(ac, tt.sources, "/tmp/dest", "", "", false, "")
 
 			if tt.expectBulk {
 				assert.True(t, hitBulk, "expected bulk download API to be called")
@@ -726,6 +726,210 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 			} else {
 				assert.True(t, hitSingle, "expected single download API to be called")
 				assert.False(t, hitBulk, "bulk download API should not be called")
+			}
+		})
+	}
+}
+
+// TestExecuteSingleUpload_WorkSession verifies the WorkSession field is sent
+// when present and omitted when empty, on the single upload create-request.
+func TestExecuteSingleUpload_WorkSession(t *testing.T) {
+	tests := []struct {
+		name            string
+		workSessionID   string
+		wantKeyPresent  bool
+		wantWorkSession string
+	}{
+		{"empty work-session is omitted from body", "", false, ""},
+		{"work-session ID is sent on POST body", "ws-uuid-123", true, "ws-uuid-123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawBody map[string]any
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+					body, _ := io.ReadAll(r.Body)
+					_ = json.Unmarshal(body, &rawBody)
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(UploadResponse{
+						ID:        "single-id-1",
+						Name:      "file1.txt",
+						UploadURL: "http://" + r.Host + "/s3/file1",
+					})
+				case r.Method == http.MethodPut:
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+					w.WriteHeader(http.StatusOK)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			request := &UploadRequest{
+				Name:        "file1.txt",
+				Path:        "/remote/path",
+				Server:      "server-id",
+				WorkSession: tt.workSessionID,
+			}
+
+			err := executeSingleUpload(ac, request, bytes.NewReader([]byte("content")), int64(len("content")))
+			require.NoError(t, err)
+
+			v, present := rawBody["work_session"]
+			assert.Equal(t, tt.wantKeyPresent, present)
+			if tt.wantKeyPresent {
+				assert.Equal(t, tt.wantWorkSession, v)
+			}
+		})
+	}
+}
+
+// TestExecuteBulkUpload_WorkSession verifies the WorkSession field is sent
+// when present and omitted when empty, on the bulk upload create-request.
+func TestExecuteBulkUpload_WorkSession(t *testing.T) {
+	tests := []struct {
+		name            string
+		workSessionID   string
+		wantKeyPresent  bool
+		wantWorkSession string
+	}{
+		{"empty work-session is omitted from body", "", false, ""},
+		{"work-session ID is sent on POST body", "ws-uuid-789", true, "ws-uuid-789"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawBody map[string]any
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+					body, _ := io.ReadAll(r.Body)
+					_ = json.Unmarshal(body, &rawBody)
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode([]UploadResponse{
+						{ID: "id-1", Name: "file1.txt", UploadURL: "http://" + r.Host + "/s3/file1"},
+					})
+				case r.Method == http.MethodPut:
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
+					w.WriteHeader(http.StatusCreated)
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			request := &BulkUploadRequest{
+				Names:       []string{"file1.txt"},
+				Path:        "/remote/path",
+				Server:      "server-id",
+				WorkSession: tt.workSessionID,
+			}
+			files := []io.Reader{bytes.NewReader([]byte("content"))}
+			sizes := []int64{int64(len("content"))}
+
+			err := executeBulkUpload(ac, request, files, sizes)
+			require.NoError(t, err)
+
+			v, present := rawBody["work_session"]
+			assert.Equal(t, tt.wantKeyPresent, present)
+			if tt.wantKeyPresent {
+				assert.Equal(t, tt.wantWorkSession, v)
+			}
+		})
+	}
+}
+
+// TestDownloadFile_WorkSession verifies the WorkSession field is sent on both
+// single- and bulk-download create-requests when DownloadFile is invoked with
+// a non-empty workSessionID, and omitted when the ID is empty.
+func TestDownloadFile_WorkSession(t *testing.T) {
+	serverResp := api.ListResponse[server.ServerDetails]{
+		Count:   1,
+		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
+	}
+
+	tests := []struct {
+		name            string
+		sources         []string
+		downloadPath    string
+		workSessionID   string
+		wantKeyPresent  bool
+		wantWorkSession string
+	}{
+		{
+			name:           "single download omits work_session when empty",
+			sources:        []string{"my-server:/path/file.txt"},
+			downloadPath:   "/api/webftp/downloads/",
+			workSessionID:  "",
+			wantKeyPresent: false,
+		},
+		{
+			name:            "single download sends work_session when set",
+			sources:         []string{"my-server:/path/file.txt"},
+			downloadPath:    "/api/webftp/downloads/",
+			workSessionID:   "ws-uuid-single",
+			wantKeyPresent:  true,
+			wantWorkSession: "ws-uuid-single",
+		},
+		{
+			name:           "bulk download omits work_session when empty",
+			sources:        []string{"my-server:/path/file1.txt", "my-server:/path/file2.txt"},
+			downloadPath:   "/api/webftp/downloads/bulk/",
+			workSessionID:  "",
+			wantKeyPresent: false,
+		},
+		{
+			name:            "bulk download sends work_session when set",
+			sources:         []string{"my-server:/path/file1.txt", "my-server:/path/file2.txt"},
+			downloadPath:    "/api/webftp/downloads/bulk/",
+			workSessionID:   "ws-uuid-bulk",
+			wantKeyPresent:  true,
+			wantWorkSession: "ws-uuid-bulk",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rawBody map[string]any
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(serverResp)
+				case r.URL.Path == tt.downloadPath && r.Method == http.MethodPost:
+					body, _ := io.ReadAll(r.Body)
+					_ = json.Unmarshal(body, &rawBody)
+					// Stop the flow after capturing the body.
+					w.WriteHeader(http.StatusBadRequest)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			// Error expected because the mock short-circuits after capturing the body;
+			// we only assert on the captured request body.
+			_ = DownloadFile(ac, tt.sources, "/tmp/dest", "", "", false, tt.workSessionID)
+
+			v, present := rawBody["work_session"]
+			assert.Equal(t, tt.wantKeyPresent, present)
+			if tt.wantKeyPresent {
+				assert.Equal(t, tt.wantWorkSession, v)
 			}
 		})
 	}

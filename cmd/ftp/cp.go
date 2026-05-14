@@ -9,6 +9,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +19,10 @@ var CpCmd = &cobra.Command{
 	Short: "Copy files between local and remote locations",
 	Long: `Copy files between your local machine and a remote server.
 Supports SSH-like user@host:path syntax for specifying the username inline with the remote path.
-Remote paths use the format [USER@]SERVER:/path.`,
+Remote paths use the format [USER@]SERVER:/path.
+
+Use --work-session to attach this transfer to a specific work-session. This
+overrides the workspace's active work-session set via 'alpacon work-session use'.`,
 	Example: `  # Upload files to a remote server
   alpacon cp /local/file1.txt /local/file2.txt my-server:/remote/path/
 
@@ -40,12 +44,16 @@ Remote paths use the format [USER@]SERVER:/path.`,
   alpacon cp -g developers /local/file.txt my-server:/remote/path/
 
   # Upload without overwriting existing files
-  alpacon cp --no-overwrite /local/file.txt my-server:/remote/path/`,
+  alpacon cp --no-overwrite /local/file.txt my-server:/remote/path/
+
+  # Attach the transfer to a work-session
+  alpacon cp /local/file.txt my-server:/remote/path/ --work-session 11111111-2222-3333-4444-555555555555`,
 	Run: func(cmd *cobra.Command, args []string) {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
 		recursive, _ := cmd.Flags().GetBool("recursive")
 		noOverwrite, _ := cmd.Flags().GetBool("no-overwrite")
+		flagWorkSession, _ := cmd.Flags().GetString("work-session")
 		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
@@ -86,6 +94,10 @@ Remote paths use the format [USER@]SERVER:/path.`,
 			return
 		}
 
+		// Resolve and announce after argument/path validation so stderr stays
+		// clean on early usage errors.
+		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s.\n\n"+
@@ -98,7 +110,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, _ := utils.SplitPath(dest)
-			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
+			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -113,7 +125,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite)
+						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 					},
 				})
 
@@ -126,7 +138,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			serverName, _ := utils.SplitPath(sources[0])
-			err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
+			err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -141,7 +153,7 @@ Remote paths use the format [USER@]SERVER:/path.`,
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return downloadObject(alpaconClient, sources, dest, username, groupname, recursive)
+						return downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 					},
 				})
 
@@ -170,6 +182,7 @@ func init() {
 	CpCmd.Flags().BoolP("no-overwrite", "n", false, "Do not overwrite existing files on the server")
 	CpCmd.Flags().StringVarP(&username, "username", "u", "", "Specify username")
 	CpCmd.Flags().StringVarP(&groupname, "groupname", "g", "", "Specify groupname")
+	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use')")
 }
 
 // isRemotePath determines if the given path is a remote server path.
@@ -240,16 +253,16 @@ func validatePaths(sources []string, dest string) error {
 	return nil
 }
 
-func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool) error {
+func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool, workSessionID string) error {
 	var err error
 
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
-		err = ftp.UploadFolder(client, src, dest, username, groupname, allowOverwrite)
+		err = ftp.UploadFolder(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	} else {
-		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite)
+		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	}
 	if err != nil {
 		// Parse error and provide specific guidance
@@ -281,12 +294,12 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 	return nil
 }
 
-func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool) error {
+func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) error {
 	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(sources[0])
 	srcDisplay := strings.Join(sources, ", ")
 
-	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive)
+	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
 	if err != nil {
 		// Parse error and provide specific guidance
 		errStr := err.Error()

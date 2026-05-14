@@ -12,8 +12,10 @@ import (
 
 // RunCommandWithRetry executes a remote command with MFA and username-required
 // error handling and retry logic. Used by both exec and websh commands.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string) (string, error) {
-	result, err := event.RunCommand(ac, serverName, command, username, groupname, env)
+// workSessionID is forwarded to the server as the work_session field; pass ""
+// to omit it.
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
+	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {
@@ -28,7 +30,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				result, err = event.RunCommand(ac, serverName, command, username, groupname, env)
+				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
 				return err
 			},
 		})

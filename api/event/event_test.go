@@ -3,8 +3,11 @@ package event
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -152,4 +155,102 @@ func TestPollCommandExecution(t *testing.T) {
 			assert.Equal(t, tt.wantRequests, int(reqCount.Load()))
 		})
 	}
+}
+
+// runCommandBodyCapture holds the captured POST body fields for the
+// /api/events/commands/ request. Access is guarded by mu because the
+// test server handler runs on a separate goroutine from the test body.
+type runCommandBodyCapture struct {
+	mu                sync.Mutex
+	hadWorkSessionKey bool
+	workSession       string
+	postSeen          bool
+}
+
+func (c *runCommandBodyCapture) record(payload map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := payload["work_session"]
+	c.hadWorkSessionKey = ok
+	if ok {
+		c.workSession, _ = v.(string)
+	}
+	c.postSeen = true
+}
+
+func (c *runCommandBodyCapture) snapshot() (hadKey bool, ws string, seen bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hadWorkSessionKey, c.workSession, c.postSeen
+}
+
+// newRunCommandBodyCaptureServer returns a test server that:
+//   - responds to GET /api/servers/servers/?name=... with a 1-item server list
+//   - captures the POST body for /api/events/commands/ and returns a minimal
+//     CommandResponse list
+//   - responds to PollCommandExecution's GET /api/events/commands/{id}/ with
+//     a terminal status so RunCommand returns synchronously instead of
+//     leaving a long-running goroutine behind.
+func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count: 1,
+				Results: []map[string]any{
+					{"id": "srv-1", "name": "server-x"},
+				},
+			})
+			return
+		}
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/") {
+			body, _ := io.ReadAll(r.Body)
+			var payload map[string]any
+			_ = json.Unmarshal(body, &payload)
+			capture.record(payload)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{
+				ID:     "cmd-1",
+				Status: "completed",
+				Result: "done",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+}
+
+func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
+	var capture runCommandBodyCapture
+	ts := newRunCommandBodyCaptureServer(t, &capture)
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
+	require.NoError(t, err)
+
+	hadKey, ws, _ := capture.snapshot()
+	require.True(t, hadKey, "body must contain work_session field when ID is set")
+	assert.Equal(t, "ses-abc", ws)
+}
+
+func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
+	var capture runCommandBodyCapture
+	ts := newRunCommandBodyCaptureServer(t, &capture)
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	require.NoError(t, err)
+
+	hadKey, _, _ := capture.snapshot()
+	assert.False(t, hadKey, "body must omit work_session field when ID is empty")
 }

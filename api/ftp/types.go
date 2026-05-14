@@ -17,6 +17,7 @@ type DownloadRequest struct {
 	Username     string `json:"username"`
 	Groupname    string `json:"groupname"`
 	ResourceType string `json:"resource_type"`
+	WorkSession  string `json:"work_session,omitempty"`
 }
 
 type DownloadResponse struct {
@@ -65,6 +66,7 @@ type UploadRequest struct {
 	Groupname      string `json:"groupname"`
 	AllowOverwrite bool   `json:"allow_overwrite"`
 	AllowUnzip     bool   `json:"allow_unzip"`
+	WorkSession    string `json:"work_session,omitempty"`
 }
 
 type BulkUploadRequest struct {
@@ -75,6 +77,7 @@ type BulkUploadRequest struct {
 	Groupname      string   `json:"groupname"`
 	AllowOverwrite bool     `json:"allow_overwrite"`
 	AllowUnzip     bool     `json:"allow_unzip"`
+	WorkSession    string   `json:"work_session,omitempty"`
 }
 
 type BulkUploadTriggerRequest struct {
@@ -82,10 +85,11 @@ type BulkUploadTriggerRequest struct {
 }
 
 type BulkDownloadRequest struct {
-	Path      []string `json:"path"`
-	Server    string   `json:"server"`
-	Username  string   `json:"username"`
-	Groupname string   `json:"groupname"`
+	Path        []string `json:"path"`
+	Server      string   `json:"server"`
+	Username    string   `json:"username"`
+	Groupname   string   `json:"groupname"`
+	WorkSession string   `json:"work_session,omitempty"`
 }
 
 type BulkDownloadResponse struct {

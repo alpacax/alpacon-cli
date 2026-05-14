@@ -196,3 +196,27 @@ func TestJoinWebshSession_InvalidURL(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid URL format")
 }
+
+func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
+	req := BuildSessionRequest("srv-1", "alice", "ops", 24, 80, "")
+	assert.Empty(t, req.WorkSession)
+	assert.Equal(t, "srv-1", req.Server)
+	assert.Equal(t, "alice", req.Username)
+	assert.Equal(t, "ops", req.Groupname)
+	assert.Equal(t, 24, req.Rows)
+	assert.Equal(t, 80, req.Cols)
+
+	// Verify omitempty: the JSON wire form must not include "work_session".
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "work_session")
+}
+
+func TestBuildSessionRequest_IncludesWorkSession(t *testing.T) {
+	req := BuildSessionRequest("srv-1", "", "", 24, 80, "ses-abc")
+	assert.Equal(t, "ses-abc", req.WorkSession)
+
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"work_session":"ses-abc"`)
+}

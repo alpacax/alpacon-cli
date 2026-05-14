@@ -81,4 +81,3 @@ var workSessionDescribeCmd = &cobra.Command{
 		utils.PrintTable(rows)
 	},
 }
-

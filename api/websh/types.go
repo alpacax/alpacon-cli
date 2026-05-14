@@ -15,11 +15,12 @@ type WebsocketClient struct {
 }
 
 type SessionRequest struct {
-	Rows      int    `json:"rows"`
-	Cols      int    `json:"cols"`
-	Server    string `json:"server"` // server id
-	Username  string `json:"username"`
-	Groupname string `json:"groupname"`
+	Rows        int    `json:"rows"`
+	Cols        int    `json:"cols"`
+	Server      string `json:"server"` // server id
+	Username    string `json:"username"`
+	Groupname   string `json:"groupname"`
+	WorkSession string `json:"work_session,omitempty"`
 }
 
 type SessionResponse struct {
