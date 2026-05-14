@@ -305,7 +305,7 @@ func formatDetails(item *wsapi.TimelineItem) string {
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(ansiStrip(*item.Command), 40))
+			detail += fmt.Sprintf(" — %s", utils.TruncateString(stripControlChars(ansiStrip(*item.Command)), 40))
 		}
 		return detail
 
