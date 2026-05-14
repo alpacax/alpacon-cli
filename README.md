@@ -326,7 +326,22 @@ $ alpacon exec my-server "uptime"
 
 Session resolution order: `--work-session` flag > `ALPACON_WORK_SESSION` env var > active session set via `work-session use`.
 
+Superusers can manage pending and active sessions from the CLI:
 
+```bash
+# Approve a pending session (grants access as originally requested)
+$ alpacon work-session approve ses-abc123
+
+# Approve with scope or server adjustments (narrows granted access)
+$ alpacon work-session approve ses-abc123 --scope command --scope websh
+$ alpacon work-session approve ses-abc123 --scope command,websh --server web-01
+
+# Reject a pending session
+$ alpacon work-session reject ses-abc123
+
+# Force-terminate an active or approved session
+$ alpacon work-session revoke ses-abc123
+```
 
 #### Identity and access management (IAM)
 Efficiently manage user and group resources:
