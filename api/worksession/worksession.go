@@ -89,6 +89,16 @@ func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExten
 	return err
 }
 
+func RejectWorkSession(ac *client.AlpaconClient, id string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "reject"), nil), struct{}{})
+	return err
+}
+
+func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "revoke"), nil), struct{}{})
+	return err
+}
+
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }

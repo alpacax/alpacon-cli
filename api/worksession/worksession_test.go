@@ -180,3 +180,29 @@ func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "command, websh, webftp", list[0].Scopes)
 }
+
+func TestRejectWorkSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/reject/"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "rejected"})
+	}))
+	defer ts.Close()
+
+	err := RejectWorkSession(newTestClient(ts), "ses-abc")
+	assert.NoError(t, err)
+}
+
+func TestRevokeWorkSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/revoke/"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "revoked"})
+	}))
+	defer ts.Close()
+
+	err := RevokeWorkSession(newTestClient(ts), "ses-abc")
+	assert.NoError(t, err)
+}

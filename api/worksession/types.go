@@ -45,3 +45,8 @@ type WorkSessionCreateRequest struct {
 type WorkSessionExtendRequest struct {
 	ExpiresAt string `json:"expires_at"`
 }
+
+type WorkSessionApproveRequest struct {
+	AdjustedScopes  []string `json:"adjusted_scopes,omitempty"`
+	AdjustedServers []string `json:"adjusted_servers,omitempty"`
+}
