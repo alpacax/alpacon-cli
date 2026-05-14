@@ -16,8 +16,8 @@ import (
 
 var (
 	purpose       string
-	scopes        string
-	servers       string
+	createScopes  []string
+	createServers []string
 	expiresIn     string
 	expiresAt     string
 	requesterType string
@@ -27,8 +27,8 @@ var (
 var workSessionCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new work session",
-	Example: `  alpacon work-session create --purpose "nginx fix" --scopes command,websh --servers web-01 --expires-in 2h
-  alpacon work-session create --purpose "deploy" --scopes command --servers web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait`,
+	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
+  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait`,
 	Run: func(cmd *cobra.Command, args []string) {
 		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {
@@ -37,19 +37,17 @@ var workSessionCreateCmd = &cobra.Command{
 			}
 			purpose = utils.PromptForRequiredInput("Purpose: ")
 		}
-		scopes = strings.TrimSpace(scopes)
-		if scopes == "" {
+		if len(createScopes) == 0 {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("Non-interactive mode requires --scopes.")
+				utils.CliErrorWithExit("Non-interactive mode requires --scope.")
 			}
-			scopes = utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): ")
+			createScopes = splitCSV(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "))
 		}
-		servers = strings.TrimSpace(servers)
-		if servers == "" {
+		if len(createServers) == 0 {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("Non-interactive mode requires --servers.")
+				utils.CliErrorWithExit("Non-interactive mode requires --server.")
 			}
-			servers = utils.PromptForRequiredInput("Servers (comma-separated server names): ")
+			createServers = splitCSV(utils.PromptForRequiredInput("Servers (comma-separated server names): "))
 		}
 
 		expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
@@ -72,12 +70,17 @@ var workSessionCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
 
-		scopeList := splitCSV(scopes)
+		var scopeList []string
+		for _, s := range createScopes {
+			if s = strings.TrimSpace(s); s != "" {
+				scopeList = append(scopeList, s)
+			}
+		}
 		if len(scopeList) == 0 {
-			utils.CliErrorWithExit("--scopes must contain at least one valid scope.")
+			utils.CliErrorWithExit("--scope must contain at least one valid scope.")
 		}
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
-			utils.CliErrorWithExit("Invalid --scopes: %s", err)
+			utils.CliErrorWithExit("Invalid --scope: %s", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -85,12 +88,17 @@ var workSessionCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		serverList := splitCSV(servers)
-		if len(serverList) == 0 {
-			utils.CliErrorWithExit("--servers must contain at least one valid server name.")
+		var serverNames []string
+		for _, s := range createServers {
+			if s = strings.TrimSpace(s); s != "" {
+				serverNames = append(serverNames, s)
+			}
 		}
-		serverIDs := make([]string, 0, len(serverList))
-		for _, name := range serverList {
+		if len(serverNames) == 0 {
+			utils.CliErrorWithExit("--server must contain at least one valid server name.")
+		}
+		serverIDs := make([]string, 0, len(serverNames))
+		for _, name := range serverNames {
 			id, err := server.GetServerIDByName(ac, name)
 			if err != nil {
 				utils.CliErrorWithExit("Server %q not found: %s.", name, err)
@@ -207,8 +215,8 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 
 func init() {
 	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose")
-	workSessionCreateCmd.Flags().StringVar(&scopes, "scopes", "", "Comma-separated scopes (command, websh, webftp, editor, tunnel, sudo)")
-	workSessionCreateCmd.Flags().StringVar(&servers, "servers", "", "Comma-separated server names")
+	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request (repeatable; comma-separated values also accepted)")
+	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
