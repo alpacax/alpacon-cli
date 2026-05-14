@@ -34,6 +34,7 @@ func init() {
 	WorkSessionCmd.AddCommand(workSessionUseCmd)
 	WorkSessionCmd.AddCommand(workSessionCurrentCmd)
 	WorkSessionCmd.AddCommand(workSessionTimelineCmd)
+	WorkSessionCmd.AddCommand(workSessionRecordingCmd)
 	WorkSessionCmd.AddCommand(workSessionApproveCmd)
 	WorkSessionCmd.AddCommand(workSessionRejectCmd)
 	WorkSessionCmd.AddCommand(workSessionRevokeCmd)
