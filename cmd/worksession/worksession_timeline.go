@@ -42,7 +42,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		}()
 		go func() {
 			defer wg.Done()
-			session, _ = wsapi.GetWorkSession(ac, id)
+			session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
 		}()
 		wg.Wait()
 
