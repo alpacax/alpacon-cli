@@ -9,7 +9,7 @@ import (
 
 var workSessionRejectCmd = &cobra.Command{
 	Use:     "reject SESSION_ID",
-	Short:   "Reject a pending work session",
+	Short:   "Reject a pending work session (superuser only)",
 	Args:    cobra.ExactArgs(1),
 	Example: `  alpacon work-session reject ses-abc123`,
 	Run: func(cmd *cobra.Command, args []string) {

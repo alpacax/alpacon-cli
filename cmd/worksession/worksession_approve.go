@@ -15,7 +15,7 @@ var (
 
 var workSessionApproveCmd = &cobra.Command{
 	Use:   "approve SESSION_ID",
-	Short: "Approve a pending work session",
+	Short: "Approve a pending work session (superuser only)",
 	Long: `Approve a pending work session. Superuser only.
 
 Without flags, approves the session as originally requested.
