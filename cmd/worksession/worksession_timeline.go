@@ -148,7 +148,7 @@ func recordingPreview(raw string) string {
 		}
 		line = strings.TrimSpace(line)
 		if line != "" {
-			return utils.TruncateString(line, 60)
+			return utils.TruncateString(stripControlChars(line), 60)
 		}
 	}
 	return ""
@@ -255,6 +255,15 @@ func ansiStrip(s string) string {
 	return ansiEscape.ReplaceAllString(s, "")
 }
 
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func formatDetails(item *wsapi.TimelineItem) string {
 	switch item.Type {
 	case "command":
@@ -268,7 +277,7 @@ func formatDetails(item *wsapi.TimelineItem) string {
 				status = "failed"
 			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(ansiStrip(item.Line), 60))
+		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(stripControlChars(ansiStrip(item.Line)), 60))
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
@@ -288,10 +297,10 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return sessionState(item.ClosedAt)
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", ansiStrip(item.Name), formatSize(item.Size))
+		return fmt.Sprintf("↑ %s (%s)", stripControlChars(ansiStrip(item.Name)), formatSize(item.Size))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", ansiStrip(item.Name), formatSize(item.Size))
+		return fmt.Sprintf("↓ %s (%s)", stripControlChars(ansiStrip(item.Name)), formatSize(item.Size))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
