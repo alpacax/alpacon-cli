@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,6 +13,13 @@ import (
 )
 
 var noRecords bool
+
+type recordingJSON struct {
+	Index   int    `json:"index"`
+	Time    string `json:"time"`
+	Server  string `json:"server"`
+	Preview string `json:"preview"`
+}
 
 var workSessionTimelineCmd = &cobra.Command{
 	Use:     "timeline SESSION_ID",
@@ -38,7 +46,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, true)
 		}()
 		go func() {
 			defer wg.Done()
@@ -58,16 +66,143 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		rows := make([]wsapi.TimelineAttributes, len(items))
+		recordingsBySession := buildRecordingsBySession(items)
+		recordings := extractRecordings(items)
+
+		var rows []wsapi.TimelineAttributes
 		for i := range items {
-			rows[i] = projectTimelineAttributes(&items[i], serverMap)
+			if items[i].Type == "websh_record" {
+				continue
+			}
+			row := projectTimelineAttributes(&items[i], serverMap)
+			if items[i].Type == "websh_session" {
+				if recs := recordingsBySession[items[i].ID]; len(recs) > 0 {
+					badge := recordingBadge(len(recs))
+					if row.Details != "" {
+						row.Details += " " + badge
+					} else {
+						row.Details = badge
+					}
+				}
+			}
+			rows = append(rows, row)
 		}
+
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			recList := recordings
+			if noRecords {
+				recList = nil
+			}
+			outputTimelineJSON(rows, recList, serverMap)
+			return
+		}
+
 		utils.PrintTable(rows)
+		if !noRecords && len(recordings) > 0 {
+			printRecordingsSection(recordings, serverMap)
+		}
 	},
 }
 
 func init() {
-	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false, "Exclude Websh session recordings from the timeline")
+	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false, "Hide the recordings section below the timeline")
+}
+
+func buildRecordingsBySession(items []wsapi.TimelineItem) map[string][]wsapi.TimelineItem {
+	m := map[string][]wsapi.TimelineItem{}
+	for _, item := range items {
+		if item.Type == "websh_record" {
+			m[item.SessionID] = append(m[item.SessionID], item)
+		}
+	}
+	return m
+}
+
+func extractRecordings(items []wsapi.TimelineItem) []wsapi.TimelineItem {
+	var out []wsapi.TimelineItem
+	for _, item := range items {
+		if item.Type == "websh_record" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func recordingBadge(n int) string {
+	if n == 1 {
+		return "• 1 recording"
+	}
+	return fmt.Sprintf("• %d recordings", n)
+}
+
+func recordingPreview(raw string) string {
+	content := ansiEscape.ReplaceAllString(raw, "")
+	for _, line := range strings.Split(content, "\n") {
+		// \r moves cursor to line start; take only the last overwritten segment
+		if idx := strings.LastIndex(line, "\r"); idx != -1 {
+			line = line[idx+1:]
+		}
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return utils.TruncateString(line, 60)
+		}
+	}
+	return ""
+}
+
+func printRecordingsSection(recordings []wsapi.TimelineItem, serverMap map[string]string) {
+	fmt.Printf("\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
+	for i, rec := range recordings {
+		ts := ""
+		if rec.Timestamp != nil {
+			ts = formatTimestamp(*rec.Timestamp)
+		}
+		server := ""
+		if rec.ServerID != nil {
+			if name, ok := serverMap[*rec.ServerID]; ok {
+				server = name
+			} else {
+				server = *rec.ServerID
+			}
+		}
+		fmt.Printf("[%d]  %s  %s\n", i+1, ts, server)
+		if preview := recordingPreview(rec.MaskedRecord); preview != "" {
+			fmt.Printf("     %s\n", preview)
+		}
+		if i < len(recordings)-1 {
+			fmt.Println()
+		}
+	}
+}
+
+func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.TimelineItem, serverMap map[string]string) {
+	recEntries := make([]recordingJSON, len(recordings))
+	for i, rec := range recordings {
+		ts := ""
+		if rec.Timestamp != nil {
+			ts = formatTimestamp(*rec.Timestamp)
+		}
+		server := ""
+		if rec.ServerID != nil {
+			if name, ok := serverMap[*rec.ServerID]; ok {
+				server = name
+			} else {
+				server = *rec.ServerID
+			}
+		}
+		recEntries[i] = recordingJSON{
+			Index:   i + 1,
+			Time:    ts,
+			Server:  server,
+			Preview: recordingPreview(rec.MaskedRecord),
+		}
+	}
+	out := map[string]any{
+		"timeline":   rows,
+		"recordings": recEntries,
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(b))
 }
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {

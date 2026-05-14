@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"strings"
 	"testing"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -93,20 +94,21 @@ func TestRecordingBadge_Multiple(t *testing.T) {
 
 func TestRecordingPreview_StripsANSI(t *testing.T) {
 	raw := "\x1b]0;user@host:~\x07\x1b[?2004h[user@host:~]$ ls -la"
-	got := recordingPreview(raw)
-	assert.Equal(t, "[user@host:~]$ ls -la", got)
+	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
+}
+
+func TestRecordingPreview_StripsCarriageReturns(t *testing.T) {
+	raw := "[user@host:~]$ \r\r[user@host:~]$ ls -la"
+	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
 }
 
 func TestRecordingPreview_SkipsEmptyLines(t *testing.T) {
-	raw := "\n\n  \nactual content here"
-	got := recordingPreview(raw)
-	assert.Equal(t, "actual content here", got)
+	assert.Equal(t, "actual content here", recordingPreview("\n\n  \nactual content here"))
 }
 
 func TestRecordingPreview_Truncates(t *testing.T) {
-	raw := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
-	got := recordingPreview(raw)
-	assert.LessOrEqual(t, len(got), 63) // 60 chars + possible "..."
+	raw := strings.Repeat("a", 80)
+	assert.LessOrEqual(t, len(recordingPreview(raw)), 63) // 60 chars + possible "..."
 }
 
 func TestRecordingPreview_EmptyRaw(t *testing.T) {
@@ -114,6 +116,6 @@ func TestRecordingPreview_EmptyRaw(t *testing.T) {
 }
 
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
-	raw := "\x1b[?2004h\x1b[2J\x1b[H"
-	assert.Equal(t, "", recordingPreview(raw))
+	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
 }
+
