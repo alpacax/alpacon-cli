@@ -3,6 +3,7 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -17,11 +18,11 @@ import (
 // to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
 	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	var remoteErr *event.RemoteCommandError
+	if errors.As(err, &remoteErr) {
+		return result, remoteErr
+	}
 	if err != nil {
-		var remoteErr *event.RemoteCommandError
-		if errors.As(err, &remoteErr) {
-			return result, remoteErr
-		}
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {
 				return mfa.HandleMFAError(ac, srv)
@@ -39,13 +40,26 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 				return err
 			},
 		})
+		if errors.As(err, &remoteErr) {
+			return result, remoteErr
+		}
 		if err != nil {
-			var remoteErr *event.RemoteCommandError
-			if errors.As(err, &remoteErr) {
-				return result, remoteErr
-			}
 			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
 		}
 	}
 	return result, nil
+}
+
+// HandleCommandResult prints result on success, or exits appropriately on error.
+func HandleCommandResult(result string, err error) {
+	if err != nil {
+		var remoteErr *event.RemoteCommandError
+		if errors.As(err, &remoteErr) {
+			fmt.Println(result)
+			os.Exit(1)
+		}
+		utils.CliErrorWithExit("%s", err)
+		return
+	}
+	fmt.Println(result)
 }

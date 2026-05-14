@@ -206,15 +206,7 @@ Note: All flags must be placed before the server name.
 			}
 			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
-			if err != nil {
-				var remoteErr *event.RemoteCommandError
-				if errors.As(err, &remoteErr) {
-					fmt.Println(result)
-					os.Exit(1)
-				}
-				utils.CliErrorWithExit("%s", err)
-			}
-			fmt.Println(result)
+			execCmd.HandleCommandResult(result, err)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 
