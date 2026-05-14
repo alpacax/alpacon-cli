@@ -30,8 +30,14 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		filteredScopes := make([]string, 0, len(approveScopes))
+		for _, s := range approveScopes {
+			if s != "" {
+				filteredScopes = append(filteredScopes, s)
+			}
+		}
 		req := wsapi.WorkSessionApproveRequest{
-			AdjustedScopes: approveScopes,
+			AdjustedScopes: filteredScopes,
 		}
 
 		if len(approveServers) > 0 {

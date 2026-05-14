@@ -343,8 +343,6 @@ $ alpacon work-session reject ses-abc123
 $ alpacon work-session revoke ses-abc123
 ```
 
-
-
 #### Identity and access management (IAM)
 Efficiently manage user and group resources:
 ```bash
