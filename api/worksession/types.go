@@ -76,7 +76,7 @@ type TimelineItem struct {
 	IsTunnel   bool  `json:"is_tunnel"`
 	TargetPort *int  `json:"target_port"`
 
-	// file_upload / file_download (path may be string or []string — rendered as-is after JSON decode)
+	// file_upload / file_download
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 
@@ -89,10 +89,6 @@ type TimelineItem struct {
 	// websh_record
 	SessionID    string `json:"session_id"`
 	MaskedRecord string `json:"masked_record"`
-}
-
-type TimelineResponse struct {
-	Results []TimelineItem `json:"results"`
 }
 
 type TimelineAttributes struct {

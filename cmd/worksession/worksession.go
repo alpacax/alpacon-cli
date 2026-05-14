@@ -20,7 +20,7 @@ var WorkSessionCmd = &cobra.Command{
 		if err := cmd.Help(); err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon work-session ls', 'alpacon work-session create', 'alpacon work-session describe', 'alpacon work-session use', 'alpacon work-session current', 'alpacon work-session activate', 'alpacon work-session complete', 'alpacon work-session extend', 'alpacon work-session approve', 'alpacon work-session reject', or 'alpacon work-session revoke'. Run 'alpacon work-session --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon work-session ls', 'alpacon work-session create', 'alpacon work-session describe', 'alpacon work-session use', 'alpacon work-session current', 'alpacon work-session activate', 'alpacon work-session complete', 'alpacon work-session extend', 'alpacon work-session approve', 'alpacon work-session reject', 'alpacon work-session revoke', 'alpacon work-session timeline', or 'alpacon work-session recording'. Run 'alpacon work-session --help' for more information")
 	},
 }
 

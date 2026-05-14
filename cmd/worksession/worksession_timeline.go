@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -127,6 +128,8 @@ func recordingBadge(n int) string {
 func recordingPreview(raw string) string {
 	for _, line := range strings.SplitN(raw, "\n", 50) {
 		line = ansiEscape.ReplaceAllString(line, "")
+		// Strip trailing CR from CRLF line endings before overwrite handling.
+		line = strings.TrimRight(line, "\r")
 		// \r moves cursor to line start; take only the last overwritten segment
 		if idx := strings.LastIndex(line, "\r"); idx != -1 {
 			line = line[idx+1:]
@@ -201,6 +204,10 @@ func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]st
 }
 
 func formatTimestamp(ts string) string {
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t.Local().Format("2006-01-02 15:04:05")
+	}
+	// fallback for non-RFC-3339 formats
 	date, rest, found := strings.Cut(ts, "T")
 	if !found {
 		return ts

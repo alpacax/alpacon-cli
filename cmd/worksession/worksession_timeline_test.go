@@ -1,22 +1,48 @@
 package worksession
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"os"
 	"testing"
+	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func captureStdout(f func()) string {
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	f()
+	_ = w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	return buf.String()
+}
+
+func mustParseTime(ts string) time.Time {
+	t, _ := time.Parse(time.RFC3339Nano, ts)
+	return t
+}
 
 func TestFormatTimestamp(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"2024-01-15T10:30:00.123456Z", "2024-01-15 10:30:00"},
-		{"2024-01-15T10:30:00+09:00", "2024-01-15 10:30:00"},
-		{"2024-01-15T10:30:00Z", "2024-01-15 10:30:00"},
+		// RFC3339 with timezone: converted to local
+		{"2024-01-15T10:30:00.123456Z", mustParseTime("2024-01-15T10:30:00.123456Z").Local().Format("2006-01-02 15:04:05")},
+		{"2024-01-15T10:30:00+09:00", mustParseTime("2024-01-15T10:30:00+09:00").Local().Format("2006-01-02 15:04:05")},
+		{"2024-01-15T10:30:00Z", mustParseTime("2024-01-15T10:30:00Z").Local().Format("2006-01-02 15:04:05")},
+		// no timezone → fallback string manipulation
 		{"2024-01-15T10:30:00", "2024-01-15 10:30:00"},
-		{"2024-01-15 10:30:00", "2024-01-15 10:30:00"}, // no T — return as-is
+		// no T separator → return as-is
+		{"2024-01-15 10:30:00", "2024-01-15 10:30:00"},
 	}
 	for _, tc := range tests {
 		assert.Equal(t, tc.want, formatTimestamp(tc.input), tc.input)
@@ -197,4 +223,28 @@ func TestFormatDetails_WebshRecord(t *testing.T) {
 func TestFormatDetails_Unknown(t *testing.T) {
 	item := wsapi.TimelineItem{Type: "unknown_event"}
 	assert.Equal(t, "", formatDetails(&item))
+}
+
+// outputTimelineJSON must emit recordings as [] not null when no recordings exist,
+// including when --no-records passes nil for recordings.
+func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
+	out := captureStdout(func() {
+		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
+	})
+	var result map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	assert.Equal(t, "[]", string(result["recordings"]), "recordings must be [] not null")
+}
+
+// Both timeline and recordings keys must always be present in JSON output.
+func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
+	out := captureStdout(func() {
+		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
+	})
+	var keys map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(out), &keys))
+	_, hasTimeline := keys["timeline"]
+	_, hasRecordings := keys["recordings"]
+	assert.True(t, hasTimeline, "timeline key must be present in JSON output")
+	assert.True(t, hasRecordings, "recordings key must be present in JSON output")
 }

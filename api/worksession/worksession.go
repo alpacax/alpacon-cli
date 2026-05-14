@@ -110,16 +110,8 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 }
 
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
-	url := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), map[string]string{
+	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), nil)
+	return api.FetchAllPages[TimelineItem](ac, endpoint, map[string]string{
 		"include_records": strconv.FormatBool(includeRecords),
 	})
-	body, err := ac.SendGetRequest(url)
-	if err != nil {
-		return nil, err
-	}
-	var resp TimelineResponse
-	if err = json.Unmarshal(body, &resp); err != nil {
-		return nil, err
-	}
-	return resp.Results, nil
 }
