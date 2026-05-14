@@ -213,7 +213,7 @@ func TestApproveWorkSession_NoAdjustments(t *testing.T) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/approve/"))
 
 		var req WorkSessionApproveRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Nil(t, req.AdjustedScopes)
 		assert.Nil(t, req.AdjustedServers)
 
@@ -232,7 +232,7 @@ func TestApproveWorkSession_WithAdjustments(t *testing.T) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/approve/"))
 
 		var req WorkSessionApproveRequest
-		_ = json.NewDecoder(r.Body).Decode(&req)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Equal(t, []string{"command"}, req.AdjustedScopes)
 		assert.Equal(t, []string{"srv-uuid-1"}, req.AdjustedServers)
 
