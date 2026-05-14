@@ -99,6 +99,11 @@ func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
+func ApproveWorkSession(ac *client.AlpaconClient, id string, req WorkSessionApproveRequest) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "approve"), nil), req)
+	return err
+}
+
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }

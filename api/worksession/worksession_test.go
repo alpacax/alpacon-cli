@@ -206,3 +206,45 @@ func TestRevokeWorkSession(t *testing.T) {
 	err := RevokeWorkSession(newTestClient(ts), "ses-abc")
 	assert.NoError(t, err)
 }
+
+func TestApproveWorkSession_NoAdjustments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/approve/"))
+
+		var req WorkSessionApproveRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		assert.Nil(t, req.AdjustedScopes)
+		assert.Nil(t, req.AdjustedServers)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "approved"})
+	}))
+	defer ts.Close()
+
+	err := ApproveWorkSession(newTestClient(ts), "ses-abc", WorkSessionApproveRequest{})
+	assert.NoError(t, err)
+}
+
+func TestApproveWorkSession_WithAdjustments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/approve/"))
+
+		var req WorkSessionApproveRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		assert.Equal(t, []string{"command"}, req.AdjustedScopes)
+		assert.Equal(t, []string{"srv-uuid-1"}, req.AdjustedServers)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "approved"})
+	}))
+	defer ts.Close()
+
+	req := WorkSessionApproveRequest{
+		AdjustedScopes:  []string{"command"},
+		AdjustedServers: []string{"srv-uuid-1"},
+	}
+	err := ApproveWorkSession(newTestClient(ts), "ses-abc", req)
+	assert.NoError(t, err)
+}
