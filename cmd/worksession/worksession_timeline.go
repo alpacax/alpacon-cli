@@ -58,7 +58,6 @@ var workSessionTimelineCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to retrieve work session timeline: %s.", timelineErr)
 		}
 
-		// Build server name map from session detail for human-readable server names.
 		serverMap := map[string]string{}
 		if session != nil {
 			for _, s := range session.Servers {
@@ -66,8 +65,7 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		recordingsBySession := buildRecordingsBySession(items)
-		recordings := extractRecordings(items)
+		recordingsBySession, recordings := buildRecordingIndex(items)
 
 		var rows []wsapi.TimelineAttributes
 		for i := range items {
@@ -108,24 +106,15 @@ func init() {
 	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false, "Hide the recordings section below the timeline")
 }
 
-func buildRecordingsBySession(items []wsapi.TimelineItem) map[string][]wsapi.TimelineItem {
-	m := map[string][]wsapi.TimelineItem{}
+func buildRecordingIndex(items []wsapi.TimelineItem) (bySession map[string][]wsapi.TimelineItem, flat []wsapi.TimelineItem) {
+	bySession = map[string][]wsapi.TimelineItem{}
 	for _, item := range items {
 		if item.Type == "websh_record" {
-			m[item.SessionID] = append(m[item.SessionID], item)
+			bySession[item.SessionID] = append(bySession[item.SessionID], item)
+			flat = append(flat, item)
 		}
 	}
-	return m
-}
-
-func extractRecordings(items []wsapi.TimelineItem) []wsapi.TimelineItem {
-	var out []wsapi.TimelineItem
-	for _, item := range items {
-		if item.Type == "websh_record" {
-			out = append(out, item)
-		}
-	}
-	return out
+	return
 }
 
 func recordingBadge(n int) string {
@@ -150,22 +139,27 @@ func recordingPreview(raw string) string {
 	return ""
 }
 
+func resolveTimestamp(ts *string) string {
+	if ts == nil {
+		return ""
+	}
+	return formatTimestamp(*ts)
+}
+
+func resolveServer(serverID *string, serverMap map[string]string) string {
+	if serverID == nil {
+		return ""
+	}
+	if name, ok := serverMap[*serverID]; ok {
+		return name
+	}
+	return *serverID
+}
+
 func printRecordingsSection(recordings []wsapi.TimelineItem, serverMap map[string]string) {
 	fmt.Printf("\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
 	for i, rec := range recordings {
-		ts := ""
-		if rec.Timestamp != nil {
-			ts = formatTimestamp(*rec.Timestamp)
-		}
-		server := ""
-		if rec.ServerID != nil {
-			if name, ok := serverMap[*rec.ServerID]; ok {
-				server = name
-			} else {
-				server = *rec.ServerID
-			}
-		}
-		fmt.Printf("[%d]  %s  %s\n", i+1, ts, server)
+		fmt.Printf("[%d]  %s  %s\n", i+1, resolveTimestamp(rec.Timestamp), resolveServer(rec.ServerID, serverMap))
 		if preview := recordingPreview(rec.MaskedRecord); preview != "" {
 			fmt.Printf("     %s\n", preview)
 		}
@@ -178,22 +172,10 @@ func printRecordingsSection(recordings []wsapi.TimelineItem, serverMap map[strin
 func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.TimelineItem, serverMap map[string]string) {
 	recEntries := make([]recordingJSON, len(recordings))
 	for i, rec := range recordings {
-		ts := ""
-		if rec.Timestamp != nil {
-			ts = formatTimestamp(*rec.Timestamp)
-		}
-		server := ""
-		if rec.ServerID != nil {
-			if name, ok := serverMap[*rec.ServerID]; ok {
-				server = name
-			} else {
-				server = *rec.ServerID
-			}
-		}
 		recEntries[i] = recordingJSON{
 			Index:   i + 1,
-			Time:    ts,
-			Server:  server,
+			Time:    resolveTimestamp(rec.Timestamp),
+			Server:  resolveServer(rec.ServerID, serverMap),
 			Preview: recordingPreview(rec.MaskedRecord),
 		}
 	}
@@ -206,24 +188,10 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.Time
 }
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
-	ts := ""
-	if item.Timestamp != nil {
-		ts = formatTimestamp(*item.Timestamp)
-	}
-
-	server := ""
-	if item.ServerID != nil {
-		if name, ok := serverMap[*item.ServerID]; ok {
-			server = name
-		} else {
-			server = *item.ServerID
-		}
-	}
-
 	return wsapi.TimelineAttributes{
-		Time:    ts,
+		Time:    resolveTimestamp(item.Timestamp),
 		Type:    formatType(item.Type),
-		Server:  server,
+		Server:  resolveServer(item.ServerID, serverMap),
 		User:    item.Username,
 		Details: formatDetails(item),
 	}

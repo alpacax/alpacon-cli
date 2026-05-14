@@ -69,12 +69,8 @@ func findRecording(recordings []wsapi.TimelineItem, index int) (*wsapi.TimelineI
 }
 
 func printRecordingHeader(target *wsapi.TimelineItem, idx int, total int) {
-	ts := ""
-	if target.Timestamp != nil {
-		ts = formatTimestamp(*target.Timestamp)
-	}
 	header := fmt.Sprintf("Recording %d/%d", idx+1, total)
-	if ts != "" {
+	if ts := resolveTimestamp(target.Timestamp); ts != "" {
 		header += " — " + ts
 	}
 	fmt.Println(header)

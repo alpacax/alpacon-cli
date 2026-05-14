@@ -49,9 +49,9 @@ func TestFindRecording_NegativeIndex(t *testing.T) {
 	assert.Equal(t, -1, idx)
 }
 
-// buildRecordingsBySession
+// buildRecordingIndex
 
-func TestBuildRecordingsBySession_GroupsBySessionID(t *testing.T) {
+func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
 	items := []wsapi.TimelineItem{
 		{Type: "websh_session", ID: "s1"},
 		{Type: "websh_record", ID: "r1", SessionID: "s1"},
@@ -59,25 +59,28 @@ func TestBuildRecordingsBySession_GroupsBySessionID(t *testing.T) {
 		{Type: "websh_session", ID: "s2"},
 		{Type: "websh_record", ID: "r3", SessionID: "s2"},
 	}
-	m := buildRecordingsBySession(items)
-	assert.Len(t, m["s1"], 2)
-	assert.Len(t, m["s2"], 1)
-	assert.Equal(t, "r1", m["s1"][0].ID)
-	assert.Equal(t, "r3", m["s2"][0].ID)
+	bySession, flat := buildRecordingIndex(items)
+	assert.Len(t, bySession["s1"], 2)
+	assert.Len(t, bySession["s2"], 1)
+	assert.Len(t, flat, 3)
+	assert.Equal(t, "r1", bySession["s1"][0].ID)
+	assert.Equal(t, "r3", bySession["s2"][0].ID)
 }
 
-func TestBuildRecordingsBySession_NoRecordings(t *testing.T) {
+func TestBuildRecordingIndex_NoRecordings(t *testing.T) {
 	items := []wsapi.TimelineItem{
 		{Type: "websh_session", ID: "s1"},
 		{Type: "ftp_session", ID: "f1"},
 	}
-	m := buildRecordingsBySession(items)
-	assert.Empty(t, m)
+	bySession, flat := buildRecordingIndex(items)
+	assert.Empty(t, bySession)
+	assert.Empty(t, flat)
 }
 
-func TestBuildRecordingsBySession_Empty(t *testing.T) {
-	m := buildRecordingsBySession(nil)
-	assert.Empty(t, m)
+func TestBuildRecordingIndex_Empty(t *testing.T) {
+	bySession, flat := buildRecordingIndex(nil)
+	assert.Empty(t, bySession)
+	assert.Empty(t, flat)
 }
 
 // recordingBadge
