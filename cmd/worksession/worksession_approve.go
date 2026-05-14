@@ -34,6 +34,7 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 
 		var filteredScopes []string
 		for _, s := range approveScopes {
+			s = strings.TrimSpace(s)
 			if s != "" {
 				filteredScopes = append(filteredScopes, s)
 			}
