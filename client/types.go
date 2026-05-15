@@ -1,6 +1,9 @@
 package client
 
-import "net/http"
+import (
+	"net/http"
+	"sync"
+)
 
 type AlpaconClient struct {
 	HTTPClient  *http.Client
@@ -10,7 +13,8 @@ type AlpaconClient struct {
 	Privileges  string
 	Username    string
 	UserAgent   string
-	userLoaded  bool
+	loadOnce    sync.Once
+	loadErr     error
 }
 
 type CheckPrivilegesResponse struct {

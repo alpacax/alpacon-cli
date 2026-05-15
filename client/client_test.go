@@ -98,3 +98,32 @@ func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
 	assert.NoError(t, ac.LoadCurrentUser())
 	assert.Equal(t, "general", ac.Privileges)
 }
+
+func TestLoadCurrentUser_401ReturnsAuthError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail": "invalid token"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	err := ac.LoadCurrentUser()
+	assert.ErrorContains(t, err, "authentication failed")
+	assert.Empty(t, ac.Username)
+	assert.Empty(t, ac.Privileges)
+}
+
+func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not valid json`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	err := ac.LoadCurrentUser()
+	assert.Error(t, err)
+	assert.Empty(t, ac.Username)
+	assert.Empty(t, ac.Privileges)
+}

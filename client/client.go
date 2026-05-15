@@ -72,21 +72,21 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 }
 
 func (ac *AlpaconClient) LoadCurrentUser() error {
-	if ac.userLoaded {
-		return nil
-	}
-	body, err := ac.SendGetRequest(checkPrivilegesURL)
-	if err != nil {
-		return err
-	}
-	var resp CheckPrivilegesResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return err
-	}
-	ac.Privileges = getUserPrivileges(resp.IsStaff, resp.IsSuperuser)
-	ac.Username = strings.TrimSpace(resp.Username)
-	ac.userLoaded = true
-	return nil
+	ac.loadOnce.Do(func() {
+		body, err := ac.SendGetRequest(checkPrivilegesURL)
+		if err != nil {
+			ac.loadErr = err
+			return
+		}
+		var resp CheckPrivilegesResponse
+		if err := json.Unmarshal(body, &resp); err != nil {
+			ac.loadErr = err
+			return
+		}
+		ac.Privileges = getUserPrivileges(resp.IsStaff, resp.IsSuperuser)
+		ac.Username = strings.TrimSpace(resp.Username)
+	})
+	return ac.loadErr
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
@@ -224,6 +224,13 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("authentication failed: please run 'alpacon login' again")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("permission denied")
 	}
 
 	if resp.StatusCode != http.StatusCreated {
