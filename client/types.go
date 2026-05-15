@@ -13,10 +13,6 @@ type AlpaconClient struct {
 	userLoaded  bool
 }
 
-type CheckAuthResponse struct {
-	Authenticated bool `json:"authenticated"`
-}
-
 type CheckPrivilegesResponse struct {
 	Username    string `json:"username"`
 	IsStaff     bool   `json:"is_staff"`

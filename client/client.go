@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	checkAuthURL       = "/api/auth/is-authenticated/"
 	checkPrivilegesURL = "/api/iam/users/-"
 )
 
@@ -59,55 +58,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		client.AccessToken = tokenRes.AccessToken
 	}
 
-	err = client.checkAuth()
-	if err != nil {
-		return nil, err
-	}
-
-	err = client.checkPrivileges()
-	if err != nil {
-		return nil, err
-	}
-
 	return client, nil
-}
-
-func (ac *AlpaconClient) checkAuth() error {
-	body, err := ac.SendGetRequest(checkAuthURL)
-	if err != nil {
-		return err
-	}
-
-	var checkAuthResponse CheckAuthResponse
-
-	err = json.Unmarshal(body, &checkAuthResponse)
-	if err != nil {
-		return err
-	}
-	if !checkAuthResponse.Authenticated {
-		return errors.New("authentication failed: your login session has expired or is invalid. Please run 'alpacon login' to authenticate again")
-	}
-
-	return nil
-}
-
-func (ac *AlpaconClient) checkPrivileges() error {
-	body, err := ac.SendGetRequest(checkPrivilegesURL)
-	if err != nil {
-		return err
-	}
-
-	var checkPrivilegesResponse CheckPrivilegesResponse
-
-	err = json.Unmarshal(body, &checkPrivilegesResponse)
-	if err != nil {
-		return err
-	}
-
-	ac.Privileges = getUserPrivileges(checkPrivilegesResponse.IsStaff, checkPrivilegesResponse.IsSuperuser)
-	ac.Username = strings.TrimSpace(checkPrivilegesResponse.Username)
-
-	return nil
 }
 
 func getUserPrivileges(isStaff, isSuperuser bool) string {
