@@ -40,6 +40,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 				return err
 			},
 		})
+		// RetryOperation may return a RemoteCommandError; re-check after HandleCommonErrors.
 		if errors.As(err, &remoteErr) {
 			return result, remoteErr
 		}

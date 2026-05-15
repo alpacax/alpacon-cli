@@ -20,6 +20,10 @@ intended for the remote command (e.g., -U, -d) are not interpreted as alpacon fl
 
 All flags must be placed before the server name.
 
+Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
+To send a literal metacharacter, wrap the argument in quotes:
+  alpacon exec server 'echo hello;world'
+
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
