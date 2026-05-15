@@ -10,6 +10,7 @@ type AlpaconClient struct {
 	Privileges  string
 	Username    string
 	UserAgent   string
+	userLoaded  bool
 }
 
 type CheckAuthResponse struct {

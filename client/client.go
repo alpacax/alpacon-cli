@@ -120,6 +120,24 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 	return "general"
 }
 
+func (ac *AlpaconClient) LoadCurrentUser() error {
+	if ac.userLoaded {
+		return nil
+	}
+	body, err := ac.SendGetRequest(checkPrivilegesURL)
+	if err != nil {
+		return err
+	}
+	var resp CheckPrivilegesResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+	ac.Privileges = getUserPrivileges(resp.IsStaff, resp.IsSuperuser)
+	ac.Username = strings.TrimSpace(resp.Username)
+	ac.userLoaded = true
+	return nil
+}
+
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	headers := http.Header{}
 	headers.Set("Origin", ac.BaseURL)
