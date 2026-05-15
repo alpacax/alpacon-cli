@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -253,4 +254,65 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 
 	hadKey, _, _ := capture.snapshot()
 	assert.False(t, hadKey, "body must omit work_session field when ID is empty")
+}
+
+func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
+	for _, status := range []string{"stuck", "error"} {
+		t.Run(status, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+					_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+						Count:   1,
+						Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+					})
+				case r.Method == http.MethodPost:
+					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
+				default:
+					_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+			require.Error(t, err)
+			assert.Empty(t, result)
+			assert.Contains(t, err.Error(), status)
+		})
+	}
+}
+
+func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
+	falseVal := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+			})
+		case r.Method == http.MethodPost:
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
+		default:
+			_ = json.NewEncoder(w).Encode(EventDetails{
+				ID:      "cmd-1",
+				Status:  "completed",
+				Success: &falseVal,
+				Result:  "command output here",
+			})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	require.Error(t, err)
+
+	var remoteErr *RemoteCommandError
+	require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
+	assert.Equal(t, "command output here", result)
+	assert.Equal(t, "command output here", remoteErr.Output)
 }

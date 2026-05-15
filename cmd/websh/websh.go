@@ -104,7 +104,11 @@ var WebshCmd = &cobra.Command{
 	Long: `Open a websh terminal for interacting with a server or execute a command directly on the server.
 Supports SSH-like user@host syntax for specifying the username inline.
 For executing commands, it is highly recommended to wrap the entire command string in quotes
-to ensure it is interpreted correctly on the remote server.`,
+to ensure it is interpreted correctly on the remote server.
+
+Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
+To send a literal metacharacter, wrap the argument in quotes:
+  alpacon websh server 'echo hello;world'`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
 
@@ -204,12 +208,9 @@ Note: All flags must be placed before the server name.
 					return
 				}
 			}
-			command := strings.Join(commandArgs, " ")
+			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
-			if err != nil {
-				utils.CliErrorWithExit("%s", err)
-			}
-			fmt.Println(result)
+			execCmd.HandleCommandResult(result, err)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 

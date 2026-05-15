@@ -105,8 +105,36 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		Groupname:     groupname,
 		WorkSessionID: workSessionID,
 		Server:        server,
-		Command:       strings.Join(commandParts, " "),
+		Command:       ShellJoin(commandParts),
 	}
+}
+
+// ShellJoin reassembles tokenized command parts into a single string.
+// Parts containing whitespace or single quotes are re-quoted to preserve
+// argument boundaries; metacharacters pass through for the remote shell.
+// A single-element slice is returned as-is (already a formed command line).
+func ShellJoin(parts []string) string {
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = shellQuote(p)
+	}
+	return strings.Join(out, " ")
+}
+
+// shellQuote wraps s in single quotes if it contains whitespace or a single quote.
+// Whitespace signals that the local shell stripped outer quotes from a multi-word arg;
+// metacharacters (|, $, *, etc.) pass through so the remote shell can interpret them.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	if !strings.ContainsAny(s, " \t\n'") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // matchShortOrLongFlag checks whether arg is an exact match for the given short

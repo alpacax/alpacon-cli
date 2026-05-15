@@ -1,8 +1,6 @@
 package exec
 
 import (
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -21,6 +19,10 @@ Use -- to separate alpacon flags from the remote command, ensuring that flags
 intended for the remote command (e.g., -U, -d) are not interpreted as alpacon flags.
 
 All flags must be placed before the server name.
+
+Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
+To send a literal metacharacter, wrap the argument in quotes:
+  alpacon exec server 'echo hello;world'
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -77,10 +79,6 @@ Flags:
 
 		env := make(map[string]string)
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-		if err != nil {
-			utils.CliErrorWithExit("%s", err)
-			return
-		}
-		fmt.Println(result)
+		HandleCommandResult(result, err)
 	},
 }
