@@ -52,8 +52,7 @@ var userCreateCmd = &cobra.Command{
 	},
 }
 
-// promptForUser collects user fields interactively. Callers must call LoadCurrentUser first,
-// as ac.Privileges determines which fields are presented.
+// Callers must call LoadCurrentUser first; ac.Privileges determines which fields are presented.
 func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	var userRequest iam.UserCreateRequest
 

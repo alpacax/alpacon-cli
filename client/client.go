@@ -61,6 +61,16 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	return client, nil
 }
 
+func checkAuthStatus(statusCode int) error {
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return errors.New("authentication failed: please run 'alpacon login' again")
+	case http.StatusForbidden:
+		return errors.New("permission denied: you do not have the required privileges for this action")
+	}
+	return nil
+}
+
 func getUserPrivileges(isStaff, isSuperuser bool) string {
 	if isSuperuser {
 		return "superuser"
@@ -129,6 +139,10 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
@@ -138,13 +152,6 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, errors.New("authentication failed: please run 'alpacon login' again")
-	}
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("permission denied: you do not have the required privileges for this action")
 	}
 
 	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
@@ -215,11 +222,8 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, errors.New("authentication failed: please run 'alpacon login' again")
-	}
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("permission denied: you do not have the required privileges for this action")
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -264,13 +268,9 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
 		_ = resp.Body.Close()
-		return nil, errors.New("authentication failed: please run 'alpacon login' again")
-	}
-	if resp.StatusCode == http.StatusForbidden {
-		_ = resp.Body.Close()
-		return nil, errors.New("permission denied: you do not have the required privileges for this action")
+		return nil, err
 	}
 
 	return resp, nil
