@@ -52,8 +52,6 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 }
 
 // HandleCommandResult prints result on success, or exits appropriately on error.
-// On RemoteCommandError, prints captured output to stdout, surfaces error_phase
-// (if present) to stderr, and exits with the remote process's actual exit code.
 func HandleCommandResult(result string, err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
