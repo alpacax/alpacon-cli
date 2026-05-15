@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -74,6 +75,7 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 }
 
 func TestPollCommandExecution(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 2*time.Second, 50, 10*time.Millisecond)
 	tests := []struct {
 		name           string
 		statusSequence []string
@@ -224,6 +226,190 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 		}
 		http.NotFound(w, r)
 	}))
+}
+
+// setPollConfig overrides polling timing variables for the duration of the test.
+// Tests using this must not call t.Parallel() — package-level vars are not safe for concurrent mutation.
+func setPollConfig(t *testing.T, idle, absolute time.Duration, maxErrors int, tick time.Duration) {
+	t.Helper()
+	origIdle, origAbsolute, origMaxErrors, origTick := pollIdleTimeout, pollAbsoluteTimeout, pollMaxConsecutiveErrors, pollTickInterval
+	pollIdleTimeout = idle
+	pollAbsoluteTimeout = absolute
+	pollMaxConsecutiveErrors = maxErrors
+	pollTickInterval = tick
+	t.Cleanup(func() {
+		pollIdleTimeout = origIdle
+		pollAbsoluteTimeout = origAbsolute
+		pollMaxConsecutiveErrors = origMaxErrors
+		pollTickInterval = origTick
+	})
+}
+
+// Case A: server always returns intermediate state → absolute timeout fires first.
+func TestPollCommandExecution_AbsoluteTimeout(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 100*time.Millisecond, 50, 10*time.Millisecond)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := PollCommandExecution(ac, "cmd-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute timeout")
+}
+
+// Case B: intermediate states keep resetting idle timer — no premature timeout.
+func TestPollCommandExecution_IdleTimerReset(t *testing.T) {
+	// idle timeout (50ms) is shorter than total sequence time, but each "running" resets it.
+	setPollConfig(t, 50*time.Millisecond, 2*time.Second, 50, 10*time.Millisecond)
+
+	var reqCount atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := "running"
+		if int(reqCount.Add(1)) >= 5 {
+			status = "completed"
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status, Result: "done"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	result, err := PollCommandExecution(ac, "cmd-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", result.Status)
+}
+
+// Case C: transient errors followed by success — function should recover without failing.
+func TestPollCommandExecution_TransientErrorRecovery(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 2*time.Second, 5, 10*time.Millisecond)
+
+	var reqCount atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(reqCount.Add(1)) <= 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"detail":"service unavailable"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed", Result: "done"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	result, err := PollCommandExecution(ac, "cmd-1")
+	require.NoError(t, err)
+	assert.Equal(t, "completed", result.Status)
+}
+
+// Case D: consecutive errors reaching pollMaxConsecutiveErrors → fail with lastErr in message.
+func TestPollCommandExecution_ConsecutiveErrorsFail(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 2*time.Second, 3, 10*time.Millisecond)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := PollCommandExecution(ac, "cmd-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "consecutive errors")
+}
+
+// Case E: terminal states (including stuck/error) are returned as-is — no error from PollCommandExecution.
+func TestPollCommandExecution_TerminalStates(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 2*time.Second, 5, 10*time.Millisecond)
+
+	for _, status := range []string{"stuck", "error", "finished", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			result, err := PollCommandExecution(ac, "cmd-1")
+			require.NoError(t, err)
+			assert.Equal(t, status, result.Status)
+		})
+	}
+}
+
+// Case F: idle timeout fires after last intermediate state, with no further progress.
+func TestPollCommandExecution_IdleTimeout(t *testing.T) {
+	// idle=80ms, absolute=2s, maxErrors=50 (high so consecutive limit won't fire first)
+	setPollConfig(t, 80*time.Millisecond, 2*time.Second, 50, 10*time.Millisecond)
+
+	var reqCount atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if int(reqCount.Add(1)) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"detail":"server busy"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := PollCommandExecution(ac, "cmd-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "idle timeout")
+}
+
+// Case G: absolute timeout and idle timeout produce distinguishable error messages.
+func TestPollCommandExecution_TimeoutMessageDistinction(t *testing.T) {
+	t.Run("absolute timeout message", func(t *testing.T) {
+		setPollConfig(t, 500*time.Millisecond, 60*time.Millisecond, 50, 10*time.Millisecond)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+		}))
+		defer ts.Close()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := PollCommandExecution(ac, "cmd-1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "absolute timeout")
+		assert.NotContains(t, err.Error(), "idle timeout")
+	})
+
+	t.Run("idle timeout message", func(t *testing.T) {
+		setPollConfig(t, 60*time.Millisecond, 2*time.Second, 50, 10*time.Millisecond)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"detail":"server busy"}`))
+		}))
+		defer ts.Close()
+		ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		_, err := PollCommandExecution(ac, "cmd-1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "idle timeout")
+		assert.NotContains(t, err.Error(), "absolute timeout")
+	})
+}
+
+// TestPollCommandExecution_MalformedJSON verifies that a well-formed HTTP 200 response
+// with invalid JSON body returns an error immediately without retrying.
+func TestPollCommandExecution_MalformedJSON(t *testing.T) {
+	setPollConfig(t, 500*time.Millisecond, 2*time.Second, 5, 10*time.Millisecond)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{invalid json`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := PollCommandExecution(ac, "cmd-1")
+	require.Error(t, err)
 }
 
 func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {

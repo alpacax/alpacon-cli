@@ -18,6 +18,13 @@ const (
 	getEventURL = "/api/events/commands/"
 )
 
+var (
+	pollIdleTimeout          = 5 * time.Minute
+	pollAbsoluteTimeout      = 30 * time.Minute
+	pollTickInterval         = 1 * time.Second
+	pollMaxConsecutiveErrors = 10
+)
+
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
 	var err error
@@ -107,30 +114,54 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	return result.Result, nil
 }
 
-func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
+func PollCommandExecution(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
 	var response EventDetails
+	var lastErr error
+	consecutiveErrors := 0
 
-	timer := time.NewTimer(5 * time.Minute)
-	defer timer.Stop()
-	ticker := time.NewTicker(1 * time.Second)
+	idleTimer := time.NewTimer(pollIdleTimeout)
+	defer idleTimer.Stop()
+	absoluteTimer := time.NewTimer(pollAbsoluteTimeout)
+	defer absoluteTimer.Stop()
+	ticker := time.NewTicker(pollTickInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-timer.C:
-			return response, errors.New("command execution timed out")
+		case <-absoluteTimer.C:
+			if lastErr != nil {
+				return response, fmt.Errorf("command execution timed out (absolute timeout): %w", lastErr)
+			}
+			return response, errors.New("command execution timed out (absolute timeout)")
+		case <-idleTimer.C:
+			if lastErr != nil {
+				return response, fmt.Errorf("command execution timed out (idle timeout): %w", lastErr)
+			}
+			return response, errors.New("command execution timed out (idle timeout)")
 		case <-ticker.C:
-			responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdId, nil))
+			responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 			if err != nil {
+				lastErr = err
+				consecutiveErrors++
+				if consecutiveErrors >= pollMaxConsecutiveErrors {
+					return response, fmt.Errorf("polling stopped after %d consecutive errors: %w", consecutiveErrors, lastErr)
+				}
 				continue
 			}
+			consecutiveErrors = 0
+			lastErr = nil
 			if err = json.Unmarshal(responseBody, &response); err != nil {
 				return response, err
 			}
-
 			switch response.Status {
 			case "queued", "scheduled", "delivered", "verifying", "running", "acked":
-				timer.Reset(5 * time.Minute)
+				if !idleTimer.Stop() {
+					select {
+					case <-idleTimer.C:
+					default:
+					}
+				}
+				idleTimer.Reset(pollIdleTimeout)
 				continue
 			default:
 				return response, nil
