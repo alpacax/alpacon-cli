@@ -105,7 +105,19 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	}
 
 	if result.Success != nil && !*result.Success {
-		return result.Result, &RemoteCommandError{Output: result.Result}
+		exitCode := 1
+		if result.ExitCode != nil {
+			exitCode = *result.ExitCode
+		}
+		errorPhase := ""
+		if result.ErrorPhase != nil {
+			errorPhase = *result.ErrorPhase
+		}
+		return result.Result, &RemoteCommandError{
+			Output:     result.Result,
+			ExitCode:   exitCode,
+			ErrorPhase: errorPhase,
+		}
 	}
 
 	return result.Result, nil

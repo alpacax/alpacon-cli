@@ -315,4 +315,102 @@ func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
 	require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
 	assert.Equal(t, "command output here", result)
 	assert.Equal(t, "command output here", remoteErr.Output)
+	assert.Equal(t, 1, remoteErr.ExitCode, "legacy response without exit_code must fall back to 1")
+	assert.Empty(t, remoteErr.ErrorPhase, "no phase when server omits error_phase")
+}
+
+func TestRunCommand_PropagatesExitCode(t *testing.T) {
+	tests := []struct {
+		name           string
+		respSuccess    *bool
+		respExitCode   *int
+		respErrorPhase *string
+		respResult     string
+		wantExitCode   int
+		wantErrorPhase string
+		wantOutput     string
+	}{
+		{
+			name:         "exit_1",
+			respSuccess:  boolPtr(false),
+			respExitCode: intPtr(1),
+			respResult:   "boom",
+			wantExitCode: 1,
+			wantOutput:   "boom",
+		},
+		{
+			name:         "exit_23_rsync_partial",
+			respSuccess:  boolPtr(false),
+			respExitCode: intPtr(23),
+			respResult:   "rsync: partial transfer",
+			wantExitCode: 23,
+			wantOutput:   "rsync: partial transfer",
+		},
+		{
+			name:           "exit_124_with_phase",
+			respSuccess:    boolPtr(false),
+			respExitCode:   intPtr(124),
+			respErrorPhase: strPtr("remote_command_exceeded_timeout"),
+			respResult:     "timed out",
+			wantExitCode:   124,
+			wantErrorPhase: "remote_command_exceeded_timeout",
+			wantOutput:     "timed out",
+		},
+		{
+			name:         "legacy_null_exit_code_falls_back_to_1",
+			respSuccess:  boolPtr(false),
+			respExitCode: nil,
+			respResult:   "old alpamon",
+			wantExitCode: 1,
+			wantOutput:   "old alpamon",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := newRunCommandServerWithDetails(t, EventDetails{
+				ID:         "cmd-1",
+				Status:     "completed",
+				Success:    tt.respSuccess,
+				ExitCode:   tt.respExitCode,
+				ErrorPhase: tt.respErrorPhase,
+				Result:     tt.respResult,
+			})
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+			require.Error(t, err)
+
+			var remoteErr *RemoteCommandError
+			require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
+			assert.Equal(t, tt.wantOutput, result)
+			assert.Equal(t, tt.wantOutput, remoteErr.Output)
+			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode)
+			assert.Equal(t, tt.wantErrorPhase, remoteErr.ErrorPhase)
+		})
+	}
+}
+
+// helpers placed near other test helpers in this file
+func boolPtr(b bool) *bool       { return &b }
+func intPtr(i int) *int          { return &i }
+func strPtr(s string) *string    { return &s }
+
+func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+			})
+		case r.Method == http.MethodPost:
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
+		default:
+			_ = json.NewEncoder(w).Encode(details)
+		}
+	}))
 }

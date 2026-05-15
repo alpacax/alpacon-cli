@@ -1,6 +1,7 @@
 package event
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -8,12 +9,21 @@ import (
 
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. Output holds the captured stdout/stderr.
+// ExitCode is the remote process exit code (>=1; falls back to 1 when the
+// server did not include exit_code in the response). ErrorPhase is the
+// server-classified phase (e.g. "remote_command_exceeded_timeout") and is
+// empty when no phase applies.
 type RemoteCommandError struct {
-	Output string
+	Output     string
+	ExitCode   int
+	ErrorPhase string
 }
 
 func (e *RemoteCommandError) Error() string {
-	return "remote command exited with non-zero status"
+	if e.ErrorPhase != "" {
+		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode)
+	}
+	return fmt.Sprintf("remote command exited with code %d", e.ExitCode)
 }
 
 type EventAttributes struct {
@@ -31,6 +41,8 @@ type EventDetails struct {
 	Shell         string              `json:"shell"`
 	Line          string              `json:"line"`
 	Success       *bool               `json:"success"`
+	ExitCode      *int                `json:"exit_code"`
+	ErrorPhase    *string             `json:"error_phase"`
 	Result        string              `json:"result"`
 	Status        string              `json:"status"`
 	Cancellable   bool                `json:"cancellable"`
