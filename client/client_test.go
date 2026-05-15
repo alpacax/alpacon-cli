@@ -116,6 +116,19 @@ func TestLoadCurrentUser_401ReturnsAuthError(t *testing.T) {
 	assert.Empty(t, ac.Privileges)
 }
 
+func TestLoadCurrentUser_403ReturnsForbiddenError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	err := ac.LoadCurrentUser()
+	assert.ErrorContains(t, err, "permission denied")
+	assert.Empty(t, ac.Username)
+	assert.Empty(t, ac.Privileges)
+}
+
 func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
