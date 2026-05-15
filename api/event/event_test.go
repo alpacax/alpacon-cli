@@ -392,6 +392,64 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 	}
 }
 
+func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
+	tests := []struct {
+		name           string
+		respStatus     string
+		respErrorPhase *string
+		wantSubstrings []string
+	}{
+		{
+			name:           "stuck_agent_timeout",
+			respStatus:     "stuck",
+			respErrorPhase: strPtr("agent_timeout"),
+			wantSubstrings: []string{"agent_timeout", "status=stuck"},
+		},
+		{
+			name:           "stuck_agent_disconnected",
+			respStatus:     "stuck",
+			respErrorPhase: strPtr("agent_disconnected"),
+			wantSubstrings: []string{"agent_disconnected", "status=stuck"},
+		},
+		{
+			name:           "stuck_no_phase_keeps_legacy_message",
+			respStatus:     "stuck",
+			respErrorPhase: nil,
+			wantSubstrings: []string{"command failed with status: stuck"},
+		},
+		{
+			name:           "error_with_phase",
+			respStatus:     "error",
+			respErrorPhase: strPtr("agent_disconnected"),
+			wantSubstrings: []string{"agent_disconnected", "status=error"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := newRunCommandServerWithDetails(t, EventDetails{
+				ID:         "cmd-1",
+				Status:     tt.respStatus,
+				ErrorPhase: tt.respErrorPhase,
+			})
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+			require.Error(t, err)
+			assert.Empty(t, result)
+
+			var remoteErr *RemoteCommandError
+			assert.False(t, errors.As(err, &remoteErr),
+				"stuck/error must remain infra error, not RemoteCommandError")
+
+			for _, sub := range tt.wantSubstrings {
+				assert.Contains(t, err.Error(), sub)
+			}
+		})
+	}
+}
+
 // helpers placed near other test helpers in this file
 func boolPtr(b bool) *bool       { return &b }
 func intPtr(i int) *int          { return &i }
