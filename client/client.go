@@ -61,26 +61,6 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	return client, nil
 }
 
-func checkAuthStatus(statusCode int) error {
-	switch statusCode {
-	case http.StatusUnauthorized:
-		return errors.New("authentication failed: please run 'alpacon login' again")
-	case http.StatusForbidden:
-		return errors.New("permission denied: you do not have the required privileges for this action")
-	}
-	return nil
-}
-
-func getUserPrivileges(isStaff, isSuperuser bool) string {
-	if isSuperuser {
-		return "superuser"
-	}
-	if isStaff {
-		return "staff"
-	}
-	return "general"
-}
-
 func (ac *AlpaconClient) LoadCurrentUser() error {
 	ac.loadOnce.Do(func() {
 		body, err := ac.SendGetRequest(checkPrivilegesURL)
@@ -97,6 +77,26 @@ func (ac *AlpaconClient) LoadCurrentUser() error {
 		ac.Username = strings.TrimSpace(resp.Username)
 	})
 	return ac.loadErr
+}
+
+func getUserPrivileges(isStaff, isSuperuser bool) string {
+	if isSuperuser {
+		return "superuser"
+	}
+	if isStaff {
+		return "staff"
+	}
+	return "general"
+}
+
+func checkAuthStatus(statusCode int) error {
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return errors.New("authentication failed: please run 'alpacon login' again")
+	case http.StatusForbidden:
+		return errors.New("permission denied: you do not have the required privileges for this action")
+	}
+	return nil
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {

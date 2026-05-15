@@ -13,8 +13,9 @@ type AlpaconClient struct {
 	Privileges  string
 	Username    string
 	UserAgent   string
-	loadOnce    sync.Once
-	loadErr     error
+
+	loadOnce sync.Once
+	loadErr  error
 }
 
 type CheckPrivilegesResponse struct {
