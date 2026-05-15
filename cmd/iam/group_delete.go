@@ -36,7 +36,7 @@ var groupDeleteCmd = &cobra.Command{
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s.", err)
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
@@ -45,7 +45,7 @@ var groupDeleteCmd = &cobra.Command{
 
 		err = iam.DeleteGroup(alpaconClient, groupName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the group: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the group: %s", err)
 		}
 
 		utils.CliSuccess("Group deleted: %s", groupName)

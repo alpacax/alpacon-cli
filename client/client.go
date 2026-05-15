@@ -215,6 +215,13 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("authentication failed: please run 'alpacon login' again")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("permission denied: you do not have the required privileges for this action")
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
@@ -226,14 +233,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 		return nil, err
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, errors.New("authentication failed: please run 'alpacon login' again")
-	}
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("permission denied: you do not have the required privileges for this action")
-	}
-
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return nil, parseAPIError(respBody)
 	}
 

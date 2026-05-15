@@ -29,7 +29,7 @@ var groupCreateCmd = &cobra.Command{
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s.", err)
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
@@ -38,14 +38,14 @@ var groupCreateCmd = &cobra.Command{
 
 		serverList, err := server.GetServerList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the server list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the server list: %s", err)
 		}
 
 		groupRequest := promptForGroup(alpaconClient, serverList)
 
 		err = iam.CreateGroup(alpaconClient, groupRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new group: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new group: %s", err)
 		}
 
 		utils.CliSuccess("Group created: %s", groupRequest.Name)

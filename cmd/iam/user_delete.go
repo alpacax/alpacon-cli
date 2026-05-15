@@ -35,7 +35,7 @@ var userDeleteCmd = &cobra.Command{
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s.", err)
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
@@ -44,7 +44,7 @@ var userDeleteCmd = &cobra.Command{
 
 		err = iam.DeleteUser(alpaconClient, userName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the user: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the user: %s", err)
 		}
 
 		utils.CliSuccess("User deleted: %s", userName)

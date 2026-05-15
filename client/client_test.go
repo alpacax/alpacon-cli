@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -126,6 +128,61 @@ func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
+}
+
+func TestSendGetRequestForDownload_401ReturnsAuthError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequestForDownload("/api/test/")
+	assert.ErrorContains(t, err, "authentication failed")
+}
+
+func TestSendGetRequestForDownload_403ReturnsForbiddenError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequestForDownload("/api/test/")
+	assert.ErrorContains(t, err, "permission denied")
+}
+
+func TestSendMultipartRequest_401ReturnsAuthError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendMultipartRequest("/api/test/", mw, buf)
+	assert.ErrorContains(t, err, "authentication failed")
+}
+
+func TestSendMultipartRequest_200IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.Close()
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendMultipartRequest("/api/test/", mw, buf)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(`{}`), body)
 }
 
 func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {

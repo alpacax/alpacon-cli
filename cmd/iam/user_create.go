@@ -34,7 +34,7 @@ var userCreateCmd = &cobra.Command{
 		}
 
 		if err := alpaconClient.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Failed to load current user: %s.", err)
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
 		}
 
 		if alpaconClient.Privileges == "general" {
@@ -45,13 +45,15 @@ var userCreateCmd = &cobra.Command{
 
 		err = iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new user: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new user: %s", err)
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
 	},
 }
 
+// promptForUser collects user fields interactively. Callers must call LoadCurrentUser first,
+// as ac.Privileges determines which fields are presented.
 func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	var userRequest iam.UserCreateRequest
 
