@@ -171,6 +171,13 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("authentication failed: please run 'alpacon login' again")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("permission denied")
+	}
+
 	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
 		return nil, parseAPIError(respBody)
 	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
