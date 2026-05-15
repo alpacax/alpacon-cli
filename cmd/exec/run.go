@@ -60,7 +60,7 @@ func HandleCommandResult(result string, err error) {
 				fmt.Println(remoteErr.Output)
 			}
 			if remoteErr.ErrorPhase != "" {
-				utils.CliWarning("remote command failed: %s", remoteErr.ErrorPhase)
+				utils.CliError("remote command failed: %s", remoteErr.ErrorPhase)
 			}
 			os.Exit(remoteErr.ExitCode)
 		}

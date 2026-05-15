@@ -108,6 +108,8 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	}
 
 	if result.Success != nil && !*result.Success {
+		// Trust the server contract: alpamon sets success=(exitCode==0), so a
+		// non-nil exit_code is propagated as-is.
 		exitCode := 1
 		if result.ExitCode != nil {
 			exitCode = *result.ExitCode
