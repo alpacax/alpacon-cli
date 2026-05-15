@@ -259,20 +259,7 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 	for _, status := range []string{"stuck", "error"} {
 		t.Run(status, func(t *testing.T) {
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				switch {
-				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
-					_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
-						Count:   1,
-						Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
-					})
-				case r.Method == http.MethodPost:
-					_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
-				default:
-					_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
-				}
-			}))
+			ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: status})
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -285,26 +272,12 @@ func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 }
 
 func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
-	falseVal := false
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
-			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
-				Count:   1,
-				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
-			})
-		case r.Method == http.MethodPost:
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
-		default:
-			_ = json.NewEncoder(w).Encode(EventDetails{
-				ID:      "cmd-1",
-				Status:  "completed",
-				Success: &falseVal,
-				Result:  "command output here",
-			})
-		}
-	}))
+	ts := newRunCommandServerWithDetails(t, EventDetails{
+		ID:      "cmd-1",
+		Status:  "completed",
+		Success: boolPtr(false),
+		Result:  "command output here",
+	})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -450,10 +423,9 @@ func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
 	}
 }
 
-// helpers placed near other test helpers in this file
-func boolPtr(b bool) *bool       { return &b }
-func intPtr(i int) *int          { return &i }
-func strPtr(s string) *string    { return &s }
+func boolPtr(b bool) *bool    { return &b }
+func intPtr(i int) *int       { return &i }
+func strPtr(s string) *string { return &s }
 
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
