@@ -166,9 +166,12 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 			}
 
 		}
-		_, err = client.NewAlpaconAPIClient()
+		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		}
+		if err := ac.LoadCurrentUser(); err != nil {
+			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
 		}
 
 		utils.CliSuccess("Login succeeded!")

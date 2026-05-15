@@ -28,20 +28,24 @@ var groupCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		if err := alpaconClient.LoadCurrentUser(); err != nil {
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
+		}
+
 		if alpaconClient.Privileges == "general" {
 			utils.CliErrorWithExit("You do not have the permission to create groups.")
 		}
 
 		serverList, err := server.GetServerList(alpaconClient)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the server list: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve the server list: %s", err)
 		}
 
 		groupRequest := promptForGroup(alpaconClient, serverList)
 
 		err = iam.CreateGroup(alpaconClient, groupRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new group: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new group: %s", err)
 		}
 
 		utils.CliSuccess("Group created: %s", groupRequest.Name)

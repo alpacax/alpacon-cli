@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	checkAuthURL       = "/api/auth/is-authenticated/"
 	checkPrivilegesURL = "/api/iam/users/-"
 )
 
@@ -59,55 +58,25 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		client.AccessToken = tokenRes.AccessToken
 	}
 
-	err = client.checkAuth()
-	if err != nil {
-		return nil, err
-	}
-
-	err = client.checkPrivileges()
-	if err != nil {
-		return nil, err
-	}
-
 	return client, nil
 }
 
-func (ac *AlpaconClient) checkAuth() error {
-	body, err := ac.SendGetRequest(checkAuthURL)
-	if err != nil {
-		return err
-	}
-
-	var checkAuthResponse CheckAuthResponse
-
-	err = json.Unmarshal(body, &checkAuthResponse)
-	if err != nil {
-		return err
-	}
-	if !checkAuthResponse.Authenticated {
-		return errors.New("authentication failed: your login session has expired or is invalid. Please run 'alpacon login' to authenticate again")
-	}
-
-	return nil
-}
-
-func (ac *AlpaconClient) checkPrivileges() error {
-	body, err := ac.SendGetRequest(checkPrivilegesURL)
-	if err != nil {
-		return err
-	}
-
-	var checkPrivilegesResponse CheckPrivilegesResponse
-
-	err = json.Unmarshal(body, &checkPrivilegesResponse)
-	if err != nil {
-		return err
-	}
-
-	ac.Privileges = getUserPrivileges(checkPrivilegesResponse.IsStaff, checkPrivilegesResponse.IsSuperuser)
-	ac.Username = strings.TrimSpace(checkPrivilegesResponse.Username)
-
-	return nil
+func (ac *AlpaconClient) LoadCurrentUser() error {
+	ac.loadOnce.Do(func() {
+		body, err := ac.SendGetRequest(checkPrivilegesURL)
+		if err != nil {
+			ac.loadErr = err
+			return
+		}
+		var resp CheckPrivilegesResponse
+		if err := json.Unmarshal(body, &resp); err != nil {
+			ac.loadErr = err
+			return
+		}
+		ac.Privileges = getUserPrivileges(resp.IsStaff, resp.IsSuperuser)
+		ac.Username = strings.TrimSpace(resp.Username)
+	})
+	return ac.loadErr
 }
 
 func getUserPrivileges(isStaff, isSuperuser bool) string {
@@ -118,6 +87,16 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 		return "staff"
 	}
 	return "general"
+}
+
+func checkAuthStatus(statusCode int) error {
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return errors.New("authentication failed: please run 'alpacon login' again")
+	case http.StatusForbidden:
+		return errors.New("permission denied: you do not have the required privileges for this action")
+	}
+	return nil
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
@@ -159,6 +138,10 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
 
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
@@ -239,6 +222,10 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
 	if contentType != "" && !strings.Contains(contentType, "application/json") {
@@ -250,7 +237,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		return nil, parseAPIError(respBody)
 	}
 
@@ -268,7 +255,8 @@ func (ac *AlpaconClient) SendGetRequestToURL(absoluteURL string) ([]byte, error)
 	return ac.sendRequest(req)
 }
 
-// This function returns response for custom error handling in each function, unlike direct error throwing in sendRequest.
+// SendGetRequestForDownload returns the raw *http.Response so callers can stream the body.
+// Auth errors (401/403) are handled here; all other status codes are left to the caller.
 func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -277,6 +265,11 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		_ = resp.Body.Close()
 		return nil, err
 	}
 
