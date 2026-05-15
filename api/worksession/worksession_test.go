@@ -248,3 +248,41 @@ func TestApproveWorkSession_WithAdjustments(t *testing.T) {
 	err := ApproveWorkSession(newTestClient(ts), "ses-abc", req)
 	assert.NoError(t, err)
 }
+
+func TestGetWorkSessionTimeline(t *testing.T) {
+	ts := newString("2024-01-15T10:30:00Z")
+	items := []TimelineItem{
+		{Type: "command", Timestamp: ts, Line: "ls -la"},
+		{Type: "websh_session", Timestamp: ts},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/timeline/"))
+		assert.Equal(t, "true", r.URL.Query().Get("include_records"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 2, Results: items})
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-abc", true)
+	assert.NoError(t, err)
+	assert.Len(t, result, 2)
+	assert.Equal(t, "command", result[0].Type)
+	assert.Equal(t, "ls -la", result[0].Line)
+}
+
+func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-xyz/timeline/"))
+		assert.Equal(t, "false", r.URL.Query().Get("include_records"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 0, Results: nil})
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-xyz", false)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func newString(s string) *string { return &s }

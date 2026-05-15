@@ -50,3 +50,51 @@ type WorkSessionApproveRequest struct {
 	AdjustedScopes  []string `json:"adjusted_scopes,omitempty"`
 	AdjustedServers []string `json:"adjusted_servers,omitempty"`
 }
+
+// TimelineItem represents a single event in a work session's activity timeline.
+// All event types share this struct; type-specific fields are zero-valued for other types.
+type TimelineItem struct {
+	Type      string  `json:"type"`
+	Timestamp *string `json:"timestamp"`
+	ID        string  `json:"id"`
+	ServerID  *string `json:"server_id"`
+
+	// shared across session-like types (websh_session, tunnel_session, ftp_session)
+	Username  string  `json:"username"`
+	Groupname string  `json:"groupname"`
+	ClosedAt  *string `json:"closed_at"`
+	ClientType string `json:"client_type"`
+
+	// command
+	Shell       string   `json:"shell"`
+	Line        string   `json:"line"`
+	Success     *bool    `json:"success"`
+	Denied      bool     `json:"denied"`
+	ElapsedTime float64  `json:"elapsed_time"`
+
+	// tunnel_session
+	IsTunnel   bool  `json:"is_tunnel"`
+	TargetPort *int  `json:"target_port"`
+
+	// file_upload / file_download
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+
+	// sudo_grant
+	GrantType string  `json:"grant_type"`
+	Status    string  `json:"status"`
+	Command   *string `json:"command"`
+	OneTime   bool    `json:"one_time"`
+
+	// websh_record
+	SessionID    string `json:"session_id"`
+	MaskedRecord string `json:"masked_record"`
+}
+
+type TimelineAttributes struct {
+	Time    string `json:"timestamp" table:"Time"`
+	Type    string `json:"type"      table:"Type"`
+	Server  string `json:"server"    table:"Server"`
+	User    string `json:"user"      table:"User"`
+	Details string `json:"details"   table:"Details"`
+}
