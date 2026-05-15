@@ -127,3 +127,22 @@ func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
 }
+
+func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail": "invalid token"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	err1 := ac.LoadCurrentUser()
+	err2 := ac.LoadCurrentUser() // second call must return cached error without hitting server
+
+	assert.ErrorContains(t, err1, "authentication failed")
+	assert.ErrorContains(t, err2, "authentication failed")
+	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once even on failure")
+}

@@ -144,7 +144,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, errors.New("authentication failed: please run 'alpacon login' again")
 	}
 	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("permission denied")
+		return nil, errors.New("permission denied: you do not have the required privileges for this action")
 	}
 
 	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
@@ -230,7 +230,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 		return nil, errors.New("authentication failed: please run 'alpacon login' again")
 	}
 	if resp.StatusCode == http.StatusForbidden {
-		return nil, errors.New("permission denied")
+		return nil, errors.New("permission denied: you do not have the required privileges for this action")
 	}
 
 	if resp.StatusCode != http.StatusCreated {
@@ -251,7 +251,8 @@ func (ac *AlpaconClient) SendGetRequestToURL(absoluteURL string) ([]byte, error)
 	return ac.sendRequest(req)
 }
 
-// This function returns response for custom error handling in each function, unlike direct error throwing in sendRequest.
+// SendGetRequestForDownload returns the raw *http.Response so callers can stream the body.
+// Auth errors (401/403) are handled here; all other status codes are left to the caller.
 func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -261,6 +262,15 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		_ = resp.Body.Close()
+		return nil, errors.New("authentication failed: please run 'alpacon login' again")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		_ = resp.Body.Close()
+		return nil, errors.New("permission denied: you do not have the required privileges for this action")
 	}
 
 	return resp, nil
