@@ -8,6 +8,18 @@ import (
 const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
+
+	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
+	WorkSessionRequired         = "work_session_required"
+	WorkSessionNotUsable        = "work_session_not_usable"
+	WorkSessionNotActive        = "work_session_not_active"
+	WorkSessionExpired          = "work_session_expired"
+	WorkSessionScopeNotAllowed  = "work_session_scope_not_allowed"
+	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
+	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
+
+	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.
+	ExitCodeWorkSessionDenied = 3
 )
 
 type ErrorResponse struct {

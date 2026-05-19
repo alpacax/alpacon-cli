@@ -96,3 +96,14 @@ func TestParseErrorResponse_NoMatch(t *testing.T) {
 	assert.Equal(t, "", code)
 	assert.Equal(t, "", source)
 }
+
+func TestWorkSessionConstants(t *testing.T) {
+	assert.Equal(t, "work_session_required", WorkSessionRequired)
+	assert.Equal(t, "work_session_not_usable", WorkSessionNotUsable)
+	assert.Equal(t, "work_session_not_active", WorkSessionNotActive)
+	assert.Equal(t, "work_session_expired", WorkSessionExpired)
+	assert.Equal(t, "work_session_scope_not_allowed", WorkSessionScopeNotAllowed)
+	assert.Equal(t, "work_session_server_not_allowed", WorkSessionServerNotAllowed)
+	assert.Equal(t, "work_session_assignee_mismatch", WorkSessionAssigneeMismatch)
+	assert.Equal(t, 3, ExitCodeWorkSessionDenied)
+}
