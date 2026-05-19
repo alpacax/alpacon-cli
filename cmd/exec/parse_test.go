@@ -560,6 +560,44 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 	}
 }
 
+func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		expectedOutput string
+		expectedServer string
+		expectedCmd    string
+	}{
+		{
+			name:           "--output json (space form)",
+			args:           []string{"--output", "json", "my-server", "ls"},
+			expectedOutput: "json",
+			expectedServer: "my-server",
+			expectedCmd:    "ls",
+		},
+		{
+			name:           "--output=table (equals form)",
+			args:           []string{"--output=table", "my-server", "ls"},
+			expectedOutput: "table",
+			expectedServer: "my-server",
+			expectedCmd:    "ls",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.expectedOutput, result.OutputFormat)
+			assert.Equal(t, tt.expectedServer, result.Server)
+			assert.Equal(t, tt.expectedCmd, result.Command)
+		})
+	}
+}
+
+func TestParseRemoteExecArgs_OutputFlagMissingValue(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--output"})
+	assert.NotEmpty(t, result.Err)
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string

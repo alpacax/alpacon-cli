@@ -28,7 +28,7 @@ type ErrorResponse struct {
 	Source string `json:"source"`
 }
 
-func ParseErrorResponse(err error) (code, source string) {
+func ParseErrorResponse(err error) (string, string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		errStr := e.Error()
 
@@ -42,16 +42,17 @@ func ParseErrorResponse(err error) (code, source string) {
 		}
 
 		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
+		var iterCode, iterSource string
 		for _, part := range strings.Split(errStr, "; ") {
 			part = strings.TrimSpace(part)
 			if strings.HasPrefix(part, "code: ") {
-				code = strings.TrimPrefix(part, "code: ")
+				iterCode = strings.TrimPrefix(part, "code: ")
 			} else if strings.HasPrefix(part, "source: ") {
-				source = strings.TrimPrefix(part, "source: ")
+				iterSource = strings.TrimPrefix(part, "source: ")
 			}
 		}
-		if code != "" {
-			return code, source
+		if iterCode != "" {
+			return iterCode, iterSource
 		}
 	}
 

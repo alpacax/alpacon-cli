@@ -119,25 +119,25 @@ func targetServerList(serverName string) []string {
 
 func workSessionNextActions(code, operation, serverName string) []string {
 	createCmd := fmt.Sprintf(
-		`alpacon worksession create --scope %s --server %s --purpose "<intent>"`,
+		`alpacon work-session create --scope %s --server %s --purpose "<intent>"`,
 		operation, serverName,
 	)
 	switch code {
 	case WorkSessionRequired:
 		return []string{
-			"alpacon worksession list --status active",
-			"alpacon worksession use <ID>",
+			"alpacon work-session ls --status active",
+			"alpacon work-session use <ID>",
 			createCmd,
 		}
 	case WorkSessionNotActive:
-		return []string{"alpacon worksession current"}
+		return []string{"alpacon work-session current"}
 	case WorkSessionExpired:
-		return []string{"alpacon worksession extend <ID>", createCmd}
+		return []string{"alpacon work-session extend <ID>", createCmd}
 	case WorkSessionAssigneeMismatch:
-		return []string{"alpacon worksession use <ID>"}
+		return []string{"alpacon work-session use <ID>"}
 	case WorkSessionNotUsable:
 		return []string{
-			"alpacon worksession list",
+			"alpacon work-session ls",
 			createCmd,
 		}
 	default: // scope_not_allowed, server_not_allowed

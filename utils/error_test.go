@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -95,6 +96,22 @@ func TestParseErrorResponse_NoMatch(t *testing.T) {
 	code, source := ParseErrorResponse(errors.New("connection refused"))
 	assert.Equal(t, "", code)
 	assert.Equal(t, "", source)
+}
+
+func TestParseErrorResponse_WrappedJSONFormat(t *testing.T) {
+	inner := errors.New(`{"code": "work_session_required", "source": "command"}`)
+	wrapped := fmt.Errorf("failed to execute command on 'srv' server: %w", inner)
+	code, source := ParseErrorResponse(wrapped)
+	assert.Equal(t, "work_session_required", code)
+	assert.Equal(t, "command", source)
+}
+
+func TestParseErrorResponse_WrappedTextFormat(t *testing.T) {
+	inner := errors.New("code: work_session_expired; source: server")
+	wrapped := fmt.Errorf("request failed: %w", inner)
+	code, source := ParseErrorResponse(wrapped)
+	assert.Equal(t, "work_session_expired", code)
+	assert.Equal(t, "server", source)
 }
 
 func TestWorkSessionConstants(t *testing.T) {

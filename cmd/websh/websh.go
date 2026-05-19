@@ -90,6 +90,9 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			i = newI
 		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
 			val, newI := extractValue(args, i)
+			if val == "" {
+				return res, fmt.Errorf("--output requires a value (table|json)")
+			}
 			res.OutputFormat = val
 			i = newI
 		default:
@@ -201,6 +204,9 @@ Note: All flags must be placed before the server name.
 		}
 
 		if parsed.OutputFormat != "" {
+			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
+				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+			}
 			utils.OutputFormat = parsed.OutputFormat
 		}
 

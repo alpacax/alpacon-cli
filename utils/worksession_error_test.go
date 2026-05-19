@@ -34,13 +34,13 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		wantReason string
 		wantNext   string
 	}{
-		{WorkSessionRequired, "no WorkSession selected", "worksession list"},
-		{WorkSessionNotActive, "not yet active", "worksession current"},
-		{WorkSessionExpired, "has expired", "worksession extend"},
-		{WorkSessionScopeNotAllowed, "does not include this scope", "worksession create"},
-		{WorkSessionServerNotAllowed, "target server is not in this session", "worksession create"},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "worksession use"},
-		{WorkSessionNotUsable, "no longer usable", "worksession create"},
+		{WorkSessionRequired, "no WorkSession selected", "work-session ls"},
+		{WorkSessionNotActive, "not yet active", "work-session current"},
+		{WorkSessionExpired, "has expired", "work-session extend"},
+		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create"},
+		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create"},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use"},
+		{WorkSessionNotUsable, "no longer usable", "work-session create"},
 	}
 
 	for _, tt := range tests {
