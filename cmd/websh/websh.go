@@ -31,6 +31,7 @@ type WebshArgs struct {
 	Share         bool
 	ReadOnly      bool
 	WorkSessionID string
+	OutputFormat  string
 	Env           map[string]string
 }
 
@@ -86,6 +87,10 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 				return res, fmt.Errorf("--work-session requires a value")
 			}
 			res.WorkSessionID = ws
+			i = newI
+		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
+			val, newI := extractValue(args, i)
+			res.OutputFormat = val
 			i = newI
 		default:
 			if res.ServerName == "" {
@@ -193,6 +198,10 @@ Note: All flags must be placed before the server name.
 				username = sshTarget.User
 			}
 			serverName = sshTarget.Host
+		}
+
+		if parsed.OutputFormat != "" {
+			utils.OutputFormat = parsed.OutputFormat
 		}
 
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)

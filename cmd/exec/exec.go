@@ -70,6 +70,10 @@ Flags:
 			return
 		}
 
+		if parsed.OutputFormat != "" {
+			utils.OutputFormat = parsed.OutputFormat
+		}
+
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
 		authMethod := config.ResolveAuthMethod()

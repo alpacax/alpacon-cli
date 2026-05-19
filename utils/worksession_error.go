@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -99,11 +100,14 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 		},
 		NextActions: workSessionNextActions(code, operation, serverName),
 	}
-	data, err := json.MarshalIndent(envelope, "", "  ")
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(envelope); err != nil {
 		return `{"ok":false,"error_code":"` + code + `"}`
 	}
-	return string(data)
+	return strings.TrimRight(buf.String(), "\n")
 }
 
 func targetServerList(serverName string) []string {
