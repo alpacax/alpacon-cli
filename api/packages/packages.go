@@ -1,11 +1,13 @@
 package packages
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -99,23 +101,42 @@ func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType s
 }
 
 func UploadPackage(ac *client.AlpaconClient, file string, packageType string) error {
-	content, err := utils.ReadFileFromPath(file)
+	src, err := os.Open(file)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = src.Close() }()
 
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
+	requestBody, err := os.CreateTemp("", "alpacon-package-upload-*.multipart")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = requestBody.Close()
+		_ = os.Remove(requestBody.Name())
+	}()
+
+	writer := multipart.NewWriter(requestBody)
 
 	fileWriter, err := writer.CreateFormFile("content", file)
 	if err != nil {
 		return err
 	}
-	_, err = fileWriter.Write(content)
+	if _, err = io.Copy(fileWriter, src); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	if err = writer.Close(); err != nil {
+		return err
+	}
+
+	size, err := requestBody.Seek(0, io.SeekEnd)
 	if err != nil {
 		return err
 	}
-	_ = writer.Close()
+	if _, err = requestBody.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 
 	var requestURL string
 	if packageType == "python" {
@@ -124,7 +145,7 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 		requestURL = systemPackageEntryURL
 	}
 
-	_, err = ac.SendMultipartRequest(requestURL, writer, requestBody)
+	_, err = ac.SendMultipartStreamRequest(requestURL, writer.FormDataContentType(), requestBody, size)
 	if err != nil {
 		return err
 	}
@@ -163,14 +184,12 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("package download failed with status %d", resp.StatusCode)
 	}
 
 	savePath := filepath.Join(dest, filepath.Base(fileName))
-	err = utils.SaveFile(savePath, respBody)
-	if err != nil {
+	if _, err = utils.SaveStream(savePath, resp.Body); err != nil {
 		return err
 	}
 
