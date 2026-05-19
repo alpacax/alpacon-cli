@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -27,11 +29,17 @@ const (
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
 	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: insecure, //nolint:gosec
 				MinVersion:         tls.VersionTLS12,
 			},
+			TLSHandshakeTimeout: 10 * time.Second,
 		},
 	}
 

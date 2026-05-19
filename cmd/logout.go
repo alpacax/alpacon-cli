@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
@@ -34,10 +36,17 @@ var logoutCmd = &cobra.Command{
 		}
 
 		httpClient := &http.Client{
+			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
 				TLSClientConfig: &tls.Config{
+					MinVersion:         tls.VersionTLS12,
 					InsecureSkipVerify: validConfig.Insecure,
 				},
+				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		}
 		ac, err := client.NewAlpaconAPIClient()
