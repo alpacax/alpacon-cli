@@ -1,9 +1,26 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
+
+type workSessionErrorJSON struct {
+	OK          bool                `json:"ok"`
+	Command     string              `json:"command"`
+	ErrorCode   string              `json:"error_code"`
+	Message     string              `json:"message"`
+	Context     workSessionErrorCtx `json:"context"`
+	NextActions []string            `json:"next_actions"`
+}
+
+type workSessionErrorCtx struct {
+	AuthMethod         string   `json:"auth_method"`
+	RequiredScope      string   `json:"required_scope"`
+	TargetServers      []string `json:"target_servers"`
+	CurrentWorksession *string  `json:"current_worksession"`
+}
 
 var workSessionReasonMap = map[string]string{
 	WorkSessionRequired:         "no WorkSession selected for this shell",
@@ -50,7 +67,28 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 }
 
 func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS string) string {
-	return ""
+	var ws *string
+	if activeWS != "" {
+		ws = &activeWS
+	}
+	envelope := workSessionErrorJSON{
+		OK:        false,
+		Command:   operation,
+		ErrorCode: code,
+		Message:   fmt.Sprintf("%s requires an active WorkSession on this authentication.", operation),
+		Context: workSessionErrorCtx{
+			AuthMethod:         authMethod,
+			RequiredScope:      operation,
+			TargetServers:      []string{serverName},
+			CurrentWorksession: ws,
+		},
+		NextActions: workSessionNextActions(code, operation, serverName),
+	}
+	data, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return `{"ok":false,"error_code":"` + code + `"}`
+	}
+	return string(data)
 }
 
 func workSessionNextActions(code, operation, serverName string) []string {
