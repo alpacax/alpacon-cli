@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -196,6 +197,9 @@ Note: All flags must be placed before the server name.
 
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
+		cfg, _ := config.LoadConfig()
+		authMethod := config.GetAuthMethod(cfg)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -210,6 +214,7 @@ Note: All flags must be placed before the server name.
 			}
 			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
+			utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
 			execCmd.HandleCommandResult(result, err)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
@@ -234,6 +239,7 @@ Note: All flags must be placed before the server name.
 				})
 
 				if err != nil {
+					utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
 					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}
