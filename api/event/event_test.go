@@ -430,17 +430,21 @@ func strPtr(s string) *string { return &s }
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
 				Count:   1,
 				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
 			})
-		case r.Method == http.MethodPost:
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/"):
+			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
-		default:
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/"):
+			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(details)
+		default:
+			http.NotFound(w, r)
 		}
 	}))
 }
