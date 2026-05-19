@@ -102,7 +102,8 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 
 	if result.Status == "stuck" || result.Status == "error" {
 		if result.ErrorPhase != nil && *result.ErrorPhase != "" {
-			return "", fmt.Errorf("command failed: %s (status=%s)", *result.ErrorPhase, result.Status)
+			return "", fmt.Errorf("command failed: [%s] %s (status=%s)",
+				*result.ErrorPhase, DescribePhase(*result.ErrorPhase), result.Status)
 		}
 		return "", fmt.Errorf("command failed with status: %s", result.Status)
 	}

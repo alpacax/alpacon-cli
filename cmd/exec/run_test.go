@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -78,8 +79,10 @@ func TestRemoteCommandOutcome(t *testing.T) {
 				assert.Empty(t, stderrLine, "stderr line should be empty when no phase")
 				return
 			}
-			assert.Contains(t, stderrLine, "remote command failed:", "stderr should carry the phase preamble")
-			assert.Contains(t, stderrLine, tt.wantStderrPhrase, "stderr should include the error phase")
+			assert.Contains(t, stderrLine, fmt.Sprintf("[%s]", tt.wantStderrPhrase),
+				"stderr should carry the phase identifier in brackets for CI/grep")
+			assert.Contains(t, stderrLine, event.DescribePhase(tt.wantStderrPhrase),
+				"stderr should include the human-readable phase description")
 			assert.True(t, len(stderrLine) > 0 && stderrLine[len(stderrLine)-1] == '\n',
 				"stderr line should end with a newline")
 		})

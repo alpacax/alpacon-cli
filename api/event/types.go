@@ -7,6 +7,13 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 )
 
+// phaseDescriptions humanizes server-classified error_phase identifiers.
+var phaseDescriptions = map[string]string{
+	"agent_disconnected":              "agent never acknowledged the command (likely disconnected)",
+	"agent_timeout":                   "agent acknowledged the command but did not return a result in time",
+	"remote_command_exceeded_timeout": "remote command exceeded its execution timeout",
+}
+
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. Callers populate ExitCode from the server response;
 // RunCommand falls back to 1 when the server omits exit_code.
@@ -75,4 +82,13 @@ func (e *RemoteCommandError) Error() string {
 		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode)
 	}
 	return fmt.Sprintf("remote command exited with code %d", e.ExitCode)
+}
+
+// DescribePhase returns the human-readable description for an error_phase,
+// or the raw identifier when the phase is unknown.
+func DescribePhase(phase string) string {
+	if desc, ok := phaseDescriptions[phase]; ok {
+		return desc
+	}
+	return phase
 }

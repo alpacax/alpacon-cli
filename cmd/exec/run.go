@@ -78,7 +78,10 @@ func remoteCommandOutcome(result string, remoteErr *event.RemoteCommandError) (s
 		stdoutLine = result
 	}
 	if remoteErr.ErrorPhase != "" {
-		stderrLine = fmt.Sprintf("%s: remote command failed: %s\n", utils.Red("Error"), remoteErr.ErrorPhase)
+		stderrLine = fmt.Sprintf("%s: [%s] %s\n",
+			utils.Red("Error"),
+			remoteErr.ErrorPhase,
+			event.DescribePhase(remoteErr.ErrorPhase))
 	}
 	return stdoutLine, stderrLine, remoteErr.ExitCode
 }
