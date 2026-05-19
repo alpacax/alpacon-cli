@@ -33,6 +33,10 @@ var userCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		if err := alpaconClient.LoadCurrentUser(); err != nil {
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
+		}
+
 		if alpaconClient.Privileges == "general" {
 			utils.CliErrorWithExit("Insufficient permissions to create users. This action requires staff or superuser privileges. Please contact your administrator to request elevated permissions")
 		}
@@ -41,13 +45,14 @@ var userCreateCmd = &cobra.Command{
 
 		err = iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create the new user: %s.", err)
+			utils.CliErrorWithExit("Failed to create the new user: %s", err)
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
 	},
 }
 
+// Callers must call LoadCurrentUser first; ac.Privileges determines which fields are presented.
 func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	var userRequest iam.UserCreateRequest
 

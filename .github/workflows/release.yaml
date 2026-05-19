@@ -64,10 +64,32 @@ jobs:
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # GoReleaser needs write access to two repositories with a single
+      # token: this repo (to attach release assets) and homebrew-alpacon
+      # (to push the updated Formula commit into the tap). The built-in
+      # `secrets.GITHUB_TOKEN` is scoped to this repo only, so we mint a
+      # cross-repo installation token from the alpacax-release-publisher
+      # GitHub App instead.
+      - name: Generate App token
+        id: release-publisher-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            alpacon-cli
+            homebrew-alpacon
+          # Pin the minted installation token to the single permission
+          # GoReleaser actually needs. If the App's installation
+          # permissions are expanded in the future for another use case,
+          # this step continues to issue a contents-only token.
+          permission-contents: write
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
@@ -76,7 +98,7 @@ jobs:
           version: "~> v1"
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GORELEASER_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-publisher-token.outputs.token }}
 
       - name: Strip "v" prefix from tag
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV

@@ -82,6 +82,9 @@ Owner defaults to the currently logged-in user.`,
 		}
 
 		if owner == "" {
+			if err := alpaconClient.LoadCurrentUser(); err != nil {
+				utils.CliErrorWithExit("Failed to load current user: %s", err)
+			}
 			if alpaconClient.Username != "" {
 				owner = alpaconClient.Username
 			} else {

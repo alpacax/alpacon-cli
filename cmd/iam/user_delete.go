@@ -34,13 +34,17 @@ var userDeleteCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		if err := alpaconClient.LoadCurrentUser(); err != nil {
+			utils.CliErrorWithExit("Failed to load current user: %s", err)
+		}
+
 		if alpaconClient.Privileges == "general" {
 			utils.CliErrorWithExit("You do not have the permission to delete users.")
 		}
 
 		err = iam.DeleteUser(alpaconClient, userName)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to delete the user: %s.", err)
+			utils.CliErrorWithExit("Failed to delete the user: %s", err)
 		}
 
 		utils.CliSuccess("User deleted: %s", userName)
