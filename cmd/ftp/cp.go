@@ -10,6 +10,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -98,6 +99,9 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 		// clean on early usage errors.
 		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
 
+		cfg, _ := config.LoadConfig()
+		authMethod := config.GetAuthMethod(cfg)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s.\n\n"+
@@ -130,6 +134,7 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 				})
 
 				if err != nil {
+					utils.HandleWorkSessionError(err, "webftp", serverName, authMethod, workSessionID)
 					utils.CliErrorWithExit("Failed to upload to '%s': %s", dest, err)
 					return
 				}
@@ -158,6 +163,7 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 				})
 
 				if err != nil {
+					utils.HandleWorkSessionError(err, "webftp", serverName, authMethod, workSessionID)
 					wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 					utils.CliErrorWithExit("Failed to download from '%s': %s", wrappedSrc, err)
 					return
