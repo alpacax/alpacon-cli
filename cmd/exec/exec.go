@@ -2,6 +2,7 @@ package exec
 
 import (
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -71,6 +72,9 @@ Flags:
 
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
+		cfg, _ := config.LoadConfig()
+		authMethod := config.GetAuthMethod(cfg)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -79,6 +83,7 @@ Flags:
 
 		env := make(map[string]string)
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		HandleCommandResult(result, err)
 	},
 }
