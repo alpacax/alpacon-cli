@@ -30,6 +30,8 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		return nil, fmt.Errorf("configuration file not found or invalid: %v. Please run 'alpacon login' to configure your connection", err)
 	}
 
+	// Transport-level timeouts only — Client.Timeout would abort streaming
+	// callers like SendGetRequestForDownload mid-transfer.
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DialContext: (&net.Dialer{
