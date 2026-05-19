@@ -56,8 +56,8 @@ func HandleCommandResult(result string, err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			if remoteErr.Output != "" {
-				fmt.Println(remoteErr.Output)
+			if result != "" {
+				fmt.Println(result)
 			}
 			if remoteErr.ErrorPhase != "" {
 				fmt.Fprintf(os.Stderr, "%s: remote command failed: %s\n", utils.Red("Error"), remoteErr.ErrorPhase)

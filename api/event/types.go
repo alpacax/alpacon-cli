@@ -8,7 +8,8 @@ import (
 )
 
 // RemoteCommandError is returned when the remote command completed but exited
-// with a non-zero status. ExitCode falls back to 1 if the server omits it.
+// with a non-zero status. Callers populate ExitCode from the server response;
+// RunCommand falls back to 1 when the server omits exit_code.
 type RemoteCommandError struct {
 	Output     string
 	ExitCode   int
