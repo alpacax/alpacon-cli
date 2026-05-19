@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -28,30 +29,31 @@ type ErrorResponse struct {
 }
 
 func ParseErrorResponse(err error) (code, source string) {
-	if err == nil {
-		return "", ""
-	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		errStr := e.Error()
 
-	errStr := err.Error()
+		// Try JSON format: {"code": "...", "source": "..."}
+		start := strings.Index(errStr, "{")
+		if start != -1 {
+			var errorResp ErrorResponse
+			if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
+				return errorResp.Code, errorResp.Source
+			}
+		}
 
-	// Try JSON format: {"code": "...", "source": "..."}
-	start := strings.Index(errStr, "{")
-	if start != -1 {
-		var errorResp ErrorResponse
-		if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
-			return errorResp.Code, errorResp.Source
+		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
+		for _, part := range strings.Split(errStr, "; ") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "code: ") {
+				code = strings.TrimPrefix(part, "code: ")
+			} else if strings.HasPrefix(part, "source: ") {
+				source = strings.TrimPrefix(part, "source: ")
+			}
+		}
+		if code != "" {
+			return code, source
 		}
 	}
 
-	// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
-	for _, part := range strings.Split(errStr, "; ") {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "code: ") {
-			code = strings.TrimPrefix(part, "code: ")
-		} else if strings.HasPrefix(part, "source: ") {
-			source = strings.TrimPrefix(part, "source: ")
-		}
-	}
-
-	return code, source
+	return "", ""
 }
