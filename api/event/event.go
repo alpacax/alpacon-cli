@@ -2,7 +2,6 @@ package event
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"time"
@@ -101,28 +100,51 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	}
 
 	if result.Status == "stuck" || result.Status == "error" {
+		if result.ErrorPhase != nil && *result.ErrorPhase != "" {
+			return "", fmt.Errorf("command failed: [%s] %s (status=%s)",
+				*result.ErrorPhase, DescribePhase(*result.ErrorPhase), result.Status)
+		}
 		return "", fmt.Errorf("command failed with status: %s", result.Status)
 	}
 
 	if result.Success != nil && !*result.Success {
-		return result.Result, &RemoteCommandError{Output: result.Result}
+		// Trust the server contract: alpamon sets success=(exitCode==0), so a
+		// non-nil exit_code is propagated as-is.
+		exitCode := 1
+		if result.ExitCode != nil {
+			exitCode = *result.ExitCode
+		}
+		errorPhase := ""
+		if result.ErrorPhase != nil {
+			errorPhase = *result.ErrorPhase
+		}
+		return result.Result, &RemoteCommandError{
+			Output:     result.Result,
+			ExitCode:   exitCode,
+			ErrorPhase: errorPhase,
+		}
 	}
 
 	return result.Result, nil
 }
 
+// PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
 func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
+	return pollCommandExecution(ac, cmdId, 5*time.Minute, 1*time.Second)
+}
+
+func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration) (EventDetails, error) {
 	var response EventDetails
 
-	timer := time.NewTimer(5 * time.Minute)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-timer.C:
-			return response, errors.New("command execution timed out")
+			return response, &ClientTimeoutError{}
 		case <-ticker.C:
 			responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdId, nil))
 			if err != nil {
@@ -134,7 +156,7 @@ func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails,
 
 			switch response.Status {
 			case "queued", "scheduled", "delivered", "verifying", "running", "acked":
-				timer.Reset(5 * time.Minute)
+				timer.Reset(timeout)
 				continue
 			default:
 				return response, nil
