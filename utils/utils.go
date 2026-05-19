@@ -267,6 +267,29 @@ func SaveFile(fileName string, data []byte) error {
 	return nil
 }
 
+func SaveStream(fileName string, r io.Reader) (int64, error) {
+	dir := filepath.Dir(fileName)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return 0, fmt.Errorf("failed to create directories: %v", err)
+	}
+
+	file, err := os.Create(fileName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %v", err)
+	}
+
+	written, copyErr := io.Copy(file, r)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return written, fmt.Errorf("failed to write file: %v", copyErr)
+	}
+	if closeErr != nil {
+		return written, fmt.Errorf("failed to close file: %v", closeErr)
+	}
+
+	return written, nil
+}
+
 func DeleteFile(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -285,7 +308,14 @@ func DeleteFile(path string) error {
 
 func Zip(folderPath string) ([]byte, error) {
 	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
+	if err := ZipToWriter(folderPath, &buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func ZipToWriter(folderPath string, w io.Writer) error {
+	zipWriter := zip.NewWriter(w)
 	folderName := filepath.Base(folderPath)
 
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
@@ -325,16 +355,7 @@ func Zip(folderPath string) ([]byte, error) {
 		}
 
 		if !info.IsDir() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = file.Close() }()
-
-			_, err = io.Copy(writer, file)
-			if err != nil {
-				return err
-			}
+			return writeFileToZip(writer, path)
 		}
 
 		return nil
@@ -342,15 +363,29 @@ func Zip(folderPath string) ([]byte, error) {
 
 	if err != nil {
 		_ = zipWriter.Close()
-		return nil, err
+		return err
 	}
 
 	err = zipWriter.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buf.Bytes(), nil
+	return nil
+}
+
+func writeFileToZip(writer io.Writer, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(writer, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func Unzip(src string, dest string) error {

@@ -1,10 +1,17 @@
 package utils
 
 import (
+	"archive/zip"
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBoolPointerToString(t *testing.T) {
@@ -146,4 +153,46 @@ func TestRemovePrefixBeforeAPI(t *testing.T) {
 			assert.Equal(t, tt.expected, RemovePrefixBeforeAPI(tt.input))
 		})
 	}
+}
+
+func TestSaveStream(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
+
+	written, err := SaveStream(dest, strings.NewReader("hello world"))
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("hello world")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", string(content))
+}
+
+func TestZipToWriter(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(root, "file.txt"), []byte("hello"), 0644))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "nested"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "nested", "child.txt"), []byte("world"), 0644))
+
+	var buf bytes.Buffer
+	require.NoError(t, ZipToWriter(root, &buf))
+
+	reader, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	require.NoError(t, err)
+
+	contents := make(map[string]string)
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := file.Open()
+		require.NoError(t, err)
+		data, err := io.ReadAll(rc)
+		require.NoError(t, err)
+		require.NoError(t, rc.Close())
+		contents[file.Name] = string(data)
+	}
+
+	folderName := filepath.Base(root)
+	assert.Equal(t, "hello", contents[filepath.ToSlash(filepath.Join(folderName, "file.txt"))])
+	assert.Equal(t, "world", contents[filepath.ToSlash(filepath.Join(folderName, "nested", "child.txt"))])
 }
