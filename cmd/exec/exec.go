@@ -72,8 +72,7 @@ Flags:
 
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
 
-		cfg, _ := config.LoadConfig()
-		authMethod := config.GetAuthMethod(cfg)
+		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

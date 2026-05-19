@@ -45,7 +45,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
-			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "")
+			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login")
 			assert.Contains(t, got, tt.wantReason)
 			assert.Contains(t, got, tt.wantNext)
 			assert.Contains(t, got, "required scope")
@@ -57,7 +57,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 }
 
 func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
-	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "")
+	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token")
 	assert.Contains(t, got, "API token")
 	assert.NotContains(t, got, "(interactive)")
 }

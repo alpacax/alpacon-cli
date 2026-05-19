@@ -38,9 +38,7 @@ func isWorkSessionCode(code string) bool {
 	return ok
 }
 
-// HandleWorkSessionError checks whether err carries a WorkSession gate code.
-// If it does, it prints a diagnostic block (or JSON envelope if --output json) to
-// stderr and exits with ExitCodeWorkSessionDenied. For all other errors it is a no-op.
+// HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
 func HandleWorkSessionError(err error, operation, serverName, authMethod, activeWS string) {
 	if err == nil {
 		return
@@ -52,12 +50,12 @@ func HandleWorkSessionError(err error, operation, serverName, authMethod, active
 	if OutputFormat == OutputFormatJSON {
 		fmt.Fprintln(os.Stderr, buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS))
 	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod))
 	}
 	os.Exit(ExitCodeWorkSessionDenied)
 }
 
-func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS string) string {
+func buildWorkSessionDiagnostic(code, operation, serverName, authMethod string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -65,7 +63,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Error: %s requires an active WorkSession on this authentication.\n", operation)
+	fmt.Fprintf(&sb, "%s: %s requires an active WorkSession on this authentication.\n", Red("Error"), operation)
 	fmt.Fprintln(&sb)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "auth", authDisplay)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "reason", reason)

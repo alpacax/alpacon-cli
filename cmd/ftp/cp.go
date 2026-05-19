@@ -99,8 +99,7 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 		// clean on early usage errors.
 		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
 
-		cfg, _ := config.LoadConfig()
-		authMethod := config.GetAuthMethod(cfg)
+		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

@@ -202,6 +202,15 @@ func GetAuthMethod(cfg Config) string {
 	return "unknown"
 }
 
+// ResolveAuthMethod loads config and returns the auth method string.
+func ResolveAuthMethod() string {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return "unknown"
+	}
+	return GetAuthMethod(cfg)
+}
+
 // GetSmuxConfig returns a ready-to-use smux configuration.
 func GetSmuxConfig() *smux.Config {
 	config := smux.DefaultConfig()
