@@ -91,6 +91,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
+			if outputFormat == "" {
+				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
+			}
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:

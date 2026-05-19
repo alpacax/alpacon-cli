@@ -598,6 +598,11 @@ func TestParseRemoteExecArgs_OutputFlagMissingValue(t *testing.T) {
 	assert.NotEmpty(t, result.Err)
 }
 
+func TestParseRemoteExecArgs_OutputFlagEmptyValue(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--output="})
+	assert.NotEmpty(t, result.Err)
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string
