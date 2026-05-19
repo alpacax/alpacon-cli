@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,6 +176,129 @@ func TestExecuteBulkUpload(t *testing.T) {
 
 	assert.Equal(t, int32(2), s3Uploads.Load())
 	assert.Equal(t, []string{"id-1", "id-2"}, triggerReq.IDs)
+}
+
+func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
+	var activeUploads atomic.Int32
+	var maxActiveUploads atomic.Int32
+	bothUploadsStarted := make(chan struct{})
+	var closeBothStarted sync.Once
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+			responses := []UploadResponse{
+				{ID: "id-1", Name: "file1.txt", UploadURL: "http://" + r.Host + "/s3/file1"},
+				{ID: "id-2", Name: "file2.txt", UploadURL: "http://" + r.Host + "/s3/file2"},
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(responses)
+
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/s3/"):
+			current := activeUploads.Add(1)
+			for {
+				maxSeen := maxActiveUploads.Load()
+				if current <= maxSeen || maxActiveUploads.CompareAndSwap(maxSeen, current) {
+					break
+				}
+			}
+			if current >= 2 {
+				closeBothStarted.Do(func() { close(bothUploadsStarted) })
+			}
+			select {
+			case <-bothUploadsStarted:
+			case <-time.After(200 * time.Millisecond):
+			}
+			activeUploads.Add(-1)
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
+			w.WriteHeader(http.StatusCreated)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &BulkUploadRequest{
+		Names:  []string{"file1.txt", "file2.txt"},
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
+
+	err := executeBulkUpload(ac, request, files, sizes)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, maxActiveUploads.Load(), int32(2))
+}
+
+func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
+	var activePolls atomic.Int32
+	var maxActivePolls atomic.Int32
+	bothPollsStarted := make(chan struct{})
+	var closeBothStarted sync.Once
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+			responses := []UploadResponse{
+				{ID: "id-1", Name: "file1.txt"},
+				{ID: "id-2", Name: "file2.txt"},
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(responses)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
+			w.WriteHeader(http.StatusCreated)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			current := activePolls.Add(1)
+			for {
+				maxSeen := maxActivePolls.Load()
+				if current <= maxSeen || maxActivePolls.CompareAndSwap(maxSeen, current) {
+					break
+				}
+			}
+			if current >= 2 {
+				closeBothStarted.Do(func() { close(bothPollsStarted) })
+			}
+			select {
+			case <-bothPollsStarted:
+			case <-time.After(200 * time.Millisecond):
+			}
+			activePolls.Add(-1)
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &BulkUploadRequest{
+		Names:  []string{"file1.txt", "file2.txt"},
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
+
+	err := executeBulkUpload(ac, request, files, sizes)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, maxActivePolls.Load(), int32(2))
 }
 
 func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
@@ -606,11 +730,14 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := fetchFromURL(ts.Client(), ts.URL, 10)
+	dest := filepath.Join(t.TempDir(), "download.bin")
+	_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "client error: 403")
 	// Should fail on first attempt, not retry
 	assert.Equal(t, int32(1), requestCount.Load())
+	_, statErr := os.Stat(dest)
+	assert.True(t, os.IsNotExist(statErr))
 }
 
 func TestDownloadFile_InputValidation(t *testing.T) {
