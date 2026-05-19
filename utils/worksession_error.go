@@ -94,7 +94,7 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 		Context: workSessionErrorCtx{
 			AuthMethod:         authMethod,
 			RequiredScope:      operation,
-			TargetServers:      []string{serverName},
+			TargetServers:      targetServerList(serverName),
 			CurrentWorksession: ws,
 		},
 		NextActions: workSessionNextActions(code, operation, serverName),
@@ -106,9 +106,16 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 	return string(data)
 }
 
+func targetServerList(serverName string) []string {
+	if serverName == "" {
+		return nil
+	}
+	return []string{serverName}
+}
+
 func workSessionNextActions(code, operation, serverName string) []string {
 	createCmd := fmt.Sprintf(
-		`alpacon worksession create --scope %s --server %s --description "<intent>"`,
+		`alpacon worksession create --scope %s --server %s --purpose "<intent>"`,
 		operation, serverName,
 	)
 	switch code {
@@ -124,7 +131,12 @@ func workSessionNextActions(code, operation, serverName string) []string {
 		return []string{"alpacon worksession extend <ID>", createCmd}
 	case WorkSessionAssigneeMismatch:
 		return []string{"alpacon worksession use <ID>"}
-	default: // scope_not_allowed, server_not_allowed, not_usable
+	case WorkSessionNotUsable:
+		return []string{
+			"alpacon worksession list",
+			createCmd,
+		}
+	default: // scope_not_allowed, server_not_allowed
 		return []string{createCmd}
 	}
 }

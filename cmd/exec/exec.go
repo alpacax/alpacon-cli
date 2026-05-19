@@ -2,8 +2,8 @@ package exec
 
 import (
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
