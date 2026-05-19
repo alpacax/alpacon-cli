@@ -56,16 +56,29 @@ func HandleCommandResult(result string, err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			if result != "" {
-				fmt.Println(result)
+			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(result, remoteErr)
+			if stdoutLine != "" {
+				fmt.Println(stdoutLine)
 			}
-			if remoteErr.ErrorPhase != "" {
-				fmt.Fprintf(os.Stderr, "%s: remote command failed: %s\n", utils.Red("Error"), remoteErr.ErrorPhase)
+			if stderrLine != "" {
+				fmt.Fprint(os.Stderr, stderrLine)
 			}
-			os.Exit(remoteErr.ExitCode)
+			os.Exit(exitCode)
 		}
 		utils.CliErrorWithExit("%s", err)
 		return
 	}
 	fmt.Println(result)
+}
+
+// remoteCommandOutcome is the testable core of HandleCommandResult's
+// RemoteCommandError branch. stderrLine already includes its trailing newline.
+func remoteCommandOutcome(result string, remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {
+	if result != "" {
+		stdoutLine = result
+	}
+	if remoteErr.ErrorPhase != "" {
+		stderrLine = fmt.Sprintf("%s: remote command failed: %s\n", utils.Red("Error"), remoteErr.ErrorPhase)
+	}
+	return stdoutLine, stderrLine, remoteErr.ExitCode
 }
