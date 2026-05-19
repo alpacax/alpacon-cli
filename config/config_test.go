@@ -230,3 +230,38 @@ func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-A", got, "switching back should restore original active session")
 }
+
+func TestGetAuthMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      Config
+		expected string
+	}{
+		{
+			name:     "access token present → Browser login",
+			cfg:      Config{AccessToken: "eyJ..."},
+			expected: "Browser login",
+		},
+		{
+			name:     "token only → API token",
+			cfg:      Config{Token: "abc123"},
+			expected: "API token",
+		},
+		{
+			name:     "both tokens → AccessToken wins",
+			cfg:      Config{AccessToken: "eyJ...", Token: "abc123"},
+			expected: "Browser login",
+		},
+		{
+			name:     "no tokens → unknown",
+			cfg:      Config{},
+			expected: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, GetAuthMethod(tt.cfg))
+		})
+	}
+}
