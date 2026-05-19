@@ -126,6 +126,7 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 		_ = writer.Close()
 		return err
 	}
+	contentType := writer.FormDataContentType()
 	if err = writer.Close(); err != nil {
 		return err
 	}
@@ -145,7 +146,7 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 		requestURL = systemPackageEntryURL
 	}
 
-	_, err = ac.SendMultipartStreamRequest(requestURL, writer.FormDataContentType(), requestBody, size)
+	_, err = ac.SendMultipartStreamRequest(requestURL, contentType, requestBody, size)
 	if err != nil {
 		return err
 	}

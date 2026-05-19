@@ -130,7 +130,7 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	}
 	wg.Wait()
 
-	failures := make([]string, 0)
+	var failures []string
 	for _, failure := range failuresByIndex {
 		if failure != "" {
 			failures = append(failures, failure)
@@ -425,10 +425,10 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		if err != nil {
 			return err
 		}
+		zipFiles[i] = zipFile
 		names[i] = filepath.Base(folderPath) + ".zip"
 		readers[i] = readOnly{zipFile}
 		sizes[i] = size
-		zipFiles[i] = zipFile
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
@@ -623,11 +623,11 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		name = "download.zip"
 	}
 	zipPath := filepath.Join(dest, filepath.Base(name))
+	defer func() { _ = utils.DeleteFile(zipPath) }()
 	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, 100)
 	if err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
-	defer func() { _ = utils.DeleteFile(zipPath) }()
 
 	if err := utils.Unzip(zipPath, dest); err != nil {
 		return fmt.Errorf("failed to extract downloaded archive: %w", err)
