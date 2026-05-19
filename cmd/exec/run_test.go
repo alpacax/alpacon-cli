@@ -1,12 +1,47 @@
 package exec
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestClientTimeoutLine(t *testing.T) {
+	line := clientTimeoutLine()
+	assert.Contains(t, line, "[client_timeout]", "stderr should carry the phase id in brackets")
+	assert.Contains(t, line, event.DescribePhase("client_timeout"),
+		"stderr should include the human-readable description")
+	assert.True(t, len(line) > 0 && line[len(line)-1] == '\n', "line should end with newline")
+}
+
+func TestAsPhasedError(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantOk  bool
+		wantNil bool
+	}{
+		{name: "nil_returns_false", err: nil, wantOk: false, wantNil: true},
+		{name: "remote_command_error", err: &event.RemoteCommandError{ExitCode: 23}, wantOk: true},
+		{name: "client_timeout", err: &event.ClientTimeoutError{}, wantOk: true},
+		{name: "wrapped_remote_command_error", err: fmt.Errorf("wrap: %w", &event.RemoteCommandError{ExitCode: 1}), wantOk: true},
+		{name: "wrapped_client_timeout", err: fmt.Errorf("wrap: %w", &event.ClientTimeoutError{}), wantOk: true},
+		{name: "plain_error", err: errors.New("nope"), wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := asPhasedError(tt.err)
+			assert.Equal(t, tt.wantOk, ok)
+			if tt.wantNil {
+				assert.Nil(t, got)
+			}
+		})
+	}
+}
 
 func TestRemoteCommandOutcome(t *testing.T) {
 	tests := []struct {

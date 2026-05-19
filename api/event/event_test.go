@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -426,6 +427,36 @@ func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
 func boolPtr(b bool) *bool    { return &b }
 func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
+
+func TestPollCommandExecution_ClientTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always fail GETs so SendGetRequest returns an error and the poll
+		// loop never resets its timer.
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond)
+	require.Error(t, err)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"timer expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
+}
+
+func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+}
 
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()

@@ -18,9 +18,8 @@ import (
 // to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
 	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
-	var remoteErr *event.RemoteCommandError
-	if errors.As(err, &remoteErr) {
-		return result, remoteErr
+	if phased, ok := asPhasedError(err); ok {
+		return result, phased
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -40,9 +39,9 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 				return err
 			},
 		})
-		// RetryOperation may return a RemoteCommandError; re-check after HandleCommonErrors.
-		if errors.As(err, &remoteErr) {
-			return result, remoteErr
+		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.
+		if phased, ok := asPhasedError(err); ok {
+			return result, phased
 		}
 		if err != nil {
 			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
@@ -65,10 +64,37 @@ func HandleCommandResult(result string, err error) {
 			}
 			os.Exit(exitCode)
 		}
+		var clientTimeout *event.ClientTimeoutError
+		if errors.As(err, &clientTimeout) {
+			fmt.Fprint(os.Stderr, clientTimeoutLine())
+			os.Exit(1)
+		}
 		utils.CliErrorWithExit("%s", err)
 		return
 	}
 	fmt.Println(result)
+}
+
+// asPhasedError unwraps err to a RemoteCommandError or ClientTimeoutError.
+func asPhasedError(err error) (error, bool) {
+	if err == nil {
+		return nil, false
+	}
+	var remoteErr *event.RemoteCommandError
+	if errors.As(err, &remoteErr) {
+		return remoteErr, true
+	}
+	var clientTimeout *event.ClientTimeoutError
+	if errors.As(err, &clientTimeout) {
+		return clientTimeout, true
+	}
+	return nil, false
+}
+
+// clientTimeoutLine renders the stderr line for ClientTimeoutError (with newline).
+func clientTimeoutLine() string {
+	const phase = "client_timeout"
+	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
 // remoteCommandOutcome is the testable core of HandleCommandResult's

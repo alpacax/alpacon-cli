@@ -8,10 +8,12 @@ import (
 )
 
 // phaseDescriptions humanizes server-classified error_phase identifiers.
+// "client_timeout" is CLI-side only; the server does not emit it.
 var phaseDescriptions = map[string]string{
 	"agent_disconnected":              "agent never acknowledged the command (likely disconnected)",
 	"agent_timeout":                   "agent acknowledged the command but did not return a result in time",
 	"remote_command_exceeded_timeout": "remote command exceeded its execution timeout",
+	"client_timeout":                  "CLI gave up waiting for the server to report a result",
 }
 
 // RemoteCommandError is returned when the remote command completed but exited
@@ -22,6 +24,10 @@ type RemoteCommandError struct {
 	ExitCode   int
 	ErrorPhase string
 }
+
+// ClientTimeoutError is returned when the CLI gave up polling for the command
+// result before the server reported a terminal status.
+type ClientTimeoutError struct{}
 
 type EventAttributes struct {
 	Server      string `json:"server"`
@@ -82,6 +88,10 @@ func (e *RemoteCommandError) Error() string {
 		return fmt.Sprintf("remote command failed (%s, exit %d)", e.ErrorPhase, e.ExitCode)
 	}
 	return fmt.Sprintf("remote command exited with code %d", e.ExitCode)
+}
+
+func (*ClientTimeoutError) Error() string {
+	return "CLI timed out waiting for command result"
 }
 
 // DescribePhase returns the human-readable description for an error_phase,
