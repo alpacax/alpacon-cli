@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
@@ -102,6 +103,7 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 		}
 
 		httpClient := &http.Client{
+			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					MinVersion:         tls.VersionTLS12,

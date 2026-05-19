@@ -35,6 +35,8 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 				MinVersion:         tls.VersionTLS12,
 				InsecureSkipVerify: validConfig.Insecure,
 			},
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
 		},
 	}
 
