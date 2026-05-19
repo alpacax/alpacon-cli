@@ -132,6 +132,19 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 	return req, nil
 }
 
+// readJSONResponse validates auth, Content-Type, and reads the body.
+// Status-code enforcement is left to the caller.
+func readJSONResponse(resp *http.Response) ([]byte, error) {
+	if err := checkAuthStatus(resp.StatusCode); err != nil {
+		return nil, err
+	}
+	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
+		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
@@ -139,17 +152,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkAuthStatus(resp.StatusCode); err != nil {
-		return nil, err
-	}
-
-	responseContentType := resp.Header.Get("Content-Type")
-	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
-	if responseContentType != "" && !strings.Contains(responseContentType, "application/json") {
-		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, responseContentType)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readJSONResponse(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -229,17 +232,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if err := checkAuthStatus(resp.StatusCode); err != nil {
-		return nil, err
-	}
-
-	responseContentType := resp.Header.Get("Content-Type")
-	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
-	if responseContentType != "" && !strings.Contains(responseContentType, "application/json") {
-		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, responseContentType)
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := readJSONResponse(resp)
 	if err != nil {
 		return nil, err
 	}
