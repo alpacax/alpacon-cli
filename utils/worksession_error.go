@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -37,8 +38,24 @@ func isWorkSessionCode(code string) bool {
 	return ok
 }
 
-// HandleWorkSessionError — placeholder until Task 6
-func HandleWorkSessionError(err error, operation, serverName, authMethod, activeWS string) {}
+// HandleWorkSessionError checks whether err carries a WorkSession gate code.
+// If it does, it prints a diagnostic block (or JSON envelope if --output json) to
+// stderr and exits with ExitCodeWorkSessionDenied. For all other errors it is a no-op.
+func HandleWorkSessionError(err error, operation, serverName, authMethod, activeWS string) {
+	if err == nil {
+		return
+	}
+	code, _ := ParseErrorResponse(err)
+	if !isWorkSessionCode(code) {
+		return
+	}
+	if OutputFormat == OutputFormatJSON {
+		fmt.Fprintln(os.Stderr, buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS))
+	} else {
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
+	}
+	os.Exit(ExitCodeWorkSessionDenied)
+}
 
 func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS string) string {
 	reason := workSessionReasonMap[code]

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -96,4 +97,16 @@ func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
 	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
+}
+
+func TestHandleWorkSessionError_NoOp(t *testing.T) {
+	// Non-WorkSession errors must not trigger any exit — just return.
+	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
+	err := errors.New("some unrelated error")
+	HandleWorkSessionError(err, "websh", "srv", "Browser login", "")
+	// reaching here means no exit — test passes
+}
+
+func TestHandleWorkSessionError_NilError(t *testing.T) {
+	HandleWorkSessionError(nil, "websh", "srv", "Browser login", "")
 }
