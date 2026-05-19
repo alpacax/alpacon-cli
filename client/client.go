@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -31,6 +32,10 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
 			TLSClientConfig: &tls.Config{
 				MinVersion:         tls.VersionTLS12,
 				InsecureSkipVerify: validConfig.Insecure,

@@ -3,6 +3,7 @@ package cmd
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -105,10 +106,15 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 		httpClient := &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
 				TLSClientConfig: &tls.Config{
 					MinVersion:         tls.VersionTLS12,
 					InsecureSkipVerify: insecure,
 				},
+				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		}
 
