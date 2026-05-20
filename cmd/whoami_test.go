@@ -25,7 +25,7 @@ func TestGetAuthMethod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := config.Config{Token: tt.token, AccessToken: tt.access}
-			assert.Equal(t, tt.expected, getAuthMethod(cfg))
+			assert.Equal(t, tt.expected, config.GetAuthMethod(cfg))
 		})
 	}
 }

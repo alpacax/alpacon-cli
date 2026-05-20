@@ -46,7 +46,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		output := whoamiOutput{
 			WorkspaceName: cfg.WorkspaceName,
 			WorkspaceURL:  cfg.WorkspaceURL,
-			AuthMethod:    getAuthMethod(cfg),
+			AuthMethod:    config.GetAuthMethod(cfg),
 			ExpiresAt:     getExpiresAt(cfg),
 		}
 
@@ -85,16 +85,6 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		warnIfExpiringSoon(cfg)
 		printWhoami(output)
 	},
-}
-
-func getAuthMethod(cfg config.Config) string {
-	if cfg.AccessToken != "" {
-		return "Browser login"
-	}
-	if cfg.Token != "" {
-		return "API token"
-	}
-	return "unknown"
 }
 
 func getExpiresAt(cfg config.Config) string {

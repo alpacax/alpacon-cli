@@ -3,6 +3,7 @@ package exec
 import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +30,10 @@ Flags:
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
-                                'alpacon work-session use'.`,
+                                'alpacon work-session use'.
+
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps
@@ -69,7 +73,16 @@ Flags:
 			return
 		}
 
+		if parsed.OutputFormat != "" {
+			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
+				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+			}
+			utils.OutputFormat = parsed.OutputFormat
+		}
+
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
+
+		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -79,6 +92,7 @@ Flags:
 
 		env := make(map[string]string)
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		HandleCommandResult(result, err)
 	},
 }
