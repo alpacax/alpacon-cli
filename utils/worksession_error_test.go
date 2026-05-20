@@ -81,6 +81,7 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 			assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 			assert.False(t, envelope.OK)
 			assert.Equal(t, code, envelope.ErrorCode)
+			assert.Equal(t, workSessionReasonMap[code], envelope.Reason)
 			assert.Equal(t, "command", envelope.Context.RequiredScope)
 			assert.Equal(t, []string{"srv-1"}, envelope.Context.TargetServers)
 			assert.Nil(t, envelope.Context.CurrentWorksession)
