@@ -10,6 +10,7 @@ import (
 
 type workSessionErrorJSON struct {
 	OK          bool                `json:"ok"`
+	ExitCode    int                 `json:"exit_code"`
 	ErrorCode   string              `json:"error_code"`
 	Message     string              `json:"message"`
 	Reason      string              `json:"reason"`
@@ -89,6 +90,7 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 	}
 	envelope := workSessionErrorJSON{
 		OK:        false,
+		ExitCode:  ExitCodeWorkSessionDenied,
 		ErrorCode: code,
 		Message:   fmt.Sprintf("%s requires an active WorkSession on this authentication.", operation),
 		Reason:    workSessionReasonMap[code],
