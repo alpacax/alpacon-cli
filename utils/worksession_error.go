@@ -51,12 +51,12 @@ func HandleWorkSessionError(err error, operation, serverName, authMethod, active
 	if OutputFormat == OutputFormatJSON {
 		fmt.Fprintln(os.Stderr, buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS))
 	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod))
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
 	}
 	os.Exit(ExitCodeWorkSessionDenied)
 }
 
-func buildWorkSessionDiagnostic(code, operation, serverName, authMethod string) string {
+func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -74,7 +74,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod string) 
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
-	for _, action := range workSessionNextActions(code, operation, serverName) {
+	for _, action := range workSessionNextActions(code, operation, serverName, activeWS) {
 		fmt.Fprintf(&sb, "  %s\n", action)
 	}
 	fmt.Fprintln(&sb)
@@ -98,7 +98,7 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 			TargetServers:      targetServerList(serverName),
 			CurrentWorksession: ws,
 		},
-		NextActions: workSessionNextActions(code, operation, serverName),
+		NextActions: workSessionNextActions(code, operation, serverName, activeWS),
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -117,7 +117,7 @@ func targetServerList(serverName string) []string {
 	return []string{serverName}
 }
 
-func workSessionNextActions(code, operation, serverName string) []string {
+func workSessionNextActions(code, operation, serverName, activeWS string) []string {
 	createCmd := fmt.Sprintf(
 		`alpacon work-session create --scope %s --server %s --purpose "<intent>"`,
 		operation, serverName,
@@ -132,7 +132,11 @@ func workSessionNextActions(code, operation, serverName string) []string {
 	case WorkSessionNotActive:
 		return []string{"alpacon work-session current"}
 	case WorkSessionExpired:
-		return []string{"alpacon work-session extend <ID>", createCmd}
+		extendCmd := "alpacon work-session extend <ID>"
+		if activeWS != "" {
+			extendCmd = fmt.Sprintf("alpacon work-session extend %s", activeWS)
+		}
+		return []string{extendCmd, createCmd}
 	case WorkSessionAssigneeMismatch:
 		return []string{"alpacon work-session use <ID>"}
 	case WorkSessionNotUsable:

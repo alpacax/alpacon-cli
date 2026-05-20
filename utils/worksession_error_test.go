@@ -45,7 +45,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
-			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login")
+			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "")
 			assert.Contains(t, got, tt.wantReason)
 			assert.Contains(t, got, tt.wantNext)
 			assert.Contains(t, got, "required scope")
@@ -57,7 +57,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 }
 
 func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
-	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token")
+	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "")
 	assert.Contains(t, got, "API token")
 	assert.NotContains(t, got, "(interactive)")
 }
@@ -97,6 +97,30 @@ func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
 	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
+	// Expired case: <ID> placeholder must be substituted with the known active UUID.
+	assert.Contains(t, envelope.NextActions, "alpacon work-session extend abc-123-uuid")
+	for _, action := range envelope.NextActions {
+		assert.NotContains(t, action, "<ID>")
+	}
+}
+
+func TestBuildWorkSessionJSON_ExpiredWithoutActiveWS(t *testing.T) {
+	// When activeWS is unknown, the placeholder must remain.
+	got := buildWorkSessionJSON(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
+
+	var envelope workSessionErrorJSON
+	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
+	assert.Contains(t, envelope.NextActions, "alpacon work-session extend <ID>")
+}
+
+func TestBuildWorkSessionJSON_RequiredKeepsPlaceholder(t *testing.T) {
+	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
+	// so the placeholder must NOT be substituted even when activeWS is known.
+	got := buildWorkSessionJSON(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
+
+	var envelope workSessionErrorJSON
+	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
+	assert.Contains(t, envelope.NextActions, "alpacon work-session use <ID>")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
