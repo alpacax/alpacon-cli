@@ -78,7 +78,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action)
 	}
 	fmt.Fprintln(&sb)
-	fmt.Fprint(&sb, "Note: ServiceToken or personal API token (source != login) skip this requirement.")
+	fmt.Fprint(&sb, "Note: Tokens issued by Alpacon (service or personal API token) bypass this check.")
 	return sb.String()
 }
 
