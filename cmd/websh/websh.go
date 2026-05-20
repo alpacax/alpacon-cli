@@ -117,7 +117,10 @@ to ensure it is interpreted correctly on the remote server.
 
 Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
-  alpacon websh server 'echo hello;world'`,
+  alpacon websh server 'echo hello;world'
+
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
 

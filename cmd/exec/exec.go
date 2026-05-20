@@ -30,7 +30,10 @@ Flags:
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
-                                'alpacon work-session use'.`,
+                                'alpacon work-session use'.
+
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps

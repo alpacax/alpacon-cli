@@ -37,6 +37,17 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - List commands should project API responses into `*Attributes` structs for `utils.PrintTable()`
 - Comments must be written in English
 
+## Exit codes
+
+`alpacon` uses a stable exit code convention:
+
+- `0` success
+- `1` general error
+- `2` usage error
+- `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
+
+Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
+
 ## Writing conventions
 
 - Use **sentence case** for all headings and descriptions (capitalize only the first word and proper nouns)

@@ -598,6 +598,17 @@ The test script will automatically:
 
 **Note:** Make sure you have access to the specified server and the necessary permissions for the test operations before running the script.
 
+## Exit codes
+
+`alpacon` follows a stable exit code convention so that scripts, CI pipelines, and AI agents can branch on outcomes:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Success |
+| `1`  | General error (network failure, server error, etc.) |
+| `2`  | Usage error (invalid flags or arguments) |
+| `3`  | WorkSession gate denied—the active session does not authorize this action |
+
 ## Contributing
 
 We welcome contributions! Here's how to get started:
