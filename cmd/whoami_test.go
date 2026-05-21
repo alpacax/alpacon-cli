@@ -163,13 +163,13 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 
 			// Contract: both keys must always be present in the JSON output,
 			// so callers can rely on them without checking for missing fields.
-			_, hasRequired := got["worksession_required"]
-			_, hasActive := got["active_worksession"]
-			assert.True(t, hasRequired, "worksession_required key must always be present")
-			assert.True(t, hasActive, "active_worksession key must always be present")
+			_, hasRequired := got["work_session_required"]
+			_, hasActive := got["active_work_session"]
+			assert.True(t, hasRequired, "work_session_required key must always be present")
+			assert.True(t, hasActive, "active_work_session key must always be present")
 
-			assert.JSONEq(t, strconv.FormatBool(tt.worksessionRequired), string(got["worksession_required"]))
-			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_worksession"]))
+			assert.JSONEq(t, strconv.FormatBool(tt.worksessionRequired), string(got["work_session_required"]))
+			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_work_session"]))
 		})
 	}
 }

@@ -36,8 +36,8 @@ type whoamiOutput struct {
 	HomeDirectory       string                    `json:"home_directory,omitempty"`
 	Role                string                    `json:"role,omitempty"`
 	Groups              []iam.GroupMembership     `json:"groups,omitempty"`
-	WorksessionRequired bool                      `json:"worksession_required"`
-	ActiveWorksession   *activeWorkSessionSummary `json:"active_worksession"`
+	WorksessionRequired bool                      `json:"work_session_required"`
+	ActiveWorksession   *activeWorkSessionSummary `json:"active_work_session"`
 }
 
 var whoamiCmd = &cobra.Command{
