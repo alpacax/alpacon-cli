@@ -55,12 +55,12 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		}
 
 		output := whoamiOutput{
-			WorkspaceName: cfg.WorkspaceName,
-			WorkspaceURL:  cfg.WorkspaceURL,
-			AuthMethod:    config.GetAuthMethod(cfg),
-			ExpiresAt:     getExpiresAt(cfg),
+			WorkspaceName:       cfg.WorkspaceName,
+			WorkspaceURL:        cfg.WorkspaceURL,
+			AuthMethod:          config.GetAuthMethod(cfg),
+			ExpiresAt:           getExpiresAt(cfg),
+			WorksessionRequired: isWorksessionRequired(cfg),
 		}
-		output.WorksessionRequired = isWorksessionRequired(cfg)
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -94,8 +94,12 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			output.Groups = groups
 		}
 
-		_, ws, wsErr := wscmd.RunCurrent(ac)
-		if wsErr == nil && ws != nil {
+		uuid, ws, wsErr := wscmd.RunCurrent(ac)
+		if wsErr != nil {
+			if uuid != "" {
+				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
+			}
+		} else if ws != nil {
 			serverNames := make([]string, len(ws.Servers))
 			for i, srv := range ws.Servers {
 				serverNames[i] = srv.Name
