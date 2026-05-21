@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +31,7 @@ type WebshArgs struct {
 	Share         bool
 	ReadOnly      bool
 	WorkSessionID string
+	OutputFormat  string
 	Env           map[string]string
 }
 
@@ -86,6 +88,13 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			}
 			res.WorkSessionID = ws
 			i = newI
+		case args[i] == "--output" || strings.HasPrefix(args[i], "--output="):
+			val, newI := extractValue(args, i)
+			if val == "" {
+				return res, fmt.Errorf("--output requires a value (table|json)")
+			}
+			res.OutputFormat = val
+			i = newI
 		default:
 			if res.ServerName == "" {
 				res.ServerName = args[i]
@@ -108,7 +117,10 @@ to ensure it is interpreted correctly on the remote server.
 
 Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
-  alpacon websh server 'echo hello;world'`,
+  alpacon websh server 'echo hello;world'
+
+Exit code 3 indicates a WorkSession gate denial; run with --output json to
+parse a machine-readable diagnostic on stderr.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
 
@@ -194,7 +206,16 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
+		if parsed.OutputFormat != "" {
+			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
+				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+			}
+			utils.OutputFormat = parsed.OutputFormat
+		}
+
 		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
+
+		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -210,6 +231,7 @@ Note: All flags must be placed before the server name.
 			}
 			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
+			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
 			execCmd.HandleCommandResult(result, err)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
@@ -234,6 +256,7 @@ Note: All flags must be placed before the server name.
 				})
 
 				if err != nil {
+					utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
 					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 				}
 			}

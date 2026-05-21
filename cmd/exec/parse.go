@@ -11,6 +11,7 @@ type RemoteExecArgs struct {
 	Username      string
 	Groupname     string
 	WorkSessionID string
+	OutputFormat  string
 	Server        string
 	Command       string
 	ShowHelp      bool
@@ -32,8 +33,8 @@ type RemoteExecArgs struct {
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
-		username, groupname, workSessionID, server string
-		commandParts                               []string
+		username, groupname, workSessionID, outputFormat, server string
+		commandParts                                              []string
 	)
 
 	for i := 0; i < len(args); i++ {
@@ -84,6 +85,15 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
+		case arg == "--output" || strings.HasPrefix(arg, "--output="):
+			var errMsg string
+			outputFormat, i, errMsg = extractFlagValue(args, i, "--output")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			if outputFormat == "" {
+				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
+			}
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
@@ -104,6 +114,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		Username:      username,
 		Groupname:     groupname,
 		WorkSessionID: workSessionID,
+		OutputFormat:  outputFormat,
 		Server:        server,
 		Command:       ShellJoin(commandParts),
 	}
