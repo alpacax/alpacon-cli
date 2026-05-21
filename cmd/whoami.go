@@ -94,22 +94,26 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			output.Groups = groups
 		}
 
-		uuid, ws, wsErr := wscmd.RunCurrent(ac)
-		if wsErr != nil {
-			if uuid != "" {
+		if output.WorksessionRequired {
+			_, ws, wsErr := wscmd.RunCurrent(ac)
+			if wsErr != nil {
 				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
-			}
-		} else if ws != nil {
-			serverNames := make([]string, len(ws.Servers))
-			for i, srv := range ws.Servers {
-				serverNames[i] = srv.Name
-			}
-			output.ActiveWorksession = &activeWorkSessionSummary{
-				ID:        ws.ID,
-				Status:    ws.Status,
-				Scopes:    ws.Scopes,
-				Servers:   serverNames,
-				ExpiresAt: ws.ExpiresAt.Local().Format("2006-01-02 15:04"),
+			} else if ws != nil {
+				serverNames := make([]string, len(ws.Servers))
+				for i, srv := range ws.Servers {
+					serverNames[i] = srv.Name
+				}
+				expiresAt := ""
+				if !ws.ExpiresAt.IsZero() {
+					expiresAt = ws.ExpiresAt.Local().Format("2006-01-02 15:04")
+				}
+				output.ActiveWorksession = &activeWorkSessionSummary{
+					ID:        ws.ID,
+					Status:    ws.Status,
+					Scopes:    ws.Scopes,
+					Servers:   serverNames,
+					ExpiresAt: expiresAt,
+				}
 			}
 		}
 
@@ -219,7 +223,7 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 		return "no"
 	}
 	if active == nil {
-		return "yes — run 'alpacon worksession list' to see available sessions"
+		return "yes — run 'alpacon work-session list' to see available sessions"
 	}
 	return fmt.Sprintf("yes — active session %s (%s)", active.ID, active.Status)
 }

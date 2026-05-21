@@ -116,7 +116,7 @@ func TestFormatGroups(t *testing.T) {
 	}
 }
 
-func TestPrintWhoamiJSON_PrefightFields(t *testing.T) {
+func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 	output := whoamiOutput{
 		WorksessionRequired: true,
 		ActiveWorksession:   nil,
