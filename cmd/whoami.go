@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
+	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -24,17 +24,17 @@ type activeWorkSessionSummary struct {
 }
 
 type whoamiOutput struct {
-	Username      string                `json:"username,omitempty"`
-	Email         string                `json:"email,omitempty"`
-	Phone         string                `json:"phone,omitempty"`
-	WorkspaceName string                `json:"workspace_name"`
-	WorkspaceURL  string                `json:"workspace_url"`
-	AuthMethod    string                `json:"auth_method"`
-	ExpiresAt     string                `json:"expires_at,omitempty"`
-	UID           int                   `json:"uid,omitempty"`
-	Shell         string                `json:"shell,omitempty"`
-	HomeDirectory string                `json:"home_directory,omitempty"`
-	Role          string                `json:"role,omitempty"`
+	Username            string                    `json:"username,omitempty"`
+	Email               string                    `json:"email,omitempty"`
+	Phone               string                    `json:"phone,omitempty"`
+	WorkspaceName       string                    `json:"workspace_name"`
+	WorkspaceURL        string                    `json:"workspace_url"`
+	AuthMethod          string                    `json:"auth_method"`
+	ExpiresAt           string                    `json:"expires_at,omitempty"`
+	UID                 int                       `json:"uid,omitempty"`
+	Shell               string                    `json:"shell,omitempty"`
+	HomeDirectory       string                    `json:"home_directory,omitempty"`
+	Role                string                    `json:"role,omitempty"`
 	Groups              []iam.GroupMembership     `json:"groups,omitempty"`
 	WorksessionRequired bool                      `json:"worksession_required"`
 	ActiveWorksession   *activeWorkSessionSummary `json:"active_worksession"`
