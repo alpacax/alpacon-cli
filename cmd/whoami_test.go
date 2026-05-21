@@ -114,3 +114,33 @@ func TestFormatGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestIsWorksessionRequired(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want bool
+	}{
+		{
+			name: "AccessToken → required",
+			cfg:  config.Config{AccessToken: "eyJ..."},
+			want: true,
+		},
+		{
+			name: "Token only → not required",
+			cfg:  config.Config{Token: "abc123"},
+			want: false,
+		},
+		{
+			name: "no tokens → not required",
+			cfg:  config.Config{},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isWorksessionRequired(tt.cfg))
+		})
+	}
+}

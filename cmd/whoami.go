@@ -108,6 +108,10 @@ func isAPITokenAuth(cfg config.Config) bool {
 	return cfg.Token != "" && cfg.AccessToken == ""
 }
 
+func isWorksessionRequired(cfg config.Config) bool {
+	return cfg.AccessToken != ""
+}
+
 func warnIfExpiringSoon(cfg config.Config) {
 	if !isAPITokenAuth(cfg) {
 		return
