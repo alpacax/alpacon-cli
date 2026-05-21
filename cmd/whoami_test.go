@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -113,6 +114,17 @@ func TestFormatGroups(t *testing.T) {
 			assert.Equal(t, tt.expected, formatGroups(tt.groups))
 		})
 	}
+}
+
+func TestPrintWhoamiJSON_PrefightFields(t *testing.T) {
+	output := whoamiOutput{
+		WorksessionRequired: true,
+		ActiveWorksession:   nil,
+	}
+	body, err := json.Marshal(output)
+	assert.NoError(t, err)
+	assert.Contains(t, string(body), `"worksession_required":true`)
+	assert.Contains(t, string(body), `"active_worksession":null`)
 }
 
 func TestIsWorksessionRequired(t *testing.T) {
