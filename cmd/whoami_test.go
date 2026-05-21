@@ -117,6 +117,40 @@ func TestFormatGroups(t *testing.T) {
 	}
 }
 
+func TestFormatWSRequired(t *testing.T) {
+	tests := []struct {
+		name     string
+		required bool
+		active   *activeWorkSessionSummary
+		expected string
+	}{
+		{
+			name:     "not required",
+			required: false,
+			active:   nil,
+			expected: "no",
+		},
+		{
+			name:     "required, no active session",
+			required: true,
+			active:   nil,
+			expected: "yes—run 'alpacon work-session list' to see available sessions",
+		},
+		{
+			name:     "required, with active session",
+			required: true,
+			active:   &activeWorkSessionSummary{ID: "ws-123", Status: "active"},
+			expected: "yes—active session ws-123 (active)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, formatWSRequired(tt.required, tt.active))
+		})
+	}
+}
+
 func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 	tests := []struct {
 		name                string
