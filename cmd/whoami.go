@@ -105,7 +105,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 				}
 				expiresAt := ""
 				if !ws.ExpiresAt.IsZero() {
-					expiresAt = ws.ExpiresAt.Local().Format("2006-01-02 15:04")
+					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 				}
 				output.ActiveWorksession = &activeWorkSessionSummary{
 					ID:        ws.ID,
