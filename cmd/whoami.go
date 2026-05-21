@@ -139,7 +139,7 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
-func isAPITokenAuth(cfg config.Config) bool {
+func isTokenAuth(cfg config.Config) bool {
 	return cfg.Token != "" && cfg.AccessToken == ""
 }
 
@@ -148,7 +148,7 @@ func isWorksessionRequired(cfg config.Config) bool {
 }
 
 func warnIfExpiringSoon(cfg config.Config) {
-	if !isAPITokenAuth(cfg) {
+	if !isTokenAuth(cfg) {
 		return
 	}
 
