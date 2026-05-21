@@ -1,6 +1,9 @@
 package exec
 
 import (
+	"fmt"
+
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -91,6 +94,19 @@ parse a machine-readable diagnostic on stderr.`,
 		}
 
 		env := make(map[string]string)
+
+		if parsed.Detach {
+			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+			if err != nil {
+				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
+				return
+			}
+			line1, line2 := detachResultLines(resp.ID)
+			fmt.Println(line1)
+			fmt.Println(line2)
+			return
+		}
+
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		HandleCommandResult(result, err)
