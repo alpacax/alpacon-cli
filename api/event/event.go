@@ -87,6 +87,9 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	if err = json.Unmarshal(respBody, &cmdResponse); err != nil {
 		return CommandResponse{}, err
 	}
+	if len(cmdResponse) == 0 {
+		return CommandResponse{}, fmt.Errorf("server returned empty command list")
+	}
 	return cmdResponse[0], nil
 }
 
@@ -101,7 +104,7 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 		return "", err
 	}
 
-	if result.Status == "stuck" || result.Status == "error" {
+	if result.Status == "stuck" || result.Status == "error" || result.Status == "cancelled" {
 		if result.ErrorPhase != nil && *result.ErrorPhase != "" {
 			return "", fmt.Errorf("command failed: [%s] %s (status=%s)",
 				*result.ErrorPhase, DescribePhase(*result.ErrorPhase), result.Status)
@@ -147,6 +150,7 @@ func execTimeout() time.Duration {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
+		utils.CliWarning("ALPACON_EXEC_TIMEOUT=%q is not a valid duration (e.g. \"30m\", \"1h\"), using default 30m", v)
 	}
 	return 30 * time.Minute
 }
@@ -177,13 +181,19 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 				return response, err
 			}
 
-			switch response.Status {
-			case "queued", "scheduled", "delivered", "verifying", "running", "acked":
+			if IsRunningStatus(response.Status) {
+				// Drain the channel before Reset to avoid the race where the timer
+				// fires between Stop and Reset, causing a spurious ClientTimeoutError.
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
 				timer.Reset(timeout)
 				continue
-			default:
-				return response, nil
 			}
+			return response, nil
 		}
 	}
 }

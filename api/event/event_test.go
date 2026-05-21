@@ -258,7 +258,7 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 }
 
 func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
-	for _, status := range []string{"stuck", "error"} {
+	for _, status := range []string{"stuck", "error", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: status})
 			defer ts.Close()
