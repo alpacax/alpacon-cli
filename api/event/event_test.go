@@ -482,6 +482,40 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 	assert.Equal(t, "job-abc-123", resp.ID)
 }
 
+func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{
+				ID:     "job-abc-123",
+				Status: "completed",
+				Result: "Packages updated.",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	details, err := GetCommandByID(ac, "job-abc-123")
+	require.NoError(t, err)
+	assert.Equal(t, "job-abc-123", details.ID)
+	assert.Equal(t, "completed", details.Status)
+	assert.Equal(t, "Packages updated.", details.Result)
+}
+
+func TestGetCommandByID_PropagatesError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := GetCommandByID(ac, "job-abc-123")
+	require.Error(t, err)
+}
+
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

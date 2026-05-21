@@ -129,6 +129,18 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	return result.Result, nil
 }
 
+func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
+	if err != nil {
+		return EventDetails{}, err
+	}
+	var response EventDetails
+	if err = json.Unmarshal(responseBody, &response); err != nil {
+		return EventDetails{}, err
+	}
+	return response, nil
+}
+
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
 func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
 	return pollCommandExecution(ac, cmdId, 5*time.Minute, 1*time.Second)
