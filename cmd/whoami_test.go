@@ -117,14 +117,41 @@ func TestFormatGroups(t *testing.T) {
 }
 
 func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
-	output := whoamiOutput{
-		WorksessionRequired: true,
-		ActiveWorksession:   nil,
+	tests := []struct {
+		name                string
+		worksessionRequired bool
+		activeWorksession   *activeWorkSessionSummary
+	}{
+		{
+			name:                "required=true, no active session",
+			worksessionRequired: true,
+			activeWorksession:   nil,
+		},
+		{
+			name:                "required=false, no active session",
+			worksessionRequired: false,
+			activeWorksession:   nil,
+		},
 	}
-	body, err := json.Marshal(output)
-	assert.NoError(t, err)
-	assert.Contains(t, string(body), `"worksession_required":true`)
-	assert.Contains(t, string(body), `"active_worksession":null`)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := whoamiOutput{
+				WorksessionRequired: tt.worksessionRequired,
+				ActiveWorksession:   tt.activeWorksession,
+			}
+			body, err := json.Marshal(output)
+			assert.NoError(t, err)
+
+			var got struct {
+				WorksessionRequired bool                      `json:"worksession_required"`
+				ActiveWorksession   *activeWorkSessionSummary `json:"active_worksession"`
+			}
+			assert.NoError(t, json.Unmarshal(body, &got))
+			assert.Equal(t, tt.worksessionRequired, got.WorksessionRequired)
+			assert.Equal(t, tt.activeWorksession, got.ActiveWorksession)
+		})
+	}
 }
 
 func TestIsWorksessionRequired(t *testing.T) {
