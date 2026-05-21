@@ -63,12 +63,11 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 	return eventList, nil
 }
 
-func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (string, error) {
+func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return "", err
+		return CommandResponse{}, err
 	}
-
 	commandRequest := &CommandRequest{
 		Shell:       "system",
 		Line:        command,
@@ -81,20 +80,22 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 	}
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
-		return "", err
+		return CommandResponse{}, err
 	}
-
-	// TODO: CLI currently supports only single-command response.
-	//       If the response contains a list, we parse only the first command result for now.
-	//       Support for handling multiple responses should be added later.
 	var cmdResponse []CommandResponse
+	if err = json.Unmarshal(respBody, &cmdResponse); err != nil {
+		return CommandResponse{}, err
+	}
+	return cmdResponse[0], nil
+}
 
-	err = json.Unmarshal(respBody, &cmdResponse)
+func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (string, error) {
+	cmdResponse, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
 		return "", err
 	}
 
-	result, err := PollCommandExecution(ac, cmdResponse[0].ID)
+	result, err := PollCommandExecution(ac, cmdResponse.ID)
 	if err != nil {
 		return "", err
 	}

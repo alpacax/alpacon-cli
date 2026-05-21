@@ -458,6 +458,30 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 }
 
+func TestSubmitCommand_ReturnsJobID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "job-abc-123"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "")
+	require.NoError(t, err)
+	assert.Equal(t, "job-abc-123", resp.ID)
+}
+
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
