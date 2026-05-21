@@ -20,7 +20,7 @@ type activeWorkSessionSummary struct {
 	Status    string   `json:"status"`
 	Scopes    []string `json:"scopes"`
 	Servers   []string `json:"servers"`
-	ExpiresAt string   `json:"expires_at"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
 type whoamiOutput struct {
