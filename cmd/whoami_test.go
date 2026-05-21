@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -121,16 +122,30 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 		name                string
 		worksessionRequired bool
 		activeWorksession   *activeWorkSessionSummary
+		wantActiveRaw       string
 	}{
 		{
 			name:                "required=true, no active session",
 			worksessionRequired: true,
 			activeWorksession:   nil,
+			wantActiveRaw:       "null",
 		},
 		{
 			name:                "required=false, no active session",
 			worksessionRequired: false,
 			activeWorksession:   nil,
+			wantActiveRaw:       "null",
+		},
+		{
+			name:                "required=true, with active session",
+			worksessionRequired: true,
+			activeWorksession: &activeWorkSessionSummary{
+				ID:      "ws-123",
+				Status:  "active",
+				Scopes:  []string{"websh"},
+				Servers: []string{"srv-1"},
+			},
+			wantActiveRaw: `{"id":"ws-123","status":"active","scopes":["websh"],"servers":["srv-1"]}`,
 		},
 	}
 
@@ -143,13 +158,18 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 			body, err := json.Marshal(output)
 			assert.NoError(t, err)
 
-			var got struct {
-				WorksessionRequired bool                      `json:"worksession_required"`
-				ActiveWorksession   *activeWorkSessionSummary `json:"active_worksession"`
-			}
+			var got map[string]json.RawMessage
 			assert.NoError(t, json.Unmarshal(body, &got))
-			assert.Equal(t, tt.worksessionRequired, got.WorksessionRequired)
-			assert.Equal(t, tt.activeWorksession, got.ActiveWorksession)
+
+			// Contract: both keys must always be present in the JSON output,
+			// so callers can rely on them without checking for missing fields.
+			_, hasRequired := got["worksession_required"]
+			_, hasActive := got["active_worksession"]
+			assert.True(t, hasRequired, "worksession_required key must always be present")
+			assert.True(t, hasActive, "active_worksession key must always be present")
+
+			assert.JSONEq(t, strconv.FormatBool(tt.worksessionRequired), string(got["worksession_required"]))
+			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_worksession"]))
 		})
 	}
 }
