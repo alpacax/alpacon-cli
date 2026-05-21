@@ -24,7 +24,7 @@ Gated operations (require an active WorkSession under interactive auth):
   command   — 'alpacon exec'     (remote command execution)
   webftp    — 'alpacon cp'       (file transfer)
   tunnel    — 'alpacon tunnel'   (port forwarding)
-  sudo      — privileged command execution (binding op: pending/approved/active allowed)
+  sudo      — 'Privilege elevation' on Alpacon web (binding op: pending/approved/active allowed)
 
 Bypass: Token auth (API token or Service token) skips the requirement.
 
