@@ -516,6 +516,21 @@ func TestGetCommandByID_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExecTimeout_Default(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	assert.Equal(t, 30*time.Minute, execTimeout())
+}
+
+func TestExecTimeout_EnvVar(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "1h")
+	assert.Equal(t, time.Hour, execTimeout())
+}
+
+func TestExecTimeout_InvalidEnvFallsBackToDefault(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "not-a-duration")
+	assert.Equal(t, 30*time.Minute, execTimeout())
+}
+
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

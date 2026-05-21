@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"time"
 
@@ -141,9 +142,18 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 	return response, nil
 }
 
+func execTimeout() time.Duration {
+	if v := os.Getenv("ALPACON_EXEC_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return 30 * time.Minute
+}
+
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
 func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdId, 5*time.Minute, 1*time.Second)
+	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second)
 }
 
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration) (EventDetails, error) {
