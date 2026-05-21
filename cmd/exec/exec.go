@@ -2,6 +2,7 @@ package exec
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
@@ -96,14 +97,18 @@ parse a machine-readable diagnostic on stderr.`,
 		env := make(map[string]string)
 
 		if parsed.Detach {
+			// Phase 1: detach path does not retry on MFA-required or username-required
+			// errors. These are surfaced as-is. Full retry support is deferred to a
+			// later phase alongside --follow / streaming output.
 			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 			if err != nil {
+				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
 				return
 			}
 			line1, line2 := detachResultLines(resp.ID)
 			fmt.Println(line1)
-			fmt.Println(line2)
+			fmt.Fprintln(os.Stderr, line2)
 			return
 		}
 

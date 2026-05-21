@@ -11,14 +11,14 @@ func boolPtr(b bool) *bool    { return &b }
 func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
 
-func TestIsRunning(t *testing.T) {
+func TestIsRunningStatus(t *testing.T) {
 	running := []string{"queued", "scheduled", "delivered", "verifying", "running", "acked"}
 	for _, s := range running {
-		assert.True(t, isRunning(s), "expected %q to be running", s)
+		assert.True(t, event.IsRunningStatus(s), "expected %q to be running", s)
 	}
 	terminal := []string{"completed", "success", "stuck", "error", "cancelled"}
 	for _, s := range terminal {
-		assert.False(t, isRunning(s), "expected %q to be terminal", s)
+		assert.False(t, event.IsRunningStatus(s), "expected %q to be terminal", s)
 	}
 }
 
@@ -71,6 +71,20 @@ func TestLogsCommandOutcome(t *testing.T) {
 			details:            event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
 			wantStdoutLine:     "",
 			wantStderrContains: []string{"agent_timeout"},
+			wantExitCode:       1,
+		},
+		{
+			name:               "cancelled",
+			details:            event.EventDetails{ID: "job-1", Status: "cancelled"},
+			wantStdoutLine:     "",
+			wantStderrContains: []string{"cancelled"},
+			wantExitCode:       1,
+		},
+		{
+			name:               "cancelled with phase",
+			details:            event.EventDetails{ID: "job-1", Status: "cancelled", ErrorPhase: strPtr("agent_disconnected")},
+			wantStdoutLine:     "",
+			wantStderrContains: []string{"agent_disconnected"},
 			wantExitCode:       1,
 		},
 		{
