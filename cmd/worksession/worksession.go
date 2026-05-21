@@ -20,11 +20,11 @@ var WorkSessionCmd = &cobra.Command{
 Work sessions are approval-gated units that authorize access-path operations on Alpacon.
 
 Gated operations (require an active WorkSession under interactive auth):
-  websh     — 'alpacon websh'    (browser-based terminal)
-  command   — 'alpacon exec'     (remote command execution)
-  webftp    — 'alpacon cp'       (file transfer)
-  tunnel    — 'alpacon tunnel'   (port forwarding)
-  sudo      — 'Privilege elevation' on Alpacon web (binding op: pending/approved/active allowed)
+  websh—'alpacon websh' (browser-based terminal)
+  command—'alpacon exec' (remote command execution)
+  webftp—'alpacon cp' (file transfer)
+  tunnel—'alpacon tunnel' (port forwarding)
+  sudo—'Privilege elevation' on Alpacon web (binding op: pending/approved/active allowed)
 
 Bypass: Token auth (API token or Service token) skips the requirement.
 

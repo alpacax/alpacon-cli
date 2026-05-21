@@ -223,9 +223,9 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 		return "no"
 	}
 	if active == nil {
-		return "yes — run 'alpacon work-session list' to see available sessions"
+		return "yes—run 'alpacon work-session list' to see available sessions"
 	}
-	return fmt.Sprintf("yes — active session %s (%s)", active.ID, active.Status)
+	return fmt.Sprintf("yes—active session %s (%s)", active.ID, active.Status)
 }
 
 func printWhoami(output whoamiOutput) {

@@ -302,7 +302,7 @@ Check your current auth and session status at any time:
 
 ```bash
 $ alpacon whoami
-WS required: yes — run 'alpacon work-session list' to see available sessions
+WS required: yes—run 'alpacon work-session list' to see available sessions
 ```
 
 If you hit a WorkSession gate denial (exit code 3), run `alpacon whoami` to confirm your auth type, then follow the `Next:` actions printed by the failing command.
