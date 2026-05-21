@@ -296,7 +296,7 @@ $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 
 
 
-Access-path commands (`websh`, `exec`, `cp`, `tunnel`) require an active **work session** when using **Browser login (Auth0)** authentication. ServiceTokens and non-login API tokens bypass this requirement automatically.
+Access-path commands (`websh`, `exec`, `cp`, `tunnel`) require an active **work session** when using **Browser login (Auth0)** authentication. Token auth (API token or Service token) bypasses this requirement automatically.
 
 Check your current auth and session status at any time:
 

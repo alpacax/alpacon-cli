@@ -26,7 +26,7 @@ Gated operations (require an active WorkSession under interactive auth):
   tunnel    — 'alpacon tunnel'   (port forwarding)
   sudo      — privileged command execution (binding op: pending/approved/active allowed)
 
-Bypass: ServiceTokens and non-login API tokens (source != 'login') skip the requirement.
+Bypass: Token auth (API token or Service token) skips the requirement.
 
 Lifecycle:  pending → approved → active → complete | expired | revoked
 

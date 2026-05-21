@@ -27,7 +27,7 @@ overrides the workspace's active work-session set via 'alpacon work-session use'
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
-Requires an active WorkSession when using Browser login (Auth0); ServiceTokens and non-login API tokens bypass this requirement.`,
+Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Upload files to a remote server
   alpacon cp /local/file1.txt /local/file2.txt my-server:/remote/path/
 

@@ -34,7 +34,7 @@ Flags:
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
-Requires an active WorkSession when using Browser login (Auth0); ServiceTokens and non-login API tokens bypass this requirement.`,
+Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
   alpacon exec root@prod-docker docker ps
