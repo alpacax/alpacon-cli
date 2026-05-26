@@ -130,6 +130,10 @@ func RunCommand(ac *client.AlpaconClient, serverName, command string, username, 
 		}
 	}
 
+	if result.Success == nil && result.Status != "completed" && result.Status != "success" {
+		return result.Result, fmt.Errorf("command ended with unrecognised status: %s", result.Status)
+	}
+
 	return result.Result, nil
 }
 
@@ -145,6 +149,11 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 	return response, nil
 }
 
+// PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
+func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
+	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second)
+}
+
 func execTimeout() time.Duration {
 	if v := os.Getenv("ALPACON_EXEC_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -153,11 +162,6 @@ func execTimeout() time.Duration {
 		utils.CliWarning("ALPACON_EXEC_TIMEOUT=%q is not a valid duration (e.g. \"30m\", \"1h\"), using default 30m", v)
 	}
 	return 30 * time.Minute
-}
-
-// PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
-func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second)
 }
 
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration) (EventDetails, error) {

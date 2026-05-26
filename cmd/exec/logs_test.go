@@ -70,7 +70,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 			name:               "stuck with agent_timeout phase",
 			details:            event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
 			wantStdoutLine:     "",
-			wantStderrContains: []string{"agent_timeout"},
+			wantStderrContains: []string{"agent_timeout", "status=stuck"},
 			wantExitCode:       1,
 		},
 		{
@@ -84,7 +84,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 			name:               "cancelled with phase",
 			details:            event.EventDetails{ID: "job-1", Status: "cancelled", ErrorPhase: strPtr("agent_disconnected")},
 			wantStdoutLine:     "",
-			wantStderrContains: []string{"agent_disconnected"},
+			wantStderrContains: []string{"agent_disconnected", "status=cancelled"},
 			wantExitCode:       1,
 		},
 		{
@@ -95,7 +95,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 				ErrorPhase: strPtr("agent_disconnected"),
 			},
 			wantStdoutLine:     "",
-			wantStderrContains: []string{"agent_disconnected"},
+			wantStderrContains: []string{"agent_disconnected", "status=error"},
 			wantExitCode:       1,
 		},
 		{

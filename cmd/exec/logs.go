@@ -63,8 +63,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 
 	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
-			stderrLine = fmt.Sprintf("%s: [%s] %s\n",
-				utils.Red("Error"), *details.ErrorPhase, event.DescribePhase(*details.ErrorPhase))
+			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
+				utils.Red("Error"), *details.ErrorPhase, event.DescribePhase(*details.ErrorPhase), details.Status)
 		} else {
 			stderrLine = fmt.Sprintf("%s: command failed with status: %s\n",
 				utils.Red("Error"), details.Status)

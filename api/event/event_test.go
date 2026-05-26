@@ -272,6 +272,17 @@ func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 	}
 }
 
+func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
+	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "denied"})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unrecognised status")
+	assert.Contains(t, err.Error(), "denied")
+}
+
 func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
 	ts := newRunCommandServerWithDetails(t, EventDetails{
 		ID:      "cmd-1",
