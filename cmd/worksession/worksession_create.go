@@ -153,16 +153,16 @@ active state.`,
 		// the --wait branch below (or exit immediately when --wait is not set).
 		switch decideUseAction(session.Status, useAfterCreate) {
 		case useDecisionUseNow:
-			attachActiveOrExit(ac, session.ID, "Work session created (%s) but failed to set as active: %s. Run 'work-session use %s' to retry.", "")
+			attachActiveOrExit(ac, session.ID, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "")
 			return
 		case useDecisionSkipScheduled:
 			if !waitApproval {
-				utils.CliInfo("Session is scheduled to activate. Run 'work-session use %s' once active.", session.ID)
+				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
 				return
 			}
 		case useDecisionErrorNeedsWait:
 			if !waitApproval {
-				utils.CliErrorWithExit("--use requires the session to be active. Pass --wait to wait for approval, or run 'work-session use %s' after approval.", session.ID)
+				utils.CliErrorWithExit("--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
 			}
 		}
 
@@ -181,7 +181,7 @@ active state.`,
 		}
 
 		// Phase 3: --wait --use. pollForApproval(untilActive=true) guarantees status reached active.
-		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
+		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
 	},
 }
 
