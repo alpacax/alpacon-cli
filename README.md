@@ -296,6 +296,17 @@ $ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 
 
 
+Access-path commands (`websh`, `exec`, `cp`, `tunnel`) require an active **work session** when using **Browser login (Auth0)** authentication. Token auth (API token or Service token) bypasses this requirement automatically.
+
+Check your current auth and session status at any time:
+
+```bash
+$ alpacon whoami
+WS required: yes—run 'alpacon work-session list' to see available sessions
+```
+
+If you hit a WorkSession gate denial (exit code 3), run `alpacon whoami` to confirm your auth type, then follow the `Next:` actions printed by the failing command.
+
 #### Work sessions
 
 Work sessions are approval-gated units that group Websh, exec, file transfer, and tunnel access under a single reviewable context. Once a session is active, all subsequent commands attach to it automatically.

@@ -9,24 +9,35 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
+	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
+type activeWorkSessionSummary struct {
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Scopes    []string `json:"scopes"`
+	Servers   []string `json:"servers"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+}
+
 type whoamiOutput struct {
-	Username      string                `json:"username,omitempty"`
-	Email         string                `json:"email,omitempty"`
-	Phone         string                `json:"phone,omitempty"`
-	WorkspaceName string                `json:"workspace_name"`
-	WorkspaceURL  string                `json:"workspace_url"`
-	AuthMethod    string                `json:"auth_method"`
-	ExpiresAt     string                `json:"expires_at,omitempty"`
-	UID           int                   `json:"uid,omitempty"`
-	Shell         string                `json:"shell,omitempty"`
-	HomeDirectory string                `json:"home_directory,omitempty"`
-	Role          string                `json:"role,omitempty"`
-	Groups        []iam.GroupMembership `json:"groups,omitempty"`
+	Username            string                    `json:"username,omitempty"`
+	Email               string                    `json:"email,omitempty"`
+	Phone               string                    `json:"phone,omitempty"`
+	WorkspaceName       string                    `json:"workspace_name"`
+	WorkspaceURL        string                    `json:"workspace_url"`
+	AuthMethod          string                    `json:"auth_method"`
+	ExpiresAt           string                    `json:"expires_at,omitempty"`
+	UID                 int                       `json:"uid,omitempty"`
+	Shell               string                    `json:"shell,omitempty"`
+	HomeDirectory       string                    `json:"home_directory,omitempty"`
+	Role                string                    `json:"role,omitempty"`
+	Groups              []iam.GroupMembership     `json:"groups,omitempty"`
+	WorksessionRequired bool                      `json:"work_session_required"`
+	ActiveWorksession   *activeWorkSessionSummary `json:"active_work_session"`
 }
 
 var whoamiCmd = &cobra.Command{
@@ -44,10 +55,11 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		}
 
 		output := whoamiOutput{
-			WorkspaceName: cfg.WorkspaceName,
-			WorkspaceURL:  cfg.WorkspaceURL,
-			AuthMethod:    config.GetAuthMethod(cfg),
-			ExpiresAt:     getExpiresAt(cfg),
+			WorkspaceName:       cfg.WorkspaceName,
+			WorkspaceURL:        cfg.WorkspaceURL,
+			AuthMethod:          config.GetAuthMethod(cfg),
+			ExpiresAt:           getExpiresAt(cfg),
+			WorksessionRequired: isWorksessionRequired(cfg),
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -82,6 +94,29 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			output.Groups = groups
 		}
 
+		if output.WorksessionRequired {
+			_, ws, wsErr := wscmd.RunCurrent(ac)
+			if wsErr != nil {
+				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
+			} else if ws != nil {
+				serverNames := make([]string, len(ws.Servers))
+				for i, srv := range ws.Servers {
+					serverNames[i] = srv.Name
+				}
+				expiresAt := ""
+				if !ws.ExpiresAt.IsZero() {
+					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
+				}
+				output.ActiveWorksession = &activeWorkSessionSummary{
+					ID:        ws.ID,
+					Status:    ws.Status,
+					Scopes:    ws.Scopes,
+					Servers:   serverNames,
+					ExpiresAt: expiresAt,
+				}
+			}
+		}
+
 		warnIfExpiringSoon(cfg)
 		printWhoami(output)
 	},
@@ -104,12 +139,16 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
-func isAPITokenAuth(cfg config.Config) bool {
+func isTokenAuth(cfg config.Config) bool {
 	return cfg.Token != "" && cfg.AccessToken == ""
 }
 
+func isWorksessionRequired(cfg config.Config) bool {
+	return cfg.AccessToken != ""
+}
+
 func warnIfExpiringSoon(cfg config.Config) {
-	if !isAPITokenAuth(cfg) {
+	if !isTokenAuth(cfg) {
 		return
 	}
 
@@ -179,6 +218,16 @@ func formatGroups(groups []iam.GroupMembership) string {
 	return strings.Join(parts, ", ")
 }
 
+func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
+	if !required {
+		return "no"
+	}
+	if active == nil {
+		return "yes—run 'alpacon work-session list' to see available sessions"
+	}
+	return fmt.Sprintf("yes—active session %s (%s)", active.ID, active.Status)
+}
+
 func printWhoami(output whoamiOutput) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		body, err := json.Marshal(output)
@@ -204,6 +253,7 @@ func printWhoami(output whoamiOutput) {
 		{"Home", output.HomeDirectory},
 		{"Role", output.Role},
 		{"Groups", formatGroups(output.Groups)},
+		{"WS required", formatWSRequired(output.WorksessionRequired, output.ActiveWorksession)},
 	}
 
 	for _, l := range lines {
