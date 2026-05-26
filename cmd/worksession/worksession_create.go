@@ -36,7 +36,7 @@ var workSessionCreateCmd = &cobra.Command{
 
 Pass --use to set the new session as the workspace's active session, so subsequent
 exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
-required, combine --use with --wait — the session is attached once it reaches the
+required, combine --use with --wait. The session is attached once it reaches the
 active state.`,
 	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
   alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait
@@ -326,7 +326,11 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) erro
 		case completedWorkSessionStatus:
 			return errors.New("work session was completed unexpectedly")
 		}
-		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
+		waitMsg := "Waiting for approval..."
+		if s.Status == approvedWorkSessionStatus {
+			waitMsg = "Waiting for activation..."
+		}
+		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, maxAttempts)
 		if attempt < maxAttempts {
 			time.Sleep(interval)
 		}
