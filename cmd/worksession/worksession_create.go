@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
 	purpose       string
@@ -78,6 +81,9 @@ var workSessionCreateCmd = &cobra.Command{
 		}
 		if len(scopeList) == 0 {
 			utils.CliErrorWithExit("--scope must contain at least one valid scope.")
+		}
+		if err := validateScopeEnum(scopeList); err != nil {
+			utils.CliErrorWithExit("Invalid --scope: %s", err)
 		}
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
 			utils.CliErrorWithExit("Invalid --scope: %s", err)
@@ -157,6 +163,29 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 	return expiresAt, nil
 }
 
+// validateScopeEnum rejects scopes not in validScopePresets and lists the
+// allowed values in the error message. The caller is expected to prefix the
+// error with the relevant flag name (e.g. "Invalid --scope: ...").
+func validateScopeEnum(scopes []string) error {
+	allowed := make(map[string]struct{}, len(validScopePresets))
+	for _, s := range validScopePresets {
+		allowed[s] = struct{}{}
+	}
+	var unknown []string
+	for _, s := range scopes {
+		if _, ok := allowed[s]; !ok {
+			unknown = append(unknown, s)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("%s. valid: %s",
+		strings.Join(unknown, ", "),
+		strings.Join(validScopePresets, ", "))
+}
+
 // validateAgentScopes returns an error when requester_type is "agent" and
 // scopes contains "websh", which the server disallows.
 func validateAgentScopes(requesterType string, scopes []string) error {
@@ -215,7 +244,7 @@ func pollForApproval(ac *client.AlpaconClient, id string) error {
 
 func init() {
 	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose")
-	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request (repeatable; comma-separated values also accepted)")
+	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")

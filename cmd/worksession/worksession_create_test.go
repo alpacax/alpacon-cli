@@ -72,6 +72,62 @@ func TestValidateAgentScopes_UserWithWebsh(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidateScopeEnum(t *testing.T) {
+	tests := []struct {
+		name        string
+		scopes      []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:    "empty input passes (handled by other validation)",
+			scopes:  nil,
+			wantErr: false,
+		},
+		{
+			name:    "single valid scope",
+			scopes:  []string{"command"},
+			wantErr: false,
+		},
+		{
+			name:    "multiple valid scopes",
+			scopes:  []string{"command", "websh", "sudo"},
+			wantErr: false,
+		},
+		{
+			name:        "single unknown scope",
+			scopes:      []string{"foo"},
+			wantErr:     true,
+			wantSubstrs: []string{"foo", "valid:", "command", "editor", "sudo", "tunnel", "webftp", "websh"},
+		},
+		{
+			name:        "mixed valid and unknown scopes, alphabetically sorted in message",
+			scopes:      []string{"command", "zzz", "aaa"},
+			wantErr:     true,
+			wantSubstrs: []string{"aaa, zzz", "valid:"},
+		},
+		{
+			name:        "case-sensitive: capitalized is rejected",
+			scopes:      []string{"Command"},
+			wantErr:     true,
+			wantSubstrs: []string{"Command", "valid:"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateScopeEnum(tt.scopes)
+			if tt.wantErr {
+				assert.Error(t, err)
+				for _, s := range tt.wantSubstrs {
+					assert.Contains(t, err.Error(), s)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestSplitCSV(t *testing.T) {
 	tests := []struct {
 		name  string
