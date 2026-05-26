@@ -10,7 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const activeWorkSessionStatus = "active"
+const (
+	activeWorkSessionStatus    = "active"
+	approvedWorkSessionStatus  = "approved"
+	rejectedWorkSessionStatus  = "rejected"
+	expiredWorkSessionStatus   = "expired"
+	revokedWorkSessionStatus   = "revoked"
+	completedWorkSessionStatus = "completed"
+)
 
 var unsetActiveWorkSession bool
 
