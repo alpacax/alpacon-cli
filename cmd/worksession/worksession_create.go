@@ -16,6 +16,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	pollMaxAttempts   = 30
+	pollInterval      = 10 * time.Second
+	waitMsgApproval   = "Waiting for approval..."
+	waitMsgActivation = "Waiting for activation..."
+)
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
@@ -302,10 +309,7 @@ func splitCSV(s string) []string {
 // untilActive=false returns on approved or active; untilActive=true returns only on
 // active (continues polling on approved until the server auto-activates).
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) error {
-	const maxAttempts = 30
-	const interval = 10 * time.Second
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+	for attempt := 1; attempt <= pollMaxAttempts; attempt++ {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			return fmt.Errorf("polling failed: %w", err)
@@ -326,16 +330,16 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) erro
 		case completedWorkSessionStatus:
 			return errors.New("work session was completed unexpectedly")
 		}
-		waitMsg := "Waiting for approval..."
+		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
-			waitMsg = "Waiting for activation..."
+			waitMsg = waitMsgActivation
 		}
-		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, maxAttempts)
-		if attempt < maxAttempts {
-			time.Sleep(interval)
+		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, pollMaxAttempts)
+		if attempt < pollMaxAttempts {
+			time.Sleep(pollInterval)
 		}
 	}
-	return fmt.Errorf("timed out waiting for approval after %d attempts", maxAttempts)
+	return fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
 }
 
 func init() {
