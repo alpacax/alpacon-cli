@@ -639,13 +639,6 @@ func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
 			wantServer:  "server",
 			wantCommand: "--detach",
 		},
-		{
-			name:        "--detach=true equals-form",
-			args:        []string{"--detach=true", "server", "apt", "upgrade"},
-			wantDetach:  true,
-			wantServer:  "server",
-			wantCommand: "apt upgrade",
-		},
 	}
 
 	for _, tt := range tests {
@@ -698,6 +691,11 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 			name:        "--groupname as last arg with no value",
 			args:        []string{"--groupname"},
 			expectedErr: "flag needs an argument: --groupname",
+		},
+		{
+			name:        "--detach=VALUE equals-form is rejected",
+			args:        []string{"--detach=true", "server", "apt", "upgrade"},
+			expectedErr: "--detach does not accept a value; use --detach alone",
 		},
 	}
 
