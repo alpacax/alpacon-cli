@@ -150,7 +150,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := PollCommandExecution(ac, "cmd-1")
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -229,6 +229,7 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 }
 
 func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -244,6 +245,7 @@ func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 }
 
 func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -258,6 +260,7 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 }
 
 func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	for _, status := range []string{"stuck", "error", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: status})
@@ -273,6 +276,7 @@ func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 }
 
 func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "denied"})
 	defer ts.Close()
 
@@ -284,6 +288,7 @@ func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
 }
 
 func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	ts := newRunCommandServerWithDetails(t, EventDetails{
 		ID:      "cmd-1",
 		Status:  "completed",
@@ -305,6 +310,7 @@ func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
 }
 
 func TestRunCommand_PropagatesExitCode(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	tests := []struct {
 		name           string
 		respSuccess    *bool
@@ -378,6 +384,7 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 }
 
 func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	tests := []struct {
 		name           string
 		respStatus     string
