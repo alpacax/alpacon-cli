@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var LogsCmd = &cobra.Command{
+var logsCmd = &cobra.Command{
 	Use:   "logs JOB_ID",
 	Short: "Fetch the result of a detached command",
 	Long: `Fetch the result of a command submitted with --detach.
@@ -21,6 +21,11 @@ Run the command again later to check for completion.`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		jobID := args[0]
+
+		if !utils.IsUUID(jobID) {
+			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			return
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -48,7 +53,7 @@ Run the command again later to check for completion.`,
 }
 
 func init() {
-	ExecCmd.AddCommand(LogsCmd)
+	ExecCmd.AddCommand(logsCmd)
 }
 
 // logsCommandOutcome maps GetCommandByID details to (stdout, stderr, exitCode). stderrLine always ends with \n.
