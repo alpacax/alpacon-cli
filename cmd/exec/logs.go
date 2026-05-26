@@ -51,11 +51,7 @@ func init() {
 	ExecCmd.AddCommand(LogsCmd)
 }
 
-// logsCommandOutcome computes stdout line, stderr line, and exit code for
-// a command result fetched via GetCommandByID. stderrLine ends with \n when non-empty.
-// When Success is nil and status is terminal, the command is treated as successful —
-// this mirrors the contract in RunCommand: alpamon sets success=(exitCode==0), so a
-// nil success field on a terminal status means the server did not report a failure.
+// logsCommandOutcome maps GetCommandByID details to (stdout, stderr, exitCode). stderrLine always ends with \n.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	if event.IsRunningStatus(details.Status) {
 		stderrLine = fmt.Sprintf(
@@ -88,5 +84,16 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return details.Result, stderrLine, exitCode
 	}
 
-	return details.Result, "", 0
+	if details.Success != nil {
+		return details.Result, "", 0
+	}
+
+	// Success nil on a known-success status means alpamon did not report failure (success=(exitCode==0) contract).
+	if details.Status == "completed" || details.Status == "success" {
+		return details.Result, "", 0
+	}
+
+	stderrLine = fmt.Sprintf("%s: command ended with unrecognised status: %s\n",
+		utils.Red("Error"), details.Status)
+	return details.Result, stderrLine, 1
 }

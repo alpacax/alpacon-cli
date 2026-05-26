@@ -103,9 +103,7 @@ func DescribePhase(phase string) string {
 	return phase
 }
 
-// IsRunningStatus reports whether the given command status represents an
-// in-progress (non-terminal) state. Both the polling loop and exec logs use
-// this to decide whether to wait or report a result.
+// IsRunningStatus reports whether status represents an in-progress (non-terminal) command.
 func IsRunningStatus(status string) bool {
 	switch status {
 	case "queued", "scheduled", "delivered", "verifying", "running", "acked":

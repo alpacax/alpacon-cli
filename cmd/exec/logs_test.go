@@ -137,6 +137,20 @@ func TestLogsCommandOutcome(t *testing.T) {
 			wantStderrEmpty: true,
 			wantExitCode:    1,
 		},
+		{
+			name:            "success status with nil Success",
+			details:         event.EventDetails{ID: "job-1", Status: "success", Result: "ok"},
+			wantStdoutLine:  "ok",
+			wantStderrEmpty: true,
+			wantExitCode:    0,
+		},
+		{
+			name:               "unrecognised terminal status with nil Success exits 1",
+			details:            event.EventDetails{ID: "job-1", Status: "denied"},
+			wantStdoutLine:     "",
+			wantStderrContains: []string{"unrecognised status", "denied"},
+			wantExitCode:       1,
+		},
 	}
 
 	for _, tt := range tests {

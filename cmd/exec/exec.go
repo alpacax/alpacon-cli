@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -35,6 +36,9 @@ Flags:
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
+  --detach                      Submit the command and return immediately without
+                                waiting for completion. Prints the job ID to stdout.
+                                Use 'alpacon exec logs JOB_ID' to retrieve the result.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
@@ -98,18 +102,20 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		env := make(map[string]string)
 
 		if parsed.Detach {
-			// Phase 1: detach path does not retry on MFA-required or username-required
-			// errors. These are surfaced as-is. Full retry support is deferred to a
-			// later phase alongside --follow / streaming output.
 			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 			if err != nil {
 				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
 				return
 			}
-			line1, line2 := detachResultLines(resp.ID)
-			fmt.Println(line1)
-			fmt.Fprintln(os.Stderr, line2)
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				data, _ := json.Marshal(map[string]string{"job_id": resp.ID})
+				utils.PrintJson(data)
+			} else {
+				line1, line2 := detachResultLines(resp.ID)
+				fmt.Println(line1)
+				fmt.Fprintln(os.Stderr, line2)
+			}
 			return
 		}
 

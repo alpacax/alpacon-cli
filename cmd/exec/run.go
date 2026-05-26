@@ -97,7 +97,6 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
-// detachResultLines returns the stdout line (job ID) and the stderr hint printed after a detached job is submitted.
 func detachResultLines(jobID string) (string, string) {
 	return fmt.Sprintf("Job submitted: %s", jobID),
 		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)

@@ -96,7 +96,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if outputFormat == "" {
 				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
 			}
-		case arg == "--detach":
+		case arg == "--detach" || strings.HasPrefix(arg, "--detach="):
 			detach = true
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}

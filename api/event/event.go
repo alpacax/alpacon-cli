@@ -182,8 +182,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 			}
 
 			if IsRunningStatus(response.Status) {
-				// Drain the channel before Reset to avoid the race where the timer
-				// fires between Stop and Reset, causing a spurious ClientTimeoutError.
+				// Drain timer.C before Reset to prevent a spurious ClientTimeoutError if the timer fires between Stop and Reset.
 				if !timer.Stop() {
 					select {
 					case <-timer.C:
