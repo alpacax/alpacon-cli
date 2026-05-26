@@ -130,7 +130,11 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				return
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				data, _ := json.Marshal(map[string]string{"job_id": resp.ID})
+				data, err := json.Marshal(map[string]string{"job_id": resp.ID})
+				if err != nil {
+					utils.CliErrorWithExit("failed to marshal JSON: %s", err)
+					return
+				}
 				utils.PrintJson(data)
 			} else {
 				line1, line2 := detachResultLines(resp.ID)
