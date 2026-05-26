@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -103,6 +105,25 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		if parsed.Detach {
 			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+			if err != nil {
+				err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
+					},
+					RefreshToken: alpaconClient.RefreshToken,
+					RetryOperation: func() error {
+						resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+						return err
+					},
+				})
+			}
 			if err != nil {
 				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
