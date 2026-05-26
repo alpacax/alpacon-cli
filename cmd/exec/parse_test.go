@@ -639,6 +639,13 @@ func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
 			wantServer:  "server",
 			wantCommand: "--detach",
 		},
+		{
+			name:        "--detach=true equals-form",
+			args:        []string{"--detach=true", "server", "apt", "upgrade"},
+			wantDetach:  true,
+			wantServer:  "server",
+			wantCommand: "apt upgrade",
+		},
 	}
 
 	for _, tt := range tests {
