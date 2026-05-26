@@ -60,7 +60,7 @@ func init() {
 	ExecCmd.AddCommand(logsCmd)
 }
 
-// logsCommandOutcome maps GetCommandByID details to (stdout, stderr, exitCode). stderrLine always ends with \n.
+// logsCommandOutcome maps GetCommandByID details to (stdout, stderr, exitCode). If non-empty, stderrLine ends with \n.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	if event.IsRunningStatus(details.Status) {
 		stderrLine = fmt.Sprintf(
