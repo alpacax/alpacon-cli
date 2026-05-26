@@ -197,7 +197,7 @@ func GetAuthMethod(cfg Config) string {
 		return "Browser login"
 	}
 	if cfg.Token != "" {
-		return "API token"
+		return "Token"
 	}
 	return "unknown"
 }

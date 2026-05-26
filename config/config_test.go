@@ -243,9 +243,9 @@ func TestGetAuthMethod(t *testing.T) {
 			expected: "Browser login",
 		},
 		{
-			name:     "token only → API token",
+			name:     "token only → Token",
 			cfg:      Config{Token: "abc123"},
-			expected: "API token",
+			expected: "Token",
 		},
 		{
 			name:     "both tokens → AccessToken wins",
