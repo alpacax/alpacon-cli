@@ -6,6 +6,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -27,6 +28,8 @@ Run the command again later to check for completion.`,
 			return
 		}
 
+		authMethod := config.ResolveAuthMethod()
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -35,6 +38,7 @@ Run the command again later to check for completion.`,
 
 		details, err := event.GetCommandByID(alpaconClient, jobID)
 		if err != nil {
+			utils.HandleWorkSessionError(err, "command", "", authMethod, "")
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}
