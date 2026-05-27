@@ -55,6 +55,7 @@ func init() {
 	WorkSessionCmd.AddCommand(workSessionActivateCmd)
 	WorkSessionCmd.AddCommand(workSessionCompleteCmd)
 	WorkSessionCmd.AddCommand(workSessionExtendCmd)
+	WorkSessionCmd.AddCommand(workSessionUpdateCmd)
 	WorkSessionCmd.AddCommand(workSessionUseCmd)
 	WorkSessionCmd.AddCommand(workSessionCurrentCmd)
 	WorkSessionCmd.AddCommand(workSessionTimelineCmd)

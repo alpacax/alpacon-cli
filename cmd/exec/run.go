@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -11,6 +12,27 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// sudoNoWorksessionPolicyCode is the server error code surfaced in command
+// output when a non-interactive sudo is denied for lack of a matching
+// MFA-bypass policy in the work session. Kept in sync with
+// alpacon-server utils/error_codes.py ErrorCode.SUDO_NO_WORKSESSION_POLICY.
+const sudoNoWorksessionPolicyCode = "sudo_no_worksession_policy"
+
+// sudoDenialHint returns actionable guidance when the command output shows a
+// non-interactive sudo denial, telling the caller how to authorize the command
+// via their work session. Returns "" when no such denial is present.
+func sudoDenialHint(output string) string {
+	if !strings.Contains(output, sudoNoWorksessionPolicyCode) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n"+
+			"Add it and re-run:\n"+
+			"  alpacon work-session update --sudo \"<command>\"\n",
+		utils.Yellow("Hint:"),
+	)
+}
 
 // RunCommandWithRetry executes a remote command with MFA and username-required
 // error handling and retry logic. Used by both exec and websh commands.
@@ -62,6 +84,9 @@ func HandleCommandResult(result string, err error) {
 			if stderrLine != "" {
 				fmt.Fprint(os.Stderr, stderrLine)
 			}
+			if hint := sudoDenialHint(result); hint != "" {
+				fmt.Fprint(os.Stderr, hint)
+			}
 			os.Exit(exitCode)
 		}
 		var clientTimeout *event.ClientTimeoutError
@@ -73,6 +98,9 @@ func HandleCommandResult(result string, err error) {
 		return
 	}
 	fmt.Println(result)
+	if hint := sudoDenialHint(result); hint != "" {
+		fmt.Fprint(os.Stderr, hint)
+	}
 }
 
 // asPhasedError unwraps err to a RemoteCommandError or ClientTimeoutError.

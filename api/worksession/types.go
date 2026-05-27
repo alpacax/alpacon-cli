@@ -20,6 +20,7 @@ type WorkSession struct {
 	CompletedAt   *time.Time            `json:"completed_at"`
 	AddedAt       time.Time             `json:"added_at"`
 	UpdatedAt     time.Time             `json:"updated_at"`
+	SudoPolicies  []SudoPolicyInline    `json:"sudo_policies"`
 }
 
 type WorkSessionAttributes struct {
@@ -35,11 +36,36 @@ type WorkSessionAttributes struct {
 }
 
 type WorkSessionCreateRequest struct {
-	Description   string   `json:"description"`
-	RequesterType string   `json:"requester_type"`
-	Scopes        []string `json:"scopes"`
-	Servers       []string `json:"servers"`
-	ExpiresAt     string   `json:"expires_at"`
+	Description   string             `json:"description"`
+	RequesterType string             `json:"requester_type"`
+	Scopes        []string           `json:"scopes"`
+	Servers       []string           `json:"servers"`
+	ExpiresAt     string             `json:"expires_at"`
+	SudoPolicies  []SudoPolicyInline `json:"sudo_policies,omitempty"`
+}
+
+// SudoPolicyInline is a sudo policy bound to a work session. It serves three
+// roles: read (when returned on a WorkSession), create (attached at session
+// create time), and modify (sent on update). Commands are the allowed patterns
+// (wildcards permitted); AllowBypassMFA lets matching sudo run without
+// interactive MFA, which is the only way a non-interactive execute-command
+// caller (e.g. an AI agent) can sudo. Users is intentionally omitted — the
+// server binds the policy to the session assignee automatically so it never
+// applies to other workspace users.
+//
+// ID is set only on read and on modify: an update PATCH sends the FULL desired
+// set, so existing policies must be echoed back with their ID (modify in place)
+// alongside new entries without an ID (additions). Omitting an existing policy
+// from the set deletes it, so callers must preserve the current entries.
+type SudoPolicyInline struct {
+	ID             string   `json:"id,omitempty"`
+	Commands       []string `json:"commands"`
+	Reason         string   `json:"reason,omitempty"`
+	AllowBypassMFA bool     `json:"allow_bypass_mfa"`
+}
+
+type WorkSessionUpdateRequest struct {
+	SudoPolicies []SudoPolicyInline `json:"sudo_policies,omitempty"`
 }
 
 type WorkSessionExtendRequest struct {
@@ -60,21 +86,21 @@ type TimelineItem struct {
 	ServerID  *string `json:"server_id"`
 
 	// shared across session-like types (websh_session, tunnel_session, ftp_session)
-	Username  string  `json:"username"`
-	Groupname string  `json:"groupname"`
-	ClosedAt  *string `json:"closed_at"`
-	ClientType string `json:"client_type"`
+	Username   string  `json:"username"`
+	Groupname  string  `json:"groupname"`
+	ClosedAt   *string `json:"closed_at"`
+	ClientType string  `json:"client_type"`
 
 	// command
-	Shell       string   `json:"shell"`
-	Line        string   `json:"line"`
-	Success     *bool    `json:"success"`
-	Denied      bool     `json:"denied"`
-	ElapsedTime float64  `json:"elapsed_time"`
+	Shell       string  `json:"shell"`
+	Line        string  `json:"line"`
+	Success     *bool   `json:"success"`
+	Denied      bool    `json:"denied"`
+	ElapsedTime float64 `json:"elapsed_time"`
 
 	// tunnel_session
-	IsTunnel   bool  `json:"is_tunnel"`
-	TargetPort *int  `json:"target_port"`
+	IsTunnel   bool `json:"is_tunnel"`
+	TargetPort *int `json:"target_port"`
 
 	// file_upload / file_download
 	Name string `json:"name"`
