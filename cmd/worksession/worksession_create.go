@@ -49,8 +49,8 @@ required, combine --use with --wait. The session is attached once it reaches the
 active state.
 
 If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
-MFA-bypass sudo policies to the session so a non-interactive execute-command caller
-(e.g. an AI agent) can run those exact sudo commands without an interactive MFA
+MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI agent
+running 'exec') can run those exact sudo commands without an interactive MFA
 prompt. The 'sudo' scope is added automatically, and the policies are submitted for
 approval together with the session. If a sudo command is later denied, add it to the
 session with 'alpacon work-session update <id> --sudo "<command>"'.`,
@@ -121,8 +121,8 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		}
 		// Build sudo bypass policies from --sudo. Each --sudo value is a
 		// comma-separated list of command patterns forming one policy; the
-		// policies are MFA-bypass (the only way a non-interactive
-		// execute-command caller can sudo). The server binds each policy to
+		// policies are MFA-bypass (the only way a non-interactive caller
+		// running 'exec' can sudo). The server binds each policy to
 		// the session assignee automatically, so they never apply to other
 		// users. ``sudo`` scope is required server-side, so add it implicitly.
 		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
@@ -393,7 +393,7 @@ func init() {
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
 	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (does not set as active; combine with --use to attach automatically)")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
-	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed). Required for non-interactive execute-command sudo (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }

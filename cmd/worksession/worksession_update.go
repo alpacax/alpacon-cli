@@ -20,7 +20,7 @@ var workSessionUpdateCmd = &cobra.Command{
 	Long: `Update an existing work session.
 
 Use --sudo to add MFA-bypass sudo command patterns to the session. This is the
-recovery path when an execute-command sudo was denied: add the command and re-run.
+recovery path when an 'exec' sudo was denied: add the command and re-run.
 Each --sudo value is a comma-separated pattern list (wildcards allowed) forming one
 policy. The session's existing policies are preserved; the additions may require
 approval before they take effect.

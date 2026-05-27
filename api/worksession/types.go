@@ -48,8 +48,8 @@ type WorkSessionCreateRequest struct {
 // roles: read (when returned on a WorkSession), create (attached at session
 // create time), and modify (sent on update). Commands are the allowed patterns
 // (wildcards permitted); AllowBypassMFA lets matching sudo run without
-// interactive MFA, which is the only way a non-interactive execute-command
-// caller (e.g. an AI agent) can sudo. Users is intentionally omitted — the
+// interactive MFA, which is the only way a non-interactive caller (e.g. an AI
+// agent running 'exec') can sudo. Users is intentionally omitted — the
 // server binds the policy to the session assignee automatically so it never
 // applies to other workspace users.
 //
