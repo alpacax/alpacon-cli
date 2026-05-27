@@ -19,7 +19,7 @@ func newTestClient(baseURL string) *AlpaconClient {
 	}
 }
 
-func TestSendRequest_401ReturnsAuthError(t *testing.T) {
+func TestSendRequest_401SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -29,14 +29,37 @@ func TestSendRequest_401ReturnsAuthError(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "invalid token")
+	assert.ErrorContains(t, err, "alpacon login")
+}
+
+func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
 	assert.ErrorContains(t, err, "authentication failed")
 }
 
-func TestSendRequest_403ReturnsForbiddenError(t *testing.T) {
+func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"detail": "forbidden"}`))
+		_, _ = w.Write([]byte(`{"detail": "missing scope: sudo"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "missing scope: sudo")
+}
+
+func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer ts.Close()
 
@@ -101,7 +124,7 @@ func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
 	assert.Equal(t, "general", ac.Privileges)
 }
 
-func TestLoadCurrentUser_401ReturnsAuthError(t *testing.T) {
+func TestLoadCurrentUser_401SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -111,7 +134,8 @@ func TestLoadCurrentUser_401ReturnsAuthError(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	err := ac.LoadCurrentUser()
-	assert.ErrorContains(t, err, "authentication failed")
+	assert.ErrorContains(t, err, "invalid token")
+	assert.ErrorContains(t, err, "alpacon login")
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
 }
@@ -212,7 +236,7 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 	err1 := ac.LoadCurrentUser()
 	err2 := ac.LoadCurrentUser() // second call must return cached error without hitting server
 
-	assert.ErrorContains(t, err1, "authentication failed")
-	assert.ErrorContains(t, err2, "authentication failed")
+	assert.ErrorContains(t, err1, "invalid token")
+	assert.ErrorContains(t, err2, "invalid token")
 	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once even on failure")
 }
