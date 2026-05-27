@@ -12,7 +12,7 @@ func TestSudoDenialHint(t *testing.T) {
 		out := "sudo: a password is required\nsudo_no_worksession_policy\n"
 		hint := sudoDenialHint(out)
 		assert.NotEmpty(t, hint)
-		assert.True(t, strings.Contains(hint, "work-session update --sudo"),
+		assert.True(t, strings.Contains(hint, "work-session update"),
 			"hint should point to the work-session update command")
 	})
 

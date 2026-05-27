@@ -55,7 +55,7 @@ prompt. The 'sudo' scope is added automatically, and the policies are submitted 
 approval together with the session. If a sudo command is later denied, add it to the
 session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
-  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait
+  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --wait
   alpacon work-session create --purpose "hotfix" --scope command --server web-01 --expires-in 1h --use
   alpacon work-session create --purpose "deploy" --scope command --server web-01 --expires-in 2h --wait --use
   alpacon work-session create --purpose "nginx hotfix" --server web-01 --expires-in 2h \

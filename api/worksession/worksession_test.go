@@ -285,4 +285,29 @@ func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+func TestUpdateWorkSession(t *testing.T) {
+	var gotBody WorkSessionUpdateRequest
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/", r.URL.Path)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "active"})
+	}))
+	defer ts.Close()
+
+	req := WorkSessionUpdateRequest{SudoPolicies: []SudoPolicyInline{
+		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, AllowBypassMFA: true},
+		{Commands: []string{"tail -f /var/log/nginx/*.log"}, AllowBypassMFA: true},
+	}}
+	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
+	assert.NoError(t, err)
+	assert.Equal(t, "ses-abc", session.ID)
+	// Full desired set is sent: existing policy echoed back with its ID
+	// plus the new addition without one.
+	assert.Len(t, gotBody.SudoPolicies, 2)
+	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
+	assert.Empty(t, gotBody.SudoPolicies[1].ID)
+}
+
 func newString(s string) *string { return &s }

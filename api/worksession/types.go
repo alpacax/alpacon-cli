@@ -64,8 +64,12 @@ type SudoPolicyInline struct {
 	AllowBypassMFA bool     `json:"allow_bypass_mfa"`
 }
 
+// WorkSessionUpdateRequest carries the FULL desired sudo policy set (PUT-style):
+// the server deletes any existing policy absent from the list. SudoPolicies is
+// sent even when empty so an explicit empty set clears all policies; callers
+// that only mean to add must echo the existing policies back.
 type WorkSessionUpdateRequest struct {
-	SudoPolicies []SudoPolicyInline `json:"sudo_policies,omitempty"`
+	SudoPolicies []SudoPolicyInline `json:"sudo_policies"`
 }
 
 type WorkSessionExtendRequest struct {

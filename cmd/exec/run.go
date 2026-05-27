@@ -28,8 +28,8 @@ func sudoDenialHint(output string) string {
 	}
 	return fmt.Sprintf(
 		"%s sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n"+
-			"Add it and re-run:\n"+
-			"  alpacon work-session update --sudo \"<command>\"\n",
+			"Add it and re-run (omit SESSION_ID to use the active session):\n"+
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
 		utils.Yellow("Hint:"),
 	)
 }

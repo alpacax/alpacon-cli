@@ -25,8 +25,9 @@ Each --sudo value is a comma-separated pattern list (wildcards allowed) forming 
 policy. The session's existing policies are preserved; the additions may require
 approval before they take effect.
 
-If SESSION_ID is omitted, the workspace's active work session is used (set via
-'alpacon work-session use').`,
+If SESSION_ID is omitted, the effective work session is resolved from the
+ALPACON_WORK_SESSION environment variable, then the workspace's active session
+(set via 'alpacon work-session use').`,
 	Args: cobra.MaximumNArgs(1),
 	Example: `  alpacon work-session update ses-abc123 --sudo "systemctl restart nginx"
   alpacon work-session update --sudo "tail -f /var/log/nginx/*.log"`,
