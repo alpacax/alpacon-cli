@@ -102,3 +102,13 @@ func DescribePhase(phase string) string {
 	}
 	return phase
 }
+
+// IsRunningStatus reports whether status represents an in-progress (non-terminal) command.
+func IsRunningStatus(status string) bool {
+	switch status {
+	case "queued", "scheduled", "delivered", "verifying", "running", "acked":
+		return true
+	default:
+		return false
+	}
+}

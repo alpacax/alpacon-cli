@@ -123,3 +123,9 @@ func TestRemoteCommandOutcome(t *testing.T) {
 		})
 	}
 }
+
+func TestDetachResultLines(t *testing.T) {
+	line1, line2 := detachResultLines("a1b2c3d4-1234-5678-abcd-000000000000")
+	assert.Equal(t, "Job submitted: a1b2c3d4-1234-5678-abcd-000000000000", line1)
+	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
+}

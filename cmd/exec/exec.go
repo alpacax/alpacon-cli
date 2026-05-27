@@ -1,6 +1,13 @@
 package exec
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -31,6 +38,9 @@ Flags:
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
+  --detach                      Submit the command and return immediately without
+                                waiting for completion. Prints the job ID to stdout.
+                                Use 'alpacon exec logs JOB_ID' to retrieve the result.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
@@ -45,7 +55,11 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # Specify user and group with flags
   alpacon exec -u root prod-docker systemctl status nginx
-  alpacon exec -g docker user@server docker images`,
+  alpacon exec -g docker user@server docker images
+
+  # Submit a command asynchronously and retrieve the result later
+  alpacon exec --detach web-server -- apt-get update
+  alpacon exec logs <JOB_ID>`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.
@@ -92,6 +106,48 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		}
 
 		env := make(map[string]string)
+
+		if parsed.Detach {
+			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+			if err != nil {
+				err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+					OnMFARequired: func(srv string) error {
+						return mfa.HandleMFAError(alpaconClient, srv)
+					},
+					OnUsernameRequired: func() error {
+						_, err := iam.HandleUsernameRequired()
+						return err
+					},
+					CheckMFACompleted: func() (bool, error) {
+						return mfa.CheckMFACompletion(alpaconClient)
+					},
+					RefreshToken: alpaconClient.RefreshToken,
+					RetryOperation: func() error {
+						resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+						return err
+					},
+				})
+			}
+			if err != nil {
+				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
+				return
+			}
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				data, err := json.Marshal(map[string]string{"job_id": resp.ID})
+				if err != nil {
+					utils.CliErrorWithExit("failed to marshal JSON: %s", err)
+					return
+				}
+				utils.PrintJson(data)
+			} else {
+				line1, line2 := detachResultLines(resp.ID)
+				fmt.Println(line1)
+				fmt.Fprintln(os.Stderr, line2)
+			}
+			return
+		}
+
 		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		HandleCommandResult(result, err)

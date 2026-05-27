@@ -97,6 +97,11 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
+func detachResultLines(jobID string) (string, string) {
+	return fmt.Sprintf("Job submitted: %s", jobID),
+		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)
+}
+
 // remoteCommandOutcome is the testable core of HandleCommandResult's
 // RemoteCommandError branch. stderrLine already includes its trailing newline.
 func remoteCommandOutcome(result string, remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {

@@ -150,7 +150,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := PollCommandExecution(ac, "cmd-1")
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -229,6 +229,7 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 }
 
 func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -244,6 +245,7 @@ func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 }
 
 func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -258,7 +260,8 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 }
 
 func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
-	for _, status := range []string{"stuck", "error"} {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	for _, status := range []string{"stuck", "error", "cancelled"} {
 		t.Run(status, func(t *testing.T) {
 			ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: status})
 			defer ts.Close()
@@ -272,7 +275,20 @@ func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 	}
 }
 
+func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "denied"})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unrecognised status")
+	assert.Contains(t, err.Error(), "denied")
+}
+
 func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	ts := newRunCommandServerWithDetails(t, EventDetails{
 		ID:      "cmd-1",
 		Status:  "completed",
@@ -294,6 +310,7 @@ func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
 }
 
 func TestRunCommand_PropagatesExitCode(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	tests := []struct {
 		name           string
 		respSuccess    *bool
@@ -367,6 +384,7 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 }
 
 func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
 	tests := []struct {
 		name           string
 		respStatus     string
@@ -458,6 +476,79 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	assert.Equal(t, "completed", resp.Status)
 }
 
+func TestSubmitCommand_ReturnsJobID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+			})
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "job-abc-123"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "")
+	require.NoError(t, err)
+	assert.Equal(t, "job-abc-123", resp.ID)
+}
+
+func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(EventDetails{
+				ID:     "job-abc-123",
+				Status: "completed",
+				Result: "Packages updated.",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	details, err := GetCommandByID(ac, "job-abc-123")
+	require.NoError(t, err)
+	assert.Equal(t, "job-abc-123", details.ID)
+	assert.Equal(t, "completed", details.Status)
+	assert.Equal(t, "Packages updated.", details.Result)
+}
+
+func TestGetCommandByID_PropagatesError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := GetCommandByID(ac, "job-abc-123")
+	require.Error(t, err)
+}
+
+func TestExecTimeout_Default(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	assert.Equal(t, 30*time.Minute, execTimeout())
+}
+
+func TestExecTimeout_EnvVar(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "1h")
+	assert.Equal(t, time.Hour, execTimeout())
+}
+
+func TestExecTimeout_InvalidEnvFallsBackToDefault(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "not-a-duration")
+	assert.Equal(t, 30*time.Minute, execTimeout())
+}
+
 func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -481,7 +572,6 @@ func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	_, err := RunCommand(ac, "server-x", "id", "root", "", nil, "ses-abc")
 	require.Error(t, err)
 
-	// Error is wrapped through multiple layers; assert substrings, not exact match.
 	assert.Contains(t, err.Error(), "denied by policy")
 	assert.NotContains(t, err.Error(), "authentication failed")
 	assert.Contains(t, err.Error(), "alpacon login")

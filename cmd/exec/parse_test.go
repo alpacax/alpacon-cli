@@ -603,6 +603,54 @@ func TestParseRemoteExecArgs_OutputFlagEmptyValue(t *testing.T) {
 	assert.NotEmpty(t, result.Err)
 }
 
+func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantDetach  bool
+		wantServer  string
+		wantCommand string
+	}{
+		{
+			name:        "--detach before server",
+			args:        []string{"--detach", "server", "apt", "upgrade"},
+			wantDetach:  true,
+			wantServer:  "server",
+			wantCommand: "apt upgrade",
+		},
+		{
+			name:        "--detach combined with -u",
+			args:        []string{"--detach", "-u", "root", "server", "apt", "upgrade"},
+			wantDetach:  true,
+			wantServer:  "server",
+			wantCommand: "apt upgrade",
+		},
+		{
+			name:        "no --detach flag",
+			args:        []string{"server", "ls"},
+			wantDetach:  false,
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "--detach after server is treated as command arg",
+			args:        []string{"server", "--detach"},
+			wantDetach:  false,
+			wantServer:  "server",
+			wantCommand: "--detach",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.wantDetach, result.Detach, "Detach")
+			assert.Equal(t, tt.wantServer, result.Server, "Server")
+			assert.Equal(t, tt.wantCommand, result.Command, "Command")
+		})
+	}
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -643,6 +691,11 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 			name:        "--groupname as last arg with no value",
 			args:        []string{"--groupname"},
 			expectedErr: "flag needs an argument: --groupname",
+		},
+		{
+			name:        "--detach=VALUE equals-form is rejected",
+			args:        []string{"--detach=true", "server", "apt", "upgrade"},
+			expectedErr: "--detach does not accept a value; use --detach alone",
 		},
 	}
 
