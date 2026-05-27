@@ -124,7 +124,7 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// policies are MFA-bypass (the only way a non-interactive caller
 		// running 'exec' can sudo). The server binds each policy to
 		// the session assignee automatically, so they never apply to other
-		// users. ``sudo`` scope is required server-side, so add it implicitly.
+		// users. The 'sudo' scope is required server-side, so add it implicitly.
 		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
 		if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
 			scopeList = append(scopeList, "sudo")

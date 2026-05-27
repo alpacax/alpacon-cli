@@ -290,7 +290,7 @@ func TestUpdateWorkSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPatch, r.Method)
 		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/", r.URL.Path)
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		assert.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "active"})
 	}))
