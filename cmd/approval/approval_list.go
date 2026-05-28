@@ -33,10 +33,10 @@ restricted to their own requests (equivalent to --my).`,
   alpacon approval ls --my --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := validateStatusFilter(statusFilter); err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliErrorWithExit("%s", err)
 		}
 		if err := validateTypeFilter(typeFilter); err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliErrorWithExit("%s", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
