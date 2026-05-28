@@ -150,3 +150,42 @@ func TestCancelRequest(t *testing.T) {
 	err := CancelRequest(newTestClient(ts), "apr-abc")
 	assert.NoError(t, err)
 }
+
+func TestApproveRequest_403PropagatesError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": "you do not have permission to perform this action"}`))
+	}))
+	defer ts.Close()
+
+	err := ApproveRequest(newTestClient(ts), "apr-abc", ApproveOptions{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "permission")
+}
+
+func TestRejectRequest_404PropagatesError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "not found"}`))
+	}))
+	defer ts.Close()
+
+	err := RejectRequest(newTestClient(ts), "apr-missing")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestCancelRequest_403PropagatesError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": "you do not have permission to perform this action"}`))
+	}))
+	defer ts.Close()
+
+	err := CancelRequest(newTestClient(ts), "apr-abc")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "permission")
+}

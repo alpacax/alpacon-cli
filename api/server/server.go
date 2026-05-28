@@ -100,6 +100,7 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 	return response.Results[0].ID, nil
 }
 
+// ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
 func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, error) {
 	ids := make([]string, 0, len(names))
 	for _, name := range names {

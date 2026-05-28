@@ -549,8 +549,7 @@ func IsInteractiveShell() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
-// SplitAndTrim splits s by sep, trims whitespace from each element, and drops empty entries.
-// Returns nil when the input is empty or yields no non-empty elements.
+// CompactStrings trims whitespace from each element and drops empty entries.
 func CompactStrings(ss []string) []string {
 	var out []string
 	for _, s := range ss {
@@ -561,6 +560,8 @@ func CompactStrings(ss []string) []string {
 	return out
 }
 
+// SplitAndTrim splits s by sep, trims whitespace from each element, and drops empty entries.
+// Returns nil when the input is empty or yields no non-empty elements.
 func SplitAndTrim(s, sep string) []string {
 	if s == "" {
 		return nil

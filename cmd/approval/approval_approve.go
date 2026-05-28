@@ -35,13 +35,11 @@ approves the request exactly as submitted.`,
 			AdjustedScopes: utils.CompactStrings(approveScopes),
 		}
 
-		if len(approveServers) > 0 {
-			serverIDs, err := server.ResolveServerNames(ac, approveServers)
-			if err != nil {
-				utils.CliErrorWithExit("%s.", err)
-			}
-			req.AdjustedServers = serverIDs
+		serverIDs, err := server.ResolveServerNames(ac, approveServers)
+		if err != nil {
+			utils.CliErrorWithExit("%s.", err)
 		}
+		req.AdjustedServers = serverIDs
 
 		if err := approvalapi.ApproveRequest(ac, args[0], req); err != nil {
 			utils.CliErrorWithExit("Failed to approve request: %s.", err)
