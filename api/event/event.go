@@ -285,6 +285,11 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 
 // applyChunk handles a single chunk: skip duplicates, fill gaps with REST,
 // and write content in seq order. Returns the new lastSeq.
+//
+// Gap-fill invariant: when REST returns the same seq as the incoming WS chunk,
+// lastSeq advances to chunk.Seq inside the REST loop and the final `if` clause
+// becomes false — the WS chunk is intentionally skipped, since REST already
+// printed identical content for that seq (REST/WS share the persisted chunk).
 func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer) int {
 	if chunk.Seq <= lastSeq {
 		return lastSeq
