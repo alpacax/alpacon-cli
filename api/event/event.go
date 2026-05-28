@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"time"
@@ -199,4 +200,169 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 			return response, nil
 		}
 	}
+}
+
+// CommandOutcome wraps the terminal result of a streamed command.
+type CommandOutcome struct {
+	Status     string
+	ExitCode   int
+	ErrorPhase string
+	Success    *bool
+}
+
+// RunCommandStreaming is the streaming-aware counterpart to RunCommand.
+// It establishes an event-server WebSocket, subscribes to command_output for
+// the new command, prints chunks to stdout in real time, and returns when the
+// command reaches a terminal state. Any error during WS setup causes a fall
+// back to RunCommand (polling) with a stderr warning.
+func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (CommandOutcome, error) {
+	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, os.Stdout)
+}
+
+func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) (CommandOutcome, error) {
+	session, err := CreateEventSession(ac)
+	if err != nil {
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, err)
+	}
+
+	listener := NewCommandOutputListener(ac, session.WebsocketURL, "")
+	listener.Start()
+	if !listener.WaitConnected(5 * time.Second) {
+		listener.Stop()
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, fmt.Errorf("event websocket connect timeout"))
+	}
+
+	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	if err != nil {
+		listener.Stop()
+		return CommandOutcome{}, err
+	}
+	listener.setCommandID(cmdResp.ID)
+
+	if err := SubscribeCommandOutput(ac, session.ChannelID, cmdResp.ID); err != nil {
+		listener.Stop()
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, err)
+	}
+
+	// Warm-fire: drain any chunks already persisted.
+	lastSeq := -1
+	if existing, err := GetCommandChunks(ac, cmdResp.ID, 0); err == nil {
+		for _, c := range existing {
+			_, _ = fmt.Fprint(out, c.Content)
+			if c.Seq > lastSeq {
+				lastSeq = c.Seq
+			}
+		}
+	}
+
+	// Status polling in background
+	pollResult := make(chan EventDetails, 1)
+	pollErr := make(chan error, 1)
+	go func() {
+		details, err := PollCommandExecution(ac, cmdResp.ID)
+		if err != nil {
+			pollErr <- err
+			return
+		}
+		pollResult <- details
+	}()
+
+	for {
+		select {
+		case chunk := <-listener.Chunks():
+			lastSeq = applyChunk(ac, cmdResp.ID, lastSeq, chunk, out)
+		case details := <-pollResult:
+			lastSeq = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
+			_ = lastSeq
+			listener.Stop()
+			return outcomeFromDetails(details), errorFromDetails(details)
+		case err := <-pollErr:
+			listener.Stop()
+			return CommandOutcome{}, err
+		}
+	}
+}
+
+// applyChunk handles a single chunk: skip duplicates, fill gaps with REST,
+// and write content in seq order. Returns the new lastSeq.
+func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer) int {
+	if chunk.Seq <= lastSeq {
+		return lastSeq
+	}
+	if chunk.Seq > lastSeq+1 {
+		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
+		if err == nil {
+			for _, c := range missing {
+				if c.Seq > lastSeq && c.Seq <= chunk.Seq {
+					_, _ = fmt.Fprint(out, c.Content)
+					lastSeq = c.Seq
+				}
+			}
+		}
+	}
+	if chunk.Seq == lastSeq+1 {
+		_, _ = fmt.Fprint(out, chunk.Content)
+		lastSeq = chunk.Seq
+	}
+	return lastSeq
+}
+
+func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
+	final, err := GetCommandChunks(ac, cmdID, lastSeq+1)
+	if err != nil {
+		return lastSeq
+	}
+	for _, c := range final {
+		if c.Seq > lastSeq {
+			_, _ = fmt.Fprint(out, c.Content)
+			lastSeq = c.Seq
+		}
+	}
+	return lastSeq
+}
+
+func outcomeFromDetails(d EventDetails) CommandOutcome {
+	out := CommandOutcome{Status: d.Status, Success: d.Success}
+	if d.ExitCode != nil {
+		out.ExitCode = *d.ExitCode
+	}
+	if d.ErrorPhase != nil {
+		out.ErrorPhase = *d.ErrorPhase
+	}
+	return out
+}
+
+func errorFromDetails(d EventDetails) error {
+	if d.Status == "stuck" || d.Status == "error" || d.Status == "cancelled" {
+		phase := ""
+		if d.ErrorPhase != nil {
+			phase = *d.ErrorPhase
+		}
+		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+	}
+	if d.Success != nil && !*d.Success {
+		exitCode := 1
+		if d.ExitCode != nil {
+			exitCode = *d.ExitCode
+		}
+		phase := ""
+		if d.ErrorPhase != nil {
+			phase = *d.ErrorPhase
+		}
+		return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase}
+	}
+	return nil
+}
+
+// runCommandFallback warns the user and delegates to the existing polling flow.
+func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) (CommandOutcome, error) {
+	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
+	result, err := RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	if err != nil {
+		return CommandOutcome{}, err
+	}
+	if result != "" {
+		_, _ = fmt.Fprint(out, result)
+	}
+	return CommandOutcome{Status: "completed"}, nil
 }

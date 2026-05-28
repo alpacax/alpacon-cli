@@ -65,7 +65,10 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	if env.EventType != "command_output" {
 		return
 	}
-	if env.Payload.CommandID != l.commandID {
+	l.mu.Lock()
+	cid := l.commandID
+	l.mu.Unlock()
+	if env.Payload.CommandID != cid {
 		return
 	}
 
@@ -73,6 +76,14 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	case l.chunks <- ChunkEvent{Seq: env.Payload.Seq, Content: env.Payload.Content}:
 	case <-l.done:
 	}
+}
+
+// setCommandID assigns the commandID after construction. Used because
+// SubmitCommand must run after the WS is already connected.
+func (l *CommandOutputListener) setCommandID(id string) {
+	l.mu.Lock()
+	l.commandID = id
+	l.mu.Unlock()
 }
 
 // NewCommandOutputListener constructs a listener without connecting.
