@@ -247,34 +247,6 @@ func RemovePrefixBeforeAPI(url string) string {
 	return url[apiIndex:]
 }
 
-func SaveFile(fileName string, data []byte) error {
-	_, err := SaveStream(fileName, bytes.NewReader(data))
-	return err
-}
-
-func SaveStream(fileName string, r io.Reader) (int64, error) {
-	dir := filepath.Dir(fileName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create directories: %v", err)
-	}
-
-	file, err := os.Create(fileName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create file: %v", err)
-	}
-
-	written, copyErr := io.Copy(file, r)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return written, fmt.Errorf("failed to write file: %v", copyErr)
-	}
-	if closeErr != nil {
-		return written, fmt.Errorf("failed to close file: %v", closeErr)
-	}
-
-	return written, nil
-}
-
 func DeleteFile(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -302,8 +274,8 @@ func CleanupTempFile(f *os.File) {
 	_ = os.Remove(name)
 }
 
-// SpoolToTempFile creates a temp file, invokes fn to write into it, then
-// rewinds it for reading and returns the file along with its size. On any
+// SpoolToTempFile creates a temp file, invokes fn to write into it, closes it
+// to surface flush errors, then reopens it for reading with its size. On any
 // error the temp file is closed and removed. The caller owns cleanup on
 // success.
 func SpoolToTempFile(pattern string, fn func(io.Writer) error) (*os.File, int64, error) {
@@ -311,31 +283,31 @@ func SpoolToTempFile(pattern string, fn func(io.Writer) error) (*os.File, int64,
 	if err != nil {
 		return nil, 0, err
 	}
+	name := f.Name()
 
 	if err := fn(f); err != nil {
 		CleanupTempFile(f)
 		return nil, 0, err
 	}
 
-	size, err := f.Seek(0, io.SeekEnd)
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return nil, 0, err
+	}
+
+	info, err := os.Stat(name)
 	if err != nil {
-		CleanupTempFile(f)
-		return nil, 0, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		CleanupTempFile(f)
+		_ = os.Remove(name)
 		return nil, 0, err
 	}
 
-	return f, size, nil
-}
-
-func Zip(folderPath string) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := ZipToWriter(folderPath, &buf); err != nil {
-		return nil, err
+	readFile, err := os.Open(name)
+	if err != nil {
+		_ = os.Remove(name)
+		return nil, 0, err
 	}
-	return buf.Bytes(), nil
+
+	return readFile, info.Size(), nil
 }
 
 func ZipToWriter(folderPath string, w io.Writer) error {

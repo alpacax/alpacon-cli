@@ -3,9 +3,11 @@ package utils
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +167,129 @@ func TestSaveStream(t *testing.T) {
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(content))
+}
+
+type failingReader struct {
+	reader *strings.Reader
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.reader.Len() > 0 {
+		return r.reader.Read(p)
+	}
+	return 0, io.ErrUnexpectedEOF
+}
+
+func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0755))
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+
+	written, err := SaveStreamAtomic(dest, &failingReader{reader: strings.NewReader("partial")})
+	require.Error(t, err)
+	assert.Equal(t, int64(len("partial")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "existing", string(content))
+
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(dest), ".alpacon-*.tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, matches)
+}
+
+func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "file.txt")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
+
+	_, err := SaveStreamAtomic(dest, strings.NewReader("replacement"))
+	require.NoError(t, err)
+
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
+func TestSaveStreamAtomic_WritesThroughExistingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on some Windows environments")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	link := filepath.Join(dir, "link.txt")
+	chain := filepath.Join(dir, "chain.txt")
+	require.NoError(t, os.WriteFile(target, []byte("existing"), 0644))
+	require.NoError(t, os.Symlink(target, link))
+	require.NoError(t, os.Symlink("link.txt", chain))
+
+	_, err := SaveStreamAtomic(chain, strings.NewReader("replacement"))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement", string(content))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+	info, err = os.Lstat(chain)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+}
+
+func TestSaveStreamAtomic_WritesThroughDanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on some Windows environments")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	link := filepath.Join(dir, "link.txt")
+	require.NoError(t, os.Symlink("target.txt", link))
+
+	_, err := SaveStreamAtomic(link, strings.NewReader("created"))
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	assert.Equal(t, "created", string(content))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+}
+
+func TestSpoolToTempFile_ReopensForReadingAndReportsSize(t *testing.T) {
+	f, size, err := SpoolToTempFile("alpacon-spool-success-*.tmp", func(w io.Writer) error {
+		_, err := w.Write([]byte("spooled"))
+		return err
+	})
+	require.NoError(t, err)
+	defer CleanupTempFile(f)
+
+	assert.Equal(t, int64(len("spooled")), size)
+	content, err := io.ReadAll(f)
+	require.NoError(t, err)
+	assert.Equal(t, "spooled", string(content))
+}
+
+func TestSpoolToTempFile_CleansUpOnCallbackError(t *testing.T) {
+	pattern := "alpacon-spool-cleanup-" + strings.ReplaceAll(t.Name(), "/", "-") + "-*.tmp"
+	wantErr := errors.New("spool failed")
+
+	f, size, err := SpoolToTempFile(pattern, func(w io.Writer) error {
+		_, writeErr := w.Write([]byte("partial"))
+		require.NoError(t, writeErr)
+		return wantErr
+	})
+	require.ErrorIs(t, err, wantErr)
+	assert.Nil(t, f)
+	assert.Zero(t, size)
+
+	matches, globErr := filepath.Glob(filepath.Join(os.TempDir(), pattern))
+	require.NoError(t, globErr)
+	assert.Empty(t, matches)
 }
 
 func TestZipToWriter(t *testing.T) {
