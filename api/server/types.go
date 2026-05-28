@@ -75,6 +75,23 @@ type RegistrationMethodGuideJsonResponse struct {
 	RegisterCommand  string   `json:"register_command"`
 }
 
+// AnsibleGuideJsonResponse is the structured JSON response from the Ansible registration method guide API.
+type AnsibleGuideJsonResponse struct {
+	MethodID          string  `json:"method_id"`
+	Platform          string  `json:"platform"`
+	PlatformLabel     string  `json:"platform_label"`
+	AlpaconURL        string  `json:"alpacon_url"`
+	RegistrationToken string  `json:"registration_token"`
+	ServerName        string  `json:"server_name"`
+	PackageProxy      *string `json:"package_proxy"`
+	AllowSudoWithMFA  bool    `json:"allow_sudo_with_mfa"`
+	CollectionInstall string  `json:"collection_install"`
+	RunCommandQuick   string  `json:"run_command_quick"`
+	InventorySnippet  string  `json:"inventory_snippet"`
+	PlaybookSnippet   string  `json:"playbook_snippet"`
+	RunCommandCustom  string  `json:"run_command_custom"`
+}
+
 type ServerStatus struct {
 	Code     string           `json:"code"`
 	Icon     string           `json:"icon"`
