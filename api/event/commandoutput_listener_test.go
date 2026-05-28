@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,4 +133,57 @@ func TestCommandOutputListener_StopIsIdempotent(t *testing.T) {
 	l.Stop()
 	l.Stop()
 	l.Stop()
+}
+
+func TestCommandOutputListener_Reconnects(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var connectionCount atomic.Int32
+	cmdID := "cmd-uuid"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		n := connectionCount.Add(1)
+
+		if n == 1 {
+			// First connection: emit one chunk and drop
+			env := `{"event_type":"command_output","payload":{"command_id":"` + cmdID + `","seq":0,"content":"first"}}`
+			_ = conn.WriteMessage(websocket.TextMessage, []byte(env))
+			_ = conn.Close()
+			return
+		}
+		// Second connection: emit second chunk and block
+		env := `{"event_type":"command_output","payload":{"command_id":"` + cmdID + `","seq":1,"content":"second"}}`
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(env))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+	l := NewCommandOutputListener(nil, wsURL, cmdID)
+	l.Start()
+	defer l.Stop()
+
+	require.True(t, l.WaitConnected(2*time.Second))
+
+	got := []ChunkEvent{}
+	timeout := time.After(5 * time.Second)
+	for len(got) < 2 {
+		select {
+		case c := <-l.Chunks():
+			got = append(got, c)
+		case <-timeout:
+			t.Fatalf("timeout, got %+v (connections=%d)", got, connectionCount.Load())
+		}
+	}
+
+	assert.Equal(t, ChunkEvent{Seq: 0, Content: "first"}, got[0])
+	assert.Equal(t, ChunkEvent{Seq: 1, Content: "second"}, got[1])
+	assert.GreaterOrEqual(t, connectionCount.Load(), int32(2))
 }
