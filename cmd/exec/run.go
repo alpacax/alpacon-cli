@@ -17,7 +17,12 @@ import (
 // output when a non-interactive sudo is denied for lack of a matching
 // MFA-bypass policy in the work session. Kept in sync with
 // alpacon-server utils/error_codes.py ErrorCode.SUDO_NO_WORKSESSION_POLICY.
-const sudoNoWorksessionPolicyCode = "sudo_no_worksession_policy"
+//
+// The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
+// codes through its sanitizer into the user-facing denial message; lowercase
+// values are dropped, so this is the form that actually reaches stderr as
+// "Permission denied (SUDO_NO_WORKSESSION_POLICY)".
+const sudoNoWorksessionPolicyCode = "SUDO_NO_WORKSESSION_POLICY"
 
 // sudoDenialHint returns actionable guidance when the command output shows a
 // non-interactive sudo denial, telling the caller how to authorize the command

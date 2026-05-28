@@ -1,6 +1,8 @@
 package worksession
 
 import (
+	"slices"
+
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -63,6 +65,12 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		}
 		if session.Status == pendingWorkSessionStatus {
 			utils.CliErrorWithExit("Work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved.", sessionID)
+		}
+		// Server rejects sudo_policies on a session without the 'sudo' scope
+		// (work_session_sudo_policy_without_scope). The update endpoint has no
+		// scopes field, so we cannot add it here — fail early with guidance.
+		if !slices.Contains(session.Scopes, "sudo") {
+			utils.CliErrorWithExit("Work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with '--scope sudo' (and --sudo).", sessionID)
 		}
 
 		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newPolicies))

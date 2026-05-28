@@ -9,7 +9,7 @@ import (
 
 func TestSudoDenialHint(t *testing.T) {
 	t.Run("returns guidance when denial code present", func(t *testing.T) {
-		out := "sudo: a password is required\nsudo_no_worksession_policy\n"
+		out := "sudo: Permission denied (SUDO_NO_WORKSESSION_POLICY)\n"
 		hint := sudoDenialHint(out)
 		assert.NotEmpty(t, hint)
 		assert.True(t, strings.Contains(hint, "work-session update"),
