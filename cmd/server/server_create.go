@@ -59,25 +59,41 @@ var serverCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		method := resolveMethod(cmd)
 		platform := resolvePlatform(cmd)
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
-		guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
-		}
-
-		if createJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(guide); err != nil {
-				utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+		switch method {
+		case "ansible":
+			guide, err := server.GetAnsibleRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+			if err != nil {
+				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
 			}
-			return
+			if createJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(guide); err != nil {
+					utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+				}
+				return
+			}
+			displayAnsibleGuideFromJSON(guide)
+		default: // token-install
+			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
+			if err != nil {
+				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
+			}
+			if createJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(guide); err != nil {
+					utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+				}
+				return
+			}
+			displayGuideFromJSON(guide)
 		}
-
-		displayGuideFromJSON(guide)
 	},
 }
 
@@ -89,6 +105,21 @@ func init() {
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
 	serverCreateCmd.Flags().BoolVar(&createJSON, "json", false, "output the installation guide as structured JSON instead of markdown")
 	serverCreateCmd.MarkFlagsMutuallyExclusive("token", "new-token")
+}
+
+// resolveMethod returns the registration method from --method flag or interactively.
+func resolveMethod(cmd *cobra.Command) string {
+	if cmd.Flags().Changed("method") {
+		if !isValidMethod(createMethod) {
+			utils.CliErrorWithExit("Invalid method %q. Valid values: %s.", createMethod, validMethodsList)
+		}
+		return createMethod
+	}
+	if !utils.IsInteractiveShell() {
+		// non-interactive: fall back to default token-install
+		return "token-install"
+	}
+	return selectMethod()
 }
 
 // resolvePlatform returns the platform value from --platform flag or interactively.
@@ -129,6 +160,24 @@ func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 		return createTokenAndWarn(ac, createNewTokenName)
 	}
 	return selectOrCreateToken(ac)
+}
+
+// selectMethod prompts the user to choose a registration method.
+// Empty input defaults to token-install to preserve existing muscle memory.
+func selectMethod() string {
+	fmt.Fprintln(os.Stderr, "Registration method:")
+	fmt.Fprintln(os.Stderr, "  [1] Token install")
+	fmt.Fprintln(os.Stderr, "  [2] Ansible")
+	for {
+		input := strings.TrimSpace(utils.PromptForInput("Method [1]: "))
+		switch input {
+		case "", "1", "token-install":
+			return "token-install"
+		case "2", "ansible":
+			return "ansible"
+		}
+		utils.CliWarning("Invalid selection. Enter 1 or 2.")
+	}
 }
 
 func selectPlatform() string {
@@ -227,6 +276,51 @@ func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
 	fmt.Fprintln(os.Stderr)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Verify"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
+}
+
+func displayAnsibleGuideFromJSON(guide server.AnsibleGuideJsonResponse) {
+	fmt.Fprintln(os.Stderr)
+	utils.PrintHeader("Installation guide")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  Platform : %s\n", guide.PlatformLabel)
+	if guide.ServerName != "" {
+		fmt.Fprintf(os.Stderr, "  Server   : %s\n", guide.ServerName)
+	}
+	fmt.Fprintf(os.Stderr, "  URL      : %s\n", guide.AlpaconURL)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Ansible collection"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.CollectionInstall)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Configure inventory"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Save as inventory.ini:")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.InventorySnippet)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Register"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, utils.Bold("Option A — Bundled playbook (recommended):"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.RunCommandQuick)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, utils.Bold("Option B — Custom playbook:"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Save as playbook.yml:")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.PlaybookSnippet)
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "Then run:")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, guide.RunCommandCustom)
+	fmt.Fprintln(os.Stderr)
+
+	fmt.Fprintln(os.Stderr, utils.Bold("Step 4 — Verify"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
 }
