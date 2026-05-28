@@ -37,7 +37,7 @@ approves the request exactly as submitted.`,
 
 		serverIDs, err := server.ResolveServerNames(ac, approveServers)
 		if err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliErrorWithExit("Failed to resolve server names: %s.", err)
 		}
 		req.AdjustedServers = serverIDs
 
