@@ -14,7 +14,8 @@ import (
 const (
 	serverURL            = "/api/servers/servers/"
 	registrationTokenURL = "/api/servers/registration-tokens/"
-	registrationGuideURL = "/api/servers/registration-methods/token-install/guide/"
+	tokenInstallGuideURL = "/api/servers/registration-methods/token-install/guide/"
+	ansibleGuideURL      = "/api/servers/registration-methods/ansible/guide/"
 	// iamGroupURL is duplicated from api/iam so this package can build a lean
 	// UUID→name projection without pulling in the full iam.GroupResponse type.
 	iamGroupURL = "/api/iam/groups/"
@@ -231,21 +232,29 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 }
 
 func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
+	return fetchRegistrationGuide[RegistrationMethodGuideJsonResponse](ac, tokenInstallGuideURL, platform, serverName, tokenID)
+}
+
+func GetAnsibleRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (AnsibleGuideJsonResponse, error) {
+	return fetchRegistrationGuide[AnsibleGuideJsonResponse](ac, ansibleGuideURL, platform, serverName, tokenID)
+}
+
+func fetchRegistrationGuide[T any](ac *client.AlpaconClient, guideURL, platform, serverName, tokenID string) (T, error) {
+	var response T
 	req := RegistrationMethodGuideRequest{
 		Platform:          platform,
 		ServerName:        serverName,
 		RegistrationToken: tokenID,
 	}
 
-	url := utils.BuildURL(registrationGuideURL, "", map[string]string{"response_type": "json"})
+	url := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
 	body, err := ac.SendPostRequest(url, req)
 	if err != nil {
-		return RegistrationMethodGuideJsonResponse{}, err
+		return response, err
 	}
 
-	var response RegistrationMethodGuideJsonResponse
 	if err = json.Unmarshal(body, &response); err != nil {
-		return RegistrationMethodGuideJsonResponse{}, err
+		return response, err
 	}
 
 	return response, nil
