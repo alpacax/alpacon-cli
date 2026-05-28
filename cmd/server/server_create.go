@@ -136,9 +136,14 @@ func resolvePlatform(cmd *cobra.Command) string {
 }
 
 // resolveName returns the server name from --name flag or interactively.
+// When --token or --new-token is set, the caller is scripting: skip the prompt
+// and let the server fall back to hostname.
 func resolveName(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("name") {
 		return createName
+	}
+	if cmd.Flags().Changed("token") || cmd.Flags().Changed("new-token") {
+		return ""
 	}
 	return promptForServerName()
 }
