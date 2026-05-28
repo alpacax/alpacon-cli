@@ -339,17 +339,6 @@ func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
 	})
 }
 
-func cleanupFolderZipTempFiles(files []*os.File) {
-	for _, file := range files {
-		if file == nil {
-			continue
-		}
-		name := file.Name()
-		_ = file.Close()
-		_ = os.Remove(name)
-	}
-}
-
 // UploadFolder uploads local folders to a remote server.
 // Each folder is zipped before upload and extracted on the server side.
 // Uses the single upload API for one folder, or the bulk API for multiple folders.
@@ -373,7 +362,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		if err != nil {
 			return err
 		}
-		defer cleanupFolderZipTempFiles([]*os.File{zipFile})
+		defer utils.CleanupTempFile(zipFile)
 
 		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
 		spinner.Start()
@@ -396,7 +385,11 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 	readers := make([]io.Reader, len(src))
 	sizes := make([]int64, len(src))
 	zipFiles := make([]*os.File, len(src))
-	defer cleanupFolderZipTempFiles(zipFiles)
+	defer func() {
+		for _, f := range zipFiles {
+			utils.CleanupTempFile(f)
+		}
+	}()
 	for i, folderPath := range src {
 		zipFile, size, err := createFolderZipTempFile(folderPath)
 		if err != nil {

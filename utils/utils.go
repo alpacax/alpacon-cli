@@ -291,6 +291,17 @@ func DeleteFile(path string) error {
 	return os.Remove(path)
 }
 
+// CleanupTempFile closes f and removes the backing file. Safe to call with
+// a nil pointer. Intended as the cleanup half of SpoolToTempFile.
+func CleanupTempFile(f *os.File) {
+	if f == nil {
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+}
+
 // SpoolToTempFile creates a temp file, invokes fn to write into it, then
 // rewinds it for reading and returns the file along with its size. On any
 // error the temp file is closed and removed. The caller owns cleanup on
@@ -301,23 +312,18 @@ func SpoolToTempFile(pattern string, fn func(io.Writer) error) (*os.File, int64,
 		return nil, 0, err
 	}
 
-	cleanup := func() {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-	}
-
 	if err := fn(f); err != nil {
-		cleanup()
+		CleanupTempFile(f)
 		return nil, 0, err
 	}
 
 	size, err := f.Seek(0, io.SeekEnd)
 	if err != nil {
-		cleanup()
+		CleanupTempFile(f)
 		return nil, 0, err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		cleanup()
+		CleanupTempFile(f)
 		return nil, 0, err
 	}
 

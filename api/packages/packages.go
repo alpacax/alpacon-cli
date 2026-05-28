@@ -123,10 +123,7 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = requestBody.Close()
-		_ = os.Remove(requestBody.Name())
-	}()
+	defer utils.CleanupTempFile(requestBody)
 
 	var requestURL string
 	if packageType == "python" {
