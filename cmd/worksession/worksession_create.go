@@ -23,6 +23,15 @@ const (
 	waitMsgActivation = "Waiting for activation..."
 )
 
+type useDecision int
+
+const (
+	useDecisionNoop useDecision = iota
+	useDecisionUseNow
+	useDecisionErrorNeedsWait
+	useDecisionSkipScheduled
+)
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
@@ -186,15 +195,6 @@ active state.`,
 		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
 	},
 }
-
-type useDecision int
-
-const (
-	useDecisionNoop useDecision = iota
-	useDecisionUseNow
-	useDecisionErrorNeedsWait
-	useDecisionSkipScheduled
-)
 
 // attachActiveOrExit calls RunUse and prints either a success line (with description if present)
 // or exits with the supplied error format (which receives session ID, error, session ID in order).

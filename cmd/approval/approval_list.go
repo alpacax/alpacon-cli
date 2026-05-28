@@ -17,6 +17,13 @@ var (
 	myRequests   bool
 )
 
+var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired"}
+
+var validTypes = []string{
+	"sudo", "work_session", "username", "groupname", "service_token",
+	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
+}
+
 var approvalListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
@@ -62,13 +69,6 @@ func init() {
 	approvalListCmd.Flags().StringVar(&statusFilter, "status", "pending", "Filter by status: pending|approved|rejected|cancelled|expired")
 	approvalListCmd.Flags().StringVar(&typeFilter, "type", "", "Filter by request type: sudo|work_session|username|groupname|service_token|svc_token_mod|app_username|work_session_mod|sudo_policy")
 	approvalListCmd.Flags().BoolVar(&myRequests, "my", false, "Show only requests you submitted")
-}
-
-var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired"}
-
-var validTypes = []string{
-	"sudo", "work_session", "username", "groupname", "service_token",
-	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
 }
 
 func validateEnumFlag(flag, value string, valid []string) error {
