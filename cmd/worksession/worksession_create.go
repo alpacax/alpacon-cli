@@ -123,22 +123,13 @@ active state.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		var serverNames []string
-		for _, s := range createServers {
-			if s = strings.TrimSpace(s); s != "" {
-				serverNames = append(serverNames, s)
-			}
-		}
+		serverNames := utils.CompactStrings(createServers)
 		if len(serverNames) == 0 {
 			utils.CliErrorWithExit("--server must contain at least one valid server name.")
 		}
-		serverIDs := make([]string, 0, len(serverNames))
-		for _, name := range serverNames {
-			id, err := server.GetServerIDByName(ac, name)
-			if err != nil {
-				utils.CliErrorWithExit("Server %q not found: %s.", name, err)
-			}
-			serverIDs = append(serverIDs, id)
+		serverIDs, err := server.ResolveServerNames(ac, serverNames)
+		if err != nil {
+			utils.CliErrorWithExit("%s.", err)
 		}
 
 		req := wsapi.WorkSessionCreateRequest{

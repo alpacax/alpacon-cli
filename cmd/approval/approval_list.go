@@ -71,16 +71,12 @@ var validTypes = []string{
 	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
 }
 
-func validateStatusFilter(s string) error {
-	if s == "" || slices.Contains(validStatuses, s) {
+func validateEnumFlag(flag, value string, valid []string) error {
+	if value == "" || slices.Contains(valid, value) {
 		return nil
 	}
-	return fmt.Errorf("invalid --status %q: must be one of %s", s, strings.Join(validStatuses, ", "))
+	return fmt.Errorf("invalid --%s %q: must be one of %s", flag, value, strings.Join(valid, ", "))
 }
 
-func validateTypeFilter(s string) error {
-	if s == "" || slices.Contains(validTypes, s) {
-		return nil
-	}
-	return fmt.Errorf("invalid --type %q: must be one of %s", s, strings.Join(validTypes, ", "))
-}
+func validateStatusFilter(s string) error { return validateEnumFlag("status", s, validStatuses) }
+func validateTypeFilter(s string) error    { return validateEnumFlag("type", s, validTypes) }
