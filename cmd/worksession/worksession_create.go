@@ -145,7 +145,11 @@ active state.`,
 			utils.CliErrorWithExit("Failed to create work session: %s.", err)
 		}
 
-		utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
+		if session.ApprovalRequestID != "" {
+			utils.CliSuccess("Work session created: %s (status: %s, approval request: %s)", session.ID, session.Status, session.ApprovalRequestID)
+		} else {
+			utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
+		}
 
 		// Phase 1: post-create decision. Cases without an explicit return delegate to
 		// the --wait branch below (or exit immediately when --wait is not set).
