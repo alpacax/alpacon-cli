@@ -259,16 +259,26 @@ func createTokenAndWarn(ac *client.AlpaconClient, name string) string {
 	return response.ID
 }
 
-func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
+func printGuideHeader(platformLabel, serverName, alpaconURL string) {
 	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Installation guide")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  Platform : %s\n", guide.PlatformLabel)
-	if guide.ServerName != "" {
-		fmt.Fprintf(os.Stderr, "  Server   : %s\n", guide.ServerName)
+	fmt.Fprintf(os.Stderr, "  Platform : %s\n", platformLabel)
+	if serverName != "" {
+		fmt.Fprintf(os.Stderr, "  Server   : %s\n", serverName)
 	}
-	fmt.Fprintf(os.Stderr, "  URL      : %s\n", guide.AlpaconURL)
+	fmt.Fprintf(os.Stderr, "  URL      : %s\n", alpaconURL)
 	fmt.Fprintln(os.Stderr)
+}
+
+func printGuideVerifyFooter(stepNum int) {
+	fmt.Fprintln(os.Stderr, utils.Bold(fmt.Sprintf("Step %d — Verify", stepNum)))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
+}
+
+func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
+	printGuideHeader(guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Alpamon"))
 	fmt.Fprintln(os.Stderr)
@@ -282,21 +292,11 @@ func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
 	fmt.Fprintln(os.Stderr, guide.RegisterCommand)
 	fmt.Fprintln(os.Stderr)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Verify"))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
+	printGuideVerifyFooter(3)
 }
 
 func displayAnsibleGuideFromJSON(guide server.AnsibleGuideJsonResponse) {
-	fmt.Fprintln(os.Stderr)
-	utils.PrintHeader("Installation guide")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  Platform : %s\n", guide.PlatformLabel)
-	if guide.ServerName != "" {
-		fmt.Fprintf(os.Stderr, "  Server   : %s\n", guide.ServerName)
-	}
-	fmt.Fprintf(os.Stderr, "  URL      : %s\n", guide.AlpaconURL)
-	fmt.Fprintln(os.Stderr)
+	printGuideHeader(guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Ansible collection"))
 	fmt.Fprintln(os.Stderr)
@@ -327,7 +327,5 @@ func displayAnsibleGuideFromJSON(guide server.AnsibleGuideJsonResponse) {
 	fmt.Fprintln(os.Stderr, guide.RunCommandCustom)
 	fmt.Fprintln(os.Stderr)
 
-	fmt.Fprintln(os.Stderr, utils.Bold("Step 4 — Verify"))
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
+	printGuideVerifyFooter(4)
 }
