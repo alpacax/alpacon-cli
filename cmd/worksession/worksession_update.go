@@ -31,6 +31,30 @@ func validateSessionForSudoUpdate(session *wsapi.WorkSession) error {
 	return nil
 }
 
+// attachSudoPoliciesToSession is the testable core of the update command Run:
+// load the current session, validate it can accept sudo policy changes, then
+// PATCH the full desired set (existing policies echoed back by ID + new
+// additions). The modify endpoint is PUT-style — any policy absent from the
+// request is deleted — so the echo-existing step is the regression bait this
+// helper exists to lock down.
+func attachSudoPoliciesToSession(
+	ac *client.AlpaconClient,
+	sessionID string,
+	newPolicies []wsapi.SudoPolicyInline,
+) (*wsapi.WorkSession, error) {
+	session, err := wsapi.GetWorkSession(ac, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
+	}
+	if err := validateSessionForSudoUpdate(session); err != nil {
+		return nil, err
+	}
+	desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newPolicies))
+	desired = append(desired, session.SudoPolicies...)
+	desired = append(desired, newPolicies...)
+	return wsapi.UpdateWorkSession(ac, sessionID, wsapi.WorkSessionUpdateRequest{SudoPolicies: desired})
+}
+
 var (
 	updateSudo       []string
 	updateSudoReason string
@@ -75,30 +99,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// The modify endpoint takes the FULL desired set of policies (PUT-style):
-		// any existing policy missing from the request is deleted. Read the
-		// current set and echo it back (with IDs) alongside the additions so
-		// nothing is dropped.
-		session, err := wsapi.GetWorkSession(ac, sessionID)
+		updated, err := attachSudoPoliciesToSession(ac, sessionID, newPolicies)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to load work session %s: %s.", sessionID, err)
-		}
-		// Server rejects sudo_policies on a pending session (the update
-		// serializer drops the field) or on one without the 'sudo' scope
-		// (work_session_sudo_policy_without_scope). The update endpoint has no
-		// scopes field, so we cannot add it here — fail early with guidance.
-		if err := validateSessionForSudoUpdate(session); err != nil {
-			utils.CliErrorWithExit("%s", err)
-		}
-
-		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newPolicies))
-		desired = append(desired, session.SudoPolicies...)
-		desired = append(desired, newPolicies...)
-
-		req := wsapi.WorkSessionUpdateRequest{SudoPolicies: desired}
-		updated, err := wsapi.UpdateWorkSession(ac, sessionID, req)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to update work session: %s.", err)
+			utils.CliErrorWithExit("%s.", err)
 		}
 
 		utils.CliSuccess("Work session %s updated (status: %s).", updated.ID, updated.Status)

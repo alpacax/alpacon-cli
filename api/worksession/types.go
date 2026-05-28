@@ -65,9 +65,15 @@ type SudoPolicyInline struct {
 }
 
 // WorkSessionUpdateRequest carries the FULL desired sudo policy set (PUT-style):
-// the server deletes any existing policy absent from the list. SudoPolicies is
-// sent even when empty so an explicit empty set clears all policies; callers
-// that only mean to add must echo the existing policies back.
+// the server deletes any existing policy absent from the list. Callers that
+// only mean to add must echo the existing policies back.
+//
+// Note on Go JSON encoding: a nil slice marshals to JSON `null` (treated by
+// the server as "field not provided" → no change). To explicitly clear all
+// policies, pass an explicitly empty slice (`[]SudoPolicyInline{}`), which
+// marshals to `[]`. The current CLI never sends nil here because the update
+// command guards `len(newPolicies) == 0` upstream and always builds the
+// desired slice via `make(...)`.
 type WorkSessionUpdateRequest struct {
 	SudoPolicies []SudoPolicyInline `json:"sudo_policies"`
 }

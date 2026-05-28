@@ -1,10 +1,14 @@
 package worksession
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -50,4 +54,75 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 			Scopes: []string{"sudo"},
 		}))
 	})
+}
+
+// TestAttachSudoPoliciesToSession_PreservesExistingPolicies locks down the
+// "don't drop existing policies" invariant of the modify endpoint: a future
+// refactor that forgets to echo the current set back would silently delete it.
+func TestAttachSudoPoliciesToSession_PreservesExistingPolicies(t *testing.T) {
+	var gotPATCH wsapi.WorkSessionUpdateRequest
+	patchCalled := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(wsapi.WorkSession{
+				ID:     "ses-1",
+				Status: "active",
+				Scopes: []string{"sudo"},
+				SudoPolicies: []wsapi.SudoPolicyInline{
+					{ID: "pol-old", Commands: []string{"systemctl restart nginx"}, AllowBypassMFA: true},
+				},
+			})
+		case http.MethodPatch:
+			patchCalled = true
+			assert.Equal(t, "/api/work-sessions/sessions/ses-1/", r.URL.Path)
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&gotPATCH))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(wsapi.WorkSession{ID: "ses-1", Status: "active"})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	newPolicies := []wsapi.SudoPolicyInline{
+		{Commands: []string{"systemctl reload nginx"}, AllowBypassMFA: true},
+	}
+	_, err := attachSudoPoliciesToSession(ac, "ses-1", newPolicies)
+	assert.NoError(t, err)
+	assert.True(t, patchCalled, "PATCH must be issued")
+	// Full desired set is sent: existing policy echoed back with its ID + the new addition without one.
+	assert.Len(t, gotPATCH.SudoPolicies, 2)
+	assert.Equal(t, "pol-old", gotPATCH.SudoPolicies[0].ID)
+	assert.Empty(t, gotPATCH.SudoPolicies[1].ID)
+	assert.Equal(t, []string{"systemctl reload nginx"}, gotPATCH.SudoPolicies[1].Commands)
+}
+
+// TestAttachSudoPoliciesToSession_PendingSessionAbortsBeforePATCH ensures the
+// validator runs in the wiring path: a pending session must error out without
+// issuing the PATCH so the server doesn't even see the request.
+func TestAttachSudoPoliciesToSession_PendingSessionAbortsBeforePATCH(t *testing.T) {
+	patchCalled := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPatch {
+			patchCalled = true
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(wsapi.WorkSession{
+			ID:     "ses-pending",
+			Status: "pending",
+			Scopes: []string{"sudo"},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := attachSudoPoliciesToSession(ac, "ses-pending", []wsapi.SudoPolicyInline{
+		{Commands: []string{"x"}, AllowBypassMFA: true},
+	})
+	assert.Error(t, err)
+	assert.False(t, patchCalled, "PATCH must not be issued when the validator rejects")
 }
