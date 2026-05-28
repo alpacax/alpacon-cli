@@ -866,3 +866,46 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
+
+func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			// Force fallback
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "fallback-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	outcome, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", outcome.Status)
+	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
+}
