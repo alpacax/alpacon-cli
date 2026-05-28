@@ -241,7 +241,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 
 	if err := SubscribeCommandOutput(ac, session.ChannelID, cmdResp.ID); err != nil {
 		listener.Stop()
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, err)
+		return runCommandFallbackFromID(ac, cmdResp.ID, out, err)
 	}
 
 	// Warm-fire: drain any chunks already persisted.
@@ -296,7 +296,11 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	}
 	if chunk.Seq > lastSeq+1 {
 		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
-		if err == nil {
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr,
+				"warning: failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete\n",
+				lastSeq+1, chunk.Seq-1, err)
+		} else {
 			for _, c := range missing {
 				if c.Seq > lastSeq && c.Seq <= chunk.Seq {
 					_, _ = fmt.Fprint(out, c.Content)
@@ -370,4 +374,24 @@ func runCommandFallback(ac *client.AlpaconClient, serverName, command, username,
 		_, _ = fmt.Fprint(out, result)
 	}
 	return CommandOutcome{Status: "completed"}, nil
+}
+
+// runCommandFallbackFromID is the fallback used when streaming setup fails
+// AFTER SubmitCommand has already created the command on the server. It
+// polls the existing command by ID instead of re-submitting, then writes
+// the buffered result to out. Returns the same shape as
+// runCommandStreamingWithWriter so callers can ignore the difference.
+func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) (CommandOutcome, error) {
+	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
+	details, err := PollCommandExecution(ac, cmdID)
+	if err != nil {
+		return CommandOutcome{}, err
+	}
+	if details.Result != "" {
+		_, _ = fmt.Fprint(out, details.Result)
+	}
+	if termErr := errorFromDetails(details); termErr != nil {
+		return outcomeFromDetails(details), termErr
+	}
+	return outcomeFromDetails(details), nil
 }

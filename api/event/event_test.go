@@ -867,6 +867,78 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
 
+func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	// WS server just upgrades and waits; subscribe will fail so chunks shouldn't matter
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer wsServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	var submitCount int
+	var pollCount int
+	var mu sync.Mutex
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
+		case "/api/events/commands/":
+			mu.Lock()
+			submitCount++
+			mu.Unlock()
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/subscriptions/":
+			// Force subscribe failure -> fallback path with existing cmdID
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "reused-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	outcome, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", outcome.Status)
+	assert.Equal(t, "reused-output\n", stdoutBuf.String())
+
+	// THE KEY ASSERTION: SubmitCommand was called exactly once
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, submitCount, "fallback must not re-submit the command")
+}
+
 func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
