@@ -79,7 +79,7 @@ var serverCreateCmd = &cobra.Command{
 				return
 			}
 			displayAnsibleGuideFromJSON(guide)
-		default: // token-install
+		case "token-install":
 			guide, err := server.GetRegistrationGuideJSON(alpaconClient, platform, serverName, tokenID)
 			if err != nil {
 				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
@@ -89,6 +89,8 @@ var serverCreateCmd = &cobra.Command{
 				return
 			}
 			displayGuideFromJSON(guide)
+		default:
+			utils.CliErrorWithExit("Unknown registration method %q. Valid values: %s.", method, validMethodsList)
 		}
 	},
 }

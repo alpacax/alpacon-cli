@@ -185,11 +185,10 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
-		return nil, parseAPIError(respBody)
-	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
-		return nil, parseAPIError(respBody)
-	} else if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	statusIsError := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
+	postUnexpected := req.Method == http.MethodPost && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK
+	deleteUnexpected := req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent
+	if statusIsError || postUnexpected || deleteUnexpected {
 		return nil, parseAPIError(respBody)
 	}
 

@@ -21,6 +21,13 @@ const (
 	pythonPackageEntryURL = "/api/packages/python/entries/"
 )
 
+func packageEntryURL(packageType string) string {
+	if packageType == "python" {
+		return pythonPackageEntryURL
+	}
+	return systemPackageEntryURL
+}
+
 func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
 	packages, err := api.FetchAllPages[SystemPackageDetail](ac, systemPackageEntryURL, nil)
 	if err != nil {
@@ -61,44 +68,31 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 }
 
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
-	var url string
-	params := map[string]string{
-		"name": fileName,
+	params := map[string]string{"name": fileName}
+	body, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), "", params))
+	if err != nil {
+		return "", err
 	}
 
 	if packageType == "python" {
-		url = pythonPackageEntryURL
 		var response api.ListResponse[PythonPackageDetail]
-		body, err := ac.SendGetRequest(utils.BuildURL(url, "", params))
-		if err != nil {
+		if err := json.Unmarshal(body, &response); err != nil {
 			return "", err
 		}
-		err = json.Unmarshal(body, &response)
-		if err != nil {
-			return "", err
-		}
-
-		if response.Count == 0 {
-			return "", errors.New("no package found with the given name")
-		}
-		return response.Results[0].ID, nil
-	} else {
-		url = systemPackageEntryURL
-		var response api.ListResponse[SystemPackageDetail]
-		body, err := ac.SendGetRequest(utils.BuildURL(url, "", params))
-		if err != nil {
-			return "", err
-		}
-		err = json.Unmarshal(body, &response)
-		if err != nil {
-			return "", err
-		}
-
 		if response.Count == 0 {
 			return "", errors.New("no package found with the given name")
 		}
 		return response.Results[0].ID, nil
 	}
+
+	var response api.ListResponse[SystemPackageDetail]
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", err
+	}
+	if response.Count == 0 {
+		return "", errors.New("no package found with the given name")
+	}
+	return response.Results[0].ID, nil
 }
 
 func UploadPackage(ac *client.AlpaconClient, file string, packageType string) error {
@@ -126,14 +120,7 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 	}
 	defer utils.CleanupTempFile(requestBody)
 
-	var requestURL string
-	if packageType == "python" {
-		requestURL = pythonPackageEntryURL
-	} else {
-		requestURL = systemPackageEntryURL
-	}
-
-	_, err = ac.SendMultipartStreamRequest(requestURL, contentType, requestBody, size)
+	_, err = ac.SendMultipartStreamRequest(packageEntryURL(packageType), contentType, requestBody, size)
 	if err != nil {
 		return err
 	}
@@ -155,14 +142,7 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 		return err
 	}
 
-	var url string
-	if packageType == "python" {
-		url = pythonPackageEntryURL
-	} else {
-		url = systemPackageEntryURL
-	}
-
-	respBody, err := ac.SendGetRequest(utils.BuildURL(url, packageID, nil))
+	respBody, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), packageID, nil))
 	if err != nil {
 		return err
 	}
