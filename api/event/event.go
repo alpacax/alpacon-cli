@@ -202,24 +202,16 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	}
 }
 
-// CommandOutcome wraps the terminal result of a streamed command.
-type CommandOutcome struct {
-	Status     string
-	ExitCode   int
-	ErrorPhase string
-	Success    *bool
-}
-
 // RunCommandStreaming is the streaming-aware counterpart to RunCommand.
 // It establishes an event-server WebSocket, subscribes to command_output for
 // the new command, prints chunks to stdout in real time, and returns when the
 // command reaches a terminal state. Any error during WS setup causes a fall
 // back to RunCommand (polling) with a stderr warning.
-func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (CommandOutcome, error) {
+func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
 	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, os.Stdout)
 }
 
-func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) (CommandOutcome, error) {
+func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
 	session, err := CreateEventSession(ac)
 	if err != nil {
 		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, err)
@@ -235,7 +227,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
 		listener.Stop()
-		return CommandOutcome{}, err
+		return err
 	}
 	listener.setCommandID(cmdResp.ID)
 
@@ -272,13 +264,12 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdResp.ID, lastSeq, chunk, out)
 		case details := <-pollResult:
-			lastSeq = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
-			_ = lastSeq
+			_ = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
 			listener.Stop()
-			return outcomeFromDetails(details), errorFromDetails(details)
+			return errorFromDetails(details)
 		case err := <-pollErr:
 			listener.Stop()
-			return CommandOutcome{}, err
+			return err
 		}
 	}
 }
@@ -319,6 +310,9 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
 	final, err := GetCommandChunks(ac, cmdID, lastSeq+1)
 	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr,
+			"warning: failed to fetch trailing chunks (from seq %d): %v; output may be incomplete\n",
+			lastSeq+1, err)
 		return lastSeq
 	}
 	for _, c := range final {
@@ -328,17 +322,6 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		}
 	}
 	return lastSeq
-}
-
-func outcomeFromDetails(d EventDetails) CommandOutcome {
-	out := CommandOutcome{Status: d.Status, Success: d.Success}
-	if d.ExitCode != nil {
-		out.ExitCode = *d.ExitCode
-	}
-	if d.ErrorPhase != nil {
-		out.ErrorPhase = *d.ErrorPhase
-	}
-	return out
 }
 
 func errorFromDetails(d EventDetails) error {
@@ -364,12 +347,12 @@ func errorFromDetails(d EventDetails) error {
 }
 
 // runCommandFallback warns the user and delegates to the existing polling flow.
-func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) (CommandOutcome, error) {
+func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) error {
 	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
 		// SubmitCommand returned an MFA/auth/etc error; surface it so the
 		// existing retry callbacks in RunCommandWithRetry can handle it.
-		return CommandOutcome{}, err
+		return err
 	}
 	return runCommandFallbackFromID(ac, cmdResp.ID, out, cause)
 }
@@ -377,19 +360,15 @@ func runCommandFallback(ac *client.AlpaconClient, serverName, command, username,
 // runCommandFallbackFromID is the fallback used when streaming setup fails
 // AFTER SubmitCommand has already created the command on the server. It
 // polls the existing command by ID instead of re-submitting, then writes
-// the buffered result to out. Returns the same shape as
-// runCommandStreamingWithWriter so callers can ignore the difference.
-func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) (CommandOutcome, error) {
+// the buffered result to out.
+func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) error {
 	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
 	details, err := PollCommandExecution(ac, cmdID)
 	if err != nil {
-		return CommandOutcome{}, err
+		return err
 	}
 	if details.Result != "" {
 		_, _ = fmt.Fprint(out, details.Result)
 	}
-	if termErr := errorFromDetails(details); termErr != nil {
-		return outcomeFromDetails(details), termErr
-	}
-	return outcomeFromDetails(details), nil
+	return errorFromDetails(details)
 }

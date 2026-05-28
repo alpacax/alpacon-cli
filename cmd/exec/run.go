@@ -19,8 +19,7 @@ import (
 //
 // Output is streamed to os.Stdout during execution (not buffered).
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
-	var err error
-	_, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
+	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 	if phased, ok := asPhasedError(err); ok {
 		return phased
 	}
@@ -38,8 +37,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				_, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
-				return err
+				return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 			},
 		})
 		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.

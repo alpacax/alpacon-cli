@@ -685,9 +685,8 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	outcome, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", outcome.Status)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
 
@@ -783,7 +782,7 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	_, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -862,7 +861,7 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	_, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -928,9 +927,8 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	outcome, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", outcome.Status)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
 	// THE KEY ASSERTION: SubmitCommand was called exactly once
@@ -976,8 +974,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	outcome, err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
-	assert.Equal(t, "completed", outcome.Status)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
