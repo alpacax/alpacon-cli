@@ -232,42 +232,29 @@ func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTok
 }
 
 func GetRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (RegistrationMethodGuideJsonResponse, error) {
-	req := RegistrationMethodGuideRequest{
-		Platform:          platform,
-		ServerName:        serverName,
-		RegistrationToken: tokenID,
-	}
-
-	url := utils.BuildURL(tokenInstallGuideURL, "", map[string]string{"response_type": "json"})
-	body, err := ac.SendPostRequest(url, req)
-	if err != nil {
-		return RegistrationMethodGuideJsonResponse{}, err
-	}
-
-	var response RegistrationMethodGuideJsonResponse
-	if err = json.Unmarshal(body, &response); err != nil {
-		return RegistrationMethodGuideJsonResponse{}, err
-	}
-
-	return response, nil
+	return fetchRegistrationGuide[RegistrationMethodGuideJsonResponse](ac, tokenInstallGuideURL, platform, serverName, tokenID)
 }
 
 func GetAnsibleRegistrationGuideJSON(ac *client.AlpaconClient, platform, serverName, tokenID string) (AnsibleGuideJsonResponse, error) {
+	return fetchRegistrationGuide[AnsibleGuideJsonResponse](ac, ansibleGuideURL, platform, serverName, tokenID)
+}
+
+func fetchRegistrationGuide[T any](ac *client.AlpaconClient, guideURL, platform, serverName, tokenID string) (T, error) {
+	var response T
 	req := RegistrationMethodGuideRequest{
 		Platform:          platform,
 		ServerName:        serverName,
 		RegistrationToken: tokenID,
 	}
 
-	url := utils.BuildURL(ansibleGuideURL, "", map[string]string{"response_type": "json"})
+	url := utils.BuildURL(guideURL, "", map[string]string{"response_type": "json"})
 	body, err := ac.SendPostRequest(url, req)
 	if err != nil {
-		return AnsibleGuideJsonResponse{}, err
+		return response, err
 	}
 
-	var response AnsibleGuideJsonResponse
 	if err = json.Unmarshal(body, &response); err != nil {
-		return AnsibleGuideJsonResponse{}, err
+		return response, err
 	}
 
 	return response, nil
