@@ -89,14 +89,36 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 	return "general"
 }
 
-func checkAuthStatus(statusCode int) error {
+// checkAuthStatus prefers the server-provided detail so policy denials are
+// not masked as stale-token failures.
+func checkAuthStatus(statusCode int, body []byte) error {
 	switch statusCode {
 	case http.StatusUnauthorized:
+		if msg := extractServerDetail(body); msg != "" {
+			return fmt.Errorf("%s (run 'alpacon login' if your session has expired)", msg)
+		}
 		return errors.New("authentication failed: please run 'alpacon login' again")
 	case http.StatusForbidden:
+		if msg := extractServerDetail(body); msg != "" {
+			return errors.New(msg)
+		}
 		return errors.New("permission denied: you do not have the required privileges for this action")
 	}
 	return nil
+}
+
+func extractServerDetail(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	if detail, ok := parsed["detail"].(string); ok {
+		return strings.TrimSpace(detail)
+	}
+	return ""
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
@@ -132,17 +154,23 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 	return req, nil
 }
 
-// readJSONResponse validates auth, Content-Type, and reads the body.
-// Status-code enforcement is left to the caller.
+// readJSONResponse reads the body, surfaces 401/403 with server detail,
+// and rejects non-JSON content types. Other status-code enforcement is
+// left to the caller.
 func readJSONResponse(resp *http.Response) ([]byte, error) {
-	if err := checkAuthStatus(resp.StatusCode); err != nil {
+	body, readErr := io.ReadAll(resp.Body)
+	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
 		return nil, err
 	}
-	// Check for non-empty and non-JSON content types. Empty content type allowed for responses without content (e.g., from PATCH requests).
+	if readErr != nil {
+		return nil, readErr
+	}
+
+	// Empty content type is allowed for responses without content (e.g. PATCH).
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
 		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
 	}
-	return io.ReadAll(resp.Body)
+	return body, nil
 }
 
 func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
@@ -268,9 +296,10 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 		return nil, err
 	}
 
-	if err := checkAuthStatus(resp.StatusCode); err != nil {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, err
+		return nil, checkAuthStatus(resp.StatusCode, body)
 	}
 
 	return resp, nil

@@ -2,12 +2,25 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
 const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
+
+	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
+	WorkSessionRequired         = "work_session_required"
+	WorkSessionNotUsable        = "work_session_not_usable"
+	WorkSessionNotActive        = "work_session_not_active"
+	WorkSessionExpired          = "work_session_expired"
+	WorkSessionScopeNotAllowed  = "work_session_scope_not_allowed"
+	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
+	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
+
+	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.
+	ExitCodeWorkSessionDenied = 3
 )
 
 type ErrorResponse struct {
@@ -15,31 +28,33 @@ type ErrorResponse struct {
 	Source string `json:"source"`
 }
 
-func ParseErrorResponse(err error) (code, source string) {
-	if err == nil {
-		return "", ""
-	}
+func ParseErrorResponse(err error) (string, string) {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		errStr := e.Error()
 
-	errStr := err.Error()
+		// Try JSON format: {"code": "...", "source": "..."}
+		start := strings.Index(errStr, "{")
+		if start != -1 {
+			var errorResp ErrorResponse
+			if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
+				return errorResp.Code, errorResp.Source
+			}
+		}
 
-	// Try JSON format: {"code": "...", "source": "..."}
-	start := strings.Index(errStr, "{")
-	if start != -1 {
-		var errorResp ErrorResponse
-		if jsonErr := json.Unmarshal([]byte(errStr[start:]), &errorResp); jsonErr == nil && (errorResp.Code != "" || errorResp.Source != "") {
-			return errorResp.Code, errorResp.Source
+		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
+		var iterCode, iterSource string
+		for _, part := range strings.Split(errStr, "; ") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "code: ") {
+				iterCode = strings.TrimPrefix(part, "code: ")
+			} else if strings.HasPrefix(part, "source: ") {
+				iterSource = strings.TrimPrefix(part, "source: ")
+			}
+		}
+		if iterCode != "" {
+			return iterCode, iterSource
 		}
 	}
 
-	// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
-	for _, part := range strings.Split(errStr, "; ") {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "code: ") {
-			code = strings.TrimPrefix(part, "code: ")
-		} else if strings.HasPrefix(part, "source: ") {
-			source = strings.TrimPrefix(part, "source: ")
-		}
-	}
-
-	return code, source
+	return "", ""
 }

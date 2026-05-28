@@ -4,31 +4,51 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
+const (
+	pollMaxAttempts   = 30
+	pollInterval      = 10 * time.Second
+	waitMsgApproval   = "Waiting for approval..."
+	waitMsgActivation = "Waiting for activation..."
+)
+
+var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
+
 var (
-	purpose       string
-	createScopes  []string
-	createServers []string
-	expiresIn     string
-	expiresAt     string
-	requesterType string
-	waitApproval  bool
+	purpose        string
+	createScopes   []string
+	createServers  []string
+	expiresIn      string
+	expiresAt      string
+	requesterType  string
+	waitApproval   bool
+	useAfterCreate bool
 )
 
 var workSessionCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new work session",
+	Long: `Create a new work session.
+
+Pass --use to set the new session as the workspace's active session, so subsequent
+exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
+required, combine --use with --wait. The session is attached once it reaches the
+active state.`,
 	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
-  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait`,
+  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait
+  alpacon work-session create --purpose "hotfix" --scope command --server web-01 --expires-in 1h --use
+  alpacon work-session create --purpose "deploy" --scope command --server web-01 --expires-in 2h --wait --use`,
 	Run: func(cmd *cobra.Command, args []string) {
 		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {
@@ -70,6 +90,18 @@ var workSessionCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
 
+		// Pre-validate --use to avoid creating an orphan server-side session that we
+		// can't attach to the workspace.
+		if useAfterCreate {
+			if requesterType == "agent" {
+				utils.CliErrorWithExit("--use cannot be combined with --requester-type=agent (agent sessions are not workspace-attachable).")
+			}
+			cfg, err := config.LoadConfig()
+			if err != nil || cfg.WorkspaceName == "" {
+				utils.CliErrorWithExit("--use requires an active workspace. Run 'alpacon login' first.")
+			}
+		}
+
 		var scopeList []string
 		for _, s := range createScopes {
 			if s = strings.TrimSpace(s); s != "" {
@@ -78,6 +110,9 @@ var workSessionCreateCmd = &cobra.Command{
 		}
 		if len(scopeList) == 0 {
 			utils.CliErrorWithExit("--scope must contain at least one valid scope.")
+		}
+		if err := validateScopeEnum(scopeList); err != nil {
+			utils.CliErrorWithExit("Invalid --scope: %s", err)
 		}
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
 			utils.CliErrorWithExit("Invalid --scope: %s", err)
@@ -121,13 +156,64 @@ var workSessionCreateCmd = &cobra.Command{
 
 		utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
 
-		if waitApproval {
-			if err := pollForApproval(ac, session.ID); err != nil {
-				utils.CliErrorWithExit("%s", err)
+		// Phase 1: post-create decision. Cases without an explicit return delegate to
+		// the --wait branch below (or exit immediately when --wait is not set).
+		switch decideUseAction(session.Status, useAfterCreate) {
+		case useDecisionUseNow:
+			attachActiveOrExit(ac, session.ID, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "")
+			return
+		case useDecisionSkipScheduled:
+			if !waitApproval {
+				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
+				return
 			}
-			utils.CliSuccess("Work session %s approved.", session.ID)
+		case useDecisionErrorNeedsWait:
+			if !waitApproval {
+				utils.CliErrorWithExit("--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+			}
 		}
+
+		if !waitApproval {
+			return
+		}
+
+		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
+		if err := pollForApproval(ac, session.ID, useAfterCreate); err != nil {
+			utils.CliErrorWithExit("%s", err)
+		}
+
+		if !useAfterCreate {
+			utils.CliSuccess("Work session %s approved.", session.ID)
+			return
+		}
+
+		// Phase 3: --wait --use. pollForApproval(untilActive=true) guarantees status reached active.
+		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
 	},
+}
+
+type useDecision int
+
+const (
+	useDecisionNoop useDecision = iota
+	useDecisionUseNow
+	useDecisionErrorNeedsWait
+	useDecisionSkipScheduled
+)
+
+// attachActiveOrExit calls RunUse and prints either a success line (with description if present)
+// or exits with the supplied error format (which receives session ID, error, session ID in order).
+// successPrefix is prepended to the success line so callers can distinguish phases.
+func attachActiveOrExit(ac *client.AlpaconClient, id, errFmt, successPrefix string) {
+	desc, err := RunUse(ac, id)
+	if err != nil {
+		utils.CliErrorWithExit(errFmt, id, err, id)
+	}
+	suffix := ""
+	if desc != "" {
+		suffix = fmt.Sprintf(" (%s)", desc)
+	}
+	utils.CliSuccess("%sActive work-session set to %s%s.", successPrefix, id, suffix)
 }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
@@ -157,6 +243,43 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 	return expiresAt, nil
 }
 
+// validateScopeEnum rejects scopes not in validScopePresets and lists the
+// allowed values in the error message. The caller is expected to prefix the
+// error with the relevant flag name (e.g. "Invalid --scope: ...").
+func validateScopeEnum(scopes []string) error {
+	allowed := make(map[string]struct{}, len(validScopePresets))
+	for _, s := range validScopePresets {
+		allowed[s] = struct{}{}
+	}
+	var unknown []string
+	for _, s := range scopes {
+		if _, ok := allowed[s]; !ok {
+			unknown = append(unknown, s)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return fmt.Errorf("%s. valid: %s",
+		strings.Join(unknown, ", "),
+		strings.Join(validScopePresets, ", "))
+}
+
+func decideUseAction(status string, useEnabled bool) useDecision {
+	if !useEnabled {
+		return useDecisionNoop
+	}
+	switch status {
+	case activeWorkSessionStatus:
+		return useDecisionUseNow
+	case approvedWorkSessionStatus:
+		return useDecisionSkipScheduled
+	default:
+		return useDecisionErrorNeedsWait
+	}
+}
+
 // validateAgentScopes returns an error when requester_type is "agent" and
 // scopes contains "websh", which the server disallows.
 func validateAgentScopes(requesterType string, scopes []string) error {
@@ -182,44 +305,51 @@ func splitCSV(s string) []string {
 	return result
 }
 
-// pollForApproval polls every 10 seconds until the session is approved/active,
-// a terminal status is reached (rejected/expired/revoked/completed), or attempts are exhausted.
-func pollForApproval(ac *client.AlpaconClient, id string) error {
-	const maxAttempts = 30
-	const interval = 10 * time.Second
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+// pollForApproval polls every 10 seconds until the session reaches a terminal state.
+// untilActive=false returns on approved or active; untilActive=true returns only on
+// active (continues polling on approved until the server auto-activates).
+func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) error {
+	for attempt := 1; attempt <= pollMaxAttempts; attempt++ {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			return fmt.Errorf("polling failed: %w", err)
 		}
 		switch s.Status {
-		case "approved", "active":
+		case activeWorkSessionStatus:
 			return nil
-		case "rejected":
+		case approvedWorkSessionStatus:
+			if !untilActive {
+				return nil
+			}
+		case rejectedWorkSessionStatus:
 			return errors.New("work session was rejected")
-		case "expired":
+		case expiredWorkSessionStatus:
 			return errors.New("work session expired while waiting for approval")
-		case "revoked":
+		case revokedWorkSessionStatus:
 			return errors.New("work session was revoked")
-		case "completed":
+		case completedWorkSessionStatus:
 			return errors.New("work session was completed unexpectedly")
 		}
-		utils.CliInfo("Waiting for approval... (attempt %d/%d)", attempt, maxAttempts)
-		if attempt < maxAttempts {
-			time.Sleep(interval)
+		waitMsg := waitMsgApproval
+		if s.Status == approvedWorkSessionStatus {
+			waitMsg = waitMsgActivation
+		}
+		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, pollMaxAttempts)
+		if attempt < pollMaxAttempts {
+			time.Sleep(pollInterval)
 		}
 	}
-	return fmt.Errorf("timed out waiting for approval after %d attempts", maxAttempts)
+	return fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
 }
 
 func init() {
 	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose")
-	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request (repeatable; comma-separated values also accepted)")
+	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
-	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit")
+	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (does not set as active; combine with --use to attach automatically)")
+	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }

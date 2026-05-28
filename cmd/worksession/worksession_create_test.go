@@ -72,6 +72,87 @@ func TestValidateAgentScopes_UserWithWebsh(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidateScopeEnum(t *testing.T) {
+	tests := []struct {
+		name        string
+		scopes      []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:    "empty input passes (handled by other validation)",
+			scopes:  nil,
+			wantErr: false,
+		},
+		{
+			name:    "single valid scope",
+			scopes:  []string{"command"},
+			wantErr: false,
+		},
+		{
+			name:    "multiple valid scopes",
+			scopes:  []string{"command", "websh", "sudo"},
+			wantErr: false,
+		},
+		{
+			name:        "single unknown scope",
+			scopes:      []string{"foo"},
+			wantErr:     true,
+			wantSubstrs: []string{"foo", "valid:", "command", "editor", "sudo", "tunnel", "webftp", "websh"},
+		},
+		{
+			name:        "mixed valid and unknown scopes, alphabetically sorted in message",
+			scopes:      []string{"command", "zzz", "aaa"},
+			wantErr:     true,
+			wantSubstrs: []string{"aaa, zzz", "valid:"},
+		},
+		{
+			name:        "case-sensitive: capitalized is rejected",
+			scopes:      []string{"Command"},
+			wantErr:     true,
+			wantSubstrs: []string{"Command", "valid:"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateScopeEnum(tt.scopes)
+			if tt.wantErr {
+				assert.Error(t, err)
+				for _, s := range tt.wantSubstrs {
+					assert.Contains(t, err.Error(), s)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDecideUseAction(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		useEnabled bool
+		want       useDecision
+	}{
+		{name: "use disabled with pending status", status: "pending", useEnabled: false, want: useDecisionNoop},
+		{name: "use disabled with active status", status: "active", useEnabled: false, want: useDecisionNoop},
+		{name: "use enabled with active status (superuser or post-poll)", status: "active", useEnabled: true, want: useDecisionUseNow},
+		{name: "use enabled with pending status (needs --wait)", status: "pending", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with approved status (scheduled starts_at)", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
+		{name: "use enabled with rejected status (terminal)", status: "rejected", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with expired status (terminal)", status: "expired", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with revoked status (terminal)", status: "revoked", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with completed status (terminal)", status: "completed", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with empty status (defensive)", status: "", useEnabled: true, want: useDecisionErrorNeedsWait},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, decideUseAction(tt.status, tt.useEnabled))
+		})
+	}
+}
+
 func TestSplitCSV(t *testing.T) {
 	tests := []struct {
 		name  string

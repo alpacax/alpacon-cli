@@ -560,6 +560,97 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 	}
 }
 
+func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		expectedOutput string
+		expectedServer string
+		expectedCmd    string
+	}{
+		{
+			name:           "--output json (space form)",
+			args:           []string{"--output", "json", "my-server", "ls"},
+			expectedOutput: "json",
+			expectedServer: "my-server",
+			expectedCmd:    "ls",
+		},
+		{
+			name:           "--output=table (equals form)",
+			args:           []string{"--output=table", "my-server", "ls"},
+			expectedOutput: "table",
+			expectedServer: "my-server",
+			expectedCmd:    "ls",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.expectedOutput, result.OutputFormat)
+			assert.Equal(t, tt.expectedServer, result.Server)
+			assert.Equal(t, tt.expectedCmd, result.Command)
+		})
+	}
+}
+
+func TestParseRemoteExecArgs_OutputFlagMissingValue(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--output"})
+	assert.NotEmpty(t, result.Err)
+}
+
+func TestParseRemoteExecArgs_OutputFlagEmptyValue(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--output="})
+	assert.NotEmpty(t, result.Err)
+}
+
+func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		wantDetach  bool
+		wantServer  string
+		wantCommand string
+	}{
+		{
+			name:        "--detach before server",
+			args:        []string{"--detach", "server", "apt", "upgrade"},
+			wantDetach:  true,
+			wantServer:  "server",
+			wantCommand: "apt upgrade",
+		},
+		{
+			name:        "--detach combined with -u",
+			args:        []string{"--detach", "-u", "root", "server", "apt", "upgrade"},
+			wantDetach:  true,
+			wantServer:  "server",
+			wantCommand: "apt upgrade",
+		},
+		{
+			name:        "no --detach flag",
+			args:        []string{"server", "ls"},
+			wantDetach:  false,
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "--detach after server is treated as command arg",
+			args:        []string{"server", "--detach"},
+			wantDetach:  false,
+			wantServer:  "server",
+			wantCommand: "--detach",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			assert.Equal(t, tt.wantDetach, result.Detach, "Detach")
+			assert.Equal(t, tt.wantServer, result.Server, "Server")
+			assert.Equal(t, tt.wantCommand, result.Command, "Command")
+		})
+	}
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -600,6 +691,11 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 			name:        "--groupname as last arg with no value",
 			args:        []string{"--groupname"},
 			expectedErr: "flag needs an argument: --groupname",
+		},
+		{
+			name:        "--detach=VALUE equals-form is rejected",
+			args:        []string{"--detach=true", "server", "apt", "upgrade"},
+			expectedErr: "--detach does not accept a value; use --detach alone",
 		},
 	}
 
