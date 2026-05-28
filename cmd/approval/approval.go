@@ -41,5 +41,6 @@ Subcommands for requesters:
 func init() {
 	ApprovalCmd.AddCommand(approvalListCmd)
 	ApprovalCmd.AddCommand(approvalApproveCmd)
-	// remaining subcommands (describe, reject, cancel) added in T08
+	ApprovalCmd.AddCommand(approvalCancelCmd)
+	// remaining subcommands (describe, reject) added in T08
 }

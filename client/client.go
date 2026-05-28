@@ -166,7 +166,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
+	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent) {
 		return nil, parseAPIError(respBody)
 	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
 		return nil, parseAPIError(respBody)

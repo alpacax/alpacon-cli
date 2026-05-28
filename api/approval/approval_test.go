@@ -138,3 +138,15 @@ func TestRejectRequest(t *testing.T) {
 	err := RejectRequest(newTestClient(ts), "apr-abc")
 	assert.NoError(t, err)
 }
+
+func TestCancelRequest(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/cancel/"))
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	err := CancelRequest(newTestClient(ts), "apr-abc")
+	assert.NoError(t, err)
+}
