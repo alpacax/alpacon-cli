@@ -291,6 +291,39 @@ func DeleteFile(path string) error {
 	return os.Remove(path)
 }
 
+// SpoolToTempFile creates a temp file, invokes fn to write into it, then
+// rewinds it for reading and returns the file along with its size. On any
+// error the temp file is closed and removed. The caller owns cleanup on
+// success.
+func SpoolToTempFile(pattern string, fn func(io.Writer) error) (*os.File, int64, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	cleanup := func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	}
+
+	if err := fn(f); err != nil {
+		cleanup()
+		return nil, 0, err
+	}
+
+	size, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
+		cleanup()
+		return nil, 0, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, err
+	}
+
+	return f, size, nil
+}
+
 func Zip(folderPath string) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := ZipToWriter(folderPath, &buf); err != nil {

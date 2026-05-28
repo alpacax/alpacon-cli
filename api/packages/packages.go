@@ -107,7 +107,19 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 	}
 	defer func() { _ = src.Close() }()
 
-	requestBody, err := os.CreateTemp("", "alpacon-package-upload-*.multipart")
+	var contentType string
+	requestBody, size, err := utils.SpoolToTempFile("alpacon-package-upload-*.multipart", func(w io.Writer) error {
+		writer := multipart.NewWriter(w)
+		fileWriter, err := writer.CreateFormFile("content", file)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fileWriter, src); err != nil {
+			return err
+		}
+		contentType = writer.FormDataContentType()
+		return writer.Close()
+	})
 	if err != nil {
 		return err
 	}
@@ -115,29 +127,6 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 		_ = requestBody.Close()
 		_ = os.Remove(requestBody.Name())
 	}()
-
-	writer := multipart.NewWriter(requestBody)
-
-	fileWriter, err := writer.CreateFormFile("content", file)
-	if err != nil {
-		return err
-	}
-	if _, err = io.Copy(fileWriter, src); err != nil {
-		_ = writer.Close()
-		return err
-	}
-	contentType := writer.FormDataContentType()
-	if err = writer.Close(); err != nil {
-		return err
-	}
-
-	size, err := requestBody.Seek(0, io.SeekEnd)
-	if err != nil {
-		return err
-	}
-	if _, err = requestBody.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
 
 	var requestURL string
 	if packageType == "python" {

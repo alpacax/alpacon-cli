@@ -334,32 +334,9 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 }
 
 func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
-	zipFile, err := os.CreateTemp("", "alpacon-folder-*.zip")
-	if err != nil {
-		return nil, 0, err
-	}
-
-	cleanup := func() {
-		_ = zipFile.Close()
-		_ = os.Remove(zipFile.Name())
-	}
-
-	if err := utils.ZipToWriter(folderPath, zipFile); err != nil {
-		cleanup()
-		return nil, 0, err
-	}
-
-	size, err := zipFile.Seek(0, io.SeekEnd)
-	if err != nil {
-		cleanup()
-		return nil, 0, err
-	}
-	if _, err := zipFile.Seek(0, io.SeekStart); err != nil {
-		cleanup()
-		return nil, 0, err
-	}
-
-	return zipFile, size, nil
+	return utils.SpoolToTempFile("alpacon-folder-*.zip", func(w io.Writer) error {
+		return utils.ZipToWriter(folderPath, w)
+	})
 }
 
 func cleanupFolderZipTempFiles(files []*os.File) {
