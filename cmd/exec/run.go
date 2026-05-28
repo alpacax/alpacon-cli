@@ -17,12 +17,12 @@ import (
 // workSessionID is forwarded to the server as the work_session field; pass ""
 // to omit it.
 //
-// Output is streamed to os.Stdout during execution (not buffered). The returned
-// string is always empty and is kept only for signature compatibility.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	outcome, err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
+// Output is streamed to os.Stdout during execution (not buffered).
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
+	var err error
+	_, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 	if phased, ok := asPhasedError(err); ok {
-		return "", phased
+		return phased
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -38,28 +38,28 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				outcome, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
+				_, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 				return err
 			},
 		})
 		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.
 		if phased, ok := asPhasedError(err); ok {
-			return "", phased
+			return phased
 		}
 		if err != nil {
-			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
+			return fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
 		}
 	}
-	_ = outcome
-	return "", nil
+	return nil
 }
 
-// HandleCommandResult prints result on success, or exits appropriately on error.
-func HandleCommandResult(result string, err error) {
+// HandleCommandResult exits appropriately on error. Chunks are already streamed
+// to stdout during execution, so no result string is needed.
+func HandleCommandResult(err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(result, remoteErr)
+			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(remoteErr)
 			if stdoutLine != "" {
 				fmt.Println(stdoutLine)
 			}
@@ -74,10 +74,6 @@ func HandleCommandResult(result string, err error) {
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)
-		return
-	}
-	if result != "" {
-		fmt.Println(result)
 	}
 }
 
@@ -110,9 +106,9 @@ func detachResultLines(jobID string) (string, string) {
 
 // remoteCommandOutcome is the testable core of HandleCommandResult's
 // RemoteCommandError branch. stderrLine already includes its trailing newline.
-func remoteCommandOutcome(result string, remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {
-	if result != "" {
-		stdoutLine = result
+func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {
+	if remoteErr.Output != "" {
+		stdoutLine = remoteErr.Output
 	}
 	if remoteErr.ErrorPhase != "" {
 		stderrLine = fmt.Sprintf("%s: [%s] %s\n",

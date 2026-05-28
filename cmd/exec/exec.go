@@ -148,8 +148,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		err = RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-		HandleCommandResult(result, err)
+		HandleCommandResult(err)
 	},
 }

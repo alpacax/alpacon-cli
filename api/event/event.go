@@ -365,15 +365,13 @@ func errorFromDetails(d EventDetails) error {
 
 // runCommandFallback warns the user and delegates to the existing polling flow.
 func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) (CommandOutcome, error) {
-	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
-	result, err := RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
+		// SubmitCommand returned an MFA/auth/etc error; surface it so the
+		// existing retry callbacks in RunCommandWithRetry can handle it.
 		return CommandOutcome{}, err
 	}
-	if result != "" {
-		_, _ = fmt.Fprint(out, result)
-	}
-	return CommandOutcome{Status: "completed"}, nil
+	return runCommandFallbackFromID(ac, cmdResp.ID, out, cause)
 }
 
 // runCommandFallbackFromID is the fallback used when streaming setup fails
