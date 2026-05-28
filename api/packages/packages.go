@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -140,6 +141,14 @@ func UploadPackage(ac *client.AlpaconClient, file string, packageType string) er
 	return nil
 }
 
+func packageDownloadResponseError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if message := strings.TrimSpace(string(body)); message != "" {
+		return fmt.Errorf("package download failed with status %d: %s", resp.StatusCode, message)
+	}
+	return fmt.Errorf("package download failed with status %d", resp.StatusCode)
+}
+
 func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, packageType string) error {
 	packageID, err := GetPackageIDByName(ac, fileName, packageType)
 	if err != nil {
@@ -171,12 +180,15 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("package download failed with status %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return packageDownloadResponseError(resp)
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return fmt.Errorf("package download returned JSON instead of file content")
 	}
 
 	savePath := filepath.Join(dest, filepath.Base(fileName))
-	if _, err = utils.SaveStream(savePath, resp.Body); err != nil {
+	if _, err = utils.SaveStreamAtomic(savePath, resp.Body); err != nil {
 		return err
 	}
 

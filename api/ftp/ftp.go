@@ -447,21 +447,10 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 
 	defer func() { _ = resp.Body.Close() }()
 
-	written, err := utils.SaveStream(filePath, resp.Body)
-	if err != nil {
-		_ = utils.DeleteFile(filePath)
-		return written, err
-	}
-
-	return written, nil
+	return utils.SaveStreamAtomic(filePath, resp.Body)
 }
 
-func downloadedFilePath(dest, remotePath string, recursive bool) (string, error) {
-	if recursive {
-		fileName := filepath.Base(remotePath) + ".zip"
-		return filepath.Join(dest, fileName), nil
-	}
-
+func downloadedFilePath(dest, remotePath string) (string, error) {
 	// If dest is an existing directory or ends with a separator, append the remote filename.
 	// Otherwise treat dest as the target file path directly (cp-style rename semantics).
 	info, err := os.Stat(dest)
@@ -476,8 +465,46 @@ func downloadedFilePath(dest, remotePath string, recursive bool) (string, error)
 	return dest, nil
 }
 
+func reserveDownloadArchiveTempPath(dest string) (string, error) {
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return "", fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	// Reserve a hidden path in dest so archive downloads never collide with
+	// user-visible files returned by the server, such as "download.zip".
+	f, err := os.CreateTemp(dest, ".alpacon-download-*.zip")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp archive: %w", err)
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("failed to close temp archive: %w", err)
+	}
+
+	return name, nil
+}
+
 func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, recursive bool, maxAttempts int) (int64, error) {
-	filePath, err := downloadedFilePath(dest, remotePath, recursive)
+	if recursive {
+		filePath, err := reserveDownloadArchiveTempPath(dest)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { _ = utils.DeleteFile(filePath) }()
+
+		written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
+		if err != nil {
+			return written, err
+		}
+		if err := utils.Unzip(filePath, dest); err != nil {
+			return written, fmt.Errorf("failed to extract downloaded folder: %w", err)
+		}
+
+		return written, nil
+	}
+
+	filePath, err := downloadedFilePath(dest, remotePath)
 	if err != nil {
 		return 0, err
 	}
@@ -485,13 +512,6 @@ func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, re
 	written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
 	if err != nil {
 		return written, err
-	}
-
-	if recursive {
-		defer func() { _ = utils.DeleteFile(filePath) }()
-		if err := utils.Unzip(filePath, dest); err != nil {
-			return written, fmt.Errorf("failed to extract downloaded folder: %w", err)
-		}
 	}
 
 	return written, nil
@@ -587,12 +607,10 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return fmt.Errorf("%s", status.Result)
 	}
 
-	// Save zip and extract contents
-	name := response.Name
-	if name == "" {
-		name = "download.zip"
+	zipPath, err := reserveDownloadArchiveTempPath(dest)
+	if err != nil {
+		return err
 	}
-	zipPath := filepath.Join(dest, filepath.Base(name))
 	defer func() { _ = utils.DeleteFile(zipPath) }()
 	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, 100)
 	if err != nil {

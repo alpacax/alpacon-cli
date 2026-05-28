@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,39 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type failingReadCloser struct {
+	reader *bytes.Reader
+}
+
+func (r *failingReadCloser) Read(p []byte) (int, error) {
+	if r.reader.Len() > 0 {
+		return r.reader.Read(p)
+	}
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (r *failingReadCloser) Close() error {
+	return nil
+}
+
+func testResponse(statusCode int, contentType string, body io.ReadCloser) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header:     http.Header{"Content-Type": []string{contentType}},
+		Body:       body,
+	}
+}
+
+func jsonTestResponse(statusCode int, body string) *http.Response {
+	return testResponse(statusCode, "application/json", io.NopCloser(bytes.NewBufferString(body)))
+}
 
 func TestGetSystemPackageEntry_Pagination(t *testing.T) {
 	var requestCount atomic.Int32
@@ -219,6 +253,137 @@ func TestDownloadPackage_StatusErrorDoesNotWriteFile(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dest, "pkg.whl")); !os.IsNotExist(statErr) {
 		t.Fatalf("expected package file not to be written, stat error: %v", statErr)
+	}
+}
+
+func TestDownloadPackage_NoContentDoesNotOverwriteExistingFile(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/packages/python/entries/":
+			_ = json.NewEncoder(w).Encode(api.ListResponse[PythonPackageDetail]{
+				Count:   1,
+				Results: []PythonPackageDetail{{ID: "pkg-id", Name: "pkg.whl"}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/packages/python/entries/pkg-id/":
+			_ = json.NewEncoder(w).Encode(DownloadURL{
+				DownloadURL: "http://" + r.Host + "/api/download/pkg.whl",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/download/pkg.whl":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	dest := t.TempDir()
+	savePath := filepath.Join(dest, "pkg.whl")
+	if err := os.WriteFile(savePath, []byte("existing-package"), 0644); err != nil {
+		t.Fatalf("failed to write existing package: %v", err)
+	}
+
+	err := DownloadPackage(ac, "pkg.whl", dest, "python")
+	if err == nil {
+		t.Fatal("expected DownloadPackage to fail")
+	}
+
+	content, readErr := os.ReadFile(savePath)
+	if readErr != nil {
+		t.Fatalf("failed to read existing package after failed download: %v", readErr)
+	}
+	if string(content) != "existing-package" {
+		t.Fatalf("expected existing package to remain intact, got %q", string(content))
+	}
+}
+
+func TestDownloadPackage_JSONSuccessDoesNotWriteFile(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/packages/python/entries/":
+			_ = json.NewEncoder(w).Encode(api.ListResponse[PythonPackageDetail]{
+				Count:   1,
+				Results: []PythonPackageDetail{{ID: "pkg-id", Name: "pkg.whl"}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/packages/python/entries/pkg-id/":
+			_ = json.NewEncoder(w).Encode(DownloadURL{
+				DownloadURL: "http://" + r.Host + "/api/download/pkg.whl",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/download/pkg.whl":
+			_, _ = w.Write([]byte(`{"detail":"not ready"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	dest := t.TempDir()
+	err := DownloadPackage(ac, "pkg.whl", dest, "python")
+	if err == nil {
+		t.Fatal("expected DownloadPackage to fail")
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "pkg.whl")); !os.IsNotExist(statErr) {
+		t.Fatalf("expected package file not to be written, stat error: %v", statErr)
+	}
+}
+
+func TestDownloadPackage_ReadErrorKeepsExistingFile(t *testing.T) {
+	ac := &client.AlpaconClient{
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				switch {
+				case req.Method == http.MethodGet && req.URL.Path == "/api/packages/python/entries/":
+					return jsonTestResponse(http.StatusOK, `{"count":1,"results":[{"id":"pkg-id","name":"pkg.whl"}]}`), nil
+				case req.Method == http.MethodGet && req.URL.Path == "/api/packages/python/entries/pkg-id/":
+					return jsonTestResponse(http.StatusOK, `{"download_url":"https://example.test/api/download/pkg.whl"}`), nil
+				case req.Method == http.MethodGet && req.URL.Path == "/api/download/pkg.whl":
+					return testResponse(http.StatusOK, "application/octet-stream", &failingReadCloser{
+						reader: bytes.NewReader([]byte("partial-package")),
+					}), nil
+				default:
+					return jsonTestResponse(http.StatusNotFound, `{"detail":"not found"}`), nil
+				}
+			}),
+		},
+		BaseURL: "https://example.test",
+	}
+
+	dest := t.TempDir()
+	savePath := filepath.Join(dest, "pkg.whl")
+	if err := os.WriteFile(savePath, []byte("existing-package"), 0644); err != nil {
+		t.Fatalf("failed to write existing package: %v", err)
+	}
+
+	err := DownloadPackage(ac, "pkg.whl", dest, "python")
+	if err == nil {
+		t.Fatal("expected DownloadPackage to fail")
+	}
+
+	content, readErr := os.ReadFile(savePath)
+	if readErr != nil {
+		t.Fatalf("failed to read existing package after failed download: %v", readErr)
+	}
+	if string(content) != "existing-package" {
+		t.Fatalf("expected existing package to remain intact, got %q", string(content))
+	}
+
+	matches, globErr := filepath.Glob(filepath.Join(dest, ".alpacon-*.tmp"))
+	if globErr != nil {
+		t.Fatalf("failed to inspect temp files: %v", globErr)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected temp files to be cleaned up, found %v", matches)
 	}
 }
 
