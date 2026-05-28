@@ -36,7 +36,8 @@ var serverCreateCmd = &cobra.Command{
 	Short: "Register a new server with a registration token",
 	Long: `
 	Register a new server by selecting a registration method (token-install or ansible)
-	and generating an installation guide.
+	and generating an installation guide. Use --method (-m) to choose between
+	token-install (default) and ansible.
 
 	token-install (default): the guide includes the Alpamon register command to run on
 	your server.
@@ -52,6 +53,7 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
+	alpacon server create --platform darwin --token prod-token
 	alpacon server create --method ansible --platform debian --token prod-token
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
