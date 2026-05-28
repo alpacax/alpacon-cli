@@ -425,14 +425,16 @@ func TestGetRegistrationTokenAttributes_EmptyList(t *testing.T) {
 
 func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
 	want := AnsibleGuideJsonResponse{
-		MethodID:          "ansible",
-		Platform:          "debian",
-		PlatformLabel:     "Debian / Ubuntu",
-		AlpaconURL:        "https://workspace.alpacon.io",
+		RegistrationGuideMeta: RegistrationGuideMeta{
+			MethodID:         "ansible",
+			Platform:         "debian",
+			PlatformLabel:    "Debian / Ubuntu",
+			AlpaconURL:       "https://workspace.alpacon.io",
+			ServerName:       "my-server",
+			PackageProxy:     nil,
+			AllowSudoWithMFA: false,
+		},
 		RegistrationToken: "alpacax_sometoken",
-		ServerName:        "my-server",
-		PackageProxy:      nil,
-		AllowSudoWithMFA:  false,
 		CollectionInstall: "ansible-galaxy collection install alpacax.alpacon --upgrade",
 		RunCommandQuick:   "ansible-playbook -i inventory.ini alpacax.alpacon.register \\\n  -e ...",
 		InventorySnippet:  "[targets]\nYOUR_IP ansible_user=YOUR_USER",
