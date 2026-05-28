@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -240,14 +240,19 @@ func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) 
 	return ac.sendRequest(req)
 }
 
-func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multipart.Writer, body bytes.Buffer) ([]byte, error) {
-	return ac.SendMultipartStreamRequest(url, multiPartWriter.FormDataContentType(), &body, int64(body.Len()))
-}
-
 func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, body io.Reader, contentLength int64) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodPost, url, body)
 	if err != nil {
 		return nil, err
+	}
+	if f, ok := body.(*os.File); ok {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		name := f.Name()
+		req.GetBody = func() (io.ReadCloser, error) {
+			return os.Open(name)
+		}
 	}
 	req.Header.Set("Content-Type", contentType)
 	if contentLength >= 0 {
