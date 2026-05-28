@@ -15,8 +15,12 @@ type describeRow struct {
 var approvalDescribeCmd = &cobra.Command{
 	Use:     "describe REQUEST_ID",
 	Aliases: []string{"desc"},
-	Short:   "Show details of an approval request",
-	Args:    cobra.ExactArgs(1),
+	Short: "Show details of an approval request",
+	Long: `Show all fields of an approval request.
+
+Use --output json to see the full raw response including nested
+work session details that are omitted from the table view.`,
+	Args: cobra.ExactArgs(1),
 	Example: `  alpacon approval describe apr-abc123
   alpacon approval desc apr-abc123`,
 	Run: func(cmd *cobra.Command, args []string) {

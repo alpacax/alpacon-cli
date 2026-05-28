@@ -11,6 +11,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	statusFilter string
+	typeFilter   string
+	myRequests   bool
+)
+
 var approvalListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},

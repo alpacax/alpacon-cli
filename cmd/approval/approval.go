@@ -6,12 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	statusFilter string
-	typeFilter   string
-	myRequests   bool
-)
-
 var ApprovalCmd = &cobra.Command{
 	Use:     "approval",
 	Aliases: []string{"req"},
