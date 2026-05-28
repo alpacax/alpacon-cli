@@ -73,11 +73,7 @@ var serverCreateCmd = &cobra.Command{
 				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
 			}
 			if createJSON {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(guide); err != nil {
-					utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
-				}
+				writeJSONGuide(guide)
 				return
 			}
 			displayAnsibleGuideFromJSON(guide)
@@ -87,16 +83,20 @@ var serverCreateCmd = &cobra.Command{
 				utils.CliErrorWithExit("Failed to retrieve the installation guide: %s.", err)
 			}
 			if createJSON {
-				enc := json.NewEncoder(os.Stdout)
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(guide); err != nil {
-					utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
-				}
+				writeJSONGuide(guide)
 				return
 			}
 			displayGuideFromJSON(guide)
 		}
 	},
+}
+
+func writeJSONGuide(v any) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		utils.CliErrorWithExit("Failed to encode guide as JSON: %s.", err)
+	}
 }
 
 func init() {
