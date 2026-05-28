@@ -16,14 +16,16 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
+type (
+	roundTripFunc func(*http.Request) (*http.Response, error)
+
+	failingReadCloser struct {
+		reader *bytes.Reader
+	}
+)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
-}
-
-type failingReadCloser struct {
-	reader *bytes.Reader
 }
 
 func (r *failingReadCloser) Read(p []byte) (int, error) {
