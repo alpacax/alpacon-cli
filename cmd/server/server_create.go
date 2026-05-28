@@ -39,8 +39,14 @@ var serverCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Register a new server with a registration token",
 	Long: `
-	Register a new server by selecting a registration token and generating an installation guide.
-	The guide includes the Alpamon register command to run on your server.
+	Register a new server by selecting a registration method (token-install or ansible)
+	and generating an installation guide.
+
+	token-install (default): the guide includes the Alpamon register command to run on
+	your server.
+
+	ansible: the guide produces an ansible-playbook command using the alpacax.alpacon
+	collection so you can register one or many servers from a control node.
 
 	Supported platforms: debian, rhel, darwin, windows.
 
@@ -50,8 +56,8 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
-	alpacon server create --platform darwin --token prod-token
-	alpacon server create --platform windows --token prod-token
+	alpacon server create --method ansible --platform debian --token prod-token
+	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		alpaconClient, err := client.NewAlpaconAPIClient()
