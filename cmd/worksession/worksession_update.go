@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"fmt"
 	"slices"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -10,6 +11,25 @@ import (
 )
 
 const pendingWorkSessionStatus = "pending"
+
+// validateSessionForSudoUpdate checks the preconditions for adding sudo
+// policies to an existing work session. It is extracted from the command Run
+// so the guard logic can be unit-tested without driving the cobra/HTTP stack.
+func validateSessionForSudoUpdate(session *wsapi.WorkSession) error {
+	if session.Status == pendingWorkSessionStatus {
+		return fmt.Errorf(
+			"work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved",
+			session.ID,
+		)
+	}
+	if !slices.Contains(session.Scopes, "sudo") {
+		return fmt.Errorf(
+			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with --sudo (it adds the 'sudo' scope automatically)",
+			session.ID,
+		)
+	}
+	return nil
+}
 
 var (
 	updateSudo       []string
@@ -40,7 +60,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		} else {
 			resolved, err := Resolve("")
 			if err != nil || resolved == "" {
-				utils.CliErrorWithExit("No SESSION_ID given and no active work session. Pass an ID or run 'alpacon work-session use <id>' first.")
+				utils.CliErrorWithExit("No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first.")
 			}
 			sessionID = resolved
 		}
@@ -63,14 +83,12 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		if err != nil {
 			utils.CliErrorWithExit("Failed to load work session %s: %s.", sessionID, err)
 		}
-		if session.Status == pendingWorkSessionStatus {
-			utils.CliErrorWithExit("Work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved.", sessionID)
-		}
-		// Server rejects sudo_policies on a session without the 'sudo' scope
+		// Server rejects sudo_policies on a pending session (the update
+		// serializer drops the field) or on one without the 'sudo' scope
 		// (work_session_sudo_policy_without_scope). The update endpoint has no
 		// scopes field, so we cannot add it here — fail early with guidance.
-		if !slices.Contains(session.Scopes, "sudo") {
-			utils.CliErrorWithExit("Work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with --sudo (it adds the 'sudo' scope automatically).", sessionID)
+		if err := validateSessionForSudoUpdate(session); err != nil {
+			utils.CliErrorWithExit("%s", err)
 		}
 
 		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newPolicies))
