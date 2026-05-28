@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	approvalURL   = "/api/approvals/"
-	myRequestsURL = "/api/approvals/-/"
+	approvalURL   = "/api/approvals/approvals/"
+	myRequestsURL = "/api/approvals/approvals/-/"
 )
 
 func ListApprovalRequests(ac *client.AlpaconClient, status, requestType string) ([]ApprovalRequestAttributes, error) {
