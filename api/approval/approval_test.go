@@ -34,7 +34,7 @@ func TestListApprovalRequests(t *testing.T) {
 		},
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/approvals/", r.URL.Path)
+		assert.Equal(t, "/api/approvals/approvals/", r.URL.Path)
 		assert.Equal(t, "pending", r.URL.Query().Get("status"))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[ApprovalRequest]{Count: 1, Results: requests})
@@ -63,7 +63,7 @@ func TestListApprovalRequests_TypeFilter(t *testing.T) {
 
 func TestListMyApprovalRequests(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/approvals/-/", r.URL.Path)
+		assert.Equal(t, "/api/approvals/approvals/-/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[ApprovalRequest]{Count: 0, Results: nil})
 	}))

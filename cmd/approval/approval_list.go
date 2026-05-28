@@ -51,8 +51,21 @@ restricted to their own requests (equivalent to --my).`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		// Server enforces /api/approvals/approvals/ as superuser-only. Auto-fall back to
+		// the my-requests endpoint for non-superusers so the default `approval ls` does not
+		// return a confusing 403.
+		useMyEndpoint := myRequests
+		if !useMyEndpoint {
+			if err := ac.LoadCurrentUser(); err != nil {
+				utils.CliErrorWithExit("Failed to load current user: %s.", err)
+			}
+			if ac.Privileges != "superuser" {
+				useMyEndpoint = true
+			}
+		}
+
 		var requests []approvalapi.ApprovalRequestAttributes
-		if myRequests {
+		if useMyEndpoint {
 			requests, err = approvalapi.ListMyApprovalRequests(ac, statusFilter, typeFilter)
 		} else {
 			requests, err = approvalapi.ListApprovalRequests(ac, statusFilter, typeFilter)
