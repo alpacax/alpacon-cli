@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	createMethod       string
 	createPlatform     string
 	createName         string
 	createTokenName    string
@@ -26,7 +27,13 @@ var (
 var (
 	validPlatforms     = []string{"debian", "rhel", "darwin", "windows"}
 	validPlatformsList = strings.Join(validPlatforms, ", ")
+	validMethods       = []string{"token-install", "ansible"}
+	validMethodsList   = strings.Join(validMethods, ", ")
 )
+
+func isValidMethod(m string) bool {
+	return slices.Contains(validMethods, m)
+}
 
 var serverCreateCmd = &cobra.Command{
 	Use:   "create",
@@ -75,6 +82,7 @@ var serverCreateCmd = &cobra.Command{
 }
 
 func init() {
+	serverCreateCmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
 	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s", validPlatformsList))
 	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
