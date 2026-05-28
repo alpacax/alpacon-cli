@@ -31,10 +31,6 @@ var (
 	validMethodsList   = strings.Join(validMethods, ", ")
 )
 
-func isValidMethod(m string) bool {
-	return slices.Contains(validMethods, m)
-}
-
 var serverCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Register a new server with a registration token",
@@ -116,7 +112,7 @@ func init() {
 // resolveMethod returns the registration method from --method flag or interactively.
 func resolveMethod(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("method") {
-		if !isValidMethod(createMethod) {
+		if !slices.Contains(validMethods, createMethod) {
 			utils.CliErrorWithExit("Invalid method %q. Valid values: %s.", createMethod, validMethodsList)
 		}
 		return createMethod
