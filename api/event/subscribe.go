@@ -57,3 +57,21 @@ func SubscribeSudoEvent(ac *client.AlpaconClient, channelID, sessionID string) e
 
 	return nil
 }
+
+// SubscribeCommandOutput subscribes the given channel to command_output events
+// for a specific command. target_id=commandID ensures the channel only receives
+// chunks for this one command.
+func SubscribeCommandOutput(ac *client.AlpaconClient, channelID, commandID string) error {
+	req := &EventSubscriptionRequest{
+		Channel:   channelID,
+		EventType: "command_output",
+		TargetID:  commandID,
+	}
+
+	_, err := ac.SendPostRequest(eventSubscriptionsURL, req)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to command_output events: %w", err)
+	}
+
+	return nil
+}
