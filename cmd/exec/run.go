@@ -16,10 +16,13 @@ import (
 // error handling and retry logic. Used by both exec and websh commands.
 // workSessionID is forwarded to the server as the work_session field; pass ""
 // to omit it.
+//
+// Output is streamed to os.Stdout during execution (not buffered). The returned
+// string is always empty and is kept only for signature compatibility.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	outcome, err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 	if phased, ok := asPhasedError(err); ok {
-		return result, phased
+		return "", phased
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -35,19 +38,20 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+				outcome, err = event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 				return err
 			},
 		})
 		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.
 		if phased, ok := asPhasedError(err); ok {
-			return result, phased
+			return "", phased
 		}
 		if err != nil {
 			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
 		}
 	}
-	return result, nil
+	_ = outcome
+	return "", nil
 }
 
 // HandleCommandResult prints result on success, or exits appropriately on error.
@@ -72,7 +76,9 @@ func HandleCommandResult(result string, err error) {
 		utils.CliErrorWithExit("%s", err)
 		return
 	}
-	fmt.Println(result)
+	if result != "" {
+		fmt.Println(result)
+	}
 }
 
 // asPhasedError unwraps err to a RemoteCommandError or ClientTimeoutError.
