@@ -2,6 +2,8 @@ package approval
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/client"
@@ -25,10 +27,10 @@ restricted to their own requests (equivalent to --my).`,
   alpacon approval ls --my --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := validateStatusFilter(statusFilter); err != nil {
-			utils.CliErrorWithExit("Invalid --status %q: must be one of pending, approved, rejected, cancelled, expired.", statusFilter)
+			utils.CliErrorWithExit("%s.", err)
 		}
 		if err := validateTypeFilter(typeFilter); err != nil {
-			utils.CliErrorWithExit("Invalid --type %q: must be one of sudo, work_session, username, groupname, service_token, svc_token_mod, app_username, work_session_mod, sudo_policy.", typeFilter)
+			utils.CliErrorWithExit("%s.", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -56,31 +58,23 @@ func init() {
 	approvalListCmd.Flags().BoolVar(&myRequests, "my", false, "Show only requests you submitted")
 }
 
+var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired"}
+
+var validTypes = []string{
+	"sudo", "work_session", "username", "groupname", "service_token",
+	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
+}
+
 func validateStatusFilter(s string) error {
-	if s == "" {
+	if s == "" || slices.Contains(validStatuses, s) {
 		return nil
 	}
-	valid := map[string]bool{
-		"pending": true, "approved": true, "rejected": true,
-		"cancelled": true, "expired": true,
-	}
-	if !valid[s] {
-		return fmt.Errorf("invalid status %q", s)
-	}
-	return nil
+	return fmt.Errorf("invalid --status %q: must be one of %s", s, strings.Join(validStatuses, ", "))
 }
 
 func validateTypeFilter(s string) error {
-	if s == "" {
+	if s == "" || slices.Contains(validTypes, s) {
 		return nil
 	}
-	valid := map[string]bool{
-		"sudo": true, "work_session": true, "username": true,
-		"groupname": true, "service_token": true, "svc_token_mod": true,
-		"app_username": true, "work_session_mod": true, "sudo_policy": true,
-	}
-	if !valid[s] {
-		return fmt.Errorf("invalid type %q", s)
-	}
-	return nil
+	return fmt.Errorf("invalid --type %q: must be one of %s", s, strings.Join(validTypes, ", "))
 }

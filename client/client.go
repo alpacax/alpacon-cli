@@ -166,11 +166,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent) {
-		return nil, parseAPIError(respBody)
-	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
-		return nil, parseAPIError(respBody)
-	} else if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, parseAPIError(respBody)
 	}
 
@@ -258,7 +254,7 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, parseAPIError(respBody)
 	}
 

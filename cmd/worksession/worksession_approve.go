@@ -1,8 +1,6 @@
 package worksession
 
 import (
-	"strings"
-
 	"github.com/alpacax/alpacon-cli/api/server"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -32,29 +30,14 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		var filteredScopes []string
-		for _, s := range approveScopes {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				filteredScopes = append(filteredScopes, s)
-			}
-		}
 		req := wsapi.WorkSessionApproveRequest{
-			AdjustedScopes: filteredScopes,
+			AdjustedScopes: utils.CompactStrings(approveScopes),
 		}
 
 		if len(approveServers) > 0 {
-			serverIDs := make([]string, 0, len(approveServers))
-			for _, name := range approveServers {
-				name = strings.TrimSpace(name)
-				if name == "" {
-					continue
-				}
-				id, err := server.GetServerIDByName(ac, name)
-				if err != nil {
-					utils.CliErrorWithExit("Server %q not found: %s.", name, err)
-				}
-				serverIDs = append(serverIDs, id)
+			serverIDs, err := server.ResolveServerNames(ac, approveServers)
+			if err != nil {
+				utils.CliErrorWithExit("%s.", err)
 			}
 			req.AdjustedServers = serverIDs
 		}

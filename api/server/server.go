@@ -100,6 +100,22 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 	return response.Results[0].ID, nil
 }
 
+func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, error) {
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		id, err := GetServerIDByName(ac, name)
+		if err != nil {
+			return nil, fmt.Errorf("server %q not found: %w", name, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 	serverID, err := GetServerIDByName(ac, serverName)
 	if err != nil {
