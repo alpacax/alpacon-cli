@@ -70,7 +70,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		// (work_session_sudo_policy_without_scope). The update endpoint has no
 		// scopes field, so we cannot add it here — fail early with guidance.
 		if !slices.Contains(session.Scopes, "sudo") {
-			utils.CliErrorWithExit("Work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with '--scope sudo' (and --sudo).", sessionID)
+			utils.CliErrorWithExit("Work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with --sudo (it adds the 'sudo' scope automatically).", sessionID)
 		}
 
 		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newPolicies))
