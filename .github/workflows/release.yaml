@@ -17,7 +17,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Create GitHub Release with auto notes
+      - name: Create draft GitHub Release with auto notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -25,14 +25,13 @@ jobs:
             echo "Release ${GITHUB_REF_NAME} already exists — skipping."
             exit 0
           fi
-          # Tags with a SemVer pre-release suffix (e.g. v1.2.3-rc1, v1.2.3-beta.1)
-          # are published as prereleases so they don't surface as the latest
-          # release to end users.
+          # Create as a draft to hide it until all jobs succeed (publish-release makes it public).
+          # Pre-release tags (e.g. v1.2.3-rc1) are published as prereleases so they aren't shown as latest.
           prerelease_flag=""
           case "${GITHUB_REF_NAME}" in
             *-*) prerelease_flag="--prerelease" ;;
           esac
-          gh release create "${GITHUB_REF_NAME}" --generate-notes ${prerelease_flag}
+          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes ${prerelease_flag}
 
   build-and-test:
     needs: [create-release]
@@ -195,3 +194,26 @@ jobs:
           PACKAGECLOUD-REPO: alpacon
           PACKAGECLOUD-DISTRIB: rpm_any/rpm_any
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [packagecloud-deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Promote draft Release to public
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Every build/test/publish job has succeeded, so flip the draft
+          # Release public. Pre-release tags (e.g. v1.2.3-rc1) must not become
+          # the latest release shown to end users.
+          latest_flag="--latest"
+          case "${GITHUB_REF_NAME}" in
+            *-*) latest_flag="--latest=false" ;;
+          esac
+          gh release edit "${GITHUB_REF_NAME}" --draft=false ${latest_flag}
