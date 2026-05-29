@@ -1,12 +1,15 @@
 package packages
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -17,6 +20,13 @@ const (
 	systemPackageEntryURL = "/api/packages/system/entries/"
 	pythonPackageEntryURL = "/api/packages/python/entries/"
 )
+
+func packageEntryURL(packageType string) string {
+	if packageType == "python" {
+		return pythonPackageEntryURL
+	}
+	return systemPackageEntryURL
+}
 
 func GetSystemPackageEntry(ac *client.AlpaconClient) ([]SystemPackage, error) {
 	packages, err := api.FetchAllPages[SystemPackageDetail](ac, systemPackageEntryURL, nil)
@@ -58,78 +68,72 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 }
 
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
-	var url string
-	params := map[string]string{
-		"name": fileName,
+	params := map[string]string{"name": fileName}
+	body, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), "", params))
+	if err != nil {
+		return "", err
 	}
 
 	if packageType == "python" {
-		url = pythonPackageEntryURL
 		var response api.ListResponse[PythonPackageDetail]
-		body, err := ac.SendGetRequest(utils.BuildURL(url, "", params))
-		if err != nil {
+		if err := json.Unmarshal(body, &response); err != nil {
 			return "", err
 		}
-		err = json.Unmarshal(body, &response)
-		if err != nil {
-			return "", err
-		}
-
-		if response.Count == 0 {
-			return "", errors.New("no package found with the given name")
-		}
-		return response.Results[0].ID, nil
-	} else {
-		url = systemPackageEntryURL
-		var response api.ListResponse[SystemPackageDetail]
-		body, err := ac.SendGetRequest(utils.BuildURL(url, "", params))
-		if err != nil {
-			return "", err
-		}
-		err = json.Unmarshal(body, &response)
-		if err != nil {
-			return "", err
-		}
-
 		if response.Count == 0 {
 			return "", errors.New("no package found with the given name")
 		}
 		return response.Results[0].ID, nil
 	}
+
+	var response api.ListResponse[SystemPackageDetail]
+	if err := json.Unmarshal(body, &response); err != nil {
+		return "", err
+	}
+	if response.Count == 0 {
+		return "", errors.New("no package found with the given name")
+	}
+	return response.Results[0].ID, nil
 }
 
 func UploadPackage(ac *client.AlpaconClient, file string, packageType string) error {
-	content, err := utils.ReadFileFromPath(file)
+	src, err := os.Open(file)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = src.Close() }()
 
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
-
-	fileWriter, err := writer.CreateFormFile("content", file)
+	var contentType string
+	requestBody, size, err := utils.SpoolToTempFile("alpacon-package-upload-*.multipart", func(w io.Writer) error {
+		writer := multipart.NewWriter(w)
+		fileWriter, err := writer.CreateFormFile("content", file)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(fileWriter, src); err != nil {
+			return err
+		}
+		contentType = writer.FormDataContentType()
+		return writer.Close()
+	})
 	if err != nil {
 		return err
 	}
-	_, err = fileWriter.Write(content)
-	if err != nil {
-		return err
-	}
-	_ = writer.Close()
+	defer utils.CleanupTempFile(requestBody)
 
-	var requestURL string
-	if packageType == "python" {
-		requestURL = pythonPackageEntryURL
-	} else {
-		requestURL = systemPackageEntryURL
-	}
-
-	_, err = ac.SendMultipartRequest(requestURL, writer, requestBody)
+	_, err = ac.SendMultipartStreamRequest(packageEntryURL(packageType), contentType, requestBody, size)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func packageDownloadResponseError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if message := strings.TrimSpace(string(body)); message != "" {
+		return fmt.Errorf("package download failed with status %d: %s", resp.StatusCode, message)
+	}
+	return fmt.Errorf("package download failed with status %d", resp.StatusCode)
 }
 
 func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, packageType string) error {
@@ -138,14 +142,7 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 		return err
 	}
 
-	var url string
-	if packageType == "python" {
-		url = pythonPackageEntryURL
-	} else {
-		url = systemPackageEntryURL
-	}
-
-	respBody, err := ac.SendGetRequest(utils.BuildURL(url, packageID, nil))
+	respBody, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), packageID, nil))
 	if err != nil {
 		return err
 	}
@@ -163,14 +160,15 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	if resp.StatusCode != http.StatusOK {
+		return packageDownloadResponseError(resp)
+	}
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return fmt.Errorf("package download returned JSON instead of file content")
 	}
 
 	savePath := filepath.Join(dest, filepath.Base(fileName))
-	err = utils.SaveFile(savePath, respBody)
-	if err != nil {
+	if _, err = utils.SaveStreamAtomic(savePath, resp.Body); err != nil {
 		return err
 	}
 
