@@ -216,4 +216,6 @@ jobs:
           case "${GITHUB_REF_NAME}" in
             *-*) latest_flag="--latest=false" ;;
           esac
+          # --draft=false is idempotent: re-running after a previously published
+          # Release leaves it public, so retries on the same tag are safe.
           gh release edit "${GITHUB_REF_NAME}" --draft=false ${latest_flag}
