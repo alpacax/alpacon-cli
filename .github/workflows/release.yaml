@@ -202,11 +202,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
-
       - name: Promote draft Release to public
         env:
+          # gh reads GH_REPO (not GITHUB_REPOSITORY), so gh resolves the repo
+          # without an actions/checkout step.
+          GH_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Every build/test/publish job has succeeded, so flip the draft
