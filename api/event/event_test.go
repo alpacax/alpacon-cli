@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -977,4 +978,210 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
+}
+
+// streamingServerConfig configures the fake event servers used by the
+// streaming-path tests below.
+type streamingServerConfig struct {
+	cmdID        string
+	serverID     string
+	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
+	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
+	runningPolls int               // number of "running" detail polls before the terminal one
+	terminal     EventDetails      // returned by the detail poll once runningPolls elapse
+}
+
+// newStreamingServers starts a WS + API server pair for streaming tests and
+// returns a client pointed at the API server. Servers are torn down via
+// t.Cleanup. The WS emits cfg.wsChunks after the subscription POST arrives.
+func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.AlpaconClient {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	subscribed := make(chan struct{})
+	var subOnce sync.Once
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer func() { _ = conn.Close() }()
+		select {
+		case <-subscribed:
+		case <-time.After(10 * time.Second):
+			t.Error("timeout waiting for subscription signal")
+			return
+		}
+		for _, c := range cfg.wsChunks {
+			env := map[string]any{
+				"event_type": "command_output",
+				"payload":    map[string]any{"command_id": cfg.cmdID, "seq": c.Seq, "content": c.Content},
+			}
+			b, _ := json.Marshal(env)
+			_ = conn.WriteMessage(websocket.TextMessage, b)
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(wsServer.Close)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + cfg.serverID + `","name":"srv"}]}`))
+		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
+		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `"}]`))
+		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
+			subOnce.Do(func() { close(subscribed) })
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/chunks/" && r.Method == http.MethodGet:
+			fromSeq, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+			var results []Chunk
+			if cfg.chunksFor != nil {
+				results = cfg.chunksFor(fromSeq)
+			}
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n <= cfg.runningPolls {
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running"}`))
+				return
+			}
+			term := cfg.terminal
+			term.ID = cfg.cmdID
+			_ = json.NewEncoder(w).Encode(term)
+		default:
+			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+
+	return &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+}
+
+// TestRunCommandStreaming_NoDuplicateOutputOnFailure guards the duplicate-output
+// fix: a failed command's terminal poll carries the full buffered Result, but
+// the chunks were already streamed live, so errorFromDetails must receive a
+// cleared Result and stdout must contain the output exactly once.
+func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+
+	// Streamed chunks appear once; the buffered Result is not appended.
+	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
+	// The returned error must carry a cleared Output so cmd/exec does not reprint it.
+	var remoteErr *RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Equal(t, "", remoteErr.Output, "buffered result must be cleared to prevent duplicate output")
+}
+
+// TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil
+// branches reached through the streaming select loop, pinning the exit-code /
+// error-mapping contract for failed, infra-error, and unrecognized statuses.
+func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		terminal EventDetails
+		check    func(t *testing.T, err error)
+	}{
+		{
+			name:     "success false returns RemoteCommandError with exit code",
+			terminal: EventDetails{Status: "completed", Success: boolPtr(false), ExitCode: intPtr(7)},
+			check: func(t *testing.T, err error) {
+				var re *RemoteCommandError
+				require.ErrorAs(t, err, &re)
+				assert.Equal(t, 7, re.ExitCode)
+			},
+		},
+		{
+			name:     "stuck status returns infra error",
+			terminal: EventDetails{Status: "stuck"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "status=stuck")
+			},
+		},
+		{
+			name:     "error status returns infra error",
+			terminal: EventDetails{Status: "error"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "status=error")
+			},
+		},
+		{
+			name:     "cancelled status returns infra error",
+			terminal: EventDetails{Status: "cancelled"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "status=cancelled")
+			},
+		},
+		{
+			name:     "unrecognized status returns unexpected-status error",
+			terminal: EventDetails{Status: "denied"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "unexpected command status")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdoutBuf := &bytes.Buffer{}
+			ac := newStreamingServers(t, streamingServerConfig{
+				cmdID:        "cmd-uuid",
+				serverID:     "srv-uuid",
+				runningPolls: 1,
+				terminal:     tt.terminal,
+			})
+			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+			tt.check(t, err)
+		})
+	}
+}
+
+// TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the
+// drain-on-terminal path: trailing chunks produced as the command finishes
+// never arrive over the WS and are recovered only by the final REST drain.
+func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			// Warm-fire (seq>=0) is empty; the final drain (seq>=1) yields the tail.
+			if fromSeq >= 1 {
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}}
+			}
+			return nil
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
