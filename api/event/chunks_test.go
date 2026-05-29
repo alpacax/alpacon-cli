@@ -45,4 +45,36 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 		{Seq: 6, Content: "world\n"},
 	}, got)
 	assert.Contains(t, capturedQuery, "seq__gte=5")
+	assert.Contains(t, capturedQuery, "ordering=seq")
+}
+
+// TestGetCommandChunks_SortsBySeq guards the seq-ascending invariant the
+// streaming consumers rely on: even if the server returns chunks out of order,
+// GetCommandChunks must return them sorted by seq.
+func TestGetCommandChunks_SortsBySeq(t *testing.T) {
+	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := api.ListResponse[Chunk]{
+			Count: 3,
+			Results: []Chunk{
+				{Seq: 2, Content: "c\n"},
+				{Seq: 0, Content: "a\n"},
+				{Seq: 1, Content: "b\n"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	got, err := GetCommandChunks(ac, cmdID, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []Chunk{
+		{Seq: 0, Content: "a\n"},
+		{Seq: 1, Content: "b\n"},
+		{Seq: 2, Content: "c\n"},
+	}, got)
 }
