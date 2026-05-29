@@ -14,11 +14,9 @@ type Chunk struct {
 	Content string `json:"content"`
 }
 
-// GetCommandChunks fetches all chunks for cmdID whose seq is >= fromSeq.
-// Pagination is handled transparently by api.FetchAllPages. Results are sorted
-// by seq ascending: the streaming consumers (warm-fire, gap-fill, drain) rely
-// on this invariant, so we request server-side ordering and also sort
-// defensively in case the server does not honor it (or paginates unordered).
+// GetCommandChunks fetches chunks for cmdID with seq >= fromSeq, sorted by seq
+// ascending. The streaming consumers rely on that order, so we sort defensively
+// in case the server does not honor the ordering param.
 func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq int) ([]Chunk, error) {
 	endpoint := "/api/events/commands/" + cmdID + "/chunks/"
 	params := map[string]string{

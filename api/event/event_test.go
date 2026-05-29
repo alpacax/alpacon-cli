@@ -607,8 +607,7 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 	cmdID := "cmd-uuid"
 
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	// subscribed is closed when the API server receives the subscription POST,
-	// signalling the WS server that it's safe to emit chunks (commandID is set by then).
+	// Closed on the subscription POST to signal the WS server it may emit chunks.
 	subscribed := make(chan struct{})
 	var wsURL string
 
@@ -647,7 +646,6 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
-			// minimal server lookup response
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-uuid","name":"srv"}]}`))
 		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch-uuid"}`))
@@ -932,7 +930,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
-	// THE KEY ASSERTION: SubmitCommand was called exactly once
+	// Key assertion: SubmitCommand was called exactly once
 	mu.Lock()
 	defer mu.Unlock()
 	assert.Equal(t, 1, submitCount, "fallback must not re-submit the command")
@@ -980,8 +978,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
 
-// streamingServerConfig configures the fake event servers used by the
-// streaming-path tests below.
+// streamingServerConfig configures the fake event servers for streaming tests.
 type streamingServerConfig struct {
 	cmdID        string
 	serverID     string
@@ -991,9 +988,8 @@ type streamingServerConfig struct {
 	terminal     EventDetails      // returned by the detail poll once runningPolls elapse
 }
 
-// newStreamingServers starts a WS + API server pair for streaming tests and
-// returns a client pointed at the API server. Servers are torn down via
-// t.Cleanup. The WS emits cfg.wsChunks after the subscription POST arrives.
+// newStreamingServers starts a WS + API server pair and returns a client for
+// them. The WS emits cfg.wsChunks after the subscription POST arrives.
 func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.AlpaconClient {
 	t.Helper()
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -1072,9 +1068,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 }
 
 // TestRunCommandStreaming_NoDuplicateOutputOnFailure guards the duplicate-output
-// fix: a failed command's terminal poll carries the full buffered Result, but
-// the chunks were already streamed live, so errorFromDetails must receive a
-// cleared Result and stdout must contain the output exactly once.
+// fix: a failed command's buffered Result must not be reprinted after streaming.
 func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -1087,17 +1081,15 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 
-	// Streamed chunks appear once; the buffered Result is not appended.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
-	// The returned error must carry a cleared Output so cmd/exec does not reprint it.
+	// Output must be cleared so cmd/exec does not reprint it.
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, "", remoteErr.Output, "buffered result must be cleared to prevent duplicate output")
 }
 
 // TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil
-// branches reached through the streaming select loop, pinning the exit-code /
-// error-mapping contract for failed, infra-error, and unrecognized statuses.
+// branches reached through the streaming select loop.
 func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1161,9 +1153,8 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 	}
 }
 
-// TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the
-// drain-on-terminal path: trailing chunks produced as the command finishes
-// never arrive over the WS and are recovered only by the final REST drain.
+// TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the drain path:
+// trailing chunks never seen over the WS are recovered by the final REST drain.
 func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{

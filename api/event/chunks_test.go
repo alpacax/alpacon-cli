@@ -48,9 +48,8 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	assert.Contains(t, capturedQuery, "ordering=seq")
 }
 
-// TestGetCommandChunks_SortsBySeq guards the seq-ascending invariant the
-// streaming consumers rely on: even if the server returns chunks out of order,
-// GetCommandChunks must return them sorted by seq.
+// TestGetCommandChunks_SortsBySeq verifies out-of-order server results are
+// returned sorted by seq.
 func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
 

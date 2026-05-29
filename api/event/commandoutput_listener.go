@@ -86,10 +86,8 @@ func (l *CommandOutputListener) setCommandID(id string) {
 	l.mu.Unlock()
 }
 
-// NewCommandOutputListener constructs a listener without connecting.
-// ac is reserved for header-building; pass nil to use the empty header
-// (useful in tests). commandID may be empty at construction time and set
-// later via setCommandID once SubmitCommand returns.
+// NewCommandOutputListener constructs a listener without connecting. ac may be
+// nil (empty header, for tests); commandID may be set later via setCommandID.
 func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string) *CommandOutputListener {
 	var header http.Header
 	if ac != nil {

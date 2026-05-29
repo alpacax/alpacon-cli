@@ -202,11 +202,8 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	}
 }
 
-// RunCommandStreaming is the streaming-aware counterpart to RunCommand.
-// It establishes an event-server WebSocket, subscribes to command_output for
-// the new command, prints chunks to stdout in real time, and returns when the
-// command reaches a terminal state. Any error during WS setup causes a fall
-// back to RunCommand (polling) with a stderr warning.
+// RunCommandStreaming runs a command and streams its output to stdout over the
+// event WebSocket, falling back to RunCommand (polling) when WS setup fails.
 func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
 	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, os.Stdout)
 }
@@ -247,7 +244,6 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		}
 	}
 
-	// Status polling in background
 	pollResult := make(chan EventDetails, 1)
 	pollErr := make(chan error, 1)
 	go func() {
@@ -277,13 +273,9 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	}
 }
 
-// applyChunk handles a single chunk: skip duplicates, fill gaps with REST,
-// and write content in seq order. Returns the new lastSeq.
-//
-// Gap-fill invariant: when REST returns the same seq as the incoming WS chunk,
-// lastSeq advances to chunk.Seq inside the REST loop and the final `if` clause
-// becomes false — the WS chunk is intentionally skipped, since REST already
-// printed identical content for that seq (REST/WS share the persisted chunk).
+// applyChunk skips duplicates, fills gaps via REST, and writes content in seq
+// order, returning the new lastSeq. When REST already returned the incoming
+// chunk's seq, the final clause is intentionally skipped to avoid reprinting it.
 func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer) int {
 	if chunk.Seq <= lastSeq {
 		return lastSeq
@@ -359,17 +351,15 @@ func errorFromDetails(d EventDetails) error {
 func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) error {
 	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
 	if err != nil {
-		// SubmitCommand returned an MFA/auth/etc error; surface it so the
-		// existing retry callbacks in RunCommandWithRetry can handle it.
+		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err
 	}
 	return runCommandFallbackFromID(ac, cmdResp.ID, out, cause)
 }
 
-// runCommandFallbackFromID is the fallback used when streaming setup fails
-// AFTER SubmitCommand has already created the command on the server. It
-// polls the existing command by ID instead of re-submitting, then writes
-// the buffered result to out.
+// runCommandFallbackFromID polls an already-submitted command by ID (instead of
+// re-submitting) and writes its buffered result to out. Used when streaming
+// setup fails after SubmitCommand has created the command.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) error {
 	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
 	details, err := PollCommandExecution(ac, cmdID)

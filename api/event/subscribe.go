@@ -58,9 +58,8 @@ func SubscribeSudoEvent(ac *client.AlpaconClient, channelID, sessionID string) e
 	return nil
 }
 
-// SubscribeCommandOutput subscribes the given channel to command_output events
-// for a specific command. target_id=commandID ensures the channel only receives
-// chunks for this one command.
+// SubscribeCommandOutput subscribes the channel to command_output events for the
+// given command (target_id scopes delivery to that command's chunks).
 func SubscribeCommandOutput(ac *client.AlpaconClient, channelID, commandID string) error {
 	req := &EventSubscriptionRequest{
 		Channel:   channelID,

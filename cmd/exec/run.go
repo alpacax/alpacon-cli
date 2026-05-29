@@ -12,12 +12,9 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// RunCommandWithRetry executes a remote command with MFA and username-required
-// error handling and retry logic. Used by both exec and websh commands.
-// workSessionID is forwarded to the server as the work_session field; pass ""
-// to omit it.
-//
-// Output is streamed to os.Stdout during execution (not buffered).
+// RunCommandWithRetry executes a remote command with MFA/username-required error
+// handling and retry logic, streaming output to stdout. Used by exec and websh.
+// workSessionID is forwarded as the work_session field; pass "" to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
 	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID)
 	if phased, ok := asPhasedError(err); ok {
