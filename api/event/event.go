@@ -324,26 +324,32 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 	return lastSeq
 }
 
+// errorFromDetails maps a terminal command status to an error, mirroring
+// RunCommand so unrecognized statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
-	if d.Status == "stuck" || d.Status == "error" || d.Status == "cancelled" {
+	switch d.Status {
+	case "completed", "success":
+		if d.Success != nil && !*d.Success {
+			exitCode := 1
+			if d.ExitCode != nil {
+				exitCode = *d.ExitCode
+			}
+			phase := ""
+			if d.ErrorPhase != nil {
+				phase = *d.ErrorPhase
+			}
+			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase}
+		}
+		return nil
+	case "stuck", "error", "cancelled":
 		phase := ""
 		if d.ErrorPhase != nil {
 			phase = *d.ErrorPhase
 		}
 		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+	default:
+		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
 	}
-	if d.Success != nil && !*d.Success {
-		exitCode := 1
-		if d.ExitCode != nil {
-			exitCode = *d.ExitCode
-		}
-		phase := ""
-		if d.ErrorPhase != nil {
-			phase = *d.ErrorPhase
-		}
-		return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase}
-	}
-	return nil
 }
 
 // runCommandFallback warns the user and delegates to the existing polling flow.
@@ -369,6 +375,8 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	}
 	if details.Result != "" {
 		_, _ = fmt.Fprint(out, details.Result)
+		// Clear so errorFromDetails doesn't return it again and cause a reprint.
+		details.Result = ""
 	}
 	return errorFromDetails(details)
 }
