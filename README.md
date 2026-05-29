@@ -112,8 +112,8 @@ To access and utilize all features of `Alpacon CLI`, first authenticate with you
 ```bash
 $ alpacon login
 
-# Cloud login (portal URL or API URL)
-$ alpacon login https://alpacon.io/myworkspace
+# Cloud login (non-interactive, for CI/CD or AI agents)
+$ alpacon login --workspace myworkspace --region us1
 $ alpacon login myworkspace.us1.alpacon.io
 
 # Self-hosted
@@ -156,28 +156,35 @@ Usage:
   alpacon [command]
 
 Available Commands:
-  agent       Commands to manage server's agent
-  authority   Commands to manage and interact with certificate authorities
-  cert        Manage and interact with SSL/TLS certificates
-  completion  Generate the autocompletion script for the specified shell
-  cp          Copy files between local and remote locations
-  csr         Generate and manage Certificate Signing Request (CSR) operations
-  event       Retrieve and display recent Alpacon events.
-  exec        Execute a command on a remote server
-  group       Manage Group resources
-  help        Help about any command
-  log         Retrieve and display server logs
-  login       Log in to Alpacon
-  logout      Log out of Alpacon
-  note        Manage and view server notes
-  package     Commands to manage and interact with packages
-  server      Commands to manage and interact with servers
-  token       Commands to manage api tokens
-  tunnel      Create a TCP tunnel to a remote server
-  user        Manage User resources
-  version     Displays the current CLI version.
-  websh       Open a websh terminal or execute a command on a server
-  work-session  Create and manage work sessions
+  agent        Manage the Alpamon agent on a server
+  approval     List and manage approval requests
+  audit        Retrieve and display audit activity logs
+  authority    Manage private certificate authorities
+  cert         List, describe, and download certificates
+  completion   Generate the autocompletion script for the specified shell
+  cp           Copy files between local and remote locations
+  csr          Manage certificate signing requests (CSRs)
+  event        Retrieve and display recent Alpacon events
+  exec         Execute a command on a remote server
+  group        Manage groups, members, and permissions
+  help         Help about any command
+  log          Retrieve and display server logs
+  login        Log in to Alpacon
+  logout       Log out of Alpacon
+  note         Manage notes attached to servers
+  package      Manage system and Python packages
+  revoke       Manage certificate revocation requests
+  server       Manage registered servers
+  token        Manage API tokens for CI/CD and automation
+  tunnel       Create a TCP tunnel (optionally run a command)
+  user         List, create, describe, update, and delete users
+  version      Display the current CLI version
+  webftp-log   Retrieve and display WebFTP transfer logs
+  webhook      Configure webhooks for event notifications
+  websh        Open a websh terminal or execute a command on a server
+  whoami       Display current authenticated identity
+  work-session Create and manage work sessions
+  workspace    View, list, and switch workspaces
 ```
 ### Examples of use cases
 
@@ -412,23 +419,28 @@ $ alpacon token delete [TOKEN_ID_OR_NAME]
 $ alpacon token rm [TOKEN_ID_OR_NAME]
 
 # Log in via API token
-$ alpacon login -s [SERVER URL] -t [TOKEN KEY]
+$ alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
 ```
 
-#### Token command ACL
-Defines command access for API tokens and enables setting specific commands that each API token can run.
+#### Token ACL
+Token ACLs enforce deny-by-default access control for API tokens across three independent types: `command` (which shell commands the token can run via websh/exec), `server` (which servers the token can access), and `file` (which file paths the token can read/write via cp). Each type supports `add`, `ls`, and `delete` subcommands.
+
 ```bash
-# Add a new command ACL with specific token and command.
-$ alpacon token acl add [TOKEN_ID_OR_NAME]
-$ alpacon token acl add --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
+# Command ACL — control which commands a token can execute
+$ alpacon token acl command add my-api-token --command="whoami"
+$ alpacon token acl command add my-api-token --command="docker *" --username=root
+$ alpacon token acl command ls my-api-token
+$ alpacon token acl command delete [COMMAND_ACL_ID]
 
-# Display all command ACLs for an API token.
-$ alpacon token acl ls [TOKEN_ID_OR_NAME]
+# Server ACL — control which servers a token can access
+$ alpacon token acl server add my-api-token --servers web-01,web-02
+$ alpacon token acl server ls my-api-token
+$ alpacon token acl server delete [SERVER_ACL_ID]
 
-# Delete the specified command ACL from an API token.
-$ alpacon token acl delete [COMMAND_ACL_ID]
-$ alpacon token acl rm [COMMAND_ACL_ID]
-$ alpacon token acl delete --token=[TOKEN_ID_OR_NAME] --command=[COMMAND]
+# File ACL — control which file paths a token can read/write
+$ alpacon token acl file add my-api-token --path "/home/deploy/*" --action upload
+$ alpacon token acl file ls my-api-token
+$ alpacon token acl file delete [FILE_ACL_ID]
 ```
 
 #### File transfer
