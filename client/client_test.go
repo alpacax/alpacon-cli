@@ -287,6 +287,34 @@ func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testin
 	assert.Equal(t, size, finalContentLength)
 }
 
+func TestSendPostRequest_204IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendPostRequest("/api/test/", struct{}{})
+	assert.NoError(t, err)
+	assert.Empty(t, body)
+}
+
+func TestSendDeleteRequest_200IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendDeleteRequest("/api/test/")
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(`{}`), body)
+}
+
 func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 	callCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

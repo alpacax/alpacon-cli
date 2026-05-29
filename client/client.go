@@ -185,10 +185,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	statusIsError := resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices
-	postUnexpected := req.Method == http.MethodPost && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK
-	deleteUnexpected := req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent
-	if statusIsError || postUnexpected || deleteUnexpected {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, parseAPIError(respBody)
 	}
 
@@ -269,7 +266,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, parseAPIError(respBody)
 	}
 
