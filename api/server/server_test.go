@@ -423,6 +423,60 @@ func TestGetRegistrationTokenAttributes_EmptyList(t *testing.T) {
 	}
 }
 
+func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
+	want := AnsibleGuideJsonResponse{
+		RegistrationGuideMeta: RegistrationGuideMeta{
+			MethodID:         "ansible",
+			Platform:         "debian",
+			PlatformLabel:    "Debian / Ubuntu",
+			AlpaconURL:       "https://workspace.alpacon.io",
+			ServerName:       "my-server",
+			PackageProxy:     nil,
+			AllowSudoWithMFA: false,
+		},
+		RegistrationToken: "alpacax_sometoken",
+		CollectionInstall: "ansible-galaxy collection install alpacax.alpacon --upgrade",
+		RunCommandQuick:   "ansible-playbook -i inventory.ini alpacax.alpacon.register \\\n  -e ...",
+		InventorySnippet:  "[targets]\nYOUR_IP ansible_user=YOUR_USER",
+		PlaybookSnippet:   "- hosts: targets\n  ...",
+		RunCommandCustom:  "ansible-playbook -i inventory.ini playbook.yml \\\n  -e ...",
+	}
+
+	var gotPath string
+	var gotMethod string
+	var gotBody RegistrationMethodGuideRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(want)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	got, err := GetAnsibleRegistrationGuideJSON(ac, "debian", "my-server", "tok-uuid")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Errorf("expected POST, got %s", gotMethod)
+	}
+	if gotPath != "/api/servers/registration-methods/ansible/guide/" {
+		t.Errorf("expected ansible guide path, got %s", gotPath)
+	}
+	if gotBody.Platform != "debian" || gotBody.ServerName != "my-server" || gotBody.RegistrationToken != "tok-uuid" {
+		t.Errorf("unexpected request body: %+v", gotBody)
+	}
+	if got.MethodID != want.MethodID || got.CollectionInstall != want.CollectionInstall || got.RunCommandQuick != want.RunCommandQuick {
+		t.Errorf("unexpected response: %+v", got)
+	}
+}
+
 func TestDeleteServer(t *testing.T) {
 	const serverID = "delete-server-id"
 	var deleteCalled bool
