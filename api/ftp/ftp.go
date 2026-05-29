@@ -86,6 +86,14 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 	}
 	req.ContentLength = size
 
+	// Set GetBody so the body can be replayed on a redirect.
+	if f, ok := osFileFrom(file); ok {
+		name := f.Name()
+		req.GetBody = func() (io.ReadCloser, error) {
+			return os.Open(name)
+		}
+	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
@@ -96,6 +104,18 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// osFileFrom unwraps readOnly to recover the underlying *os.File.
+func osFileFrom(r io.Reader) (*os.File, bool) {
+	switch v := r.(type) {
+	case *os.File:
+		return v, true
+	case readOnly:
+		f, ok := v.Reader.(*os.File)
+		return f, ok
+	}
+	return nil, false
 }
 
 func uploadResponseLabel(resp UploadResponse) string {
