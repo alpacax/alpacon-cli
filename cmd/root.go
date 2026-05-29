@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
+	"github.com/alpacax/alpacon-cli/cmd/approval"
 	"github.com/alpacax/alpacon-cli/cmd/audit"
 	"github.com/alpacax/alpacon-cli/cmd/authority"
 	"github.com/alpacax/alpacon-cli/cmd/cert"
@@ -141,6 +142,9 @@ func init() {
 
 	// work-session
 	RootCmd.AddCommand(worksession.WorkSessionCmd)
+
+	// approval
+	RootCmd.AddCommand(approval.ApprovalCmd)
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)

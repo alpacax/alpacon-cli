@@ -1,7 +1,6 @@
 package ftp
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -31,6 +31,9 @@ const (
 	basePollTimeout    = 30 * time.Second
 	perFilePollTimeout = 10 * time.Second
 	perMBPollTimeout   = 5 * time.Second
+
+	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
+	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
@@ -83,6 +86,14 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 	}
 	req.ContentLength = size
 
+	// Set GetBody so the body can be replayed on a redirect.
+	if f, ok := osFileFrom(file); ok {
+		name := f.Name()
+		req.GetBody = func() (io.ReadCloser, error) {
+			return os.Open(name)
+		}
+	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
@@ -93,6 +104,59 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// osFileFrom unwraps readOnly to recover the underlying *os.File.
+func osFileFrom(r io.Reader) (*os.File, bool) {
+	switch v := r.(type) {
+	case *os.File:
+		return v, true
+	case readOnly:
+		f, ok := v.Reader.(*os.File)
+		return f, ok
+	}
+	return nil, false
+}
+
+func uploadResponseLabel(resp UploadResponse) string {
+	if resp.Name != "" {
+		return resp.Name
+	}
+	return resp.ID
+}
+
+func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
+	if count == 0 {
+		return nil
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > count {
+		limit = count
+	}
+
+	failuresByIndex := make([]string, count)
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			failuresByIndex[index] = fn(index)
+		}(i)
+	}
+	wg.Wait()
+
+	var failures []string
+	for _, failure := range failuresByIndex {
+		if failure != "" {
+			failures = append(failures, failure)
+		}
+	}
+	return failures
 }
 
 func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
@@ -144,15 +208,23 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 		return fmt.Errorf("server returned %d upload slots but %d files were provided", len(responses), len(files))
 	}
 
-	// Upload each file to S3
-	ids := make([]string, 0, len(responses))
+	ids := make([]string, len(responses))
 	for i, resp := range responses {
-		ids = append(ids, resp.ID)
-		if resp.UploadURL != "" {
-			if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i], sizes[i]); err != nil {
-				return fmt.Errorf("failed to upload %s to storage: %w", resp.Name, err)
-			}
+		ids[i] = resp.ID
+	}
+
+	uploadFailures := collectConcurrentFailures(len(responses), bulkUploadConcurrency, func(i int) string {
+		resp := responses[i]
+		if resp.UploadURL == "" {
+			return ""
 		}
+		if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i], sizes[i]); err != nil {
+			return fmt.Sprintf("%s: failed to upload to storage: %v", uploadResponseLabel(resp), err)
+		}
+		return ""
+	})
+	if len(uploadFailures) > 0 {
+		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(uploadFailures), strings.Join(uploadFailures, "\n  "))
 	}
 
 	// Trigger server-side processing
@@ -168,17 +240,17 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 	}
 	timeout := calcPollTimeout(len(files), totalBytes)
 
-	var failures []string
-	for _, resp := range responses {
+	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) string {
+		resp := responses[i]
 		success, message, err := PollTransferStatus(ac, "upload", resp.ID, timeout)
 		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", resp.Name, err))
-			continue
+			return fmt.Sprintf("%s: %v", uploadResponseLabel(resp), err)
 		}
 		if !success {
-			failures = append(failures, fmt.Sprintf("%s: %s", resp.Name, message))
+			return fmt.Sprintf("%s: %s", uploadResponseLabel(resp), message)
 		}
-	}
+		return ""
+	})
 	if len(failures) > 0 {
 		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(failures), strings.Join(failures, "\n  "))
 	}
@@ -281,6 +353,12 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	return executeBulkUpload(ac, request, readers, sizes)
 }
 
+func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
+	return utils.SpoolToTempFile("alpacon-folder-*.zip", func(w io.Writer) error {
+		return utils.ZipToWriter(folderPath, w)
+	})
+}
+
 // UploadFolder uploads local folders to a remote server.
 // Each folder is zipped before upload and extracted on the server side.
 // Uses the single upload API for one folder, or the bulk API for multiple folders.
@@ -300,10 +378,11 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 	}
 
 	if len(src) == 1 {
-		zipBytes, err := utils.Zip(src[0])
+		zipFile, size, err := createFolderZipTempFile(src[0])
 		if err != nil {
 			return err
 		}
+		defer utils.CleanupTempFile(zipFile)
 
 		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
 		spinner.Start()
@@ -319,20 +398,27 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 			AllowUnzip:     true,
 			WorkSession:    workSessionID,
 		}
-		return executeSingleUpload(ac, request, bytes.NewReader(zipBytes), int64(len(zipBytes)))
+		return executeSingleUpload(ac, request, readOnly{zipFile}, size)
 	}
 
 	names := make([]string, len(src))
 	readers := make([]io.Reader, len(src))
 	sizes := make([]int64, len(src))
+	zipFiles := make([]*os.File, len(src))
+	defer func() {
+		for _, f := range zipFiles {
+			utils.CleanupTempFile(f)
+		}
+	}()
 	for i, folderPath := range src {
-		zipBytes, err := utils.Zip(folderPath)
+		zipFile, size, err := createFolderZipTempFile(folderPath)
 		if err != nil {
 			return err
 		}
+		zipFiles[i] = zipFile
 		names[i] = filepath.Base(folderPath) + ".zip"
-		readers[i] = bytes.NewReader(zipBytes)
-		sizes[i] = int64(len(zipBytes))
+		readers[i] = readOnly{zipFile}
+		sizes[i] = size
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
@@ -353,14 +439,14 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 	return executeBulkUpload(ac, request, readers, sizes)
 }
 
-func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte, error) {
+func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttempts int) (int64, error) {
 	var resp *http.Response
 	var err error
 
 	for count := 0; count < maxAttempts; count++ {
 		resp, err = httpClient.Get(url)
 		if err != nil {
-			return nil, fmt.Errorf("network error while downloading: %w", err)
+			return 0, fmt.Errorf("network error while downloading: %w", err)
 		}
 
 		if resp.StatusCode == http.StatusOK {
@@ -370,52 +456,80 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) ([]byte,
 
 		// Client errors (4xx) will never succeed on retry
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return nil, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
+			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
 		if count == maxAttempts-1 {
-			return nil, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
+			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
 		}
 		time.Sleep(time.Second)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
-	return io.ReadAll(resp.Body)
+	return utils.SaveStreamAtomic(filePath, resp.Body)
 }
 
-func saveDownloadedContent(content []byte, dest, remotePath string, recursive bool) error {
-	var filePath string
-	if recursive {
-		fileName := filepath.Base(remotePath) + ".zip"
-		filePath = filepath.Join(dest, fileName)
-	} else {
-		// If dest is an existing directory or ends with a separator, append the remote filename.
-		// Otherwise treat dest as the target file path directly (cp-style rename semantics).
-		info, err := os.Stat(dest)
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to access destination %q: %w", dest, err)
-		}
-		destHasTrailingSep := len(dest) > 0 && os.IsPathSeparator(dest[len(dest)-1])
-		if (err == nil && info.IsDir()) || destHasTrailingSep {
-			filePath = filepath.Join(dest, filepath.Base(remotePath))
-		} else {
-			filePath = dest
-		}
+func downloadedFilePath(dest, remotePath string) (string, error) {
+	// If dest is an existing directory or ends with a separator, append the remote filename.
+	// Otherwise treat dest as the target file path directly (cp-style rename semantics).
+	info, err := os.Stat(dest)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to access destination %q: %w", dest, err)
+	}
+	destHasTrailingSep := len(dest) > 0 && os.IsPathSeparator(dest[len(dest)-1])
+	if (err == nil && info.IsDir()) || destHasTrailingSep {
+		return filepath.Join(dest, filepath.Base(remotePath)), nil
 	}
 
-	if err := utils.SaveFile(filePath, content); err != nil {
-		return fmt.Errorf("failed to save file locally: %w", err)
+	return dest, nil
+}
+
+func reserveDownloadArchiveTempPath(dest string) (string, error) {
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return "", fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
+	// Reserve a hidden path in dest so archive downloads never collide with
+	// user-visible files returned by the server, such as "download.zip".
+	f, err := os.CreateTemp(dest, ".alpacon-download-*.zip")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp archive: %w", err)
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", fmt.Errorf("failed to close temp archive: %w", err)
+	}
+
+	return name, nil
+}
+
+func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, recursive bool, maxAttempts int) (int64, error) {
 	if recursive {
+		filePath, err := reserveDownloadArchiveTempPath(dest)
+		if err != nil {
+			return 0, err
+		}
 		defer func() { _ = utils.DeleteFile(filePath) }()
-		if err := utils.Unzip(filePath, dest); err != nil {
-			return fmt.Errorf("failed to extract downloaded folder: %w", err)
+
+		written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
+		if err != nil {
+			return written, err
 		}
+		if err := utils.Unzip(filePath, dest); err != nil {
+			return written, fmt.Errorf("failed to extract downloaded folder: %w", err)
+		}
+
+		return written, nil
 	}
 
-	return nil
+	filePath, err := downloadedFilePath(dest, remotePath)
+	if err != nil {
+		return 0, err
+	}
+
+	return fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
 }
 
 func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) error {
@@ -455,16 +569,12 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 		return fmt.Errorf("%s", status.Result)
 	}
 
-	content, err := fetchFromURL(ac.HTTPClient, downloadResponse.DownloadURL, 100)
+	written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, 100)
 	if err != nil {
 		return err
 	}
 
-	if err := saveDownloadedContent(content, dest, remotePath, recursive); err != nil {
-		return err
-	}
-
-	timeout := calcPollTimeout(1, int64(len(content)))
+	timeout := calcPollTimeout(1, written)
 	success, message, err := PollTransferStatus(ac, "download", downloadResponse.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
@@ -512,27 +622,21 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return fmt.Errorf("%s", status.Result)
 	}
 
-	content, err := fetchFromURL(ac.HTTPClient, response.DownloadURL, 100)
+	zipPath, err := reserveDownloadArchiveTempPath(dest)
 	if err != nil {
 		return err
 	}
-
-	// Save zip and extract contents
-	name := response.Name
-	if name == "" {
-		name = "download.zip"
-	}
-	zipPath := filepath.Join(dest, filepath.Base(name))
-	if err := utils.SaveFile(zipPath, content); err != nil {
+	defer func() { _ = utils.DeleteFile(zipPath) }()
+	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, 100)
+	if err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
-	defer func() { _ = utils.DeleteFile(zipPath) }()
 
 	if err := utils.Unzip(zipPath, dest); err != nil {
 		return fmt.Errorf("failed to extract downloaded archive: %w", err)
 	}
 
-	timeout := calcPollTimeout(len(remotePaths), int64(len(content)))
+	timeout := calcPollTimeout(len(remotePaths), written)
 	success, message, err := PollTransferStatus(ac, "download", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)

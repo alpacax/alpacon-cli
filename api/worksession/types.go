@@ -7,20 +7,21 @@ import (
 )
 
 type WorkSession struct {
-	ID            string                `json:"id"`
-	Description   string                `json:"description"`
-	Status        string                `json:"status"`
-	RequesterType string                `json:"requester_type"`
-	Scopes        []string              `json:"scopes"`
-	Servers       []types.ServerSummary `json:"servers"`
-	CreatedBy     *types.UserSummary    `json:"created_by"`
-	AssignedUser  *types.UserSummary    `json:"assigned_user"`
-	ExpiresAt     time.Time             `json:"expires_at"`
-	StartedAt     *time.Time            `json:"started_at"`
-	CompletedAt   *time.Time            `json:"completed_at"`
-	AddedAt       time.Time             `json:"added_at"`
-	UpdatedAt     time.Time             `json:"updated_at"`
-	SudoPolicies  []SudoPolicyInline    `json:"sudo_policies"`
+	ID                string                `json:"id"`
+	Description       string                `json:"description"`
+	Status            string                `json:"status"`
+	RequesterType     string                `json:"requester_type"`
+	Scopes            []string              `json:"scopes"`
+	Servers           []types.ServerSummary `json:"servers"`
+	CreatedBy         *types.UserSummary    `json:"created_by"`
+	AssignedUser      *types.UserSummary    `json:"assigned_user"`
+	ApprovalRequestID string                `json:"approval_request_id"`
+	ExpiresAt         time.Time             `json:"expires_at"`
+	StartedAt         *time.Time            `json:"started_at"`
+	CompletedAt       *time.Time            `json:"completed_at"`
+	AddedAt           time.Time             `json:"added_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	SudoPolicies      []SudoPolicyInline    `json:"sudo_policies"`
 }
 
 type WorkSessionAttributes struct {

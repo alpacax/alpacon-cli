@@ -115,20 +115,6 @@ func ShowLogo(rightLines []string) {
 	fmt.Fprintln(os.Stderr)
 }
 
-func ReadFileFromPath(filePath string) ([]byte, error) {
-	absolutePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	content, err := os.ReadFile(absolutePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return content, nil
-}
-
 func GetUserAgent() string {
 	return fmt.Sprintf("%s/%s", "alpacon-cli", GetCLIVersion())
 }
@@ -247,26 +233,6 @@ func RemovePrefixBeforeAPI(url string) string {
 	return url[apiIndex:]
 }
 
-func SaveFile(fileName string, data []byte) error {
-	dir := filepath.Dir(fileName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directories: %v", err)
-	}
-
-	file, err := os.Create(fileName)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %v", err)
-	}
-	defer func() { _ = file.Close() }()
-
-	_, err = file.Write(data)
-	if err != nil {
-		return fmt.Errorf("failed to write data to file: %v", err)
-	}
-
-	return nil
-}
-
 func DeleteFile(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
@@ -283,9 +249,55 @@ func DeleteFile(path string) error {
 	return os.Remove(path)
 }
 
-func Zip(folderPath string) ([]byte, error) {
-	var buf bytes.Buffer
-	zipWriter := zip.NewWriter(&buf)
+// CleanupTempFile closes f and removes the backing file. Safe to call with
+// a nil pointer. Intended as the cleanup half of SpoolToTempFile.
+func CleanupTempFile(f *os.File) {
+	if f == nil {
+		return
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+}
+
+// SpoolToTempFile creates a temp file, invokes fn to write into it, closes it
+// to surface flush errors, then reopens it for reading with its size. On any
+// error the temp file is closed and removed. The caller owns cleanup on
+// success.
+func SpoolToTempFile(pattern string, fn func(io.Writer) error) (*os.File, int64, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return nil, 0, err
+	}
+	name := f.Name()
+
+	if err := fn(f); err != nil {
+		CleanupTempFile(f)
+		return nil, 0, err
+	}
+
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return nil, 0, err
+	}
+
+	info, err := os.Stat(name)
+	if err != nil {
+		_ = os.Remove(name)
+		return nil, 0, err
+	}
+
+	readFile, err := os.Open(name)
+	if err != nil {
+		_ = os.Remove(name)
+		return nil, 0, err
+	}
+
+	return readFile, info.Size(), nil
+}
+
+func ZipToWriter(folderPath string, w io.Writer) error {
+	zipWriter := zip.NewWriter(w)
 	folderName := filepath.Base(folderPath)
 
 	err := filepath.Walk(folderPath, func(path string, info os.FileInfo, err error) error {
@@ -325,16 +337,7 @@ func Zip(folderPath string) ([]byte, error) {
 		}
 
 		if !info.IsDir() {
-			file, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = file.Close() }()
-
-			_, err = io.Copy(writer, file)
-			if err != nil {
-				return err
-			}
+			return writeFileToZip(writer, path)
 		}
 
 		return nil
@@ -342,15 +345,29 @@ func Zip(folderPath string) ([]byte, error) {
 
 	if err != nil {
 		_ = zipWriter.Close()
-		return nil, err
+		return err
 	}
 
 	err = zipWriter.Close()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return buf.Bytes(), nil
+	return nil
+}
+
+func writeFileToZip(writer io.Writer, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(writer, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func Unzip(src string, dest string) error {
@@ -547,6 +564,17 @@ func CommandConfirm() bool {
 // IsInteractiveShell checks if the current program is running in an interactive terminal.
 func IsInteractiveShell() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
+}
+
+// CompactStrings trims whitespace from each element and drops empty entries.
+func CompactStrings(ss []string) []string {
+	var out []string
+	for _, s := range ss {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // SplitAndTrim splits s by sep, trims whitespace from each element, and drops empty entries.

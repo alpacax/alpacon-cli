@@ -3,12 +3,15 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(baseURL string) *AlpaconClient {
@@ -189,7 +192,7 @@ func TestSendGetRequestForDownload_403ReturnsForbiddenError(t *testing.T) {
 	assert.ErrorContains(t, err, "permission denied")
 }
 
-func TestSendMultipartRequest_401ReturnsAuthError(t *testing.T) {
+func TestSendMultipartStreamRequest_401ReturnsAuthError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -200,11 +203,11 @@ func TestSendMultipartRequest_401ReturnsAuthError(t *testing.T) {
 	_ = mw.Close()
 
 	ac := newTestClient(ts.URL)
-	_, err := ac.SendMultipartRequest("/api/test/", mw, buf)
+	_, err := ac.SendMultipartStreamRequest("/api/test/", mw.FormDataContentType(), &buf, int64(buf.Len()))
 	assert.ErrorContains(t, err, "authentication failed")
 }
 
-func TestSendMultipartRequest_200IsSuccess(t *testing.T) {
+func TestSendMultipartStreamRequest_200IsSuccess(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -217,7 +220,97 @@ func TestSendMultipartRequest_200IsSuccess(t *testing.T) {
 	_ = mw.Close()
 
 	ac := newTestClient(ts.URL)
-	body, err := ac.SendMultipartRequest("/api/test/", mw, buf)
+	body, err := ac.SendMultipartStreamRequest("/api/test/", mw.FormDataContentType(), &buf, int64(buf.Len()))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(`{}`), body)
+}
+
+func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testing.T) {
+	var finalHit bool
+	var uploadedContent string
+	var finalContentLength int64
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/redirect/":
+			http.Redirect(w, r, "/api/final/", http.StatusTemporaryRedirect)
+		case "/api/final/":
+			finalHit = true
+			finalContentLength = r.ContentLength
+			assert.Equal(t, http.MethodPost, r.Method)
+
+			partReader, err := r.MultipartReader()
+			require.NoError(t, err)
+			part, err := partReader.NextPart()
+			require.NoError(t, err)
+			defer func() { _ = part.Close() }()
+
+			content, err := io.ReadAll(part)
+			require.NoError(t, err)
+			uploadedContent = string(content)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	tmp, err := os.CreateTemp(t.TempDir(), "multipart-*.body")
+	require.NoError(t, err)
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+
+	mw := multipart.NewWriter(tmp)
+	part, err := mw.CreateFormFile("content", "pkg.whl")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("package-content"))
+	require.NoError(t, err)
+	contentType := mw.FormDataContentType()
+	require.NoError(t, mw.Close())
+
+	size, err := tmp.Seek(0, io.SeekEnd)
+	require.NoError(t, err)
+	_, err = tmp.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendMultipartStreamRequest("/api/redirect/", contentType, tmp, size)
+	require.NoError(t, err)
+	assert.Equal(t, []byte(`{}`), body)
+	assert.True(t, finalHit)
+	assert.Equal(t, "package-content", uploadedContent)
+	assert.Equal(t, size, finalContentLength)
+}
+
+func TestSendPostRequest_204IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendPostRequest("/api/test/", struct{}{})
+	assert.NoError(t, err)
+	assert.Empty(t, body)
+}
+
+func TestSendDeleteRequest_200IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	body, err := ac.SendDeleteRequest("/api/test/")
 	assert.NoError(t, err)
 	assert.Equal(t, []byte(`{}`), body)
 }

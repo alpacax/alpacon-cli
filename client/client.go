@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -154,32 +154,10 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 	return req, nil
 }
 
-func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
-	resp, err := ac.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := readAndValidateResponse(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	if req.Method == http.MethodPost && (resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK) {
-		return nil, parseAPIError(respBody)
-	} else if req.Method == http.MethodDelete && resp.StatusCode != http.StatusNoContent {
-		return nil, parseAPIError(respBody)
-	} else if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, parseAPIError(respBody)
-	}
-
-	return respBody, nil
-}
-
-// readAndValidateResponse reads the body, surfaces 401/403 with server detail,
-// and rejects non-JSON content types.
-func readAndValidateResponse(resp *http.Response) ([]byte, error) {
+// readJSONResponse reads the body, surfaces 401/403 with server detail,
+// and rejects non-JSON content types. Other status-code enforcement is
+// left to the caller.
+func readJSONResponse(resp *http.Response) ([]byte, error) {
 	body, readErr := io.ReadAll(resp.Body)
 	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
 		return nil, err
@@ -188,12 +166,30 @@ func readAndValidateResponse(resp *http.Response) ([]byte, error) {
 		return nil, readErr
 	}
 
-	contentType := resp.Header.Get("Content-Type")
 	// Empty content type is allowed for responses without content (e.g. PATCH).
-	if contentType != "" && !strings.Contains(contentType, "application/json") {
-		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, contentType)
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
+		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
 	}
 	return body, nil
+}
+
+func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
+	resp, err := ac.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := readJSONResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, parseAPIError(respBody)
+	}
+
+	return respBody, nil
 }
 
 // Get Request to Alpacon Server
@@ -240,12 +236,24 @@ func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) 
 	return ac.sendRequest(req)
 }
 
-func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multipart.Writer, body bytes.Buffer) ([]byte, error) {
-	req, err := ac.createRequest(http.MethodPost, url, &body)
+func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, body io.Reader, contentLength int64) ([]byte, error) {
+	req, err := ac.createRequest(http.MethodPost, url, body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", multiPartWriter.FormDataContentType())
+	if f, ok := body.(*os.File); ok {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, err
+		}
+		name := f.Name()
+		req.GetBody = func() (io.ReadCloser, error) {
+			return os.Open(name)
+		}
+	}
+	req.Header.Set("Content-Type", contentType)
+	if contentLength >= 0 {
+		req.ContentLength = contentLength
+	}
 
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
@@ -253,12 +261,12 @@ func (ac *AlpaconClient) SendMultipartRequest(url string, multiPartWriter *multi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := readAndValidateResponse(resp)
+	respBody, err := readJSONResponse(resp)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, parseAPIError(respBody)
 	}
 
