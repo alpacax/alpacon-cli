@@ -18,21 +18,21 @@ func SaveFile(fileName string, data []byte) error {
 func SaveStream(fileName string, r io.Reader) (int64, error) {
 	dir := filepath.Dir(fileName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create directories: %v", err)
+		return 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	file, err := os.Create(fileName)
 	if err != nil {
-		return 0, fmt.Errorf("failed to create file: %v", err)
+		return 0, fmt.Errorf("failed to create file: %w", err)
 	}
 
 	written, copyErr := io.Copy(file, r)
 	closeErr := file.Close()
 	if copyErr != nil {
-		return written, fmt.Errorf("failed to write file: %v", copyErr)
+		return written, fmt.Errorf("failed to write file: %w", copyErr)
 	}
 	if closeErr != nil {
-		return written, fmt.Errorf("failed to close file: %v", closeErr)
+		return written, fmt.Errorf("failed to close file: %w", closeErr)
 	}
 
 	return written, nil
@@ -46,7 +46,7 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 
 	dir := filepath.Dir(targetName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create directories: %v", err)
+		return 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	perm := os.FileMode(0666)
@@ -58,7 +58,7 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 		existingPerm = info.Mode().Perm()
 		perm = existingPerm
 	} else if !os.IsNotExist(err) {
-		return 0, fmt.Errorf("failed to access file: %v", err)
+		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
 
 	file, err := createReplacementTempFile(dir, perm)
@@ -76,21 +76,21 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 
 	if existingPerm != 0 {
 		if err := file.Chmod(existingPerm); err != nil {
-			return 0, fmt.Errorf("failed to set temp file permissions: %v", err)
+			return 0, fmt.Errorf("failed to set temp file permissions: %w", err)
 		}
 	}
 
 	written, copyErr := io.Copy(file, r)
 	closeErr := file.Close()
 	if copyErr != nil {
-		return written, fmt.Errorf("failed to write file: %v", copyErr)
+		return written, fmt.Errorf("failed to write file: %w", copyErr)
 	}
 	if closeErr != nil {
-		return written, fmt.Errorf("failed to close file: %v", closeErr)
+		return written, fmt.Errorf("failed to close file: %w", closeErr)
 	}
 
 	if err := replaceFile(tempName, targetName); err != nil {
-		return written, fmt.Errorf("failed to replace file: %v", err)
+		return written, fmt.Errorf("failed to replace file: %w", err)
 	}
 	cleanup = false
 
@@ -107,7 +107,7 @@ func resolveWritePath(fileName string) (string, error) {
 			return targetName, nil
 		}
 		if err != nil {
-			return "", fmt.Errorf("failed to access file: %v", err)
+			return "", fmt.Errorf("failed to access file: %w", err)
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
 			return targetName, nil
@@ -115,7 +115,7 @@ func resolveWritePath(fileName string) (string, error) {
 
 		nextName, err := os.Readlink(targetName)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve symlink: %v", err)
+			return "", fmt.Errorf("failed to resolve symlink: %w", err)
 		}
 		if !filepath.IsAbs(nextName) {
 			nextName = filepath.Join(filepath.Dir(targetName), nextName)
@@ -133,7 +133,7 @@ func createReplacementTempFile(dir string, perm os.FileMode) (*os.File, error) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("failed to create temp file: %v", err)
+			return nil, fmt.Errorf("failed to create temp file: %w", err)
 		}
 		return file, nil
 	}
