@@ -160,7 +160,7 @@ func TestRemovePrefixBeforeAPI(t *testing.T) {
 func TestSaveStream(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
 
-	written, err := SaveStream(dest, strings.NewReader("hello world"))
+	written, err := saveStream(dest, strings.NewReader("hello world"))
 	require.NoError(t, err)
 	assert.Equal(t, int64(len("hello world")), written)
 

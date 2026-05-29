@@ -11,11 +11,11 @@ import (
 )
 
 func SaveFile(fileName string, data []byte) error {
-	_, err := SaveStream(fileName, bytes.NewReader(data))
+	_, err := saveStream(fileName, bytes.NewReader(data))
 	return err
 }
 
-func SaveStream(fileName string, r io.Reader) (int64, error) {
+func saveStream(fileName string, r io.Reader) (int64, error) {
 	dir := filepath.Dir(fileName)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return 0, fmt.Errorf("failed to create directories: %w", err)
