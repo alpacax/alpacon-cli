@@ -529,12 +529,7 @@ func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, re
 		return 0, err
 	}
 
-	written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
-	if err != nil {
-		return written, err
-	}
-
-	return written, nil
+	return fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
 }
 
 func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) error {
