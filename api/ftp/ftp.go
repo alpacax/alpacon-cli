@@ -32,8 +32,8 @@ const (
 	perFilePollTimeout = 10 * time.Second
 	perMBPollTimeout   = 5 * time.Second
 
-	bulkUploadConcurrency = 4
-	bulkPollConcurrency   = 8
+	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
+	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
