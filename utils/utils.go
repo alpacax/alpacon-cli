@@ -115,20 +115,6 @@ func ShowLogo(rightLines []string) {
 	fmt.Fprintln(os.Stderr)
 }
 
-func ReadFileFromPath(filePath string) ([]byte, error) {
-	absolutePath, err := filepath.Abs(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	content, err := os.ReadFile(absolutePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return content, nil
-}
-
 func GetUserAgent() string {
 	return fmt.Sprintf("%s/%s", "alpacon-cli", GetCLIVersion())
 }
