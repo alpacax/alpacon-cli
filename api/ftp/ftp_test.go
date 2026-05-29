@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,6 +176,129 @@ func TestExecuteBulkUpload(t *testing.T) {
 
 	assert.Equal(t, int32(2), s3Uploads.Load())
 	assert.Equal(t, []string{"id-1", "id-2"}, triggerReq.IDs)
+}
+
+func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
+	uploadsEntered := make(chan struct{}, 2)
+	releaseUploads := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseUploads) }) }
+	defer release()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+			responses := []UploadResponse{
+				{ID: "id-1", Name: "file1.txt", UploadURL: "http://" + r.Host + "/s3/file1"},
+				{ID: "id-2", Name: "file2.txt", UploadURL: "http://" + r.Host + "/s3/file2"},
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(responses)
+
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/s3/"):
+			uploadsEntered <- struct{}{}
+			<-releaseUploads
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
+			w.WriteHeader(http.StatusCreated)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &BulkUploadRequest{
+		Names:  []string{"file1.txt", "file2.txt"},
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- executeBulkUpload(ac, request, files, sizes)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-uploadsEntered:
+		case <-time.After(2 * time.Second):
+			release()
+			t.Fatal("timed out waiting for concurrent uploads to enter handler")
+		}
+	}
+	release()
+	err := <-errCh
+	require.NoError(t, err)
+}
+
+func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
+	pollsEntered := make(chan struct{}, 2)
+	releasePolls := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releasePolls) }) }
+	defer release()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
+			responses := []UploadResponse{
+				{ID: "id-1", Name: "file1.txt"},
+				{ID: "id-2", Name: "file2.txt"},
+			}
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(responses)
+
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
+			w.WriteHeader(http.StatusCreated)
+
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			pollsEntered <- struct{}{}
+			<-releasePolls
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	request := &BulkUploadRequest{
+		Names:  []string{"file1.txt", "file2.txt"},
+		Path:   "/remote/path",
+		Server: "server-id",
+	}
+	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
+	sizes := []int64{int64(len("content1")), int64(len("content2"))}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- executeBulkUpload(ac, request, files, sizes)
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-pollsEntered:
+		case <-time.After(2 * time.Second):
+			release()
+			t.Fatal("timed out waiting for concurrent polls to enter handler")
+		}
+	}
+	release()
+	err := <-errCh
+	require.NoError(t, err)
 }
 
 func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
@@ -344,6 +468,61 @@ func TestDownloadBulk(t *testing.T) {
 	// Verify temp zip was cleaned up
 	_, err = os.Stat(filepath.Join(dest, "archive.zip"))
 	assert.True(t, os.IsNotExist(err))
+}
+
+func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
+	zipContent := createTestZip(t, map[string]string{
+		"file.txt": "downloaded",
+	})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/bulk/":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(BulkDownloadResponse{
+				ID:          "dl-1",
+				Name:        "archive.zip",
+				Command:     "cmd-1",
+				DownloadURL: "http://" + r.Host + "/download/archive.zip",
+			})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/commands/"):
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"id":     "cmd-1",
+				"status": "completed",
+				"result": "done",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/download/archive.zip":
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(zipContent)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	dest := t.TempDir()
+	archivePath := filepath.Join(dest, "archive.zip")
+	require.NoError(t, os.WriteFile(archivePath, []byte("existing-archive"), 0644))
+
+	err := downloadBulk(ac, []string{"/path/file.txt"}, dest, "server-id", "admin", "developers", "")
+	require.NoError(t, err)
+
+	content, readErr := os.ReadFile(archivePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "existing-archive", string(content))
+
+	matches, globErr := filepath.Glob(filepath.Join(dest, ".alpacon-download-*.zip"))
+	require.NoError(t, globErr)
+	assert.Empty(t, matches)
 }
 
 func TestExecuteSingleUpload(t *testing.T) {
@@ -606,11 +785,69 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := fetchFromURL(ts.Client(), ts.URL, 10)
+	dest := filepath.Join(t.TempDir(), "download.bin")
+	_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "client error: 403")
 	// Should fail on first attempt, not retry
 	assert.Equal(t, int32(1), requestCount.Load())
+	_, statErr := os.Stat(dest)
+	assert.True(t, os.IsNotExist(statErr))
+}
+
+func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = w.Write([]byte("partial"))
+	}))
+	defer ts.Close()
+
+	dest := filepath.Join(t.TempDir(), "download.bin")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+
+	written, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 1)
+	require.Error(t, err)
+	assert.Equal(t, int64(len("partial")), written)
+
+	content, readErr := os.ReadFile(dest)
+	require.NoError(t, readErr)
+	assert.Equal(t, "existing", string(content))
+
+	matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(dest), ".alpacon-*.tmp"))
+	require.NoError(t, globErr)
+	assert.Empty(t, matches)
+}
+
+func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
+	zipContent := createTestZip(t, map[string]string{
+		"folder/file.txt": "downloaded",
+	})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipContent)
+	}))
+	defer ts.Close()
+
+	dest := t.TempDir()
+	existingArchive := filepath.Join(dest, "folder.zip")
+	require.NoError(t, os.WriteFile(existingArchive, []byte("existing-archive"), 0644))
+
+	written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, "/remote/folder", true, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(zipContent)), written)
+
+	content, readErr := os.ReadFile(existingArchive)
+	require.NoError(t, readErr)
+	assert.Equal(t, "existing-archive", string(content))
+
+	extracted, readErr := os.ReadFile(filepath.Join(dest, "folder", "file.txt"))
+	require.NoError(t, readErr)
+	assert.Equal(t, "downloaded", string(extracted))
+
+	matches, globErr := filepath.Glob(filepath.Join(dest, ".alpacon-download-*.zip"))
+	require.NoError(t, globErr)
+	assert.Empty(t, matches)
 }
 
 func TestDownloadFile_InputValidation(t *testing.T) {
