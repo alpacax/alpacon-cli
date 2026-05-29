@@ -23,6 +23,15 @@ const (
 	waitMsgActivation = "Waiting for activation..."
 )
 
+type useDecision int
+
+const (
+	useDecisionNoop useDecision = iota
+	useDecisionUseNow
+	useDecisionErrorNeedsWait
+	useDecisionSkipScheduled
+)
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
@@ -123,22 +132,13 @@ active state.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		var serverNames []string
-		for _, s := range createServers {
-			if s = strings.TrimSpace(s); s != "" {
-				serverNames = append(serverNames, s)
-			}
-		}
+		serverNames := utils.CompactStrings(createServers)
 		if len(serverNames) == 0 {
 			utils.CliErrorWithExit("--server must contain at least one valid server name.")
 		}
-		serverIDs := make([]string, 0, len(serverNames))
-		for _, name := range serverNames {
-			id, err := server.GetServerIDByName(ac, name)
-			if err != nil {
-				utils.CliErrorWithExit("Server %q not found: %s.", name, err)
-			}
-			serverIDs = append(serverIDs, id)
+		serverIDs, err := server.ResolveServerNames(ac, serverNames)
+		if err != nil {
+			utils.CliErrorWithExit("%s.", err)
 		}
 
 		req := wsapi.WorkSessionCreateRequest{
@@ -154,7 +154,11 @@ active state.`,
 			utils.CliErrorWithExit("Failed to create work session: %s.", err)
 		}
 
-		utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
+		if session.ApprovalRequestID != "" {
+			utils.CliSuccess("Work session created: %s (status: %s, approval request: %s)", session.ID, session.Status, session.ApprovalRequestID)
+		} else {
+			utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
+		}
 
 		// Phase 1: post-create decision. Cases without an explicit return delegate to
 		// the --wait branch below (or exit immediately when --wait is not set).
@@ -191,15 +195,6 @@ active state.`,
 		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
 	},
 }
-
-type useDecision int
-
-const (
-	useDecisionNoop useDecision = iota
-	useDecisionUseNow
-	useDecisionErrorNeedsWait
-	useDecisionSkipScheduled
-)
 
 // attachActiveOrExit calls RunUse and prints either a success line (with description if present)
 // or exits with the supplied error format (which receives session ID, error, session ID in order).
