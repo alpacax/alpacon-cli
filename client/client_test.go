@@ -48,6 +48,20 @@ func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
 	assert.ErrorContains(t, err, "authentication failed")
 }
 
+func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "authentication failed")
+	assert.NotContains(t, err.Error(), "{}")
+}
+
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -91,6 +105,20 @@ func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	assert.ErrorContains(t, err, "permission denied")
+}
+
+func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": ""}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "detail:")
 }
 
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {

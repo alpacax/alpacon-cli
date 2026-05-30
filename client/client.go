@@ -94,17 +94,36 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 func checkAuthStatus(statusCode int, body []byte) error {
 	switch statusCode {
 	case http.StatusUnauthorized:
-		if msg, code, source, ok := parseAPIErrorPayload(body); ok && msg != "" {
+		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
 			return newAPIError(fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", msg), code, source)
 		}
 		return errors.New("authentication failed: please run 'alpacon login' again")
 	case http.StatusForbidden:
-		if msg, code, source, ok := parseAPIErrorPayload(body); ok && msg != "" {
+		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
 			return newAPIError(msg, code, source)
 		}
 		return errors.New("permission denied: you do not have the required privileges for this action")
 	}
 	return nil
+}
+
+func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, ok bool) {
+	message, code, source, ok = parseAPIErrorPayload(body)
+	if !ok || message == "" {
+		return "", "", "", false
+	}
+	if code != "" || source != "" {
+		return message, code, source, true
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", "", "", false
+	}
+	if stringField(parsed, "detail") == "" {
+		return "", "", "", false
+	}
+	return message, code, source, true
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
