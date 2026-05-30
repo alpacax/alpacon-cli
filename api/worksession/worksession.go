@@ -63,6 +63,22 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	return &session, nil
 }
 
+// UpdateWorkSession PATCHes a work session. Used to attach sudo policies to an
+// existing session (e.g. after an 'exec' sudo was denied). The server
+// may queue the change for approval, in which case it takes effect only once
+// approved.
+func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
+	body, err := ac.SendPatchRequest(utils.BuildURL(workSessionURL, id, nil), req)
+	if err != nil {
+		return nil, err
+	}
+	var session WorkSession
+	if err = json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
 	body, err := ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 	if err != nil {

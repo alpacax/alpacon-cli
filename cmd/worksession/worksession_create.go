@@ -35,14 +35,16 @@ const (
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
-	purpose        string
-	createScopes   []string
-	createServers  []string
-	expiresIn      string
-	expiresAt      string
-	requesterType  string
-	waitApproval   bool
-	useAfterCreate bool
+	purpose          string
+	createScopes     []string
+	createServers    []string
+	expiresIn        string
+	expiresAt        string
+	requesterType    string
+	waitApproval     bool
+	useAfterCreate   bool
+	createSudo       []string
+	createSudoReason string
 )
 
 var workSessionCreateCmd = &cobra.Command{
@@ -53,11 +55,20 @@ var workSessionCreateCmd = &cobra.Command{
 Pass --use to set the new session as the workspace's active session, so subsequent
 exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
 required, combine --use with --wait. The session is attached once it reaches the
-active state.`,
+active state.
+
+If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
+MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI agent
+running 'exec') can run those exact sudo commands without an interactive MFA
+prompt. The 'sudo' scope is added automatically, and the policies are submitted for
+approval together with the session. If a sudo command is later denied, add it to the
+session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
-  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2026-05-09T10:00:00Z --wait
+  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --wait
   alpacon work-session create --purpose "hotfix" --scope command --server web-01 --expires-in 1h --use
-  alpacon work-session create --purpose "deploy" --scope command --server web-01 --expires-in 2h --wait --use`,
+  alpacon work-session create --purpose "deploy" --scope command --server web-01 --expires-in 2h --wait --use
+  alpacon work-session create --purpose "nginx hotfix" --server web-01 --expires-in 2h \
+    --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {
@@ -117,6 +128,17 @@ active state.`,
 				scopeList = append(scopeList, s)
 			}
 		}
+		// Build sudo bypass policies from --sudo. Each --sudo value is a
+		// comma-separated list of command patterns forming one policy; the
+		// policies are MFA-bypass (the only way a non-interactive caller
+		// running 'exec' can sudo). The server binds each policy to
+		// the session assignee automatically, so they never apply to other
+		// users. The 'sudo' scope is required server-side, so add it implicitly.
+		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
+		if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
+			scopeList = append(scopeList, "sudo")
+		}
+
 		if len(scopeList) == 0 {
 			utils.CliErrorWithExit("--scope must contain at least one valid scope.")
 		}
@@ -147,6 +169,7 @@ active state.`,
 			Scopes:        scopeList,
 			Servers:       serverIDs,
 			ExpiresAt:     expiresAtVal,
+			SudoPolicies:  sudoPolicies,
 		}
 
 		session, err := wsapi.CreateWorkSession(ac, req)
@@ -287,6 +310,25 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 	return nil
 }
 
+// buildSudoPolicies turns repeatable --sudo values into MFA-bypass policy
+// definitions. Each value is a comma-separated list of command patterns
+// (wildcards permitted) forming one policy. Empty values are skipped.
+func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
+	var policies []wsapi.SudoPolicyInline
+	for _, spec := range specs {
+		commands := splitCSV(spec)
+		if len(commands) == 0 {
+			continue
+		}
+		policies = append(policies, wsapi.SudoPolicyInline{
+			Commands:       commands,
+			Reason:         reason,
+			AllowBypassMFA: true,
+		})
+	}
+	return policies
+}
+
 // splitCSV splits a comma-separated string and trims whitespace.
 func splitCSV(s string) []string {
 	parts := strings.Split(s, ",")
@@ -346,5 +388,7 @@ func init() {
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
 	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (does not set as active; combine with --use to attach automatically)")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
+	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }
