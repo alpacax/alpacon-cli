@@ -247,4 +247,4 @@ Bug reports and feature requests welcome at [GitHub Issues](https://github.com/a
 
 ## License
 
-MIT—see [LICENSE](LICENSE).
+[MIT License](LICENSE). Copyright © 2026 AlpacaX Inc.
