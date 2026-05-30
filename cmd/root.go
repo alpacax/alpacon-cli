@@ -37,11 +37,12 @@ var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
 	Short:   "Command-line client for Alpacon, the AI-native PAM",
-	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM
-that gives humans, AI agents, and CI/CD pipelines a safe way to reach your
-servers. Every action runs inside a scoped work session that is recorded
-and judged at runtime: if a credential leaks or an AI client is compromised,
-the damage is bounded by the session's scope.
+	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
+With Alpacon, humans, AI agents, and CI/CD pipelines reach and operate
+your entire fleet through a single identity—and every command they run
+is judged at runtime, recorded, and bounded by a scoped work session.
+If a credential leaks or an AI client is compromised, the damage is
+bounded by the session, not by what the credential could touch.
 
 Quick start (interactive auth):
 
