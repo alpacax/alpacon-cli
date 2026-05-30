@@ -215,6 +215,10 @@ $ alpacon log <server> --tail=10
 $ alpacon audit <filters>                        # workspace audit log
 ```
 
+### More commands
+
+Run `alpacon --help` for the full list, or `alpacon <command> --help` for details on any command.
+
 ## Exit codes
 
 | Code | Meaning |
