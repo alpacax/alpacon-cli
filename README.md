@@ -66,7 +66,7 @@ brew install alpacon-cli
 > brew install alpacon-cli
 > ```
 
-#### Download from GitHub Releases
+#### Download from GitHub releases
 ```bash
 VERSION=<latest-version> # Replace with the actual version
 wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-darwin-arm64.tar.gz
@@ -85,14 +85,14 @@ curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.deb.
 sudo apt-get install alpacon
 ```
 
-#### CentOS and RHEL
+#### RHEL, Rocky, AlmaLinux
 ```bash
 curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.rpm.sh?any=true | sudo bash
 
 sudo yum install alpacon
 ```
 
-#### Download from GitHub Releases
+#### Download from GitHub releases
 ```bash
 VERSION=<latest-version> # Replace with the actual version
 wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-linux-amd64.tar.gz
@@ -399,7 +399,7 @@ $ alpacon group member add
 $ alpacon group member add --group [GROUP NAME] --member [MEMBER NAME] --role [ROLE]
 
 # Remove a member from a group
-$ alpacon group member delete --group [GROUP NAME] --member[MEMBER NAME]
+$ alpacon group member delete --group [GROUP NAME] --member [MEMBER NAME]
 $ alpacon group member rm --group [GROUP NAME] --member [MEMBER NAME]
 ```
 
@@ -464,13 +464,13 @@ Handle Python and system packages effortlessly:
 ```bash
 # python
 $ alpacon package python ls / list / all
-$ alpacon package python upload alpamon-1.1.0-py3-none-any.whl
-$ alpacon package python download alpamon-1.1.0-py3-none-any.whl .
+$ alpacon package python upload <package>-<version>-py3-none-any.whl
+$ alpacon package python download <package>-<version>-py3-none-any.whl .
 
 # system
 $ alpacon package system ls / list / all
-$ alpacon package system upload osquery-5.10.2-1.linux.x86_64.rpm
-$ alpacon package system download osquery-5.10.2-1.linux.x86_64.rpm .
+$ alpacon package system upload <package>-<version>.<arch>.rpm
+$ alpacon package system download <package>-<version>.<arch>.rpm .
 ```
 
 #### Log retrieval
@@ -531,7 +531,7 @@ $ alpacon authority ls
 $ alpacon authority describe [AUTHORITY ID]
 
 # Download a root Certificate by authority's ID and save it to the specified file path.
-$ alpacon authority download-crt [AUTHOIRY ID] --out=/path/to/root.crt
+$ alpacon authority download-crt [AUTHORITY ID] --out=/path/to/root.crt
 
 # Delete a CA along with its certificate and CSR
 $ alpacon authority delete [AUTHORITY ID]
