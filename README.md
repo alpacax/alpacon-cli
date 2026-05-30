@@ -105,7 +105,9 @@ $ alpacon login --no-browser                     # CI / headless (or ALPACON_NO_
 $ alpacon logout
 ```
 
-Successful login writes `~/.alpacon/config.json` (workspace URL, token, ~1-week expiry). Re-login reuses the stored workspace URL unless one is provided.
+Successful login writes `~/.alpacon/config.json` containing the workspace URL, API token, and token expiry (~1 week). Re-login reuses the stored workspace URL unless one is provided.
+
+For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 
 ## Commands
 
@@ -115,7 +117,9 @@ Run `alpacon --help` for the full command list. Common workflows below.
 ```bash
 $ alpacon server ls
 $ alpacon server describe <server>
-$ alpacon server create                          # interactive
+$ alpacon server create                          # interactive: prompts for name,
+                                                 # platform (debian/rhel/darwin/windows),
+                                                 # and authorized groups
 $ alpacon server rm <server>
 ```
 
@@ -188,7 +192,7 @@ $ alpacon login <URL> -t <TOKEN_KEY>
 ```
 
 ### Token ACLs
-Three independent deny-by-default ACL types per token: `command` (which shell commands the token can run), `server` (which servers it can reach), `file` (which file paths it can read/write).
+Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).
 
 ```bash
 $ alpacon token acl command add my-token --command="docker *" --username=root
@@ -227,6 +231,16 @@ git clone https://github.com/alpacax/alpacon-cli.git
 cd alpacon-cli
 go build
 go test ./...
+```
+
+### End-to-end tests against a live workspace
+
+`sample_test_cli.sh` exercises the major commands (server lookup, exec, websh, cp, tunnel) against a real Alpacon workspace. Copy it, fill in the workspace URL and target server at the top, and run:
+
+```bash
+cp sample_test_cli.sh test_cli.sh
+$EDITOR test_cli.sh                              # set WORKSPACE_URL, SERVER_NAME
+chmod +x test_cli.sh && ./test_cli.sh
 ```
 
 Bug reports and feature requests welcome at [GitHub Issues](https://github.com/alpacax/alpacon-cli/issues).
