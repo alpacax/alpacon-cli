@@ -4,626 +4,222 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/alpacax/alpacon-cli/blob/main/LICENSE)
 [![Latest Release](https://img.shields.io/github/v/release/alpacax/alpacon-cli)](https://github.com/alpacax/alpacon-cli/releases)
 
-`Alpacon CLI` is a command-line tool for [Alpacon](https://alpacon.io)—a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Alpacon enables teams to scale operations across servers and customer environments without managing per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely.
+`Alpacon CLI` is the command-line client for [Alpacon](https://alpacon.io), the AI-native PAM. With Alpacon, humans, AI agents, and CI/CD pipelines reach and operate your entire fleet through a single identity—and every command they run is judged at runtime, recorded, and bounded by a scoped work session. Three guarantees:
 
-This CLI lets you interact with your Alpacon workspace directly from the terminal: open browser-based terminals, execute remote commands, transfer files, create TCP tunnels, and manage certificates—all with built-in MFA, session recording, and role-based access controls. Designed to be used by engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms for the most AI-native infrastructure operations.
+1. **A gate, not a credential.** After login, a **work session** is the first thing required—nothing reaches your servers without one. Sessions are scoped (servers, commands, time window).
+2. **Damage containment.** Every command is judged at runtime against the session's scope. If a credential leaks or an AI client is compromised, what the attacker can do is bounded by the session, not by what the credential could touch on its own.
+3. **One audit shape.** Everything inside a session is recorded—same timeline whether the actor is human, AI agent, or CI/CD pipeline.
+
+This CLI lets you drive your Alpacon workspace from the terminal: open a work session, then Websh into a server, exec remote commands, transfer files, create TCP tunnels, and manage API tokens with command/server/file ACLs. Login is browser-based (OAuth + MFA); everything else stays in the terminal. Built for engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms.
 
 ## Architecture
 
-Alpacon consists of the following components:
-
-- **Alpacon Server**—The zero-trust access platform with encrypted connections, MFA, session recording, and granular access controls. No inbound ports required. Sign up at [alpacon.io](https://alpacon.io).
-- **[Alpamon](https://github.com/alpacax/alpamon)**—An open-source agent installed on managed servers to enable remote access and monitoring.
-- **Alpacon CLI** (this repository)—A command-line client for interacting with your Alpacon workspace. Manage API tokens for CI/CD and automation.
+- **Alpacon Server**—the AI-native PAM control plane. Web console with simple OAuth + MFA login. Centralized RBAC, runtime command judgment, session recording, and 100% audit. Sign up at [alpacon.io](https://alpacon.io).
+- **[Alpamon](https://github.com/alpacax/alpamon)**—open-source agent installed on managed servers. Outbound-only connection (no inbound ports, no firewall changes); enforces server-side decisions locally.
+- **Alpacon CLI** (this repository)—command-line client for your Alpacon workspace.
 
 ## Documentation
 
-> [!NOTE]
-> This README is intended as a **development and contribution guide**.
-> For production usage and deployment, please refer to the [official documentation](https://docs.alpacax.com/reference/cli/).
+For production usage, see the [official documentation](https://docs.alpacax.com/reference/cli/). This README is the engineering / contribution guide.
 
 ## Installation
 
-Download the latest `Alpacon CLI` directly from our [releases page](https://github.com/alpacax/alpacon-cli/releases) or install it using package managers.
-
 > [!IMPORTANT]
-> Building from source is intended for **development purposes only**.
-> For production use, please install via package managers or download pre-built binaries from the [releases page](https://github.com/alpacax/alpacon-cli/releases).
-> See the [official documentation](https://docs.alpacax.com/reference/cli/) for more details.
+> Building from source is for development. For production, use the package managers below or pre-built binaries from [Releases](https://github.com/alpacax/alpacon-cli/releases).
 
-### Docker
-
-For every release and Release Candidate (RC), we push a corresponding container image to our Docker Hub repository at `alpacax/alpacon-cli`. For example:
-
-```bash
-docker run --rm -it alpacax/alpacon-cli version
-```
-
-### Build from source
-
-Make sure you have [Go](https://go.dev/dl/) installed:
-
-```bash
-git clone https://github.com/alpacax/alpacon-cli.git
-cd alpacon-cli
-go build
-sudo mv alpacon-cli /usr/local/bin/alpacon
-```
-
-### macOS
-
-#### Homebrew
+### macOS (Homebrew)
 ```bash
 brew tap alpacax/alpacon
 brew install alpacon-cli
 ```
 
-> **Note for existing users**: If you encounter any issues with `brew upgrade`, please run:
-> ```bash
-> brew uninstall alpacon-cli
-> brew untap alpacax/cli
-> brew tap alpacax/alpacon
-> brew install alpacon-cli
-> ```
-
-#### Download from GitHub Releases
-```bash
-VERSION=<latest-version> # Replace with the actual version
-wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-darwin-arm64.tar.gz
-tar -xvf alpacon-${VERSION}-darwin-arm64.tar.gz
-chmod +x alpacon
-sudo mv alpacon /usr/local/bin
-```
-
-
-### Linux
-
-#### Debian and Ubuntu
+### Linux (Debian / Ubuntu)
 ```bash
 curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.deb.sh?any=true | sudo bash
-
 sudo apt-get install alpacon
 ```
 
-#### CentOS and RHEL
+### Linux (RHEL / Rocky / AlmaLinux)
 ```bash
 curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.rpm.sh?any=true | sudo bash
-
 sudo yum install alpacon
 ```
 
-#### Download from GitHub Releases
+### Windows
+Download the latest `.zip` from [Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your `PATH`.
+
+### Docker
 ```bash
-VERSION=<latest-version> # Replace with the actual version
-wget https://github.com/alpacax/alpacon-cli/releases/download/${VERSION}/alpacon-${VERSION}-linux-amd64.tar.gz
-tar -xvf alpacon-${VERSION}-linux-amd64.tar.gz
-chmod +x alpacon
-sudo mv alpacon /usr/local/bin
+docker run --rm -it alpacax/alpacon-cli version
 ```
 
-### Windows
+### Build from source
+```bash
+git clone https://github.com/alpacax/alpacon-cli.git
+cd alpacon-cli
+go build && sudo mv alpacon-cli /usr/local/bin/alpacon
+```
 
-Download the latest `.zip` archive for Windows from [GitHub Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your PATH.
-
-
-### Login & logout
-To access and utilize all features of `Alpacon CLI`, first authenticate with your Alpacon workspace:
+## Quick start
 
 ```bash
-$ alpacon login
+# 1. Check current login + workspace.
+#    Run 'alpacon login' or 'alpacon workspace switch' if not logged in or in the wrong place.
+$ alpacon
 
-# Cloud login (non-interactive, for CI/CD or AI agents)
-$ alpacon login --workspace myworkspace --region us1
-$ alpacon login myworkspace.us1.alpacon.io
+# 2. Confirm identity and whether a work session is required.
+$ alpacon whoami
 
-# Self-hosted
-$ alpacon login alpacon.example.com
+# 3. Open a scoped work session (interactive auth only).
+$ alpacon work-session create \
+    --purpose "describe the task" \
+    --scope command,websh \
+    --server <server> \
+    --use --wait
 
-# Log in via API token
-$ alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
+# 4. Operate within the session.
+$ alpacon websh <server>
+$ alpacon exec <server> "uptime"
+$ alpacon cp ./file.txt <server>:/tmp/
+$ alpacon tunnel <server> -l 9000 -r 8082
+```
 
-# Legacy username/password
-$ alpacon login [WORKSPACE_URL] -u [USERNAME] -p [PASSWORD]
+CI/CD and API automation use token auth, which bypasses work sessions:
 
-# Skip TLS certificate verification
-$ alpacon login [WORKSPACE_URL] --insecure
+```bash
+$ alpacon login <URL> -t <TOKEN_KEY>
+$ alpacon exec <server> "..."
+```
 
-# Disable auto-open browser (useful for CI, scripted, or remote sessions)
-$ alpacon login --no-browser
-$ ALPACON_NO_BROWSER=1 alpacon login
+See `alpacon work-session --help` for session lifecycle, gating, and error codes.
 
-# Logout
+## Login
+
+```bash
+$ alpacon login                                  # browser OAuth (default)
+$ alpacon login --workspace my-ws --region us1   # cloud workspace by name/region
+$ alpacon login myws.us1.alpacon.io              # by URL
+$ alpacon login alpacon.example.com              # self-hosted
+$ alpacon login <URL> -t <TOKEN_KEY>             # API token
+$ alpacon login --no-browser                     # CI / headless (or ALPACON_NO_BROWSER=1)
 $ alpacon logout
 ```
 
-For Auth0 and MFA authentication, the CLI automatically opens the authentication URL in your default browser. This is skipped in SSH sessions and headless environments. To disable it explicitly, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The `ALPACON_NO_BROWSER` environment variable also applies to MFA prompts triggered by other commands.
+Successful login writes `~/.alpacon/config.json` containing the workspace URL, API token, and token expiry (~1 week). Re-login reuses the stored workspace URL unless one is provided.
 
-A successful login generates a `config.json` file in `~/.alpacon`, which includes the workspace url, API token, and token expiration time (approximately 1 week).
-This file is crucial for executing commands, and you will need to log in again once the token expires.
+For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 
-Upon re-login, the Alpacon CLI will automatically reuse the workspace URL from `config.json`, unless you provide a workspace URL as an argument.
+## Commands
 
-## Usage
-Explore Alpacon CLI's capabilities with the `-h` or `help` command.
+Run `alpacon --help` for the full command list. Common workflows below.
 
+### Servers
 ```bash
-$ alpacon -h
-
-Use this tool to interact with the alpacon service.
-
-Usage:
-  alpacon [flags]
-  alpacon [command]
-
-Available Commands:
-  agent        Manage the Alpamon agent on a server
-  approval     List and manage approval requests
-  audit        Retrieve and display audit activity logs
-  authority    Manage private certificate authorities
-  cert         List, describe, and download certificates
-  completion   Generate the autocompletion script for the specified shell
-  cp           Copy files between local and remote locations
-  csr          Manage certificate signing requests (CSRs)
-  event        Retrieve and display recent Alpacon events
-  exec         Execute a command on a remote server
-  group        Manage groups, members, and permissions
-  help         Help about any command
-  log          Retrieve and display server logs
-  login        Log in to Alpacon
-  logout       Log out of Alpacon
-  note         Manage notes attached to servers
-  package      Manage system and Python packages
-  revoke       Manage certificate revocation requests
-  server       Manage registered servers
-  token        Manage API tokens for CI/CD and automation
-  tunnel       Create a TCP tunnel (optionally run a command)
-  user         List, create, describe, update, and delete users
-  version      Display the current CLI version
-  webftp-log   Retrieve and display WebFTP transfer logs
-  webhook      Configure webhooks for event notifications
-  websh        Open a websh terminal or execute a command on a server
-  whoami       Display current authenticated identity
-  work-session Create and manage work sessions
-  workspace    View, list, and switch workspaces
-```
-### Examples of use cases
-
-#### Server fleet operations
-Manage and interact with servers efficiently using Alpacon CLI:
-```bash
-# List all servers.
-$ alpacon server ls / list / all
-
-# Get detailed information about a specific server.
-$ alpacon server describe [SERVER NAME]
-
-# Interactive server creation process.
-$ alpacon server create
-
-# Delete server
-$ alpacon server delete [SERVER NAME]
-$ alpacon server rm [SERVER NAME]
-
-Server Name:
-Platform (debian, rhel, darwin, windows):
-Groups:
-[1] alpacon
-[2] auditors
-[3] designers
-[4] developers
-[5] managers
-[6] operators
-Select groups that are authorized to access this server. (e.g., 1,2):
+$ alpacon server ls
+$ alpacon server describe <server>
+$ alpacon server create                          # interactive: prompts for name,
+                                                 # platform (debian/rhel/darwin/windows),
+                                                 # and authorized groups
+$ alpacon server rm <server>
 ```
 
-#### Connect Websh
-Access a server's Websh terminal:
+### Websh (terminal in your shell)
 ```bash
-# Open a websh terminal
-$ alpacon websh my-server
-
-# Open as root using SSH-like syntax
-$ alpacon websh root@my-server
-
-# Open with specific user and group
-$ alpacon websh -u admin -g developers my-server
+$ alpacon websh <server>
+$ alpacon websh root@<server>
+$ alpacon websh -u admin -g developers <server>
+$ alpacon websh --share <server>                 # share via temporary link
+$ alpacon websh join --url <SHARED_URL> --password <PASSWORD>
 ```
 
-#### Remote command execution
-Execute a command directly on a server and retrieve the output:
+### Remote command execution
 ```bash
-$ alpacon websh my-server "ls -la /var/log"
-
-$ alpacon websh root@my-server "systemctl status nginx"
-
-$ alpacon websh -u admin -g developers my-server "docker ps"
-
-$ alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
-```
-> **Note**: All flags must be placed before the server name. Everything after the server name is treated as the remote command.
-
-#### SSH-style command execution
-Execute a command on a remote server using SSH-like `user@host` syntax:
-```bash
-# Execute a command on a server
-$ alpacon exec [SERVER NAME] [COMMAND]
-
-# Use SSH-style user@host syntax
-$ alpacon exec root@prod-docker docker ps
-$ alpacon exec admin@web-server ls -la /var/log
-
-# Specify username and groupname via flags
-$ alpacon exec -u root prod-docker systemctl status nginx
-$ alpacon exec -g docker user@server docker images
+$ alpacon exec <server> "<cmd>"
+$ alpacon exec root@<server> "docker ps"
+$ alpacon exec -u admin -g developers <server> "..."
+$ alpacon exec --env="KEY=VALUE" <server> "echo $KEY"
 ```
 
-#### TCP tunneling
-Create a TCP tunnel that forwards local port traffic to a remote server's port:
+Flags go before the server name; everything after is the remote command.
+
+### File transfer
 ```bash
-# Forward local port 9000 to remote server's port 8082
-$ alpacon tunnel my-server -l 9000 -r 8082
-
-# Forward local port 2222 to remote server's SSH port (22)
-$ alpacon tunnel my-server -l 2222 -r 22
-
-# Specify username and groupname for the tunnel
-$ alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
-
-# Enable verbose connection logs
-$ alpacon tunnel my-server -l 9000 -r 8082 -v
+$ alpacon cp ./local.txt <server>:/home/user/
+$ alpacon cp <server>:/home/user/file.txt .
+$ alpacon cp -u admin -g developers <SOURCE> <DESTINATION>
 ```
 
-Run a local TCP application in the same session with an attached tunnel:
+`<server>:<path>` denotes a remote target.
+
+### TCP tunneling
 ```bash
-# psql through tunnel (local 5432 -> remote 5432)
+$ alpacon tunnel <server> -l 9000 -r 8082
 $ alpacon tunnel prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb
-
-# kubectl through tunnel (local 6443 -> remote 6443)
 $ alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:6443 get pods
-
-# SSH through tunnel
-$ alpacon tunnel my-server -l 2222 -r 22 -- ssh -p 2222 user@127.0.0.1
-```
-> `--` separator is required.  
-> `alpacon tunnel` does not auto-detect app ports; pass the app's local target (e.g. `127.0.0.1:<LOCAL_PORT>`) explicitly.
-> Prefer `-- COMMAND [ARGS...]` over a single quoted command string.  
-> If you really need shell one-liner style, use `-- sh -c "..."`.
-
-
-#### Terminal sharing
-You can share the current terminal to others via a temporary link:
-```bash
-# Open a websh terminal and share the current terminal
-$ alpacon websh --share my-server
-$ alpacon websh --share --read-only=true my-server
-
-# Join an existing shared session
-$ alpacon websh join --url [SHARED_URL] --password [PASSWORD]
 ```
 
+`--` separates the tunnel command from the inner command. `alpacon tunnel` does not auto-detect app ports—pass `127.0.0.1:<LOCAL_PORT>` explicitly.
 
-
-Access-path commands (`websh`, `exec`, `cp`, `tunnel`) require an active **work session** when using **Browser login (Auth0)** authentication. Token auth (API token or Service token) bypasses this requirement automatically.
-
-Check your current auth and session status at any time:
-
+### Work sessions
 ```bash
-$ alpacon whoami
-WS required: yes—run 'alpacon work-session list' to see available sessions
-```
-
-If you hit a WorkSession gate denial (exit code 3), run `alpacon whoami` to confirm your auth type, then follow the `Next:` actions printed by the failing command.
-
-#### Work sessions
-
-Work sessions are approval-gated units that group Websh, exec, file transfer, and tunnel access under a single reviewable context. Once a session is active, all subsequent commands attach to it automatically.
-
-```bash
-# List work sessions
 $ alpacon work-session ls
-
-# Show the currently active work-session
 $ alpacon work-session current
-
-# Set the active work-session for your workspace
-$ alpacon work-session use ses-abc123
-
-# Clear the active work-session
+$ alpacon work-session use <session-id>          # set active session
 $ alpacon work-session use --unset
-
-# Attach a specific session to a single command (overrides the active session)
-$ alpacon websh my-server --work-session ses-abc123
-$ alpacon exec my-server "uptime" --work-session ses-abc123
-$ alpacon tunnel my-server -l 9000 -r 8082 --work-session ses-abc123
-$ alpacon cp localfile.txt my-server:/tmp/ --work-session ses-abc123
-
-# Use ALPACON_WORK_SESSION env var instead of repeating the flag
-$ export ALPACON_WORK_SESSION=ses-abc123
-$ alpacon exec my-server "uptime"
+$ alpacon work-session approve <session-id>      # superuser
+$ alpacon work-session reject <session-id>       # superuser
+$ alpacon work-session revoke <session-id>       # superuser
 ```
 
-Session resolution order: `--work-session` flag > `ALPACON_WORK_SESSION` env var > active session set via `work-session use`.
+Override the active session per command with `--work-session <id>` or `ALPACON_WORK_SESSION=<id>`. Resolution order: `--work-session` flag > env var > active session.
 
-Superusers can manage pending and active sessions from the CLI:
-
+### Identity (users, groups)
 ```bash
-# Approve a pending session (grants access as originally requested)
-$ alpacon work-session approve ses-abc123
-
-# Approve with scope or server adjustments (narrows granted access)
-$ alpacon work-session approve ses-abc123 --scope command --scope websh
-$ alpacon work-session approve ses-abc123 --scope command,websh --server web-01
-
-# Reject a pending session
-$ alpacon work-session reject ses-abc123
-
-# Force-terminate an active or approved session
-$ alpacon work-session revoke ses-abc123
-```
-
-#### Identity and access management (IAM)
-Efficiently manage user and group resources:
-```bash
-# Managing users
-
-# List all users.
-$ alpacon user ls / list / all
-
-# Detailed user information.
-$ alpacon user describe [USER NAME]
-
-# Create a new user
-$ alpacon user create
-
-# Update the user information.
-$ alpacon user update [USER NAME]
-
-# Delete user
-$ alpacon user delete [USER NAME]
-$ alpacon user rm [USER NAME]
-
-# Managing groups
-
-# List all groups.
+$ alpacon user ls
+$ alpacon user describe <username>
+$ alpacon user create / update / rm
 $ alpacon group ls
-
-# Detailed group information.
-$ alpacon group describe [GROUP NAME]
-
-# Delete group
-$ alpacon group delete [GROUP NAME]
-$ alpacon group rm [GROUP NAME]
-
-# Add a member to a group with a specific role
-$ alpacon group member add
-$ alpacon group member add --group [GROUP NAME] --member [MEMBER NAME] --role [ROLE]
-
-# Remove a member from a group
-$ alpacon group member delete --group [GROUP NAME] --member[MEMBER NAME]
-$ alpacon group member rm --group [GROUP NAME] --member [MEMBER NAME]
+$ alpacon group member add --group <group> --member <user> --role <role>
+$ alpacon group member rm --group <group> --member <user>
 ```
 
-#### API tokens and automation
-API tokens can be used to access Alpacon.
+### API tokens
 ```bash
-# Create a new API token
-$ alpacon token create
-$ alpacon token create -n [TOKEN NAME] -l / --limit=true
-$ alpacon token create -n [TOKEN NAME] --expiration-in-days=7
-
-# Display a list of API tokens in the Alpacon
+$ alpacon token create -n <name> --expiration-in-days=7
 $ alpacon token ls
-
-# Delete API token
-$ alpacon token delete [TOKEN_ID_OR_NAME]
-$ alpacon token rm [TOKEN_ID_OR_NAME]
-
-# Log in via API token
-$ alpacon login myworkspace.us1.alpacon.io -t [TOKEN_KEY]
+$ alpacon token rm <token-id-or-name>
+$ alpacon login <URL> -t <TOKEN_KEY>
 ```
 
-#### Token ACL
-Token ACLs enforce deny-by-default access control for API tokens across three independent types: `command` (which shell commands the token can run via websh/exec), `server` (which servers the token can access), and `file` (which file paths the token can read/write via cp). Each type supports `add`, `ls`, and `delete` subcommands.
+### Token ACLs
+Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).
 
 ```bash
-# Command ACL — control which commands a token can execute
-$ alpacon token acl command add my-api-token --command="whoami"
-$ alpacon token acl command add my-api-token --command="docker *" --username=root
-$ alpacon token acl command ls my-api-token
-$ alpacon token acl command delete [COMMAND_ACL_ID]
-
-# Server ACL — control which servers a token can access
-$ alpacon token acl server add my-api-token --servers web-01,web-02
-$ alpacon token acl server ls my-api-token
-$ alpacon token acl server delete [SERVER_ACL_ID]
-
-# File ACL — control which file paths a token can read/write
-$ alpacon token acl file add my-api-token --path "/home/deploy/*" --action upload
-$ alpacon token acl file ls my-api-token
-$ alpacon token acl file delete [FILE_ACL_ID]
+$ alpacon token acl command add my-token --command="docker *" --username=root
+$ alpacon token acl server  add my-token --servers web-01,web-02
+$ alpacon token acl file    add my-token --path "/home/deploy/*" --action upload
+$ alpacon token acl <type> ls     my-token
+$ alpacon token acl <type> delete <acl-id>
 ```
 
-#### File transfer
-Facilitate file uploads and downloads:
+### Agent (Alpamon) management
 ```bash
-$ alpacon cp [SOURCE] [DESTINATION]
-
-# Upload files
-$ alpacon cp /Users/alpacon.txt myserver:/home/alpacon/
-
-# Download files
-$ alpacon cp myserver:/home/alpacon/alpacon.txt .
-
-# To use a specified username and groupname for the transfer:
-$ alpacon cp -u [USER NAME] -g [GROUP NAME] [SOURCE] [DESTINATION]
+$ alpacon agent restart  <server>
+$ alpacon agent upgrade  <server>
+$ alpacon agent shutdown <server>
 ```
-- `[SERVER NAME]:[PATH]` : denotes the server's name and the file's path for FTP operations.
 
-#### Package management
-Handle Python and system packages effortlessly:
+### Logs and audit
 ```bash
-# python
-$ alpacon package python ls / list / all
-$ alpacon package python upload alpamon-1.1.0-py3-none-any.whl
-$ alpacon package python download alpamon-1.1.0-py3-none-any.whl .
-
-# system
-$ alpacon package system ls / list / all
-$ alpacon package system upload osquery-5.10.2-1.linux.x86_64.rpm
-$ alpacon package system download osquery-5.10.2-1.linux.x86_64.rpm .
+$ alpacon log <server> --tail=10
+$ alpacon audit <filters>                        # workspace audit log
 ```
 
-#### Log retrieval
-Retrieve and monitor server logs:
-```bash
-# View recent logs or tail specific logs.
-$ alpacon logs [SERVER_NAME]
-$ alpacon logs [SERVER NAME] --tail=10
-```
+### More commands
 
-#### Event monitoring
-Retrieve and monitor events in the Alpacon:
-```bash
-# Display a list of recent events in the Alpacon
-$ alpacon event
-$ alpacon events
-
-# Tail the last 10 events related to a specific server and requested by a specific user
-$ alpacon event -t 10 -s myserver -u admin
-$ alpacon event --tail=10 --server=myserver --user=admin
-```
-
-#### Agent (Alpamon) management
-Manage server agents(Alpamon) with ease:
-```bash
-# Commands to control and upgrade server agents.
-$ alpacon agent restart [SERVER NAME]
-$ alpacon agent upgrade [SERVER NAME]
-$ alpacon agent shutdown [SERVER NAME]
-```
-
-#### Server notes
-Manage and view server notes:
-```bash
-# Display a list of all notes
-$ alpacon note ls / list / all
-$ alpacon note ls -s [SERVER NAME] --tail=10
-
-# Create a note on the specified server
-$ alpacon note create
-$ alpacon note create -s [SERVER NAME] -c [CONTENT] -p [PRIVATE(true or false)]
-
-# Delete a specified note
-$ alpacon note delete [NOTE ID]
-$ alpacon note rm [NOTE ID]
-```
-
-#### Private CA and certificates
-Easily manage your private Certificate Authorities (CAs) and certificates:
-```bash
-# Create a new Certificate Authority
-$ alpacon authority create
-
-# List all Certificate Authorities
-$ alpacon authority ls
-
-# Get detailed information about a specific Certificate Authority.
-$ alpacon authority describe [AUTHORITY ID]
-
-# Download a root Certificate by authority's ID and save it to the specified file path.
-$ alpacon authority download-crt [AUTHOIRY ID] --out=/path/to/root.crt
-
-# Delete a CA along with its certificate and CSR
-$ alpacon authority delete [AUTHORITY ID]
-$ alpacon authority rm [AUTHORITY ID]
-
-# Generate a new Certificate Signing Request (CSR)
-$ alpacon csr create
-
-# Display a list of CSRs, optionally filtered by status
-$ alpacon csr ls
-$ alpacon csr ls --status=signed
-
-# Approve a Certificate Signing Request
-$ alpacon csr approve [CSR ID]
-
-# Deny a Certificate Signing Request
-$ alpacon csr deny [CSR ID]
-
-# Delete a Certificate Signing Request
-$ alpacon csr delete [CSR ID]
-$ alpacon csr rm [CSR ID]
-
-# Get detailed information about a specific Signing Request.
-$ alpacon csr describe [CSR ID]
-
-# Download the signed certificate for a CSR
-$ alpacon csr download-crt [CSR ID] --out=/path/to/certificate.crt
-
-# List all certificates
-$ alpacon cert ls
-
-# Get detailed information about a specific Certificate.
-$ alpacon cert describe [CERT ID]
-
-# Download a specific Certificate by its ID and save it to the specified file path.
-$ alpacon cert download [CERT ID] --out=/path/to/certificate.crt
-```
-
-### Test
-
-To test the Alpacon CLI functionality, you can use the provided test script:
-
-1. **Copy the sample test script:**
-   ```bash
-   cp sample_test_cli.sh test_cli.sh
-   ```
-
-2. **Edit the configuration variables to match your environment:**
-   ```bash
-   vi test_cli.sh
-   ```
-
-   Update the following variables in the Configuration section:
-   ```bash
-   # Configuration
-   SERVER_NAME="your-server-name"           # e.g., "amazon-linux-1"
-   LOCAL_PATH="/your/local/path"            # e.g., "/Users/username/Documents"
-   REMOTE_ROOT_PATH="/root"                 # Usually "/root"
-   REMOTE_USER_PATH="/your/remote/path"     # e.g., "/home/username"
-   WORKSPACE_URL="your-workspace-url"       # e.g., "https://myworkspace.us1.alpacon.io"
-   ```
-
-3. **Make the script executable and run the tests:**
-   ```bash
-   chmod +x test_cli.sh
-   ./test_cli.sh
-   ```
-
-The test script will automatically:
-- Check if you're logged in to Alpacon (and login if necessary)
-- Create test files and folders locally
-- Run comprehensive tests covering:
-  - Basic connectivity and server information
-  - Command execution (regular and root user)
-  - File upload/download operations
-  - Folder upload/download operations (recursive)
-  - Websh functionality
-  - Advanced operations and error handling
-- Clean up all test files after completion
-
-**Test Coverage:**
-- 32 automated tests covering all major CLI functionality
-- File and folder transfer operations
-- Permission-based operations (user and root)
-- SSH-style command syntax
-- Error handling and edge cases
-
-**Note:** Make sure you have access to the specified server and the necessary permissions for the test operations before running the script.
+Run `alpacon --help` for the full list, or `alpacon <command> --help` for details on any command.
 
 ## Exit codes
-
-`alpacon` follows a stable exit code convention so that scripts, CI pipelines, and AI agents can branch on outcomes:
 
 | Code | Meaning |
 |------|---------|
@@ -634,31 +230,25 @@ The test script will automatically:
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
-
-### Build
-
 ```bash
 git clone https://github.com/alpacax/alpacon-cli.git
 cd alpacon-cli
 go build
-```
-
-### Run tests
-
-```bash
 go test ./...
 ```
 
-### Submitting changes
+### End-to-end tests against a live workspace
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes
-4. Push to the branch and open a Pull Request
+`sample_test_cli.sh` exercises the major commands (server lookup, exec, websh, cp, tunnel) against a real Alpacon workspace. Copy it, fill in the workspace URL and target server at the top, and run:
 
-Bug reports and feature requests are welcome on our [GitHub Issues](https://github.com/alpacax/alpacon-cli/issues) page.
+```bash
+cp sample_test_cli.sh test_cli.sh
+$EDITOR test_cli.sh                              # set WORKSPACE_URL, SERVER_NAME
+chmod +x test_cli.sh && ./test_cli.sh
+```
+
+Bug reports and feature requests welcome at [GitHub Issues](https://github.com/alpacax/alpacon-cli/issues).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT License](LICENSE). Copyright © 2026 AlpacaX Inc.
