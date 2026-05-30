@@ -47,7 +47,7 @@ brews:
       email: support@alpacax.com
     directory: Formula
     homepage: "https://github.com/alpacax/alpacon-cli"
-    description: "Alpacon CLI"
+    description: "Command-line client for Alpacon (Websh, exec, file transfer, tunnels)"
 
 dockers:
   - goos: linux
@@ -62,7 +62,11 @@ dockers:
 nfpms:
   - file_name_template: '{{ .PackageName }}_{{ trimprefix .Version "v" }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
     maintainer: AlpacaX <support@alpacax.com>
-    description: "Alpacon CLI"
+    description: |
+      Command-line client for Alpacon. Manage your workspace from the
+      terminal: open browser-based terminals, execute remote commands,
+      transfer files, create TCP tunnels, and manage API tokens for
+      CI/CD and AI agents.
     homepage: https://github.com/alpacax/alpacon-cli
     license: MIT
     vendor: AlpacaX
