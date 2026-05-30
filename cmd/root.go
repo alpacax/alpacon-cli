@@ -36,7 +36,7 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short:   "AI-native PAM: govern what humans, AI agents, and CI/CD pipelines execute",
+	Short:   "Command-line client for Alpacon, the AI-native PAM",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM
 that gives humans, AI agents, and CI/CD pipelines a safe way to reach your
 servers. Every action runs inside a scoped work session that is recorded
