@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Alpacon CLI (`alpacon`, alias `ac`) is a command-line tool for [Alpacon](https://alpacon.io)—a zero-trust infrastructure access platform that replaces SSH keys, VPNs, and bastion hosts with a single secure identity. Built with Go and [Cobra](https://github.com/spf13/cobra).
+Alpacon CLI (`alpacon`, alias `ac`) is the command-line client for [Alpacon](https://alpacon.io), the AI-native PAM that governs *what* humans, AI agents, and CI/CD pipelines execute on managed servers. Built with Go and [Cobra](https://github.com/spf13/cobra).
 
-Alpacon enables teams to scale operations across servers and customer environments without per-server credentials, and provides API tokens for CI/CD pipelines and AI agents to access infrastructure safely. The CLI is designed to be used by engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms for the most AI-native infrastructure operations.
+Every action runs inside a scoped, recorded work session; if a credential leaks or an AI client is compromised, the damage is bounded by the session's scope. The CLI is the terminal-side surface for that model and is used by engineers, AI coding agents (Claude Code, GitHub Copilot, Cursor, Codex CLI, Gemini CLI), and CI/CD platforms.
 
 ## Development commands
 
