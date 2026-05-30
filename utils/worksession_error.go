@@ -1,22 +1,12 @@
 package utils
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 )
 
-type workSessionErrorJSON struct {
-	OK          bool                `json:"ok"`
-	ExitCode    int                 `json:"exit_code"`
-	ErrorCode   string              `json:"error_code"`
-	Message     string              `json:"message"`
-	Reason      string              `json:"reason"`
-	Context     workSessionErrorCtx `json:"context"`
-	NextActions []string            `json:"next_actions"`
-}
+type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
 type workSessionErrorCtx struct {
 	AuthMethod         string   `json:"auth_method"`
@@ -50,7 +40,7 @@ func HandleWorkSessionError(err error, operation, serverName, authMethod, active
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
-		fmt.Fprintln(os.Stderr, buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS))
+		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS))
 	} else {
 		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
 	}
@@ -84,11 +74,20 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 }
 
 func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS string) string {
+	envelope := buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS)
+	rendered, err := FormatJSON(envelope)
+	if err != nil {
+		return `{"ok":false,"error_code":"` + code + `"}`
+	}
+	return rendered
+}
+
+func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS string) workSessionErrorJSON {
 	var ws *string
 	if activeWS != "" {
 		ws = &activeWS
 	}
-	envelope := workSessionErrorJSON{
+	return workSessionErrorJSON{
 		OK:        false,
 		ExitCode:  ExitCodeWorkSessionDenied,
 		ErrorCode: code,
@@ -102,14 +101,6 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 		},
 		NextActions: workSessionNextActions(code, operation, serverName, activeWS),
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(envelope); err != nil {
-		return `{"ok":false,"error_code":"` + code + `"}`
-	}
-	return strings.TrimRight(buf.String(), "\n")
 }
 
 func targetServerList(serverName string) []string {
