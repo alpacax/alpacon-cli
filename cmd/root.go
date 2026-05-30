@@ -36,13 +36,35 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short:   "Access infrastructure securely with Alpacon",
-	Long: `Alpacon CLI provides secure access to remote servers without SSH keys, VPNs,
-or bastion hosts. Open terminals, execute commands, transfer files, create TCP
-tunnels, and manage certificates — all with zero-trust authentication, MFA,
-session recording, and role-based access controls.
+	Short:   "AI-native PAM: govern what humans, AI agents, and CI/CD pipelines execute",
+	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM
+that gives humans, AI agents, and CI/CD pipelines a safe way to reach your
+servers. Every action runs inside a scoped work session that is recorded
+and judged at runtime: if a credential leaks or an AI client is compromised,
+the damage is bounded by the session's scope.
 
-Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
+Quick start (interactive auth):
+
+  1. alpacon                                # check current login + workspace
+                                            # (run 'alpacon login' or
+                                            #  'alpacon workspace switch' if
+                                            #  not logged in / wrong place)
+  2. alpacon whoami                         # confirm identity + work
+                                            # session requirement
+  3. alpacon work-session create \          # create + activate a session
+       --purpose "describe the task" \
+       --scope command,websh \
+       --server <server> \
+       --use --wait
+  4. alpacon exec, websh, cp, tunnel        # operate within the session
+
+Token auth (CI/CD, API automation):
+
+  alpacon login -t <token>                  # work session not required
+  alpacon exec ...
+
+See 'alpacon work-session --help' for session lifecycle, gating, and
+common error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
 		case utils.OutputFormatTable, utils.OutputFormatJSON:
