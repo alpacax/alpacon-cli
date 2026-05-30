@@ -63,9 +63,10 @@ nfpms:
   - file_name_template: '{{ .PackageName }}_{{ trimprefix .Version "v" }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ with .Mips }}_{{ . }}{{ end }}{{ if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}'
     maintainer: AlpacaX <support@alpacax.com>
     description: |
-      Command-line client for Alpacon. Manage your workspace from the
-      terminal: open browser-based terminals, execute remote commands,
-      transfer files, create TCP tunnels, and manage API tokens for
+      Command-line client for Alpacon, the AI-native PAM. Drive your
+      workspace from the terminal: open Websh terminal sessions directly
+      in your shell, execute remote commands, transfer files, create TCP
+      tunnels, and manage API tokens with command/server/file ACLs for
       CI/CD and AI agents.
     homepage: https://github.com/alpacax/alpacon-cli
     license: MIT
