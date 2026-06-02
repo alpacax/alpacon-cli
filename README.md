@@ -162,7 +162,10 @@ $ alpacon tunnel prod-k8s -l 6443 -r 6443 -- kubectl --server=https://127.0.0.1:
 
 ### Work sessions
 ```bash
-$ alpacon work-session ls
+$ alpacon work-session ls                          # my active sessions (default)
+$ alpacon work-session ls --status all             # my sessions in any status
+$ alpacon work-session ls --user all               # everyone's active sessions
+$ alpacon work-session ls --user all --status all  # all sessions
 $ alpacon work-session current
 $ alpacon work-session use <session-id>          # set active session
 $ alpacon work-session use --unset
