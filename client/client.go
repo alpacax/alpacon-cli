@@ -23,6 +23,12 @@ const (
 	checkPrivilegesURL = "/api/iam/users/-"
 )
 
+type apiError struct {
+	message string
+	code    string
+	source  string
+}
+
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
@@ -354,12 +360,6 @@ func isAccessTokenExpired(cfg config.Config) bool {
 	}
 
 	return time.Now().After(expireTime.Add(-10 * time.Second))
-}
-
-type apiError struct {
-	message string
-	code    string
-	source  string
 }
 
 func (e *apiError) Error() string {

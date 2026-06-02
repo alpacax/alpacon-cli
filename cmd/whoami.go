@@ -139,6 +139,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 				if !ws.ExpiresAt.IsZero() {
 					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 				}
+				// normalized() mirrors this into ActiveWorksessionCanonical.
 				output.ActiveWorksession = &activeWorkSessionSummary{
 					ID:        ws.ID,
 					Status:    ws.Status,
@@ -146,7 +147,6 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 					Servers:   serverNames,
 					ExpiresAt: expiresAt,
 				}
-				output.ActiveWorksessionCanonical = output.ActiveWorksession
 			}
 		}
 
