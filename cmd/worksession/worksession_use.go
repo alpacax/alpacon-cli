@@ -103,7 +103,7 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 		return nil, err
 	}
 	if ws.Status != activeWorkSessionStatus {
-		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
+		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}
 	// Persist the canonical ID from the API rather than the raw argument so config
 	// stays consistent with server-side canonicalization and the printed JSON fields.
