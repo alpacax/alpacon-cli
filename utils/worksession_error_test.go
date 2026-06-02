@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -62,7 +61,7 @@ func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	assert.NotContains(t, got, "(interactive)")
 }
 
-func TestBuildWorkSessionJSON(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 	tests := []string{
 		WorkSessionRequired,
 		WorkSessionNotActive,
@@ -75,10 +74,8 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 
 	for _, code := range tests {
 		t.Run(code, func(t *testing.T) {
-			got := buildWorkSessionJSON(code, "command", "srv-1", "API token", "")
+			envelope := buildWorkSessionErrorEnvelope(code, "command", "srv-1", "API token", "")
 
-			var envelope workSessionErrorJSON
-			assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
 			assert.Equal(t, code, envelope.ErrorCode)
@@ -91,11 +88,9 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
-	got := buildWorkSessionJSON(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
+func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
 	// Expired case: <ID> placeholder must be substituted with the known active UUID.
@@ -105,22 +100,18 @@ func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_ExpiredWithoutActiveWS(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	// When activeWS is unknown, the placeholder must remain.
-	got := buildWorkSessionJSON(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.Contains(t, envelope.NextActions, "alpacon work-session extend <ID>")
 }
 
-func TestBuildWorkSessionJSON_RequiredKeepsPlaceholder(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
 	// so the placeholder must NOT be substituted even when activeWS is known.
-	got := buildWorkSessionJSON(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.Contains(t, envelope.NextActions, "alpacon work-session use <ID>")
 }
 

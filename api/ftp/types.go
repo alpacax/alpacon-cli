@@ -35,6 +35,11 @@ type DownloadResponse struct {
 	Command     string              `json:"command"`
 }
 
+type DownloadedFile struct {
+	Path string
+	Size int64
+}
+
 type UploadResponse struct {
 	ID        string              `json:"id"`
 	Name      string              `json:"name"`

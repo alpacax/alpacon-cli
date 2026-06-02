@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -374,6 +375,49 @@ func UploadContent(ac *client.AlpaconClient, serverName, remotePath string, cont
 	return executeSingleUpload(ac, request, bytes.NewReader(content), int64(len(content)))
 }
 
+// UploadLocalFileAs uploads one local file to the exact remote file path.
+// It preserves the remote basename instead of deriving the destination name
+// from the local temp file name.
+func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePath, username, groupname, workSessionID string) error {
+	remoteName, err := utils.RemoteFileName(remotePath)
+	if err != nil {
+		return err
+	}
+	remoteDir := pathpkg.Dir(remotePath)
+	if remoteDir == "." {
+		remoteDir = ""
+	} else if !strings.HasSuffix(remoteDir, "/") {
+		remoteDir += "/"
+	}
+
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	stat, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
+	request := &UploadRequest{
+		Name:           remoteName,
+		Path:           remoteDir,
+		Server:         serverID,
+		Username:       username,
+		Groupname:      groupname,
+		AllowOverwrite: true,
+		WorkSession:    workSessionID,
+	}
+	return executeSingleUpload(ac, request, readOnly{f}, stat.Size())
+}
+
 func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
 	return utils.SpoolToTempFile("alpacon-folder-*.zip", func(w io.Writer) error {
 		return utils.ZipToWriter(folderPath, w)
@@ -526,34 +570,41 @@ func reserveDownloadArchiveTempPath(dest string) (string, error) {
 	return name, nil
 }
 
-func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, recursive bool, maxAttempts int) (int64, error) {
+// saveDownloadedURL writes the downloaded content and returns the resolved local path.
+func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, recursive bool, maxAttempts int) (string, int64, error) {
 	if recursive {
 		filePath, err := reserveDownloadArchiveTempPath(dest)
 		if err != nil {
-			return 0, err
+			return "", 0, err
 		}
 		defer func() { _ = utils.DeleteFile(filePath) }()
 
 		written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
 		if err != nil {
-			return written, err
+			return dest, written, err
 		}
 		if err := utils.Unzip(filePath, dest); err != nil {
-			return written, fmt.Errorf("failed to extract downloaded folder: %w", err)
+			return dest, written, fmt.Errorf("failed to extract downloaded folder: %w", err)
 		}
 
-		return written, nil
+		return dest, written, nil
 	}
 
 	filePath, err := downloadedFilePath(dest, remotePath)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 
-	return fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
+	written, err := fetchFromURLToFile(httpClient, url, filePath, maxAttempts)
+	return filePath, written, err
 }
 
 func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) error {
+	_, err := downloadSingleFileWithResult(ac, remotePath, dest, serverID, username, groupname, resourceType, workSessionID, recursive)
+	return err
+}
+
+func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (DownloadedFile, error) {
 	downloadRequest := &DownloadRequest{
 		Path:         remotePath,
 		Name:         filepath.Base(remotePath),
@@ -570,41 +621,43 @@ func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, us
 
 	postBody, err := ac.SendPostRequest(downloadAPIURL, downloadRequest)
 	if err != nil {
-		return err
+		return DownloadedFile{}, err
 	}
 
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
-		return err
+		return DownloadedFile{}, err
 	}
 
 	status, err := event.PollCommandExecution(ac, downloadResponse.Command)
 	if err != nil {
-		return err
+		return DownloadedFile{}, err
 	}
 
 	if status.Status == "stuck" || status.Status == "error" {
-		return fmt.Errorf("command failed with status: %s", status.Status)
+		return DownloadedFile{}, fmt.Errorf("command failed with status: %s", status.Status)
 	}
 	if status.Status == "failed" {
-		return fmt.Errorf("%s", status.Result)
+		return DownloadedFile{}, fmt.Errorf("%s", status.Result)
 	}
 
-	written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, 100)
+	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, 100)
 	if err != nil {
-		return err
+		return DownloadedFile{}, err
 	}
 
 	timeout := calcPollTimeout(1, written)
 	success, message, err := PollTransferStatus(ac, "download", downloadResponse.ID, timeout)
 	if err != nil {
-		return fmt.Errorf("download transfer status check failed: %w", err)
+		return DownloadedFile{}, fmt.Errorf("download transfer status check failed: %w", err)
 	}
 	if !success {
-		return fmt.Errorf("%s", message)
+		return DownloadedFile{}, fmt.Errorf("%s", message)
 	}
 
-	return nil
+	// Report the bytes actually written to disk; the edit size guard must reflect
+	// the local file, not a possibly stale or incorrect server-reported size.
+	return DownloadedFile{Path: localPath, Size: written}, nil
 }
 
 // downloadBulk downloads multiple remote files as a single zip archive using the bulk API.
@@ -706,6 +759,14 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 	}
 
 	return downloadSingleFile(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, workSessionID, recursive)
+}
+
+func DownloadFileToPath(ac *client.AlpaconClient, serverName, remotePath, localPath, username, groupname, workSessionID string) (DownloadedFile, error) {
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return DownloadedFile{}, err
+	}
+	return downloadSingleFileWithResult(ac, remotePath, localPath, serverID, username, groupname, "file", workSessionID, false)
 }
 
 // calcPollTimeout returns a dynamic poll timeout based on file count and total size.
