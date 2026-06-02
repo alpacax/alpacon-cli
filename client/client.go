@@ -100,33 +100,34 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 func checkAuthStatus(statusCode int, body []byte) error {
 	switch statusCode {
 	case http.StatusUnauthorized:
-		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
-			return newAPIError(fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", msg), code, source)
+		msg, code, source, ok := parseAuthStatusErrorPayload(body)
+		if !ok {
+			return newAPIError("authentication failed: please run 'alpacon login' again", code, source)
 		}
-		return errors.New("authentication failed: please run 'alpacon login' again")
+		return newAPIError(fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", msg), code, source)
 	case http.StatusForbidden:
-		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
-			return newAPIError(msg, code, source)
+		msg, code, source, ok := parseAuthStatusErrorPayload(body)
+		if !ok {
+			return newAPIError("permission denied: you do not have the required privileges for this action", code, source)
 		}
-		return errors.New("permission denied: you do not have the required privileges for this action")
+		return newAPIError(msg, code, source)
 	}
 	return nil
 }
 
+// parseAuthStatusErrorPayload returns ok=true only with a clean "detail" message;
+// code/source are returned regardless so the WorkSession gate can route to exit 3.
 func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, ok bool) {
 	message, code, source, ok = parseAPIErrorPayload(body)
 	if !ok || message == "" {
-		return "", "", "", false
+		return "", code, source, false
 	}
-	// Require a non-empty "detail" so 401/403 responses surface a clean server
-	// message (while still preserving code/source) instead of the truncated
-	// raw-body fallback parseAPIErrorPayload returns when only code/source exist.
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", "", "", false
+		return "", code, source, false
 	}
 	if stringField(parsed, "detail") == "" {
-		return "", "", "", false
+		return "", code, source, false
 	}
 	return message, code, source, true
 }
