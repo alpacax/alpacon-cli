@@ -260,8 +260,14 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdResp.ID, lastSeq, chunk, out)
 		case details := <-pollResult:
-			_ = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
+			lastSeq = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
 			listener.Stop()
+			// If nothing was ever streamed (no WS chunks, none persisted), fall back
+			// to the buffered Result so output is never silently dropped. On a normal
+			// streamed run lastSeq has advanced and this is skipped.
+			if lastSeq < 0 && details.Result != "" {
+				_, _ = fmt.Fprint(out, details.Result)
+			}
 			// Output is already streamed; errorFromDetails keeps it on the error
 			// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
 			return errorFromDetails(details)
@@ -282,8 +288,7 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	if chunk.Seq > lastSeq+1 {
 		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr,
-				"warning: failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete\n",
+			utils.CliWarning("failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete",
 				lastSeq+1, chunk.Seq-1, err)
 		} else {
 			for _, c := range missing {
@@ -304,8 +309,7 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
 	final, err := GetCommandChunks(ac, cmdID, lastSeq+1)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr,
-			"warning: failed to fetch trailing chunks (from seq %d): %v; output may be incomplete\n",
+		utils.CliWarning("failed to fetch trailing chunks (from seq %d): %v; output may be incomplete",
 			lastSeq+1, err)
 		return lastSeq
 	}
@@ -363,7 +367,7 @@ func runCommandFallback(ac *client.AlpaconClient, serverName, command, username,
 // re-submitting) and writes its buffered result to out. Used when streaming
 // setup fails after SubmitCommand has created the command.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) error {
-	_, _ = fmt.Fprintf(os.Stderr, "warning: real-time output unavailable (%v); falling back to polling\n", cause)
+	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
 	details, err := PollCommandExecution(ac, cmdID)
 	if err != nil {
 		return err

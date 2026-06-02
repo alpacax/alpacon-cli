@@ -983,3 +983,20 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
+
+// TestRunCommandStreaming_FallbackToResultWhenNothingStreamed covers the
+// last-resort path: when no chunks arrive over the WS and none are persisted,
+// the buffered Result must still be written so output is never silently dropped.
+func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
+}
