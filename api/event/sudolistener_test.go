@@ -19,7 +19,7 @@ func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
 	payload := sudoMFAEvent{}
 	payload.Payload.Type = "auth"
 	payload.Payload.Query = "mfa_request"
-	payload.Payload.ApprovalRequestID = "test-approval-id"
+	payload.Payload.SudoGrantID = "test-grant-id"
 	payload.Payload.MfaURL = "https://auth.alpacon.io/mfa?token=abc"
 	payload.Payload.Command = "sudo systemctl restart nginx"
 	payload.Payload.SessionID = "test-session-id"
@@ -32,7 +32,7 @@ func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "auth", parsed.Payload.Type)
 	assert.Equal(t, "mfa_request", parsed.Payload.Query)
-	assert.Equal(t, "test-approval-id", parsed.Payload.ApprovalRequestID)
+	assert.Equal(t, "test-grant-id", parsed.Payload.SudoGrantID)
 	assert.Equal(t, "https://auth.alpacon.io/mfa?token=abc", parsed.Payload.MfaURL)
 }
 
@@ -237,15 +237,10 @@ func TestSudoListener_WaitConnected_Shutdown(t *testing.T) {
 	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
 }
 
-func TestSudoListener_SelfApprove_Success(t *testing.T) {
+func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Contains(t, r.URL.Path, "sudo-policies/self-approve")
-
-		var req selfApproveRequest
-		err := json.NewDecoder(r.Body).Decode(&req)
-		assert.NoError(t, err)
-		assert.Equal(t, "approval-123", req.ApprovalRequestID)
+		assert.Contains(t, r.URL.Path, "/api/sudo/grants/grant-123/verify/")
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -263,11 +258,11 @@ func TestSudoListener_SelfApprove_Success(t *testing.T) {
 		connected: make(chan struct{}),
 	}
 
-	err := sl.selfApprove("approval-123")
+	err := sl.verifySudoGrant("grant-123")
 	assert.NoError(t, err)
 }
 
-func TestSudoListener_SelfApprove_ServerError(t *testing.T) {
+func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -283,7 +278,7 @@ func TestSudoListener_SelfApprove_ServerError(t *testing.T) {
 		connected: make(chan struct{}),
 	}
 
-	err := sl.selfApprove("approval-123")
+	err := sl.verifySudoGrant("grant-123")
 	assert.Error(t, err)
 }
 

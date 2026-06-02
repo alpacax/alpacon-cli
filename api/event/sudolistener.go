@@ -15,13 +15,16 @@ import (
 )
 
 const (
-	sudoApproveURL = "/api/approvals/sudo-policies/self-approve/"
+	// sudoVerifyURLFmt is the sudo-grant MFA verify endpoint; the grant ID is
+	// substituted into the path. Replaces the removed self-approve route.
+	sudoVerifyURLFmt = "/api/sudo/grants/%s/verify/"
 
 	// mfaPollingInterval is how often we check if MFA is completed.
 	mfaPollingInterval = 500 * time.Millisecond
 
 	// mfaPollingTimeout is the maximum time to wait for MFA completion.
-	// Server expires the approval request after 30s, but we give extra buffer.
+	// The server expires the pending sudo grant after a short window; we keep
+	// extra buffer over that so a slow browser MFA does not race the expiry.
 	mfaPollingTimeout = 60 * time.Second
 
 	// reconnectBaseDelay is the initial delay for WebSocket reconnection.
@@ -34,26 +37,21 @@ const (
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
 type sudoMFAEvent struct {
 	Payload struct {
-		Type              string `json:"type"`
-		Query             string `json:"query"`
-		ApprovalRequestID string `json:"approval_request_id"`
-		MfaURL            string `json:"mfa_url"`
-		Command           string `json:"command"`
-		SessionID         string `json:"session_id"`
+		Type        string `json:"type"`
+		Query       string `json:"query"`
+		SudoGrantID string `json:"sudo_grant_id"`
+		MfaURL      string `json:"mfa_url"`
+		Command     string `json:"command"`
+		SessionID   string `json:"session_id"`
 	} `json:"payload"`
-}
-
-// selfApproveRequest is sent to approve a sudo request after MFA.
-type selfApproveRequest struct {
-	ApprovalRequestID string `json:"approval_request_id"`
 }
 
 // SudoListener listens for sudo MFA events on the event WebSocket
 // and handles the browser-based MFA flow.
 //
 // The AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
-// http.Client is concurrency-safe. Token refresh and self-approve are serialized
-// by mfaMu so only one MFA flow runs at a time.
+// http.Client is concurrency-safe. Token refresh and grant verification are
+// serialized by mfaMu so only one MFA flow runs at a time.
 type SudoListener struct {
 	ac           *client.AlpaconClient
 	serverName   string
@@ -231,15 +229,15 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	default:
 	}
 
-	approvalID := event.Payload.ApprovalRequestID
-	if approvalID == "" {
+	grantID := event.Payload.SudoGrantID
+	if grantID == "" {
 		return
 	}
 
 	// Fast path: if MFA is already completed (e.g., recent sudo in another
 	// terminal), skip the browser and approve immediately.
 	if err := sl.ac.RefreshToken(); err == nil {
-		if err := sl.selfApprove(approvalID); err == nil {
+		if err := sl.verifySudoGrant(grantID); err == nil {
 			return
 		}
 	}
@@ -270,7 +268,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		return
 	}
 
-	if err := sl.selfApprove(approvalID); err != nil {
+	if err := sl.verifySudoGrant(grantID); err != nil {
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo approval failed: %s\033[0m\r\n", err)
 		return
 	}
@@ -299,14 +297,12 @@ func (sl *SudoListener) pollMFACompletion() bool {
 	}
 }
 
-func (sl *SudoListener) selfApprove(approvalRequestID string) error {
-	req := &selfApproveRequest{
-		ApprovalRequestID: approvalRequestID,
-	}
+func (sl *SudoListener) verifySudoGrant(grantID string) error {
+	url := fmt.Sprintf(sudoVerifyURLFmt, grantID)
 
-	_, err := sl.ac.SendPostRequest(sudoApproveURL, req)
+	_, err := sl.ac.SendPostRequest(url, struct{}{})
 	if err != nil {
-		return fmt.Errorf("failed to self-approve sudo request: %w", err)
+		return fmt.Errorf("failed to verify sudo grant: %w", err)
 	}
 
 	return nil
