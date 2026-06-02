@@ -188,14 +188,15 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// the --wait branch below (or exit immediately when --wait is not set).
 		switch decideUseAction(session.Status, useAfterCreate) {
 		case useDecisionUseNow:
-			desc, err := RunUse(ac, session.ID)
+			// Re-fetch so the serialized JSON matches the --wait --use path.
+			activeSession, err := RunUseSession(ac, session.ID)
 			if err != nil {
 				utils.CliErrorWithExit("Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 			}
-			message := activeWorkSessionSetMessage("", session.ID, desc)
+			message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				active := session.ID
-				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, session, &active))
+				active := activeSession.ID
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, activeSession, &active))
 				return
 			}
 			utils.CliSuccess("%s", message)
