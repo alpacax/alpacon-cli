@@ -40,7 +40,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				if utils.OutputFormat == utils.OutputFormatJSON {
 					printWorkSessionMutationJSON(workSessionMutationOutput{
 						OK:                true,
-						Operation:         "use",
+						Operation:         "unset",
 						Message:           "No active work-session to unset.",
 						ActiveWorksession: nil,
 					})
@@ -55,7 +55,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(workSessionMutationOutput{
 					OK:                true,
-					Operation:         "use",
+					Operation:         "unset",
 					Message:           "Active work-session cleared.",
 					ActiveWorksession: nil,
 				})

@@ -180,6 +180,30 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "ses-active", active)
 }
 
+func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
+	setupWorkSessionCommandConfig(t, "http://example.invalid")
+	withWorkSessionCommandJSONMode(t)
+	require.NoError(t, config.SetActiveWorkSession("ses-active"))
+	unsetActiveWorkSession = true
+	t.Cleanup(func() { unsetActiveWorkSession = false })
+
+	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+		workSessionUseCmd.Run(workSessionUseCmd, nil)
+	})
+
+	assert.Empty(t, stderr)
+
+	var got struct {
+		OK                bool    `json:"ok"`
+		Operation         string  `json:"operation"`
+		ActiveWorksession *string `json:"active_worksession"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.True(t, got.OK)
+	assert.Equal(t, "unset", got.Operation)
+	assert.Nil(t, got.ActiveWorksession)
+}
+
 func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	var sawExtend bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
