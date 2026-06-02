@@ -102,6 +102,15 @@ func TestParseSSHTarget(t *testing.T) {
 				Path: "/opt/app/config",
 			},
 		},
+		{
+			name:  "Remote path contains at sign",
+			input: "prod-docker:/tmp/alice@example.com",
+			expected: SSHTarget{
+				User: "",
+				Host: "prod-docker",
+				Path: "/tmp/alice@example.com",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -163,6 +172,11 @@ func TestIsRemoteTarget(t *testing.T) {
 			input:    "user@server:",
 			expected: true,
 		},
+		{
+			name:     "Remote path contains at sign",
+			input:    "prod-docker:/tmp/alice@example.com",
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -207,6 +221,11 @@ func TestIsLocalTarget(t *testing.T) {
 		{
 			name:     "Remote path with user and hostname",
 			input:    "root@prod-docker:/var/log/syslog",
+			expected: false,
+		},
+		{
+			name:     "Remote path contains at sign",
+			input:    "prod-docker:/tmp/alice@example.com",
 			expected: false,
 		},
 	}
