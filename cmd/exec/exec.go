@@ -1,13 +1,6 @@
 package exec
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-
-	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -108,43 +101,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		env := make(map[string]string)
 
 		if parsed.Detach {
-			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-			if err != nil {
-				err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-						return err
-					},
-				})
-			}
-			if err != nil {
-				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
-				return
-			}
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				data, err := json.Marshal(map[string]string{"job_id": resp.ID})
-				if err != nil {
-					utils.CliErrorWithExit("failed to marshal JSON: %s", err)
-					return
-				}
-				utils.PrintJson(data)
-			} else {
-				line1, line2 := detachResultLines(resp.ID)
-				fmt.Println(line1)
-				fmt.Fprintln(os.Stderr, line2)
-			}
+			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod)
 			return
 		}
 

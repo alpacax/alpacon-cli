@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -128,6 +129,52 @@ func asPhasedError(err error) (error, bool) {
 func clientTimeoutLine() string {
 	const phase = "client_timeout"
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
+}
+
+// runDetached submits command without waiting for completion and prints the
+// job id. MFA / username-required / token-refresh errors are handled and
+// retried, matching the inline path. Used by both inline exec and the
+// oversized-command bypass.
+func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string) {
+	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID)
+	if err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+			OnMFARequired: func(srv string) error {
+				return mfa.HandleMFAError(ac, srv)
+			},
+			OnUsernameRequired: func() error {
+				_, e := iam.HandleUsernameRequired()
+				return e
+			},
+			CheckMFACompleted: func() (bool, error) {
+				return mfa.CheckMFACompletion(ac)
+			},
+			RefreshToken: ac.RefreshToken,
+			RetryOperation: func() error {
+				resp, err = event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID)
+				return err
+			},
+		})
+	}
+	if err != nil {
+		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+		utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
+		return
+	}
+
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		data, mErr := json.Marshal(map[string]string{"job_id": resp.ID})
+		if mErr != nil {
+			utils.CliErrorWithExit("failed to marshal JSON: %s", mErr)
+			return
+		}
+		utils.PrintJson(data)
+		return
+	}
+
+	line1, line2 := detachResultLines(resp.ID)
+	fmt.Println(line1)
+	fmt.Fprintln(os.Stderr, line2)
 }
 
 func detachResultLines(jobID string) (string, string) {
