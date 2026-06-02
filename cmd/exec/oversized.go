@@ -116,10 +116,9 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 		}
 	}
 
-	// The wrapper deletes the script after running it (rm -f inside the
-	// wrapper). If command submission fails before the agent runs the wrapper,
-	// the temp script is left on the server; it is a unique dotfile under /tmp
-	// and reaped by normal tmp cleanup.
+	// The wrapper's rm -f cleans up the script after it runs. If command
+	// submission fails before the agent runs the wrapper, the script is left
+	// behind: a unique dotfile under /tmp, reaped by normal tmp cleanup.
 	wrapper := wrapScriptCommand(scriptPath)
 
 	if parsed.Detach {
