@@ -58,11 +58,8 @@ func isWindowsPlatform(platform string) bool {
 // avoiding collisions between concurrent oversized executions.
 func newExecID() string {
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// rand.Read failing is effectively impossible; fall back to a fixed
-		// token so the upload still proceeds (allow_overwrite covers reuse).
-		return "fallback00000000"
-	}
+	// rand.Read failing is effectively impossible; all-zero b stays hex on failure.
+	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
