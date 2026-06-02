@@ -56,9 +56,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
   alpacon exec logs <JOB_ID>`,
-	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
-	// would otherwise be consumed by Cobra's flag parser.
-	// All flags are parsed manually in the Run function.
+	// DisableFlagParsing is required so remote command args (e.g. -U, -d) aren't consumed by Cobra; all flags are parsed manually in Run.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed := ParseRemoteExecArgs(args)

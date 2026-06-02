@@ -131,10 +131,7 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
-// runDetached submits command without waiting for completion and prints the
-// job id. MFA / username-required / token-refresh errors are handled and
-// retried, matching the inline path. Used by both inline exec and the
-// oversized-command bypass.
+// runDetached submits command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path. Used by inline exec and the oversized bypass.
 func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string) {
 	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID)
 	if err != nil {
