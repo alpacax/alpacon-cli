@@ -49,7 +49,12 @@ Use -u/--username and -g/--groupname the same way you would with 'alpacon cp'.
 Interactive browser login requires an active WorkSession with the webftp scope.
 
 The file is downloaded in full before editing; files larger than 10 MB prompt
-for confirmation (skipped with --force) before opening in the editor.`,
+for confirmation (skipped with --force) before opening in the editor.
+
+This edits existing remote files only—the file is downloaded first, so it
+cannot create a new one. The --editor value is tokenized without a shell (the
+file path is appended as the last argument), so shell syntax such as pipes,
+redirections, or '&&' will not work.`,
 	Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
   alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
