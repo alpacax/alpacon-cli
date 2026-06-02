@@ -904,27 +904,36 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			},
 		},
 		{
-			name:     "stuck status returns infra error",
+			name:     "stuck status without phase keeps legacy message",
 			terminal: EventDetails{Status: "stuck"},
 			check: func(t *testing.T, err error) {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "status=stuck")
+				assert.Contains(t, err.Error(), "command failed with status: stuck")
 			},
 		},
 		{
-			name:     "error status returns infra error",
+			name:     "error status without phase keeps legacy message",
 			terminal: EventDetails{Status: "error"},
 			check: func(t *testing.T, err error) {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "status=error")
+				assert.Contains(t, err.Error(), "command failed with status: error")
 			},
 		},
 		{
-			name:     "cancelled status returns infra error",
+			name:     "cancelled status without phase keeps legacy message",
 			terminal: EventDetails{Status: "cancelled"},
 			check: func(t *testing.T, err error) {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "status=cancelled")
+				assert.Contains(t, err.Error(), "command failed with status: cancelled")
+			},
+		},
+		{
+			name:     "stuck status with phase carries phase identifier",
+			terminal: EventDetails{Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "[agent_timeout]")
+				assert.Contains(t, err.Error(), "status=stuck")
 			},
 		},
 		{

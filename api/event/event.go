@@ -340,6 +340,9 @@ func errorFromDetails(d EventDetails) error {
 		if d.ErrorPhase != nil {
 			phase = *d.ErrorPhase
 		}
+		if phase == "" {
+			return fmt.Errorf("command failed with status: %s", d.Status)
+		}
 		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
