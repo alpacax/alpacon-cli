@@ -5,6 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/api/server"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // inlineCommandLimit is the maximum command size (in bytes) sent inline to the
@@ -56,4 +63,66 @@ func newExecID() string {
 		return "fallback00000000"
 	}
 	return hex.EncodeToString(b)
+}
+
+// runOversizedCommand handles a command that exceeds the inline limit by
+// uploading it as a temp script and executing it with sh. The caller must
+// already have confirmed OAuth auth. Windows servers are rejected before any
+// upload. The upload always completes synchronously; with --detach only the
+// wrapper command is submitted detached.
+func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env map[string]string, workSessionID, authMethod string) {
+	platform, err := server.GetServerPlatform(ac, parsed.Server)
+	if err != nil {
+		utils.CliErrorWithExit("failed to resolve server platform for '%s': %s", parsed.Server, err)
+		return
+	}
+	if isWindowsPlatform(platform) {
+		utils.CliErrorWithExit("Large commands (>2KB) are not supported on Windows servers.\n" +
+			"The upload bypass relies on POSIX sh/tmp/rm semantics. Shorten the command, " +
+			"or run it through a Windows-native mechanism.")
+		return
+	}
+
+	id := newExecID()
+	scriptPath := tempScriptPath(id)
+
+	utils.CliInfo("Command exceeds 2KB; uploading via temporary file...")
+
+	upload := func() error {
+		return ftp.UploadContent(ac, parsed.Server, tempScriptDir, tempScriptName(id),
+			[]byte(parsed.Command), parsed.Username, parsed.Groupname, true, workSessionID)
+	}
+
+	if err := upload(); err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+			OnMFARequired: func(srv string) error {
+				return mfa.HandleMFAError(ac, srv)
+			},
+			OnUsernameRequired: func() error {
+				_, e := iam.HandleUsernameRequired()
+				return e
+			},
+			CheckMFACompleted: func() (bool, error) {
+				return mfa.CheckMFACompletion(ac)
+			},
+			RefreshToken:   ac.RefreshToken,
+			RetryOperation: upload,
+		})
+		if err != nil {
+			utils.HandleWorkSessionError(err, "webftp", parsed.Server, authMethod, workSessionID)
+			utils.CliErrorWithExit("failed to upload command to '%s': %s", parsed.Server, err)
+			return
+		}
+	}
+
+	wrapper := wrapScriptCommand(scriptPath)
+
+	if parsed.Detach {
+		runDetached(ac, parsed, wrapper, env, workSessionID, authMethod)
+		return
+	}
+
+	result, err := RunCommandWithRetry(ac, parsed.Server, wrapper, parsed.Username, parsed.Groupname, env, workSessionID)
+	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+	HandleCommandResult(result, err)
 }

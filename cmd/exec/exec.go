@@ -100,6 +100,18 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		env := make(map[string]string)
 
+		if exceedsInlineLimit(parsed.Command) {
+			isSaaS, err := config.IsSaaS()
+			if err != nil || !isSaaS {
+				utils.CliErrorWithExit("Large commands (>2KB) are only supported with Browser login (Alpacon Cloud workspaces).\n" +
+					"Your current authentication is Token. Shorten the command, " +
+					"or upload a script with 'alpacon cp' and run it with 'alpacon exec'.")
+				return
+			}
+			runOversizedCommand(alpaconClient, parsed, env, workSessionID, authMethod)
+			return
+		}
+
 		if parsed.Detach {
 			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod)
 			return
