@@ -164,6 +164,7 @@ Available Commands:
   completion   Generate the autocompletion script for the specified shell
   cp           Copy files between local and remote locations
   csr          Manage certificate signing requests (CSRs)
+  edit         Edit a remote file with your local editor
   event        Retrieve and display recent Alpacon events
   exec         Execute a command on a remote server
   group        Manage groups, members, and permissions
@@ -453,6 +454,10 @@ $ alpacon cp /Users/alpacon.txt myserver:/home/alpacon/
 
 # Download files
 $ alpacon cp myserver:/home/alpacon/alpacon.txt .
+
+# Edit a remote file with your local editor
+$ alpacon edit myserver:/etc/nginx/nginx.conf
+# Saving overwrites the remote file; its ownership and permissions may be reset according to server policy.
 
 # To use a specified username and groupname for the transfer:
 $ alpacon cp -u [USER NAME] -g [GROUP NAME] [SOURCE] [DESTINATION]
