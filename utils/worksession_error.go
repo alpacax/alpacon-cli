@@ -96,7 +96,8 @@ func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, acti
 
 func targetServerList(serverName string) []string {
 	if serverName == "" {
-		return nil
+		// Return an empty array (not nil) so the JSON field type stays a stable array.
+		return []string{}
 	}
 	return []string{serverName}
 }

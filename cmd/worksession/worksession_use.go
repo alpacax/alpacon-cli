@@ -76,9 +76,9 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
-		message := activeWorkSessionSetMessage("", args[0], ws.Description)
+		message := activeWorkSessionSetMessage("", ws.ID, ws.Description)
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			active := args[0]
+			active := ws.ID
 			printWorkSessionMutationJSON(newWorkSessionMutationOutput("use", message, ws, &active))
 			return
 		}
@@ -105,7 +105,9 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if ws.Status != activeWorkSessionStatus {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
 	}
-	if err := config.SetActiveWorkSession(uuid); err != nil {
+	// Persist the canonical ID from the API rather than the raw argument so config
+	// stays consistent with server-side canonicalization and the printed JSON fields.
+	if err := config.SetActiveWorkSession(ws.ID); err != nil {
 		return nil, err
 	}
 	return ws, nil
