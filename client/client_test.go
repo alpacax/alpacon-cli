@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +48,20 @@ func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
 	assert.ErrorContains(t, err, "authentication failed")
 }
 
+func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "authentication failed")
+	assert.NotContains(t, err.Error(), "{}")
+}
+
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -60,6 +75,27 @@ func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	assert.ErrorContains(t, err, "missing scope: sudo")
 }
 
+func TestSendRequest_403PreservesWorkSessionCodeAndSource(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{
+			"code": "work_session_required",
+			"source": "command",
+			"detail": "WorkSession required"
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "WorkSession required")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.WorkSessionRequired, code)
+	assert.Equal(t, "command", source)
+}
+
 func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -69,6 +105,35 @@ func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	assert.ErrorContains(t, err, "permission denied")
+}
+
+func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": ""}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "detail:")
+}
+
+func TestSendRequest_403CodeWithoutDetailFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "some_code", "source": "command"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	// No "detail" -> must not leak the raw JSON body as the message.
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "some_code")
 }
 
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -20,6 +21,43 @@ const (
 // OutputFormat holds the value of the --output persistent flag.
 // Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
+
+type JSONErrorEnvelope[T any] struct {
+	OK          bool     `json:"ok"`
+	ExitCode    int      `json:"exit_code,omitempty"`
+	ErrorCode   string   `json:"error_code,omitempty"`
+	Message     string   `json:"message"`
+	Reason      string   `json:"reason,omitempty"`
+	Context     T        `json:"context,omitempty"`
+	NextActions []string `json:"next_actions,omitempty"`
+}
+
+func FormatJSON(value any) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(value); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(buf.String(), "\n"), nil
+}
+
+func PrintJSONValue(w io.Writer, value any) error {
+	rendered, err := FormatJSON(value)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, rendered)
+	return err
+}
+
+func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
+	envelope.OK = false
+	if err := PrintJSONValue(w, envelope); err != nil {
+		_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":%q}`+"\n", envelope.ErrorCode)
+	}
+}
 
 func PrintTable(slice any) {
 	s := reflect.ValueOf(slice)
