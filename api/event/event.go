@@ -233,14 +233,19 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		return runCommandFallbackFromID(ac, cmdResp.ID, out, err)
 	}
 
-	// Warm-fire: drain any chunks already persisted.
+	// Warm-fire: drain any chunks already persisted. Advance lastSeq only over
+	// contiguous seqs and stop at the first gap, so a later chunk filling that
+	// gap (e.g. arriving over the WS) is still written instead of being skipped
+	// as a duplicate. The chunks past the gap are picked up in order once the
+	// gap is filled (via applyChunk) or by the terminal drain.
 	lastSeq := -1
 	if existing, err := GetCommandChunks(ac, cmdResp.ID, 0); err == nil {
 		for _, c := range existing {
-			_, _ = fmt.Fprint(out, c.Content)
-			if c.Seq > lastSeq {
-				lastSeq = c.Seq
+			if c.Seq != lastSeq+1 {
+				break
 			}
+			_, _ = fmt.Fprint(out, c.Content)
+			lastSeq = c.Seq
 		}
 	}
 

@@ -639,6 +639,38 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
 
+// TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk guards against
+// advancing lastSeq past a gap during the warm-fire drain. If the persisted
+// chunks contain a hole (seq 0,1,3 with 2 missing), lastSeq must stop at the
+// last contiguous seq (1) so a later seq 2 arriving over the WS is still
+// written rather than skipped as a duplicate. seq 3 is then filled by the
+// terminal drain in order.
+func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// seq 2 is absent from the persisted set; it arrives only over the WS.
+		wsChunks: []ChunkEvent{{Seq: 2, Content: "s2\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			persisted := []Chunk{{Seq: 0, Content: "s0\n"}, {Seq: 1, Content: "s1\n"}, {Seq: 3, Content: "s3\n"}}
+			var out []Chunk
+			for _, c := range persisted {
+				if c.Seq >= fromSeq {
+					out = append(out, c)
+				}
+			}
+			return out
+		},
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
+}
+
 func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
