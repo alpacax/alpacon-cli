@@ -65,6 +65,23 @@ func GetServerDetail(ac *client.AlpaconClient, serverName string) ([]byte, error
 	return body, nil
 }
 
+// GetServerPlatform returns the server's platform string (e.g. "debian",
+// "rhel", "darwin", "windows"). May be empty when os_info is unavailable or
+// the agent is too old to report it.
+func GetServerPlatform(ac *client.AlpaconClient, serverName string) (string, error) {
+	body, err := GetServerDetail(ac, serverName)
+	if err != nil {
+		return "", err
+	}
+
+	var detail ServerDetails
+	if err := json.Unmarshal(body, &detail); err != nil {
+		return "", err
+	}
+
+	return detail.Platform, nil
+}
+
 func DeleteServer(ac *client.AlpaconClient, serverName string) error {
 	serverID, err := GetServerIDByName(ac, serverName)
 	if err != nil {
