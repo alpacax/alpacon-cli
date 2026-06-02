@@ -56,6 +56,33 @@ func TestSplitEditorCommandPreservesEmptyQuotedArgument(t *testing.T) {
 	assert.Equal(t, []string{"emacsclient", "-a", "", "-c"}, parts)
 }
 
+func TestGuiEditorWaitWarning(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		warn  bool
+	}{
+		{name: "gui editor without wait flag", input: "code", warn: true},
+		{name: "gui editor full path without wait flag", input: "/usr/local/bin/code", warn: true},
+		{name: "gui editor with --wait", input: "code --wait", warn: false},
+		{name: "gui editor with -w", input: "subl -w", warn: false},
+		{name: "terminal editor", input: "vim", warn: false},
+		{name: "terminal editor with args", input: "nano -w", warn: false},
+		{name: "empty command", input: "", warn: false},
+		{name: "unmatched quote", input: `code "--wait`, warn: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			warning := guiEditorWaitWarning(tc.input)
+			if tc.warn {
+				assert.NotEmpty(t, warning)
+			} else {
+				assert.Empty(t, warning)
+			}
+		})
+	}
+}
+
 func TestParseEditTarget(t *testing.T) {
 	target, err := parseEditTarget("root@prod:/etc/nginx/nginx.conf", "")
 	require.NoError(t, err)

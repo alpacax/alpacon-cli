@@ -22,6 +22,22 @@ import (
 
 const maxEditPromptSize int64 = 10 * 1024 * 1024
 
+// guiEditors are editors that, without a wait flag, spawn a window and return
+// immediately—so edit would hash an unchanged file and skip the upload.
+var guiEditors = map[string]bool{
+	"code":          true,
+	"code-insiders": true,
+	"codium":        true,
+	"vscodium":      true,
+	"cursor":        true,
+	"windsurf":      true,
+	"subl":          true,
+	"sublime_text":  true,
+	"atom":          true,
+	"mate":          true,
+	"zed":           true,
+}
+
 var EditCmd = &cobra.Command{
 	Use:   "edit [USER@]SERVER:PATH",
 	Short: "Edit a remote file with your local editor",
@@ -189,6 +205,28 @@ func resolveEditor(flagValue string) string {
 	return "vi"
 }
 
+// guiEditorWaitWarning returns a warning when the resolved editor is a known GUI
+// editor invoked without a wait flag. Such editors return before the user saves,
+// so the before/after hash is unchanged and edit reports "No changes" and skips
+// the upload—the classic git core.editor footgun.
+func guiEditorWaitWarning(editor string) string {
+	parts, err := splitEditorCommand(editor)
+	if err != nil || len(parts) == 0 {
+		return ""
+	}
+	name := strings.ToLower(filepath.Base(parts[0]))
+	name = strings.TrimSuffix(name, ".exe")
+	if !guiEditors[name] {
+		return ""
+	}
+	for _, arg := range parts[1:] {
+		if arg == "-w" || arg == "--wait" {
+			return ""
+		}
+	}
+	return fmt.Sprintf("'%s' looks like a GUI editor launched without a wait flag; it may return before you save, so changes would not be uploaded. Add a wait flag, e.g. --editor \"%s --wait\"", name, name)
+}
+
 func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 	deps = normalizeEditDeps(deps)
 	tempPath, err := editTempPath(deps.tempRoot, opts.Target)
@@ -229,7 +267,11 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		return result, err
 	}
 
-	editorErr := deps.runEditor(resolveEditor(opts.Editor), result.TempPath)
+	editor := resolveEditor(opts.Editor)
+	if warning := guiEditorWaitWarning(editor); warning != "" {
+		utils.CliWarning("%s", warning)
+	}
+	editorErr := deps.runEditor(editor, result.TempPath)
 
 	after, err := hashFile(result.TempPath)
 	if err != nil {
