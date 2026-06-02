@@ -354,18 +354,20 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	return executeBulkUpload(ac, request, readers, sizes)
 }
 
-// UploadContent uploads an in-memory byte payload to remoteDir/name on the
-// named server, reusing the single-file upload pipeline. workSessionID is
-// optional; when non-empty it is attached to the request body.
-func UploadContent(ac *client.AlpaconClient, serverName, remoteDir, name string, content []byte, username, groupname string, allowOverwrite bool, workSessionID string) error {
+// UploadContent uploads an in-memory byte payload to remotePath on the named
+// server, reusing the single-file upload pipeline. remotePath is the full
+// destination path including the filename (cp semantics: the server writes to
+// Path). workSessionID is optional; when non-empty it is attached to the
+// request body.
+func UploadContent(ac *client.AlpaconClient, serverName, remotePath string, content []byte, username, groupname string, allowOverwrite bool, workSessionID string) error {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return err
 	}
 
 	request := &UploadRequest{
-		Name:           name,
-		Path:           remoteDir,
+		Name:           filepath.Base(remotePath),
+		Path:           remotePath,
 		Server:         serverID,
 		Username:       username,
 		Groupname:      groupname,

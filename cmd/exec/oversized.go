@@ -90,7 +90,7 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 	utils.CliInfo("Command exceeds 2KB; uploading via temporary file...")
 
 	upload := func() error {
-		return ftp.UploadContent(ac, parsed.Server, tempScriptDir, tempScriptName(id),
+		return ftp.UploadContent(ac, parsed.Server, scriptPath,
 			[]byte(parsed.Command), parsed.Username, parsed.Groupname, true, workSessionID)
 	}
 

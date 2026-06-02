@@ -1213,11 +1213,11 @@ func TestUploadContent(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	content := []byte("echo hello\n")
-	err := UploadContent(ac, "my-server", "/tmp", ".alpacon-exec-abc.sh", content, "root", "alpacon", true, "ws-1")
+	err := UploadContent(ac, "my-server", "/tmp/.alpacon-exec-abc.sh", content, "root", "alpacon", true, "ws-1")
 	require.NoError(t, err)
 
 	assert.Equal(t, ".alpacon-exec-abc.sh", uploadReq.Name)
-	assert.Equal(t, "/tmp", uploadReq.Path)
+	assert.Equal(t, "/tmp/.alpacon-exec-abc.sh", uploadReq.Path)
 	assert.Equal(t, "srv-1", uploadReq.Server)
 	assert.Equal(t, "root", uploadReq.Username)
 	assert.Equal(t, "alpacon", uploadReq.Groupname)
