@@ -24,8 +24,9 @@ const inlineCommandLimit = 2048
 const tempScriptDir = "/tmp"
 
 // exceedsInlineLimit reports whether command is too large to send inline.
-// Byte-based (len), a strict subset of the server's char-based max_length: the
-// CLI only ever bypasses early, never late.
+// Byte-based (len) while the server's max_length is char-based; since byte
+// length >= rune count, the CLI may bypass slightly before the server's char
+// limit but never after, which is the safe direction.
 func exceedsInlineLimit(command string) bool {
 	return len(command) > inlineCommandLimit
 }
@@ -115,6 +116,10 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 		}
 	}
 
+	// The wrapper deletes the script after running it (rm -f inside the
+	// wrapper). If command submission fails before the agent runs the wrapper,
+	// the temp script is left on the server; it is a unique dotfile under /tmp
+	// and reaped by normal tmp cleanup.
 	wrapper := wrapScriptCommand(scriptPath)
 
 	if parsed.Detach {

@@ -25,6 +25,9 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon exec server 'echo hello;world'
 
+Commands larger than 2KB are uploaded to the server as a temporary file and
+executed under POSIX sh (Browser login / Alpacon Cloud workspaces only).
+
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
@@ -105,7 +108,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			if err != nil || !isSaaS {
 				utils.CliErrorWithExit("Large commands (>2KB) are only supported with Browser login (Alpacon Cloud workspaces).\n" +
 					"Your current authentication is Token. Shorten the command, " +
-					"or upload a script with 'alpacon cp' and run it with 'alpacon exec'.")
+					"or upload a script with 'alpacon cp' and run the uploaded script with a short 'alpacon exec' command.")
 				return
 			}
 			runOversizedCommand(alpaconClient, parsed, env, workSessionID, authMethod)
