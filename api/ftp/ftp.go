@@ -1,6 +1,7 @@
 package ftp
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -351,6 +352,28 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		readers[i] = readOnly{f}
 	}
 	return executeBulkUpload(ac, request, readers, sizes)
+}
+
+// UploadContent uploads an in-memory byte payload to remoteDir/name on the
+// named server, reusing the single-file upload pipeline. workSessionID is
+// optional; when non-empty it is attached to the request body.
+func UploadContent(ac *client.AlpaconClient, serverName, remoteDir, name string, content []byte, username, groupname string, allowOverwrite bool, workSessionID string) error {
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return err
+	}
+
+	request := &UploadRequest{
+		Name:           name,
+		Path:           remoteDir,
+		Server:         serverID,
+		Username:       username,
+		Groupname:      groupname,
+		AllowOverwrite: allowOverwrite,
+		WorkSession:    workSessionID,
+	}
+
+	return executeSingleUpload(ac, request, bytes.NewReader(content), int64(len(content)))
 }
 
 func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {

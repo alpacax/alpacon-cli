@@ -22,6 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// serverIDResult is a minimal projection matching the fields GetServerIDByName
+// reads from the server search response.
+type serverIDResult struct {
+	ID string `json:"id"`
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 func createTestZip(t *testing.T, files map[string]string) []byte {
@@ -1170,4 +1176,53 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUploadContent(t *testing.T) {
+	var uploadReq UploadRequest
+	var s3Body []byte
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Query().Get("name") != "":
+			// GetServerIDByName name->ID resolution
+			_ = json.NewEncoder(w).Encode(api.ListResponse[serverIDResult]{
+				Count:   1,
+				Results: []serverIDResult{{ID: "srv-1"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+			_ = json.NewDecoder(r.Body).Decode(&uploadReq)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(UploadResponse{
+				ID:        "up-1",
+				Name:      uploadReq.Name,
+				UploadURL: "http://" + r.Host + "/s3/up-1",
+			})
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/s3/"):
+			s3Body, _ = io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	content := []byte("echo hello\n")
+	err := UploadContent(ac, "my-server", "/tmp", ".alpacon-exec-abc.sh", content, "root", "alpacon", true, "ws-1")
+	require.NoError(t, err)
+
+	assert.Equal(t, ".alpacon-exec-abc.sh", uploadReq.Name)
+	assert.Equal(t, "/tmp", uploadReq.Path)
+	assert.Equal(t, "srv-1", uploadReq.Server)
+	assert.Equal(t, "root", uploadReq.Username)
+	assert.Equal(t, "alpacon", uploadReq.Groupname)
+	assert.True(t, uploadReq.AllowOverwrite)
+	assert.False(t, uploadReq.AllowUnzip)
+	assert.Equal(t, "ws-1", uploadReq.WorkSession)
+	assert.Equal(t, content, s3Body)
 }
