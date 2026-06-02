@@ -2,7 +2,6 @@ package event
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -30,7 +29,6 @@ type ChunkEvent struct {
 // Lifecycle: NewCommandOutputListener -> Start -> (consume Chunks) -> Stop.
 // Stop is idempotent and safe to call from any goroutine.
 type CommandOutputListener struct {
-	ac          *client.AlpaconClient
 	wsURL       string
 	wsHeader    http.Header
 	commandID   string
@@ -96,7 +94,6 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 		header = http.Header{}
 	}
 	return &CommandOutputListener{
-		ac:        ac,
 		wsURL:     wsURL,
 		wsHeader:  header,
 		commandID: commandID,
@@ -156,8 +153,7 @@ func (l *CommandOutputListener) listenLoop() {
 		default:
 		}
 
-		connected, _ := l.connectAndListen()
-		if connected {
+		if l.connectAndListen() {
 			delay = commandOutputReconnectBase
 		}
 
@@ -173,11 +169,13 @@ func (l *CommandOutputListener) listenLoop() {
 	}
 }
 
-func (l *CommandOutputListener) connectAndListen() (connected bool, err error) {
+// connectAndListen dials, reads frames until the connection drops or Stop is
+// called, and returns whether a connection was established (to reset backoff).
+func (l *CommandOutputListener) connectAndListen() (connected bool) {
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, dialErr := dialer.Dial(l.wsURL, l.wsHeader)
 	if dialErr != nil {
-		return false, fmt.Errorf("event websocket connection failed: %w", dialErr)
+		return false
 	}
 
 	l.mu.Lock()
@@ -196,17 +194,12 @@ func (l *CommandOutputListener) connectAndListen() (connected bool, err error) {
 	for {
 		select {
 		case <-l.done:
-			return true, nil
+			return true
 		default:
 		}
 		_, message, readErr := conn.ReadMessage()
 		if readErr != nil {
-			select {
-			case <-l.done:
-				return true, nil
-			default:
-			}
-			return true, fmt.Errorf("event websocket read error: %w", readErr)
+			return true
 		}
 		l.handleMessage(message)
 	}

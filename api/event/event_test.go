@@ -604,85 +604,13 @@ func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptes
 
 func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
-	cmdID := "cmd-uuid"
-
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	// Closed on the subscription POST to signal the WS server it may emit chunks.
-	subscribed := make(chan struct{})
-	var wsURL string
-
-	// WS server: wait for subscription then emit two chunks
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		require.NoError(t, err)
-		defer func() { _ = conn.Close() }()
-		// Wait until the subscriber has called setCommandID before sending chunks.
-		select {
-		case <-subscribed:
-		case <-time.After(10 * time.Second):
-			t.Error("timeout waiting for subscription signal")
-			return
-		}
-		for _, c := range []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}} {
-			env := map[string]any{
-				"event_type": "command_output",
-				"payload":    map[string]any{"command_id": cmdID, "seq": c.Seq, "content": c.Content},
-			}
-			b, _ := json.Marshal(env)
-			_ = conn.WriteMessage(websocket.TextMessage, b)
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}))
-	defer wsServer.Close()
-	wsURL = "ws" + strings.TrimPrefix(wsServer.URL, "http")
-
-	var pollCount int
-	var mu sync.Mutex
-	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-uuid","name":"srv"}]}`))
-		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch-uuid"}`))
-		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
-		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-			// Signal the WS server that setCommandID has been called (happens before SubscribeCommandOutput).
-			select {
-			case <-subscribed:
-			default:
-				close(subscribed)
-			}
-		case r.URL.Path == "/api/events/commands/"+cmdID+"/chunks/" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
-		case r.URL.Path == "/api/events/commands/"+cmdID+"/" && r.Method == http.MethodGet:
-			mu.Lock()
-			pollCount++
-			n := pollCount
-			mu.Unlock()
-			// Stay running for first 2 polls, then success
-			if n < 3 {
-				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
-			} else {
-				success := true
-				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: ""}
-				_ = json.NewEncoder(w).Encode(resp)
-			}
-		default:
-			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer apiServer.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
 
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
@@ -691,95 +619,20 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
-	cmdID := "cmd-uuid"
-	serverID := "srv-uuid"
-
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	subscribed := make(chan struct{})
-	var subOnce sync.Once
-
-	// WS emits seq 0 and seq 3 (gap)
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		require.NoError(t, err)
-		defer func() { _ = conn.Close() }()
-		select {
-		case <-subscribed:
-		case <-time.After(10 * time.Second):
-			t.Errorf("ws: timed out waiting for subscribed signal")
-			return
-		}
-		for _, seq := range []int{0, 3} {
-			env := map[string]any{
-				"event_type": "command_output",
-				"payload":    map[string]any{"command_id": cmdID, "seq": seq, "content": fmt.Sprintf("s%d\n", seq)},
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// WS delivers seq 0 then 3; the missing 1,2 come from the gap-fill fetch.
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}, {Seq: 3, Content: "s3\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			if fromSeq == 1 {
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}}
 			}
-			b, _ := json.Marshal(env)
-			_ = conn.WriteMessage(websocket.TextMessage, b)
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}))
-	defer wsServer.Close()
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
-
-	var chunkRequests int
-	var pollCount int
-	var mu sync.Mutex
-	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
-		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
-		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
-		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
-			subOnce.Do(func() { close(subscribed) })
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case r.URL.Path == "/api/events/commands/"+cmdID+"/chunks/" && r.Method == http.MethodGet:
-			mu.Lock()
-			chunkRequests++
-			n := chunkRequests
-			mu.Unlock()
-			// First call (warm-fire) → empty.
-			// Subsequent (gap fill at seq>=1) → return seq 1 and 2.
-			if n == 1 {
-				_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
-				return
-			}
-			resp := api.ListResponse[Chunk]{
-				Count: 2,
-				Results: []Chunk{
-					{Seq: 1, Content: "s1\n"},
-					{Seq: 2, Content: "s2\n"},
-				},
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-		case r.URL.Path == "/api/events/commands/"+cmdID+"/" && r.Method == http.MethodGet:
-			mu.Lock()
-			pollCount++
-			n := pollCount
-			mu.Unlock()
-			if n < 3 {
-				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
-			} else {
-				success := true
-				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success}
-				_ = json.NewEncoder(w).Encode(resp)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer apiServer.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+			return nil
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
 
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
@@ -788,77 +641,19 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 
 func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
-	cmdID := "cmd-uuid"
-	serverID := "srv-uuid"
-
-	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
-	subscribed := make(chan struct{})
-	var subOnce sync.Once
-
-	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		require.NoError(t, err)
-		defer func() { _ = conn.Close() }()
-		select {
-		case <-subscribed:
-		case <-time.After(10 * time.Second):
-			t.Errorf("ws: timed out waiting for subscribed signal")
-			return
-		}
-		// Emit 0, 1, 1, 2 — second 1 must be dropped
-		for _, seq := range []int{0, 1, 1, 2} {
-			env := map[string]any{
-				"event_type": "command_output",
-				"payload":    map[string]any{"command_id": cmdID, "seq": seq, "content": fmt.Sprintf("s%d\n", seq)},
-			}
-			b, _ := json.Marshal(env)
-			_ = conn.WriteMessage(websocket.TextMessage, b)
-		}
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}))
-	defer wsServer.Close()
-	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
-
-	var pollCount int
-	var mu sync.Mutex
-	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/servers/servers/":
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
-		case "/api/events/sessions/":
-			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
-		case "/api/events/commands/":
-			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
-		case "/api/events/subscriptions/":
-			subOnce.Do(func() { close(subscribed) })
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{}`))
-		case "/api/events/commands/" + cmdID + "/chunks/":
-			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
-		case "/api/events/commands/" + cmdID + "/":
-			mu.Lock()
-			pollCount++
-			n := pollCount
-			mu.Unlock()
-			if n < 3 {
-				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
-			} else {
-				success := true
-				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success}
-				_ = json.NewEncoder(w).Encode(resp)
-			}
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer apiServer.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// The second seq 1 must be dropped.
+		wsChunks: []ChunkEvent{
+			{Seq: 0, Content: "s0\n"},
+			{Seq: 1, Content: "s1\n"},
+			{Seq: 1, Content: "s1\n"},
+			{Seq: 2, Content: "s2\n"},
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
 
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
