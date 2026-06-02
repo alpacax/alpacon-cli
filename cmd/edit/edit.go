@@ -35,7 +35,7 @@ Interactive browser login requires an active WorkSession with the webftp scope.
 The file is downloaded in full before editing; files larger than 10 MB prompt
 for confirmation (skipped with --force) before opening in the editor.`,
 	Example: `  alpacon edit my-server:/etc/nginx/nginx.conf
-  alpacon edit root@my-server:/etc/nginx/nginx.conf --editor "code --wait"
+  alpacon edit my-server:/etc/nginx/nginx.conf --editor "code --wait"
   alpacon edit my-server:/var/log/large.txt --force`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
