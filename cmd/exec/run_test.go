@@ -47,19 +47,17 @@ func TestRemoteCommandOutcome(t *testing.T) {
 	tests := []struct {
 		name             string
 		remoteErr        *event.RemoteCommandError
-		wantStdoutLine   string
 		wantStderrEmpty  bool
 		wantStderrPhrase string
 		wantExitCode     int
 	}{
 		{
-			name: "result_and_phase_propagate_exit_124",
+			name: "phase_propagates_exit_124",
 			remoteErr: &event.RemoteCommandError{
 				Output:     "command timed out",
 				ExitCode:   124,
 				ErrorPhase: "remote_command_exceeded_timeout",
 			},
-			wantStdoutLine:   "command timed out",
 			wantStderrPhrase: "remote_command_exceeded_timeout",
 			wantExitCode:     124,
 		},
@@ -70,29 +68,24 @@ func TestRemoteCommandOutcome(t *testing.T) {
 				ExitCode:   23,
 				ErrorPhase: "",
 			},
-			wantStdoutLine:  "rsync: some files vanished",
 			wantStderrEmpty: true,
 			wantExitCode:    23,
 		},
 		{
-			name: "empty_result_with_phase_still_emits_stderr",
+			name: "phase_still_emits_stderr",
 			remoteErr: &event.RemoteCommandError{
-				Output:     "",
 				ExitCode:   1,
 				ErrorPhase: "agent_timeout",
 			},
-			wantStdoutLine:   "",
 			wantStderrPhrase: "agent_timeout",
 			wantExitCode:     1,
 		},
 		{
-			name: "legacy_fallback_exit_1_no_phase",
+			name: "exit_1_no_phase",
 			remoteErr: &event.RemoteCommandError{
-				Output:     "boom",
 				ExitCode:   1,
 				ErrorPhase: "",
 			},
-			wantStdoutLine:  "boom",
 			wantStderrEmpty: true,
 			wantExitCode:    1,
 		},
@@ -100,9 +93,8 @@ func TestRemoteCommandOutcome(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(tt.remoteErr)
+			stderrLine, exitCode := remoteCommandOutcome(tt.remoteErr)
 
-			assert.Equal(t, tt.wantStdoutLine, stdoutLine, "stdout line should match")
 			assert.Equal(t, tt.wantExitCode, exitCode, "exit code should match")
 
 			if tt.wantStderrEmpty {

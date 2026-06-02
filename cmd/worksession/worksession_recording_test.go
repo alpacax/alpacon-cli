@@ -121,4 +121,3 @@ func TestRecordingPreview_EmptyRaw(t *testing.T) {
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
 	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
 }
-

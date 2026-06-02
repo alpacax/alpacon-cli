@@ -863,7 +863,9 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 }
 
 // TestRunCommandStreaming_NoDuplicateOutputOnFailure guards the duplicate-output
-// fix: a failed command's buffered Result must not be reprinted after streaming.
+// fix: a failed command's buffered Result must not be re-written to stdout after
+// the chunks were already streamed. The Result is still carried on the error so
+// cmd/exec can inspect it (e.g. for the sudo-denial hint) without reprinting.
 func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -876,11 +878,12 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 
+	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
-	// Output must be cleared so cmd/exec does not reprint it.
+	// Retained on the error for inspection (cmd/exec must not reprint it).
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
-	assert.Equal(t, "", remoteErr.Output, "buffered result must be cleared to prevent duplicate output")
+	assert.Equal(t, "hello\nworld\n", remoteErr.Output)
 }
 
 // TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil

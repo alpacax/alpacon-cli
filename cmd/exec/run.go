@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -11,6 +12,32 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// sudoNoWorksessionPolicyCode is the server error code surfaced in command
+// output when a non-interactive sudo is denied for lack of a matching
+// MFA-bypass policy in the work session. Kept in sync with
+// alpacon-server utils/error_codes.py ErrorCode.SUDO_NO_WORKSESSION_POLICY.
+//
+// The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
+// codes through its sanitizer into the user-facing denial message; lowercase
+// values are dropped, so this is the form that actually reaches stderr as
+// "Permission denied (SUDO_NO_WORKSESSION_POLICY)".
+const sudoNoWorksessionPolicyCode = "SUDO_NO_WORKSESSION_POLICY"
+
+// sudoDenialHint returns actionable guidance when the command output shows a
+// non-interactive sudo denial, telling the caller how to authorize the command
+// via their work session. Returns "" when no such denial is present.
+func sudoDenialHint(output string) string {
+	if !strings.Contains(output, sudoNoWorksessionPolicyCode) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"%s sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n"+
+			"Add it and re-run (omit SESSION_ID to use the active session):\n"+
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
+		utils.Yellow("Hint:"),
+	)
+}
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
 // handling and retry logic, streaming output to stdout. Used by exec and websh.
@@ -48,18 +75,19 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 	return nil
 }
 
-// HandleCommandResult exits appropriately on error. Chunks are already streamed
-// to stdout during execution, so no result string is needed.
+// HandleCommandResult exits appropriately on error. Output is streamed to stdout
+// during execution; on a remote failure the error carries that output, used here
+// only to surface the sudo-denial hint (not re-printed).
 func HandleCommandResult(err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(remoteErr)
-			if stdoutLine != "" {
-				fmt.Println(stdoutLine)
-			}
+			stderrLine, exitCode := remoteCommandOutcome(remoteErr)
 			if stderrLine != "" {
 				fmt.Fprint(os.Stderr, stderrLine)
+			}
+			if hint := sudoDenialHint(remoteErr.Output); hint != "" {
+				fmt.Fprint(os.Stderr, hint)
 			}
 			os.Exit(exitCode)
 		}
@@ -99,17 +127,15 @@ func detachResultLines(jobID string) (string, string) {
 		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)
 }
 
-// remoteCommandOutcome is the testable core of HandleCommandResult's
-// RemoteCommandError branch. stderrLine already includes its trailing newline.
-func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {
-	if remoteErr.Output != "" {
-		stdoutLine = remoteErr.Output
-	}
+// remoteCommandOutcome renders the stderr phase line and exit code for a remote
+// command failure. The command's stdout was already streamed during execution,
+// so it is not re-emitted here. stderrLine already includes its trailing newline.
+func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
 	if remoteErr.ErrorPhase != "" {
 		stderrLine = fmt.Sprintf("%s: [%s] %s\n",
 			utils.Red("Error"),
 			remoteErr.ErrorPhase,
 			event.DescribePhase(remoteErr.ErrorPhase))
 	}
-	return stdoutLine, stderrLine, remoteErr.ExitCode
+	return stderrLine, remoteErr.ExitCode
 }

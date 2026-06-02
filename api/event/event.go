@@ -262,9 +262,8 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		case details := <-pollResult:
 			_ = drainRemainingChunks(ac, cmdResp.ID, lastSeq, out)
 			listener.Stop()
-			// Chunks are already streamed; clear so errorFromDetails doesn't
-			// return the result again and cause a reprint.
-			details.Result = ""
+			// Output is already streamed; errorFromDetails keeps it on the error
+			// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
 			return errorFromDetails(details)
 		case err := <-pollErr:
 			listener.Stop()
@@ -368,8 +367,6 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	}
 	if details.Result != "" {
 		_, _ = fmt.Fprint(out, details.Result)
-		// Clear so errorFromDetails doesn't return it again and cause a reprint.
-		details.Result = ""
 	}
 	return errorFromDetails(details)
 }
