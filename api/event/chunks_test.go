@@ -48,6 +48,32 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	assert.Contains(t, capturedQuery, "ordering=seq")
 }
 
+// TestGetCommandOutput_ConcatenatesChunksInSeqOrder verifies the full output is
+// reconstructed from chunks in seq order regardless of server ordering.
+func TestGetCommandOutput_ConcatenatesChunksInSeqOrder(t *testing.T) {
+	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := api.ListResponse[Chunk]{
+			Count: 3,
+			Results: []Chunk{
+				{Seq: 1, Content: "b\n"},
+				{Seq: 0, Content: "a\n"},
+				{Seq: 2, Content: "c\n"},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	got, err := GetCommandOutput(ac, cmdID)
+	require.NoError(t, err)
+	assert.Equal(t, "a\nb\nc\n", got)
+}
+
 // TestGetCommandChunks_SortsBySeq verifies out-of-order server results are
 // returned sorted by seq.
 func TestGetCommandChunks_SortsBySeq(t *testing.T) {

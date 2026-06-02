@@ -3,6 +3,7 @@ package event
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -29,4 +30,20 @@ func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq int) ([]Ch
 	}
 	sort.Slice(chunks, func(i, j int) bool { return chunks[i].Seq < chunks[j].Seq })
 	return chunks, nil
+}
+
+// GetCommandOutput reconstructs the full command output from its chunks in seq
+// order. Empty when no chunks were produced. Used by paths that don't stream
+// live (polling fallback, exec logs) where Result is empty under the chunk
+// contract.
+func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
+	chunks, err := GetCommandChunks(ac, cmdID, 0)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, c := range chunks {
+		b.WriteString(c.Content)
+	}
+	return b.String(), nil
 }

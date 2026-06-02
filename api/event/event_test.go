@@ -786,6 +786,9 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 		case "/api/events/subscriptions/":
 			// Force subscribe failure -> fallback path with existing cmdID
 			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			// No chunks persisted: fallback must use the buffered Result.
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
 		case "/api/events/commands/" + cmdID + "/":
 			mu.Lock()
 			pollCount++
@@ -816,6 +819,52 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 	assert.Equal(t, 1, submitCount, "fallback must not re-submit the command")
 }
 
+// TestRunCommandStreaming_FallbackDrainsChunks guards that the polling fallback
+// reconstructs output from chunks when the server leaves Result empty (the
+// chunk-streaming contract), instead of silently dropping it.
+func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			w.WriteHeader(http.StatusInternalServerError) // force fallback
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			resp := api.ListResponse[Chunk]{Count: 2, Results: []Chunk{{Seq: 0, Content: "chunk-a\n"}, {Seq: 1, Content: "chunk-b\n"}}}
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				// Result empty: output lives only in chunks (server contract).
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: cmdID, Status: "completed", Success: boolPtr(true), Result: ""})
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
+}
+
 func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
@@ -833,6 +882,9 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			// No chunks persisted: fallback must use the buffered Result.
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
 		case "/api/events/commands/" + cmdID + "/":
 			mu.Lock()
 			pollCount++

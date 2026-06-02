@@ -380,7 +380,9 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if err != nil {
 		return err
 	}
-	if details.Result != "" {
+	// Output lives in chunks under the streaming contract (Result is empty), so
+	// drain them; fall back to Result only when no chunks were produced.
+	if lastSeq := drainRemainingChunks(ac, cmdID, -1, out); lastSeq < 0 && details.Result != "" {
 		_, _ = fmt.Fprint(out, details.Result)
 	}
 	return errorFromDetails(details)
