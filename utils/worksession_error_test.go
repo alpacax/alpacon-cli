@@ -2,6 +2,7 @@ package utils
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,18 +30,19 @@ func TestIsWorkSessionCode(t *testing.T) {
 
 func TestBuildWorkSessionDiagnostic(t *testing.T) {
 	tests := []struct {
-		code       string
-		wantReason string
-		wantNext   string
-		hasCreate  bool // suggests 'work-session create', which must carry an expiry flag
+		code          string
+		wantReason    string
+		wantNext      string
+		hasCreate     bool // suggests 'create --use', which must carry an expiry flag
+		reuseVsCreate bool // distinguishes reuse (use) vs create-and-attach paths
 	}{
-		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true},
-		{WorkSessionNotActive, "not yet active", "work-session current", false},
-		{WorkSessionExpired, "has expired", "work-session extend", true},
-		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true},
-		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false},
-		{WorkSessionNotUsable, "no longer usable", "work-session create", true},
+		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
+		{WorkSessionNotActive, "not yet active", "work-session current", false, false},
+		{WorkSessionExpired, "has expired", "work-session extend", true, false},
+		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
+		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false, false},
+		{WorkSessionNotUsable, "no longer usable", "work-session create", true, true},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +57,12 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 			assert.Contains(t, got, "Note:")
 			if tt.hasCreate {
 				assert.Contains(t, got, "--expires-in")
+				assert.Contains(t, got, "--use")
+			}
+			if tt.reuseVsCreate {
+				assert.Contains(t, got, "alpacon work-session use <ID>")
+				assert.Contains(t, got, "reuse an existing")
+				assert.Contains(t, got, "create a new")
 			}
 		})
 	}
@@ -118,7 +126,8 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	// so the placeholder must NOT be substituted even when activeWS is known.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
 
-	assert.Contains(t, envelope.NextActions, "alpacon work-session use <ID>")
+	// The use action carries an inline comment, so match as a substring.
+	assert.Contains(t, strings.Join(envelope.NextActions, "\n"), "alpacon work-session use <ID>")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
