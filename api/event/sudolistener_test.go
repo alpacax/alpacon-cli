@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -241,6 +242,11 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "/api/sudo/grants/grant-123/verify/")
+
+		// Verify carries no payload — the server resolves MFA from the
+		// MFACompletion record, so the body must stay empty.
+		body, _ := io.ReadAll(r.Body)
+		assert.JSONEq(t, "{}", string(body))
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)

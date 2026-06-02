@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -231,6 +232,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 
 	grantID := event.Payload.SudoGrantID
 	if grantID == "" {
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA event is missing a grant ID; cannot verify. This likely indicates a server/CLI version mismatch.\033[0m\r\n")
 		return
 	}
 
@@ -269,7 +271,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	}
 
 	if err := sl.verifySudoGrant(grantID); err != nil {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo approval failed: %s\033[0m\r\n", err)
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
 		return
 	}
 }
@@ -298,9 +300,11 @@ func (sl *SudoListener) pollMFACompletion() bool {
 }
 
 func (sl *SudoListener) verifySudoGrant(grantID string) error {
-	url := fmt.Sprintf(sudoVerifyURLFmt, grantID)
+	// PathEscape the server-issued grant ID so a stray '/' cannot redirect
+	// the request to an unintended endpoint.
+	endpoint := fmt.Sprintf(sudoVerifyURLFmt, url.PathEscape(grantID))
 
-	_, err := sl.ac.SendPostRequest(url, struct{}{})
+	_, err := sl.ac.SendPostRequest(endpoint, struct{}{})
 	if err != nil {
 		return fmt.Errorf("failed to verify sudo grant: %w", err)
 	}
