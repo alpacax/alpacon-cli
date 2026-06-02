@@ -101,6 +101,9 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 	}
 	if err := resolvePlatform(); err != nil {
 		if err = utils.HandleCommonErrors(err, parsed.Server, commonCallbacks(resolvePlatform)); err != nil {
+			// A WorkSession gate denial on the server-detail read must surface as
+			// exit 3, consistent with the upload and command paths below.
+			utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 			utils.CliErrorWithExit("failed to resolve server platform for '%s': %s", parsed.Server, err)
 			return
 		}
