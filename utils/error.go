@@ -28,8 +28,20 @@ type ErrorResponse struct {
 	Source string `json:"source"`
 }
 
+type codedError interface {
+	ErrorCode() string
+	ErrorSource() string
+}
+
 func ParseErrorResponse(err error) (string, string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {
+		if coded, ok := e.(codedError); ok {
+			code, source := coded.ErrorCode(), coded.ErrorSource()
+			if code != "" || source != "" {
+				return code, source
+			}
+		}
+
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}

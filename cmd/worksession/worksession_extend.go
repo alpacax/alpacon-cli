@@ -45,7 +45,12 @@ var workSessionExtendCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to extend work session: %s.", err)
 		}
 
-		utils.CliSuccess("Work session %s extended to %s.", args[0], expiresAtVal)
+		output := newWorkSessionExtendOutput(args[0], expiresAtVal)
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			printWorkSessionMutationJSON(output)
+			return
+		}
+		utils.CliSuccess("%s", output.Message)
 	},
 }
 

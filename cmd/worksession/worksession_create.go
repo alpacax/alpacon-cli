@@ -177,20 +177,32 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 			utils.CliErrorWithExit("Failed to create work session: %s.", err)
 		}
 
-		if session.ApprovalRequestID != "" {
-			utils.CliSuccess("Work session created: %s (status: %s, approval request: %s)", session.ID, session.Status, session.ApprovalRequestID)
-		} else {
-			utils.CliSuccess("Work session created: %s (status: %s)", session.ID, session.Status)
+		if utils.OutputFormat != utils.OutputFormatJSON {
+			utils.CliSuccess("%s", createSuccessMessage(session))
 		}
 
 		// Phase 1: post-create decision. Cases without an explicit return delegate to
 		// the --wait branch below (or exit immediately when --wait is not set).
 		switch decideUseAction(session.Status, useAfterCreate) {
 		case useDecisionUseNow:
-			attachActiveOrExit(ac, session.ID, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "")
+			desc, err := RunUse(ac, session.ID)
+			if err != nil {
+				utils.CliErrorWithExit("Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+			}
+			message := activeWorkSessionSetMessage("", session.ID, desc)
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				active := session.ID
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, session, &active))
+				return
+			}
+			utils.CliSuccess("%s", message)
 			return
 		case useDecisionSkipScheduled:
 			if !waitApproval {
+				if utils.OutputFormat == utils.OutputFormatJSON {
+					printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session), session, nil))
+					return
+				}
 				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
 				return
 			}
@@ -201,37 +213,41 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		}
 
 		if !waitApproval {
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session), session, nil))
+			}
 			return
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		if err := pollForApproval(ac, session.ID, useAfterCreate); err != nil {
+		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate)
+		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
 
 		if !useAfterCreate {
-			utils.CliSuccess("Work session %s approved.", session.ID)
+			message := fmt.Sprintf("Work session %s approved.", session.ID)
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", message, finalSession, nil))
+				return
+			}
+			utils.CliSuccess("%s", message)
 			return
 		}
 
 		// Phase 3: --wait --use. pollForApproval(untilActive=true) guarantees status reached active.
-		attachActiveOrExit(ac, session.ID, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", fmt.Sprintf("Work session %s approved. ", session.ID))
+		desc, err := RunUse(ac, session.ID)
+		if err != nil {
+			utils.CliErrorWithExit("Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+		}
+		message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			active := session.ID
+			printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", message, finalSession, &active))
+			return
+		}
+		utils.CliSuccess("%s", message)
 	},
-}
-
-// attachActiveOrExit calls RunUse and prints either a success line (with description if present)
-// or exits with the supplied error format (which receives session ID, error, session ID in order).
-// successPrefix is prepended to the success line so callers can distinguish phases.
-func attachActiveOrExit(ac *client.AlpaconClient, id, errFmt, successPrefix string) {
-	desc, err := RunUse(ac, id)
-	if err != nil {
-		utils.CliErrorWithExit(errFmt, id, err, id)
-	}
-	suffix := ""
-	if desc != "" {
-		suffix = fmt.Sprintf(" (%s)", desc)
-	}
-	utils.CliSuccess("%sActive work-session set to %s%s.", successPrefix, id, suffix)
 }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
@@ -345,27 +361,27 @@ func splitCSV(s string) []string {
 // pollForApproval polls every 10 seconds until the session reaches a terminal state.
 // untilActive=false returns on approved or active; untilActive=true returns only on
 // active (continues polling on approved until the server auto-activates).
-func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) error {
+func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*wsapi.WorkSession, error) {
 	for attempt := 1; attempt <= pollMaxAttempts; attempt++ {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
-			return fmt.Errorf("polling failed: %w", err)
+			return nil, fmt.Errorf("polling failed: %w", err)
 		}
 		switch s.Status {
 		case activeWorkSessionStatus:
-			return nil
+			return s, nil
 		case approvedWorkSessionStatus:
 			if !untilActive {
-				return nil
+				return s, nil
 			}
 		case rejectedWorkSessionStatus:
-			return errors.New("work session was rejected")
+			return nil, errors.New("work session was rejected")
 		case expiredWorkSessionStatus:
-			return errors.New("work session expired while waiting for approval")
+			return nil, errors.New("work session expired while waiting for approval")
 		case revokedWorkSessionStatus:
-			return errors.New("work session was revoked")
+			return nil, errors.New("work session was revoked")
 		case completedWorkSessionStatus:
-			return errors.New("work session was completed unexpectedly")
+			return nil, errors.New("work session was completed unexpectedly")
 		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
@@ -376,7 +392,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) erro
 			time.Sleep(pollInterval)
 		}
 	}
-	return fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
+	return nil, fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
 }
 
 func init() {
