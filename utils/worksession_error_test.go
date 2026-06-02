@@ -61,7 +61,7 @@ func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	assert.NotContains(t, got, "(interactive)")
 }
 
-func TestBuildWorkSessionJSON(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 	tests := []string{
 		WorkSessionRequired,
 		WorkSessionNotActive,
@@ -88,7 +88,7 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
 
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
@@ -100,14 +100,14 @@ func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_ExpiredWithoutActiveWS(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	// When activeWS is unknown, the placeholder must remain.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
 
 	assert.Contains(t, envelope.NextActions, "alpacon work-session extend <ID>")
 }
 
-func TestBuildWorkSessionJSON_RequiredKeepsPlaceholder(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
 	// so the placeholder must NOT be substituted even when activeWS is known.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
