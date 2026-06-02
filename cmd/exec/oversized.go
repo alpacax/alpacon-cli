@@ -86,8 +86,8 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 		}
 	}
 	if isWindowsPlatform(platform) {
-		utils.CliErrorWithExit("Large commands (>2KB) are not supported on Windows servers.\n" +
-			"The upload bypass relies on POSIX sh/tmp/rm semantics. Shorten the command, " +
+		utils.CliErrorWithExit("Large commands (>2KB) are not supported on Windows servers.\n"+
+			"The upload bypass relies on POSIX sh/tmp/rm semantics. Shorten the command, "+
 			"or run it through a Windows-native mechanism.")
 		return
 	}
