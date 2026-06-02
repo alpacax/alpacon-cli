@@ -65,7 +65,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s: %s requires an active WorkSession on this authentication.\n", Red("Error"), operation)
+	fmt.Fprintf(&sb, "%s: the %s operation requires an active WorkSession on this authentication.\n", Red("Error"), operation)
 	fmt.Fprintln(&sb)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "auth", authDisplay)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "reason", reason)
@@ -92,7 +92,7 @@ func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS stri
 		OK:        false,
 		ExitCode:  ExitCodeWorkSessionDenied,
 		ErrorCode: code,
-		Message:   fmt.Sprintf("%s requires an active WorkSession on this authentication.", operation),
+		Message:   fmt.Sprintf("the %s operation requires an active WorkSession on this authentication.", operation),
 		Reason:    workSessionReasonMap[code],
 		Context: workSessionErrorCtx{
 			AuthMethod:         authMethod,
@@ -121,7 +121,7 @@ func targetServerList(serverName string) []string {
 
 func workSessionNextActions(code, operation, serverName, activeWS string) []string {
 	createCmd := fmt.Sprintf(
-		`alpacon work-session create --scope %s --server %s --purpose "<intent>"`,
+		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>"`,
 		operation, serverName,
 	)
 	switch code {

@@ -33,25 +33,30 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		code       string
 		wantReason string
 		wantNext   string
+		hasCreate  bool // suggests 'work-session create', which must carry an expiry flag
 	}{
-		{WorkSessionRequired, "no WorkSession selected", "work-session ls"},
-		{WorkSessionNotActive, "not yet active", "work-session current"},
-		{WorkSessionExpired, "has expired", "work-session extend"},
-		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create"},
-		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create"},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use"},
-		{WorkSessionNotUsable, "no longer usable", "work-session create"},
+		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true},
+		{WorkSessionNotActive, "not yet active", "work-session current", false},
+		{WorkSessionExpired, "has expired", "work-session extend", true},
+		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true},
+		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false},
+		{WorkSessionNotUsable, "no longer usable", "work-session create", true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
 			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "")
+			assert.Contains(t, got, "the websh operation requires an active WorkSession")
 			assert.Contains(t, got, tt.wantReason)
 			assert.Contains(t, got, tt.wantNext)
 			assert.Contains(t, got, "required scope")
 			assert.Contains(t, got, "prod-1")
 			assert.Contains(t, got, "Browser login (interactive)")
 			assert.Contains(t, got, "Note:")
+			if tt.hasCreate {
+				assert.Contains(t, got, "--expires-in")
+			}
 		})
 	}
 }
@@ -82,6 +87,7 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
 			assert.Equal(t, code, envelope.ErrorCode)
+			assert.Equal(t, "the command operation requires an active WorkSession on this authentication.", envelope.Message)
 			assert.Equal(t, workSessionReasonMap[code], envelope.Reason)
 			assert.Equal(t, "command", envelope.Context.RequiredScope)
 			assert.Equal(t, []string{"srv-1"}, envelope.Context.TargetServers)
