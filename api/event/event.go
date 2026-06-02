@@ -296,11 +296,14 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 			utils.CliWarning("failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete",
 				lastSeq+1, chunk.Seq-1, err)
 		} else {
+			// Advance only over contiguous seqs, stopping at the first hole, so a
+			// gap-fill racing ahead of persistence can't skip a not-yet-stored seq.
 			for _, c := range missing {
-				if c.Seq > lastSeq && c.Seq <= chunk.Seq {
-					_, _ = fmt.Fprint(out, c.Content)
-					lastSeq = c.Seq
+				if c.Seq != lastSeq+1 || c.Seq > chunk.Seq {
+					break
 				}
+				_, _ = fmt.Fprint(out, c.Content)
+				lastSeq = c.Seq
 			}
 		}
 	}
@@ -331,7 +334,7 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 // RunCommand so unrecognized statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
 	switch d.Status {
-	case "completed", "success":
+	case "completed", "success", "failed":
 		if d.Success != nil && !*d.Success {
 			exitCode := 1
 			if d.ExitCode != nil {

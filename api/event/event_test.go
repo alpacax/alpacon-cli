@@ -692,6 +692,59 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
 
+// TestRunCommandStreaming_FailedStatusPropagatesExitCode guards that terminal
+// status "failed" yields a *RemoteCommandError carrying the exit code.
+func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "before-exit\n"}},
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", stdoutBuf)
+	require.Error(t, err)
+	var remoteErr *RemoteCommandError
+	require.True(t, errors.As(err, &remoteErr), "failed status must yield *RemoteCommandError")
+	assert.Equal(t, 23, remoteErr.ExitCode)
+	assert.Equal(t, "before-exit\n", stdoutBuf.String())
+}
+
+// TestRunCommandStreaming_GapFillRaceDoesNotDropChunk guards that when a gap-fill
+// fetch returns a hole (seq 1,3; 2 not yet persisted), applyChunk stops at the
+// hole so the later WS seq 2 isn't dropped as a duplicate.
+func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// WS order 0,3,2: seq 3 opens a gap; seq 2 arrives only afterwards.
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}, {Seq: 3, Content: "s3\n"}, {Seq: 2, Content: "s2\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			persisted := []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}, {Seq: 3, Content: "s3\n"}}
+			if fromSeq == 1 {
+				// Race: seq 2 is not yet persisted when the gap-fill fetch runs.
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 3, Content: "s3\n"}}
+			}
+			var out []Chunk
+			for _, c := range persisted {
+				if c.Seq >= fromSeq {
+					out = append(out, c)
+				}
+			}
+			return out
+		},
+		runningPolls: 3,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
+}
+
 func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
