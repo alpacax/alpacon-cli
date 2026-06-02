@@ -147,9 +147,10 @@ Flags go before the server name; everything after is the remote command.
 $ alpacon cp ./local.txt <server>:/home/user/
 $ alpacon cp <server>:/home/user/file.txt .
 $ alpacon cp -u admin -g developers <SOURCE> <DESTINATION>
+$ alpacon edit <server>:/etc/nginx/nginx.conf    # open a remote file in your local editor
 ```
 
-`<server>:<path>` denotes a remote target.
+`<server>:<path>` denotes a remote target. Saving in `edit` overwrites the remote file; ownership and permissions may be reset by server policy. `edit` only opens existing remote files—it downloads first, so it won't create a new one. `--editor` is tokenized without a shell (the file path is appended as the last argument), so shell syntax such as pipes (`|`), redirections (`>>`), or `&&` won't work.
 
 ### TCP tunneling
 ```bash
