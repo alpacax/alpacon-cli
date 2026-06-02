@@ -37,13 +37,36 @@ import (
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short:   "Access infrastructure securely with Alpacon",
-	Long: `Alpacon CLI provides secure access to remote servers without SSH keys, VPNs,
-or bastion hosts. Open terminals, execute commands, transfer files, create TCP
-tunnels, and manage certificates — all with zero-trust authentication, MFA,
-session recording, and role-based access controls.
+	Short:   "Command-line client for Alpacon, the AI-native PAM",
+	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
+With Alpacon, humans, AI agents, and CI/CD pipelines reach and operate
+your entire fleet through a single identity—and every command they run
+is judged at runtime, recorded, and bounded by a scoped work session.
+If a credential leaks or an AI client is compromised, the damage is
+bounded by the session, not by what the credential could touch.
 
-Designed to be used by engineers, AI coding agents, and CI/CD platforms alike.`,
+Quick start (interactive auth):
+
+  1. alpacon                                # check current login + workspace
+                                            # (run 'alpacon login' or
+                                            #  'alpacon workspace switch' if
+                                            #  not logged in / wrong place)
+  2. alpacon whoami                         # confirm identity + work
+                                            # session requirement
+  3. alpacon work-session create \          # create + activate a session
+       --purpose "describe the task" \
+       --scope command,websh \
+       --server <server> \
+       --use --wait
+  4. alpacon exec, websh, cp, tunnel        # operate within the session
+
+Token auth (CI/CD, API automation):
+
+  alpacon login -t <token>                  # work session not required
+  alpacon exec ...
+
+See 'alpacon work-session --help' for session lifecycle, gating, and
+common error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
 		case utils.OutputFormatTable, utils.OutputFormatJSON:
