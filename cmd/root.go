@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/authority"
 	"github.com/alpacax/alpacon-cli/cmd/cert"
 	"github.com/alpacax/alpacon-cli/cmd/csr"
+	"github.com/alpacax/alpacon-cli/cmd/edit"
 	"github.com/alpacax/alpacon-cli/cmd/event"
 	"github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/ftp"
@@ -97,6 +98,9 @@ func init() {
 
 	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)
+
+	// edit
+	RootCmd.AddCommand(edit.EditCmd)
 
 	// packages
 	RootCmd.AddCommand(packages.PackagesCmd)
