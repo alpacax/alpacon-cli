@@ -69,10 +69,41 @@ func newExecID() string {
 // upload. The upload always completes synchronously; with --detach only the
 // wrapper command is submitted detached.
 func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env map[string]string, workSessionID, authMethod string) {
-	platform, err := server.GetServerPlatform(ac, parsed.Server)
-	if err != nil {
-		utils.CliErrorWithExit("failed to resolve server platform for '%s': %s", parsed.Server, err)
-		return
+	// Shared MFA / username-required / token-refresh handling, parameterized by
+	// the operation to retry. Both platform resolution and the upload run
+	// through this so an oversized exec prompts/retries like the inline path
+	// instead of hard-failing on a transient auth error before any upload.
+	commonCallbacks := func(retry func() error) utils.ErrorHandlerCallbacks {
+		return utils.ErrorHandlerCallbacks{
+			OnMFARequired: func(srv string) error {
+				return mfa.HandleMFAError(ac, srv)
+			},
+			OnUsernameRequired: func() error {
+				_, e := iam.HandleUsernameRequired()
+				return e
+			},
+			CheckMFACompleted: func() (bool, error) {
+				return mfa.CheckMFACompletion(ac)
+			},
+			RefreshToken:   ac.RefreshToken,
+			RetryOperation: retry,
+		}
+	}
+
+	var platform string
+	resolvePlatform := func() error {
+		p, e := server.GetServerPlatform(ac, parsed.Server)
+		if e != nil {
+			return e
+		}
+		platform = p
+		return nil
+	}
+	if err := resolvePlatform(); err != nil {
+		if err = utils.HandleCommonErrors(err, parsed.Server, commonCallbacks(resolvePlatform)); err != nil {
+			utils.CliErrorWithExit("failed to resolve server platform for '%s': %s", parsed.Server, err)
+			return
+		}
 	}
 	if isWindowsPlatform(platform) {
 		utils.CliErrorWithExit("Large commands (>2KB) are not supported on Windows servers.\n" +
@@ -86,27 +117,15 @@ func runOversizedCommand(ac *client.AlpaconClient, parsed RemoteExecArgs, env ma
 
 	utils.CliInfo("Command exceeds 2KB; uploading via temporary file...")
 
+	// allowOverwrite is false: scriptPath is a fresh random path, so an existing
+	// file means an unexpected collision or leftover—surface it, don't clobber.
 	upload := func() error {
 		return ftp.UploadContent(ac, parsed.Server, scriptPath,
-			[]byte(parsed.Command), parsed.Username, parsed.Groupname, true, workSessionID)
+			[]byte(parsed.Command), parsed.Username, parsed.Groupname, false, workSessionID)
 	}
 
 	if err := upload(); err != nil {
-		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
-			OnMFARequired: func(srv string) error {
-				return mfa.HandleMFAError(ac, srv)
-			},
-			OnUsernameRequired: func() error {
-				_, e := iam.HandleUsernameRequired()
-				return e
-			},
-			CheckMFACompleted: func() (bool, error) {
-				return mfa.CheckMFACompletion(ac)
-			},
-			RefreshToken:   ac.RefreshToken,
-			RetryOperation: upload,
-		})
-		if err != nil {
+		if err = utils.HandleCommonErrors(err, parsed.Server, commonCallbacks(upload)); err != nil {
 			utils.HandleWorkSessionError(err, "webftp", parsed.Server, authMethod, workSessionID)
 			utils.CliErrorWithExit("failed to upload command to '%s': %s", parsed.Server, err)
 			return
