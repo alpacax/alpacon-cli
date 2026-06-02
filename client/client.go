@@ -23,6 +23,12 @@ const (
 	checkPrivilegesURL = "/api/iam/users/-"
 )
 
+type apiError struct {
+	message string
+	code    string
+	source  string
+}
+
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
@@ -94,31 +100,35 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 func checkAuthStatus(statusCode int, body []byte) error {
 	switch statusCode {
 	case http.StatusUnauthorized:
-		if msg := extractServerDetail(body); msg != "" {
-			return fmt.Errorf("%s (run 'alpacon login' if your session has expired)", msg)
+		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
+			return newAPIError(fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", msg), code, source)
 		}
 		return errors.New("authentication failed: please run 'alpacon login' again")
 	case http.StatusForbidden:
-		if msg := extractServerDetail(body); msg != "" {
-			return errors.New(msg)
+		if msg, code, source, ok := parseAuthStatusErrorPayload(body); ok {
+			return newAPIError(msg, code, source)
 		}
 		return errors.New("permission denied: you do not have the required privileges for this action")
 	}
 	return nil
 }
 
-func extractServerDetail(body []byte) string {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return ""
+func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, ok bool) {
+	message, code, source, ok = parseAPIErrorPayload(body)
+	if !ok || message == "" {
+		return "", "", "", false
 	}
+	// Require a non-empty "detail" so 401/403 responses surface a clean server
+	// message (while still preserving code/source) instead of the truncated
+	// raw-body fallback parseAPIErrorPayload returns when only code/source exist.
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
+		return "", "", "", false
 	}
-	if detail, ok := parsed["detail"].(string); ok {
-		return strings.TrimSpace(detail)
+	if stringField(parsed, "detail") == "" {
+		return "", "", "", false
 	}
-	return ""
+	return message, code, source, true
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
@@ -351,26 +361,51 @@ func isAccessTokenExpired(cfg config.Config) bool {
 	return time.Now().After(expireTime.Add(-10 * time.Second))
 }
 
+func (e *apiError) Error() string {
+	return e.message
+}
+
+func (e *apiError) ErrorCode() string {
+	return e.code
+}
+
+func (e *apiError) ErrorSource() string {
+	return e.source
+}
+
+func newAPIError(message, code, source string) error {
+	return &apiError{message: message, code: code, source: source}
+}
+
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
 func parseAPIError(body []byte) error {
+	message, code, source, ok := parseAPIErrorPayload(body)
+	if ok {
+		return newAPIError(message, code, source)
+	}
+	return errors.New(message)
+}
+
+func parseAPIErrorPayload(body []byte) (message string, code string, source string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return errors.New("server returned an empty error response")
+		return "server returned an empty error response", "", "", false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
-		return errors.New(truncateBody(raw))
+		return truncateBody(raw), "", "", false
 	}
 
+	code = stringField(parsed, "code")
+	source = stringField(parsed, "source")
+
 	// Case 1: {"detail": "..."}
-	if detail, ok := parsed["detail"]; ok {
-		if s, ok := detail.(string); ok {
-			return errors.New(s)
-		}
+	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
+		return detail, code, source, true
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
@@ -400,11 +435,16 @@ func parseAPIError(body []byte) error {
 	}
 
 	if len(messages) > 0 {
-		return errors.New(strings.Join(messages, "; "))
+		return strings.Join(messages, "; "), code, source, true
 	}
 
 	// Fallback: return truncated raw body
-	return errors.New(truncateBody(raw))
+	return truncateBody(raw), code, source, true
+}
+
+func stringField(values map[string]any, field string) string {
+	value, _ := values[field].(string)
+	return strings.TrimSpace(value)
 }
 
 func truncateBody(s string) string {

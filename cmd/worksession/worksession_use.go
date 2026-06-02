@@ -37,11 +37,29 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 			// Treat missing config / no active workspace / empty entry as already-unset
 			// so --unset is a true no-op and never surfaces a confusing config error.
 			if cur, err := config.GetActiveWorkSession(); err != nil || cur == "" {
+				if utils.OutputFormat == utils.OutputFormatJSON {
+					printWorkSessionMutationJSON(workSessionMutationOutput{
+						OK:                true,
+						Operation:         "unset",
+						Message:           "No active work-session to unset.",
+						ActiveWorksession: nil,
+					})
+					return
+				}
 				utils.CliInfo("No active work-session to unset.")
 				return
 			}
 			if err := RunUnset(); err != nil {
 				utils.CliErrorWithExit("%s", err)
+			}
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				printWorkSessionMutationJSON(workSessionMutationOutput{
+					OK:                true,
+					Operation:         "unset",
+					Message:           "Active work-session cleared.",
+					ActiveWorksession: nil,
+				})
+				return
 			}
 			utils.CliSuccess("Active work-session cleared.")
 			return
@@ -54,32 +72,45 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		desc, err := RunUse(ac, args[0])
+		ws, err := RunUseSession(ac, args[0])
 		if err != nil {
 			utils.CliErrorWithExit("%s", err)
 		}
-		if desc != "" {
-			utils.CliSuccess("Active work-session set to %s (%s).", args[0], desc)
-		} else {
-			utils.CliSuccess("Active work-session set to %s.", args[0])
+		message := activeWorkSessionSetMessage("", ws.ID, ws.Description)
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			active := ws.ID
+			printWorkSessionMutationJSON(newWorkSessionMutationOutput("use", message, ws, &active))
+			return
 		}
+		utils.CliSuccess("%s", message)
 	},
 }
 
 // RunUse validates the work-session via the server, then stores it in config.
 // Returns the human-readable description on success.
 func RunUse(ac *client.AlpaconClient, uuid string) (string, error) {
-	ws, err := wsapi.GetWorkSession(ac, uuid)
+	ws, err := RunUseSession(ac, uuid)
 	if err != nil {
 		return "", err
 	}
-	if ws.Status != activeWorkSessionStatus {
-		return "", fmt.Errorf("work-session %s is in '%s' state and cannot be used", uuid, ws.Status)
-	}
-	if err := config.SetActiveWorkSession(uuid); err != nil {
-		return "", err
-	}
 	return ws.Description, nil
+}
+
+// RunUseSession validates the work-session via the server, then stores it in config.
+func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, error) {
+	ws, err := wsapi.GetWorkSession(ac, uuid)
+	if err != nil {
+		return nil, err
+	}
+	if ws.Status != activeWorkSessionStatus {
+		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
+	}
+	// Persist the canonical ID from the API rather than the raw argument so config
+	// stays consistent with server-side canonicalization and the printed JSON fields.
+	if err := config.SetActiveWorkSession(ws.ID); err != nil {
+		return nil, err
+	}
+	return ws, nil
 }
 
 // RunUnset clears the active work-session for the current workspace.
