@@ -245,7 +245,8 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 
 		// Verify carries no payload — the server resolves MFA from the
 		// MFACompletion record, so the body must stay empty.
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
 		assert.JSONEq(t, "{}", string(body))
 
 		w.Header().Set("Content-Type", "application/json")
