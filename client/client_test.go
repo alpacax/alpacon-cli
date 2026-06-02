@@ -121,6 +121,21 @@ func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
 	assert.NotContains(t, err.Error(), "detail:")
 }
 
+func TestSendRequest_403CodeWithoutDetailFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "some_code", "source": "command"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	// No "detail" -> must not leak the raw JSON body as the message.
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "some_code")
+}
+
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	callCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

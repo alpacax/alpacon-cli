@@ -118,10 +118,9 @@ func parseAuthStatusErrorPayload(body []byte) (message string, code string, sour
 	if !ok || message == "" {
 		return "", "", "", false
 	}
-	if code != "" || source != "" {
-		return message, code, source, true
-	}
-
+	// Require a non-empty "detail" so 401/403 responses surface a clean server
+	// message (while still preserving code/source) instead of the truncated
+	// raw-body fallback parseAPIErrorPayload returns when only code/source exist.
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", "", "", false
