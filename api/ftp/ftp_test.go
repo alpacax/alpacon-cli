@@ -833,8 +833,9 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 	existingArchive := filepath.Join(dest, "folder.zip")
 	require.NoError(t, os.WriteFile(existingArchive, []byte("existing-archive"), 0644))
 
-	written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, "/remote/folder", true, 1)
+	savedPath, written, err := saveDownloadedURL(ts.Client(), ts.URL, dest, "/remote/folder", true, 1)
 	require.NoError(t, err)
+	assert.Equal(t, dest, savedPath)
 	assert.Equal(t, int64(len(zipContent)), written)
 
 	content, readErr := os.ReadFile(existingArchive)
@@ -1024,6 +1025,64 @@ func TestExecuteSingleUpload_WorkSession(t *testing.T) {
 			if tt.wantKeyPresent {
 				assert.Equal(t, tt.wantWorkSession, v)
 			}
+		})
+	}
+}
+
+func TestUploadLocalFileAsUsesRemoteBasenameAndDirectory(t *testing.T) {
+	var uploadReq UploadRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/api/servers/servers"):
+			_ = json.NewEncoder(w).Encode(api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-123", Name: "prod"}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+			_ = json.NewDecoder(r.Body).Decode(&uploadReq)
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(UploadResponse{
+				ID:        "upload-1",
+				Name:      "app.conf",
+				UploadURL: "http://" + r.Host + "/s3/app.conf",
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/s3/app.conf":
+			body, _ := io.ReadAll(r.Body)
+			assert.Equal(t, "edited", string(body))
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	localFile := filepath.Join(t.TempDir(), ".alpacon-edit-random")
+	require.NoError(t, os.WriteFile(localFile, []byte("edited"), 0600))
+
+	err := UploadLocalFileAs(ac, localFile, "prod", "/etc/app.conf", "root", "ops", "ws-1")
+	require.NoError(t, err)
+	assert.Equal(t, "app.conf", uploadReq.Name)
+	assert.Equal(t, "/etc/", uploadReq.Path)
+	assert.Equal(t, "srv-123", uploadReq.Server)
+	assert.Equal(t, "root", uploadReq.Username)
+	assert.Equal(t, "ops", uploadReq.Groupname)
+	assert.True(t, uploadReq.AllowOverwrite)
+	assert.Equal(t, "ws-1", uploadReq.WorkSession)
+}
+
+func TestUploadLocalFileAsRejectsInvalidRemoteBasename(t *testing.T) {
+	for _, remotePath := range []string{"/tmp/..", "/tmp/app.conf/", `/tmp/..\saved`} {
+		t.Run(remotePath, func(t *testing.T) {
+			err := UploadLocalFileAs(&client.AlpaconClient{}, "/tmp/local", "prod", remotePath, "", "", "")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "file name")
 		})
 	}
 }
