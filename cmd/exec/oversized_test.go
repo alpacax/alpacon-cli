@@ -40,5 +40,6 @@ func TestIsWindowsPlatform(t *testing.T) {
 func TestNewExecID(t *testing.T) {
 	id := newExecID()
 	assert.Len(t, id, 16, "8 random bytes hex-encoded")
+	assert.Regexp(t, "^[0-9a-f]+$", id, "id is lowercase hex")
 	assert.NotEqual(t, newExecID(), id, "ids should differ between calls")
 }
