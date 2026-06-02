@@ -18,9 +18,8 @@ import (
 
 const defaultBaseDomain = "alpacon.io"
 
-// knownCloudRegions lists the Alpacon Cloud regions shown as a hint when a
-// user omits --region. Source of truth: 10-alpacon-web src/constants/constants.ts
-// and 06-account settings.py. Update on CLI release when a region is added.
+// knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
+// Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
 var knownCloudRegions = []string{"us1", "ap1"}
 
 var (
@@ -86,12 +85,12 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 			baseDomain = utils.ExtractBaseDomain(workspaceURL)
 		} else if workspaceFlag != "" || regionFlag != "" {
 			// Alpacon Cloud mode via flags (non-interactive)
-			if msg := validateCloudFlags(workspaceFlag, regionFlag); msg != "" {
-				utils.CliErrorWithExit("%s", msg)
+			if err := validateCloudFlags(workspaceFlag, regionFlag); err != nil {
+				utils.CliErrorWithExit("%s", err.Error())
 			}
 			workspaceName = workspaceFlag
 			baseDomain = defaultBaseDomain
-			workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceFlag, regionFlag, defaultBaseDomain)
+			workspaceURL = buildCloudWorkspaceURL(workspaceFlag, regionFlag)
 		} else {
 			// No args, no flags — try saved config for re-login
 			cfg, err := config.LoadConfig()
@@ -111,7 +110,7 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 					knownCloudRegions[0],
 				)
 				baseDomain = defaultBaseDomain
-				workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceName, region, defaultBaseDomain)
+				workspaceURL = buildCloudWorkspaceURL(workspaceName, region)
 			}
 		}
 
@@ -224,34 +223,34 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 	return workspaceURL, username, password
 }
 
-// cloudRegionsHint renders the known regions as a comma-separated hint.
 func cloudRegionsHint() string {
 	return strings.Join(knownCloudRegions, ", ")
 }
 
-// validateCloudFlags returns a user-facing error message when exactly one of
-// workspace/region is provided. An empty string means the input is valid
-// (both set, or both empty).
-func validateCloudFlags(workspace, region string) string {
+// buildCloudWorkspaceURL assembles an Alpacon Cloud workspace URL.
+func buildCloudWorkspaceURL(workspace, region string) string {
+	return fmt.Sprintf("https://%s.%s.%s", workspace, region, defaultBaseDomain)
+}
+
+// validateCloudFlags rejects the case where exactly one of workspace/region is set.
+func validateCloudFlags(workspace, region string) error {
 	if workspace != "" && region == "" {
-		return fmt.Sprintf(
+		return fmt.Errorf(
 			"--region is required for Alpacon Cloud.\nAvailable regions: %s\nTry: alpacon login --workspace %s --region %s",
 			cloudRegionsHint(), workspace, knownCloudRegions[0],
 		)
 	}
 	if region != "" && workspace == "" {
-		return fmt.Sprintf(
+		return fmt.Errorf(
 			"--workspace is required for Alpacon Cloud.\nTry: alpacon login --workspace <name> --region %s",
 			region,
 		)
 	}
-	return ""
+	return nil
 }
 
-// isCloudDirectURL reports whether a host-mode workspace URL points at the
-// Alpacon Cloud base domain. Such direct URLs are deprecated in favor of
-// --workspace/--region. Matches both subdomain forms (myws.us1.alpacon.io)
-// and the bare base domain (alpacon.io).
+// isCloudDirectURL reports whether a host-mode URL targets the Alpacon Cloud base
+// domain (alpacon.io or a subdomain). Such direct URLs are deprecated.
 func isCloudDirectURL(workspaceURL string) bool {
 	parsed, err := url.Parse(workspaceURL)
 	if err != nil {

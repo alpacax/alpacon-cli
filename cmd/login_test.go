@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,7 +85,7 @@ func TestBuildCloudWorkspaceURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := fmt.Sprintf("https://%s.%s.%s", tt.workspace, tt.region, defaultBaseDomain)
+			result := buildCloudWorkspaceURL(tt.workspace, tt.region)
 			assert.Equal(t, tt.expected, result)
 		})
 	}
@@ -98,19 +97,19 @@ func TestValidateCloudFlags(t *testing.T) {
 		workspace string
 		region    string
 		contains  []string
-		empty     bool
+		valid     bool
 	}{
 		{
 			name:      "both set is valid",
 			workspace: "demo",
 			region:    "us1",
-			empty:     true,
+			valid:     true,
 		},
 		{
 			name:      "both empty is valid",
 			workspace: "",
 			region:    "",
-			empty:     true,
+			valid:     true,
 		},
 		{
 			name:      "workspace without region",
@@ -128,13 +127,13 @@ func TestValidateCloudFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := validateCloudFlags(tt.workspace, tt.region)
-			if tt.empty {
-				assert.Empty(t, result)
+			err := validateCloudFlags(tt.workspace, tt.region)
+			if tt.valid {
+				assert.NoError(t, err)
 				return
 			}
 			for _, sub := range tt.contains {
-				assert.Contains(t, result, sub)
+				assert.ErrorContains(t, err, sub)
 			}
 		})
 	}
