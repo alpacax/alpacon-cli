@@ -73,15 +73,6 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	return sb.String()
 }
 
-func buildWorkSessionJSON(code, operation, serverName, authMethod, activeWS string) string {
-	envelope := buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS)
-	rendered, err := FormatJSON(envelope)
-	if err != nil {
-		return `{"ok":false,"error_code":"` + code + `"}`
-	}
-	return rendered
-}
-
 func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS string) workSessionErrorJSON {
 	var ws *string
 	if activeWS != "" {

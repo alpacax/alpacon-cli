@@ -283,9 +283,8 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 }
 
 func printWhoami(output whoamiOutput) {
-	output = output.normalized()
-
 	if utils.OutputFormat == utils.OutputFormatJSON {
+		// MarshalJSON normalizes, so no need to pre-normalize here.
 		body, err := json.Marshal(output)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
@@ -294,6 +293,7 @@ func printWhoami(output whoamiOutput) {
 		return
 	}
 
+	output = output.normalized()
 	lines := []struct {
 		label string
 		value string
