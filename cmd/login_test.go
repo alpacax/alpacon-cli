@@ -91,3 +91,72 @@ func TestBuildCloudWorkspaceURL(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCloudFlags(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		region    string
+		contains  []string
+		empty     bool
+	}{
+		{
+			name:      "both set is valid",
+			workspace: "demo",
+			region:    "us1",
+			empty:     true,
+		},
+		{
+			name:      "both empty is valid",
+			workspace: "",
+			region:    "",
+			empty:     true,
+		},
+		{
+			name:      "workspace without region",
+			workspace: "demo",
+			region:    "",
+			contains:  []string{"--region is required", "us1, ap1", "alpacon login --workspace demo --region us1"},
+		},
+		{
+			name:      "region without workspace",
+			workspace: "",
+			region:    "ap1",
+			contains:  []string{"--workspace is required", "--region ap1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := validateCloudFlags(tt.workspace, tt.region)
+			if tt.empty {
+				assert.Empty(t, result)
+				return
+			}
+			for _, sub := range tt.contains {
+				assert.Contains(t, result, sub)
+			}
+		})
+	}
+}
+
+func TestIsCloudDirectURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		expected bool
+	}{
+		{name: "cloud subdomain", url: "https://demo.us1.alpacon.io", expected: true},
+		{name: "cloud subdomain with port", url: "https://demo.us1.alpacon.io:8443", expected: true},
+		{name: "cloud region subdomain", url: "https://foo.alpacon.io", expected: true},
+		{name: "cloud base domain", url: "https://alpacon.io", expected: true},
+		{name: "self-hosted domain", url: "https://alpacon.example.com", expected: false},
+		{name: "localhost", url: "http://localhost:8000", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isCloudDirectURL(tt.url))
+		})
+	}
+}
