@@ -14,6 +14,7 @@ import (
 // resolveStatusFilter maps the --status flag to the API value. "all"
 // (case-insensitive) clears the filter; any other value passes through.
 func resolveStatusFilter(status string) string {
+	status = strings.TrimSpace(status)
 	if strings.EqualFold(status, "all") {
 		return ""
 	}
@@ -24,6 +25,7 @@ func resolveStatusFilter(status string) string {
 // "all" (case-insensitive) lists everyone; empty resolves to the current user
 // via getCurrentUserID; any other value (a uuid) passes through.
 func resolveAssignedUser(user string, getCurrentUserID func() (string, error)) (string, error) {
+	user = strings.TrimSpace(user)
 	switch {
 	case strings.EqualFold(user, "all"):
 		return "", nil

@@ -19,6 +19,9 @@ func TestResolveStatusFilter(t *testing.T) {
 		{"active passes through", "active", "active"},
 		{"comma multi-value passes through", "active,completed", "active,completed"},
 		{"empty passes through", "", ""},
+		{"surrounding whitespace trimmed", " active ", "active"},
+		{"whitespace around all still clears", " all ", ""},
+		{"whitespace-only becomes empty", "   ", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -60,6 +63,20 @@ func TestResolveAssignedUser(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, myID, got)
 		assert.Equal(t, 0, calls)
+	})
+
+	t.Run("surrounding whitespace trimmed off uuid", func(t *testing.T) {
+		got, err := resolveAssignedUser("  "+myID+"  ", func() (string, error) { return "other", nil })
+		require.NoError(t, err)
+		assert.Equal(t, myID, got)
+	})
+
+	t.Run("whitespace-only resolves to current user", func(t *testing.T) {
+		calls := 0
+		got, err := resolveAssignedUser("   ", func() (string, error) { calls++; return myID, nil })
+		require.NoError(t, err)
+		assert.Equal(t, myID, got)
+		assert.Equal(t, 1, calls, "blank input must be treated as empty (self)")
 	})
 
 	t.Run("current user resolution error propagates", func(t *testing.T) {
