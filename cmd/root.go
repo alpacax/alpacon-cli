@@ -47,10 +47,10 @@ Quick start (for humans and AI agents):
   2. alpacon work-session create \          # open + activate a scoped session
        --purpose "<what you're doing>" \    #   (prints a SESSION_ID)
        --scope command,websh \              #   (scopes: command, editor, sudo, tunnel, webftp, websh)
-       --server <server> \
+       --server <SERVER> \
        --use --wait
-  3. alpacon exec <server> -- <command>     # run work inside the session
-  4. alpacon work-session complete <id>     # finish the session when done
+  3. alpacon exec <SERVER> -- <COMMAND>     # run work inside the session
+  4. alpacon work-session complete <SESSION_ID>  # finish the session when done
 
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

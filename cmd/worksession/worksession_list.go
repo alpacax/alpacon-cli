@@ -57,7 +57,7 @@ var workSessionListCmd = &cobra.Command{
   alpacon work-session ls --user all               # everyone's active sessions
   alpacon work-session ls --user all --status all  # all sessions
   alpacon work-session ls --requester-type agent
-  alpacon work-session ls --user 1a2b3c4d-... --status active`,
+  alpacon work-session ls --user <USER_ID> --status active`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if requesterFilter != "" && requesterFilter != "user" && requesterFilter != "agent" {
 			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterFilter)
