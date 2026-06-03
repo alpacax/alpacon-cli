@@ -260,7 +260,8 @@ func isCloudDirectURL(workspaceURL string) bool {
 	if err != nil {
 		return false
 	}
-	host := strings.ToLower(parsed.Hostname())
+	// Normalize for case-insensitive hostnames and the trailing-dot FQDN form.
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
 	return host == defaultBaseDomain || strings.HasSuffix(host, "."+defaultBaseDomain)
 }
 

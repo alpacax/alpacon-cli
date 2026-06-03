@@ -147,6 +147,8 @@ func TestIsCloudDirectURL(t *testing.T) {
 	}{
 		{name: "cloud subdomain", url: "https://demo.us1.alpacon.io", expected: true},
 		{name: "mixed-case cloud subdomain", url: "https://DeMo.us1.AlPaCoN.iO", expected: true},
+		{name: "cloud base domain with trailing dot", url: "https://alpacon.io.", expected: true},
+		{name: "cloud subdomain with trailing dot", url: "https://demo.us1.alpacon.io.", expected: true},
 		{name: "cloud subdomain with port", url: "https://demo.us1.alpacon.io:8443", expected: true},
 		{name: "cloud region subdomain", url: "https://foo.alpacon.io", expected: true},
 		{name: "cloud base domain", url: "https://alpacon.io", expected: true},
