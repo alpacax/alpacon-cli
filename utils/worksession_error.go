@@ -55,7 +55,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s: %s requires an active WorkSession on this authentication.\n", Red("Error"), operation)
+	fmt.Fprintf(&sb, "%s: the %s operation requires an active WorkSession on this authentication.\n", Red("Error"), operation)
 	fmt.Fprintln(&sb)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "auth", authDisplay)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "reason", reason)
@@ -82,7 +82,7 @@ func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, acti
 		OK:        false,
 		ExitCode:  ExitCodeWorkSessionDenied,
 		ErrorCode: code,
-		Message:   fmt.Sprintf("%s requires an active WorkSession on this authentication.", operation),
+		Message:   fmt.Sprintf("the %s operation requires an active WorkSession on this authentication.", operation),
 		Reason:    workSessionReasonMap[code],
 		Context: workSessionErrorCtx{
 			AuthMethod:         authMethod,
@@ -103,17 +103,24 @@ func targetServerList(serverName string) []string {
 }
 
 func workSessionNextActions(code, operation, serverName, activeWS string) []string {
+	serverArg := serverName
+	if serverArg == "" {
+		// Some call sites have no target server (e.g. exec logs); keep the suggestion runnable.
+		serverArg = "<SERVER>"
+	}
 	createCmd := fmt.Sprintf(
-		`alpacon work-session create --scope %s --server %s --purpose "<intent>"`,
-		operation, serverName,
+		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
+		operation, serverArg,
 	)
+	// createOrReuse leads with create-and-attach, then the reuse path.
+	createOrReuse := []string{
+		createCmd + "  # create a new session and attach it",
+		"alpacon work-session ls --status active  # or reuse an existing active session",
+		"alpacon work-session use <ID>",
+	}
 	switch code {
 	case WorkSessionRequired:
-		return []string{
-			"alpacon work-session ls --status active",
-			"alpacon work-session use <ID>",
-			createCmd,
-		}
+		return createOrReuse
 	case WorkSessionNotActive:
 		return []string{"alpacon work-session current"}
 	case WorkSessionExpired:
@@ -125,10 +132,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	case WorkSessionAssigneeMismatch:
 		return []string{"alpacon work-session use <ID>"}
 	case WorkSessionNotUsable:
-		return []string{
-			"alpacon work-session ls",
-			createCmd,
-		}
+		return createOrReuse
 	default: // scope_not_allowed, server_not_allowed
 		return []string{createCmd}
 	}

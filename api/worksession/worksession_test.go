@@ -42,7 +42,7 @@ func TestGetWorkSessionList(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	list, err := GetWorkSessionList(newTestClient(ts), "", "")
+	list, err := GetWorkSessionList(newTestClient(ts), "", "", "")
 	assert.NoError(t, err)
 	assert.Len(t, list, 1)
 	assert.Equal(t, "ses-1", list[0].ID)
@@ -59,7 +59,19 @@ func TestGetWorkSessionList_StatusFilter(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := GetWorkSessionList(newTestClient(ts), "pending", "")
+	_, err := GetWorkSessionList(newTestClient(ts), "pending", "", "")
+	assert.NoError(t, err)
+}
+
+func TestGetWorkSessionList_AssignedUserFilter(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "6eaa827d-616a-4fa9-ad42-4fbb67bb007b", r.URL.Query().Get("assigned_user"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[WorkSession]{Count: 0, Results: nil})
+	}))
+	defer ts.Close()
+
+	_, err := GetWorkSessionList(newTestClient(ts), "", "", "6eaa827d-616a-4fa9-ad42-4fbb67bb007b")
 	assert.NoError(t, err)
 }
 
@@ -161,7 +173,7 @@ func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := GetWorkSessionList(newTestClient(ts), "", "agent")
+	_, err := GetWorkSessionList(newTestClient(ts), "", "agent", "")
 	assert.NoError(t, err)
 }
 
@@ -176,7 +188,7 @@ func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	list, err := GetWorkSessionList(newTestClient(ts), "", "")
+	list, err := GetWorkSessionList(newTestClient(ts), "", "", "")
 	assert.NoError(t, err)
 	assert.Equal(t, "command, websh, webftp", list[0].Scopes)
 }

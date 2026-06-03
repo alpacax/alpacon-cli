@@ -52,6 +52,9 @@ var workSessionCreateCmd = &cobra.Command{
 	Short: "Create a new work session",
 	Long: `Create a new work session.
 
+Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
+(absolute RFC3339); one is required in non-interactive mode.
+
 Pass --use to set the new session as the workspace's active session, so subsequent
 exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
 required, combine --use with --wait. The session is attached once it reaches the
@@ -63,11 +66,11 @@ running 'exec') can run those exact sudo commands without an interactive MFA
 prompt. The 'sudo' scope is added automatically, and the policies are submitted for
 approval together with the session. If a sudo command is later denied, add it to the
 session with 'alpacon work-session update <id> --sudo "<command>"'.`,
-	Example: `  alpacon work-session create --purpose "nginx fix" --scope command,websh --server web-01 --expires-in 2h
-  alpacon work-session create --purpose "deploy" --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --wait
-  alpacon work-session create --purpose "hotfix" --scope command --server web-01 --expires-in 1h --use
-  alpacon work-session create --purpose "deploy" --scope command --server web-01 --expires-in 2h --wait --use
-  alpacon work-session create --purpose "nginx hotfix" --server web-01 --expires-in 2h \
+	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "nginx fix"
+  alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
+  alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
+  alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		purpose = strings.TrimSpace(purpose)
@@ -185,14 +188,15 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// the --wait branch below (or exit immediately when --wait is not set).
 		switch decideUseAction(session.Status, useAfterCreate) {
 		case useDecisionUseNow:
-			desc, err := RunUse(ac, session.ID)
+			// Re-fetch so the serialized JSON matches the --wait --use path.
+			activeSession, err := RunUseSession(ac, session.ID)
 			if err != nil {
 				utils.CliErrorWithExit("Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 			}
-			message := activeWorkSessionSetMessage("", session.ID, desc)
+			message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				active := session.ID
-				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, session, &active))
+				active := activeSession.ID
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, activeSession, &active))
 				return
 			}
 			utils.CliSuccess("%s", message)
@@ -396,7 +400,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*ws
 }
 
 func init() {
-	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose")
+	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose (required in non-interactive mode)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
