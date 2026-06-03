@@ -75,6 +75,7 @@ $ alpacon work-session create \
     --purpose "describe the task" \
     --scope command,websh \
     --server <server> \
+    --expires-in 1h \
     --use --wait
 
 # 4. Operate within the session.
