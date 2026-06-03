@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -72,38 +73,12 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
   ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// Trim cloud flag values so whitespace-only input can't bypass
-		// validateCloudFlags or assemble a broken URL like https://demo. .alpacon.io.
-		var blank bool
-		workspaceFlag, regionFlag, blank = normalizeCloudFlags(workspaceFlag, regionFlag)
-		if blank {
-			utils.CliErrorWithExit("--workspace/--region cannot be blank")
+		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
+		if err != nil {
+			utils.CliErrorWithExit("%s", err.Error())
 		}
 
-		if len(args) > 0 && (workspaceFlag != "" || regionFlag != "") {
-			utils.CliErrorWithExit("Cannot combine a HOST argument with --workspace/--region. Use a HOST for self-hosted, or --workspace/--region for Alpacon Cloud")
-		}
-
-		var workspaceURL, workspaceName, baseDomain string
-
-		if len(args) > 0 {
-			// Host mode: self-hosted only. Cloud direct URLs are deprecated.
-			rejectURLWithPath(args[0])
-			workspaceURL = formatHostURL(args[0])
-			if isCloudDirectURL(workspaceURL) {
-				utils.CliErrorWithExit("Direct URLs are not supported for Alpacon Cloud. Use 'alpacon login --workspace <name> --region <region>' instead")
-			}
-			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
-			baseDomain = utils.ExtractBaseDomain(workspaceURL)
-		} else if workspaceFlag != "" || regionFlag != "" {
-			// Alpacon Cloud mode via flags (non-interactive)
-			if err := validateCloudFlags(workspaceFlag, regionFlag); err != nil {
-				utils.CliErrorWithExit("%s", err.Error())
-			}
-			workspaceName = workspaceFlag
-			baseDomain = defaultBaseDomain
-			workspaceURL = buildCloudWorkspaceURL(workspaceFlag, regionFlag)
-		} else {
+		if !ok {
 			// No args, no flags — try saved config for re-login
 			cfg, err := config.LoadConfig()
 			if err == nil && cfg.WorkspaceURL != "" {
@@ -253,6 +228,43 @@ func normalizeCloudFlags(workspace, region string) (w, r string, blank bool) {
 	return w, r, blank
 }
 
+// resolveLoginTarget resolves the non-interactive login target from the HOST
+// argument and the cloud --workspace/--region flags, applying all combination
+// guards. ok is false when neither a HOST nor cloud flags were supplied, so the
+// caller falls back to saved config or interactive prompts.
+func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, workspaceName, baseDomain string, ok bool, err error) {
+	// Trim cloud flag values so whitespace-only input is rejected up front
+	// instead of slipping past validation or building a malformed URL.
+	workspace, region, blank := normalizeCloudFlags(workspace, region)
+	if blank {
+		return "", "", "", false, errors.New("--workspace/--region cannot be blank")
+	}
+	if len(args) > 0 && (workspace != "" || region != "") {
+		return "", "", "", false, errors.New("cannot combine a HOST argument with --workspace/--region. Use a HOST for self-hosted, or --workspace/--region for Alpacon Cloud")
+	}
+
+	switch {
+	case len(args) > 0:
+		// Host mode: self-hosted only. Cloud direct URLs are deprecated.
+		if err := checkURLPath(args[0]); err != nil {
+			return "", "", "", false, err
+		}
+		workspaceURL = formatHostURL(args[0])
+		if isCloudDirectURL(workspaceURL) {
+			return "", "", "", false, errors.New("direct URLs are not supported for Alpacon Cloud. Use 'alpacon login --workspace <name> --region <region>' instead")
+		}
+		return workspaceURL, utils.ExtractWorkspaceName(workspaceURL), utils.ExtractBaseDomain(workspaceURL), true, nil
+	case workspace != "" || region != "":
+		// Alpacon Cloud mode via flags (non-interactive)
+		if err := validateCloudFlags(workspace, region); err != nil {
+			return "", "", "", false, err
+		}
+		return buildCloudWorkspaceURL(workspace, region), workspace, defaultBaseDomain, true, nil
+	default:
+		return "", "", "", false, nil
+	}
+}
+
 // validateCloudFlags rejects the case where exactly one of workspace/region is set.
 func validateCloudFlags(workspace, region string) error {
 	if workspace != "" && region == "" {
@@ -282,21 +294,22 @@ func isCloudDirectURL(workspaceURL string) bool {
 	return host == defaultBaseDomain || strings.HasSuffix(host, "."+defaultBaseDomain)
 }
 
-// rejectURLWithPath exits with a migration hint if the host argument contains a path.
+// checkURLPath returns a migration-hint error if the host argument contains a path.
 // This catches the legacy alpacon.io/workspace format that is no longer supported.
 // TODO: remove once the new workspace/region flow is well-established.
-func rejectURLWithPath(host string) {
+func checkURLPath(host string) error {
 	raw := host
 	if !strings.Contains(raw, "://") {
 		raw = "https://" + raw
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return
+		return nil
 	}
 	if p := strings.TrimSuffix(parsed.Path, "/"); p != "" {
-		utils.CliErrorWithExit("URL paths are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass the host without a path (e.g. 'alpacon login alpacon.example.com')")
+		return errors.New("URL paths are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass the host without a path (e.g. 'alpacon login alpacon.example.com')")
 	}
+	return nil
 }
 
 // formatHostURL normalizes a host argument into a full URL.

@@ -117,6 +117,58 @@ func TestNormalizeCloudFlags(t *testing.T) {
 	}
 }
 
+func TestResolveLoginTarget(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		workspace  string
+		region     string
+		wantOK     bool
+		wantURL    string
+		wantName   string
+		wantDomain string
+		wantErrSub string
+	}{
+		{name: "self-hosted host", args: []string{"alpacon.example.com"}, wantOK: true, wantURL: "https://alpacon.example.com", wantName: "alpacon", wantDomain: "example.com"},
+		{name: "cloud flags", workspace: "demo", region: "us1", wantOK: true, wantURL: "https://demo.us1.alpacon.io", wantName: "demo", wantDomain: "alpacon.io"},
+		{name: "no args no flags falls back", wantOK: false},
+		{name: "host plus workspace flag", args: []string{"alpacon.example.com"}, workspace: "demo", wantErrSub: "cannot combine a HOST"},
+		{name: "host plus region flag", args: []string{"alpacon.example.com"}, region: "us1", wantErrSub: "cannot combine a HOST"},
+		// Blank guard fires before the combine guard, even when a HOST is present.
+		{name: "host plus blank flag is blank not combine", args: []string{"alpacon.example.com"}, workspace: " ", wantErrSub: "cannot be blank"},
+		{name: "blank both flags", workspace: " ", region: " ", wantErrSub: "cannot be blank"},
+		{name: "blank region only", region: " ", wantErrSub: "cannot be blank"},
+		{name: "workspace without region", workspace: "demo", wantErrSub: "--region is required"},
+		{name: "region without workspace", region: "us1", wantErrSub: "--workspace is required"},
+		{name: "host with path", args: []string{"alpacon.io/demo"}, wantErrSub: "URL paths are not supported"},
+		{name: "cloud direct url rejected", args: []string{"demo.us1.alpacon.io"}, wantErrSub: "direct URLs are not supported"},
+		// Path check runs before the cloud-direct check, so a cloud URL with a path reports the path error.
+		{name: "cloud direct url with path reports path error", args: []string{"demo.us1.alpacon.io/foo"}, wantErrSub: "URL paths are not supported"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			url, name, domain, ok, err := resolveLoginTarget(tt.args, tt.workspace, tt.region)
+			if tt.wantErrSub != "" {
+				assert.ErrorContains(t, err, tt.wantErrSub)
+				assert.False(t, ok)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantURL, url)
+			}
+			if tt.wantName != "" {
+				assert.Equal(t, tt.wantName, name)
+			}
+			if tt.wantDomain != "" {
+				assert.Equal(t, tt.wantDomain, domain)
+			}
+		})
+	}
+}
+
 func TestValidateCloudFlags(t *testing.T) {
 	tests := []struct {
 		name      string
