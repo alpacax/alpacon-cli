@@ -48,6 +48,7 @@ Quick start (for humans and AI agents):
        --purpose "<what you're doing>" \    #   (prints a SESSION_ID)
        --scope command,websh \              #   (scopes: command, editor, sudo, tunnel, webftp, websh)
        --server <SERVER> \
+       --expires-in 1h \                    #   (required non-interactively; or --expires-at <RFC3339>)
        --use --wait
   3. alpacon exec <SERVER> -- <COMMAND>     # run work inside the session
   4. alpacon work-session complete <SESSION_ID>  # finish the session when done
