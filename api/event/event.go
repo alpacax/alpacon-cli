@@ -336,10 +336,15 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if err != nil {
 		return err
 	}
-	// Output lives in chunks under the streaming contract (Result is empty), so
-	// drain them; fall back to Result only when no chunks were produced.
-	if lastSeq := drainRemainingChunks(ac, cmdID, -1, out); lastSeq < 0 && details.Result != "" {
-		_, _ = fmt.Fprint(out, details.Result)
+	// Command has finished: reconstruct output from chunks best-effort, falling
+	// back to Result when chunks are empty or unavailable. No warning on failure—
+	// the polling-fallback warning above already covers it.
+	output := details.Result
+	if reconstructed, oerr := GetCommandOutput(ac, cmdID); oerr == nil && reconstructed != "" {
+		output = reconstructed
+	}
+	if output != "" {
+		_, _ = fmt.Fprint(out, output)
 	}
 	return errorFromDetails(details)
 }

@@ -757,6 +757,51 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
 
+// TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable: when the chunks
+// endpoint errors, the polling fallback emits the buffered Result, not an error.
+func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			w.WriteHeader(http.StatusInternalServerError) // force fallback
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			w.WriteHeader(http.StatusNotFound) // server without chunk support
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "buffered-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
+}
+
 // streamingServerConfig configures the fake event servers for streaming tests.
 type streamingServerConfig struct {
 	cmdID        string
