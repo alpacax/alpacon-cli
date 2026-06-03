@@ -103,9 +103,14 @@ func targetServerList(serverName string) []string {
 }
 
 func workSessionNextActions(code, operation, serverName, activeWS string) []string {
+	serverArg := serverName
+	if serverArg == "" {
+		// Some call sites have no target server (e.g. exec logs); keep the suggestion runnable.
+		serverArg = "<SERVER>"
+	}
 	createCmd := fmt.Sprintf(
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
-		operation, serverName,
+		operation, serverArg,
 	)
 	// createOrReuse leads with create-and-attach, then the reuse path.
 	createOrReuse := []string{
