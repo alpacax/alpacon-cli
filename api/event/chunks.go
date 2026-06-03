@@ -33,9 +33,8 @@ func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq int) ([]Ch
 }
 
 // GetCommandOutput reconstructs the full command output from its chunks in seq
-// order. Empty when no chunks were produced. Used by paths that don't stream
-// live (polling fallback, exec logs) where Result is empty under the chunk
-// contract.
+// order. Empty when no chunks were produced. Used by exec logs, which doesn't
+// stream live, where Result is empty under the chunk contract.
 func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
 	chunks, err := GetCommandChunks(ac, cmdID, 0)
 	if err != nil {

@@ -94,50 +94,6 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	return cmdResponse[0], nil
 }
 
-func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	cmdResponse, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
-	if err != nil {
-		return "", err
-	}
-
-	result, err := PollCommandExecution(ac, cmdResponse.ID)
-	if err != nil {
-		return "", err
-	}
-
-	if result.Status == "stuck" || result.Status == "error" || result.Status == "cancelled" {
-		if result.ErrorPhase != nil && *result.ErrorPhase != "" {
-			return "", fmt.Errorf("command failed: [%s] %s (status=%s)",
-				*result.ErrorPhase, DescribePhase(*result.ErrorPhase), result.Status)
-		}
-		return "", fmt.Errorf("command failed with status: %s", result.Status)
-	}
-
-	if result.Success != nil && !*result.Success {
-		// Trust the server contract: alpamon sets success=(exitCode==0), so a
-		// non-nil exit_code is propagated as-is.
-		exitCode := 1
-		if result.ExitCode != nil {
-			exitCode = *result.ExitCode
-		}
-		errorPhase := ""
-		if result.ErrorPhase != nil {
-			errorPhase = *result.ErrorPhase
-		}
-		return result.Result, &RemoteCommandError{
-			Output:     result.Result,
-			ExitCode:   exitCode,
-			ErrorPhase: errorPhase,
-		}
-	}
-
-	if result.Success == nil && result.Status != "completed" && result.Status != "success" {
-		return result.Result, fmt.Errorf("command ended with unrecognised status: %s", result.Status)
-	}
-
-	return result.Result, nil
-}
-
 func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 	if err != nil {
@@ -203,7 +159,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 }
 
 // RunCommandStreaming runs a command and streams its output to stdout over the
-// event WebSocket, falling back to RunCommand (polling) when WS setup fails.
+// event WebSocket, falling back to polling (runCommandFallback) when WS setup fails.
 func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
 	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, os.Stdout)
 }
@@ -330,8 +286,8 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 	return lastSeq
 }
 
-// errorFromDetails maps a terminal command status to an error, mirroring
-// RunCommand so unrecognized statuses are not masked as success.
+// errorFromDetails maps a terminal command status to an error so unrecognized
+// statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
 	switch d.Status {
 	case "completed", "success", "failed":
@@ -372,8 +328,8 @@ func runCommandFallback(ac *client.AlpaconClient, serverName, command, username,
 }
 
 // runCommandFallbackFromID polls an already-submitted command by ID (instead of
-// re-submitting) and writes its buffered result to out. Used when streaming
-// setup fails after SubmitCommand has created the command.
+// re-submitting) and writes its output to out. Used when streaming setup fails
+// after SubmitCommand has created the command.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
 	details, err := PollCommandExecution(ac, cmdID)
