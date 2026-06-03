@@ -77,7 +77,7 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 		var blank bool
 		workspaceFlag, regionFlag, blank = normalizeCloudFlags(workspaceFlag, regionFlag)
 		if blank {
-			utils.CliErrorWithExit("--workspace and --region cannot be blank")
+			utils.CliErrorWithExit("--workspace/--region cannot be blank")
 		}
 
 		if len(args) > 0 && (workspaceFlag != "" || regionFlag != "") {
