@@ -91,6 +91,32 @@ func TestBuildCloudWorkspaceURL(t *testing.T) {
 	}
 }
 
+func TestNormalizeCloudFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		workspace     string
+		region        string
+		wantWorkspace string
+		wantRegion    string
+		wantBlank     bool
+	}{
+		{name: "trims surrounding spaces", workspace: " demo ", region: " us1 ", wantWorkspace: "demo", wantRegion: "us1"},
+		{name: "no flags is not blank", workspace: "", region: "", wantWorkspace: "", wantRegion: ""},
+		{name: "whitespace-only both is blank", workspace: " ", region: "  ", wantBlank: true},
+		{name: "whitespace-only region only is blank", workspace: "", region: " ", wantBlank: true},
+		{name: "valid workspace with blank region is not blank", workspace: "demo", region: " ", wantWorkspace: "demo", wantRegion: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, r, blank := normalizeCloudFlags(tt.workspace, tt.region)
+			assert.Equal(t, tt.wantWorkspace, w)
+			assert.Equal(t, tt.wantRegion, r)
+			assert.Equal(t, tt.wantBlank, blank)
+		})
+	}
+}
+
 func TestValidateCloudFlags(t *testing.T) {
 	tests := []struct {
 		name      string

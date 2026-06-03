@@ -72,6 +72,14 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
   ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		// Trim cloud flag values so whitespace-only input can't bypass
+		// validateCloudFlags or assemble a broken URL like https://demo. .alpacon.io.
+		var blank bool
+		workspaceFlag, regionFlag, blank = normalizeCloudFlags(workspaceFlag, regionFlag)
+		if blank {
+			utils.CliErrorWithExit("--workspace and --region cannot be blank")
+		}
+
 		if len(args) > 0 && (workspaceFlag != "" || regionFlag != "") {
 			utils.CliErrorWithExit("Cannot combine a HOST argument with --workspace/--region. Use a HOST for self-hosted, or --workspace/--region for Alpacon Cloud")
 		}
@@ -234,6 +242,15 @@ func cloudRegionsHint() string {
 // buildCloudWorkspaceURL assembles an Alpacon Cloud workspace URL.
 func buildCloudWorkspaceURL(workspace, region string) string {
 	return fmt.Sprintf("https://%s.%s.%s", workspace, region, defaultBaseDomain)
+}
+
+// normalizeCloudFlags trims flag values and reports whether the user supplied
+// only blank (whitespace-only) values, which must be rejected rather than
+// silently treated as if no flags were passed.
+func normalizeCloudFlags(workspace, region string) (w, r string, blank bool) {
+	w, r = strings.TrimSpace(workspace), strings.TrimSpace(region)
+	blank = (workspace != "" || region != "") && w == "" && r == ""
+	return w, r, blank
 }
 
 // validateCloudFlags rejects the case where exactly one of workspace/region is set.
