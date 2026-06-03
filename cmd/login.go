@@ -260,7 +260,7 @@ func isCloudDirectURL(workspaceURL string) bool {
 	if err != nil {
 		return false
 	}
-	host := parsed.Hostname()
+	host := strings.ToLower(parsed.Hostname())
 	return host == defaultBaseDomain || strings.HasSuffix(host, "."+defaultBaseDomain)
 }
 
