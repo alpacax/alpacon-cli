@@ -72,6 +72,10 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
   ALPACON_NO_BROWSER=1 alpacon login`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 && (workspaceFlag != "" || regionFlag != "") {
+			utils.CliErrorWithExit("Cannot combine a HOST argument with --workspace/--region. Use a HOST for self-hosted, or --workspace/--region for Alpacon Cloud")
+		}
+
 		var workspaceURL, workspaceName, baseDomain string
 
 		if len(args) > 0 {
@@ -273,7 +277,7 @@ func rejectURLWithPath(host string) {
 		return
 	}
 	if p := strings.TrimSuffix(parsed.Path, "/"); p != "" {
-		utils.CliErrorWithExit("URL paths are not supported. Use 'alpacon login --workspace <name> --region <region>' instead")
+		utils.CliErrorWithExit("URL paths are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass the host without a path (e.g. 'alpacon login alpacon.example.com')")
 	}
 }
 
