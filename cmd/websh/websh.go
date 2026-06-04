@@ -224,12 +224,6 @@ Note: All flags must be placed before the server name.
 		}
 
 		if len(commandArgs) > 0 {
-			if len(commandArgs) > 1 {
-				utils.CliWarning("Command without quotes may cause unexpected behavior. Consider wrapping the command in quotes.")
-				if !utils.CommandConfirm() {
-					return
-				}
-			}
 			command := execCmd.ShellJoin(commandArgs)
 			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
 			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)

@@ -2,7 +2,6 @@ package utils
 
 import (
 	"archive/zip"
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -536,29 +535,6 @@ func CreateAndEditTempFile(data []byte) (string, error) {
 func SplitPath(path string) (string, string) {
 	parts := strings.SplitN(path, ":", 2)
 	return parts[0], parts[1]
-}
-
-// CommandConfirm prompts the user for confirmation to continue executing a command.
-// It returns true if the user enters "y" or "yes" (case-insensitive), and false otherwise.
-func CommandConfirm() bool {
-	if IsInteractiveShell() {
-		fmt.Fprint(os.Stderr, "Do you want to continue executing the command? [y/n]: ")
-		reader := bufio.NewReader(os.Stdin)
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			CliErrorWithExit("Failed to read user input: %s", err)
-			return false
-		}
-
-		input = strings.TrimSpace(strings.ToLower(input))
-		if input != "y" && input != "yes" {
-			CliInfo("Command execution cancelled.")
-			return false
-		}
-		return true
-	} else {
-		return true
-	}
 }
 
 // IsInteractiveShell checks if the current program is running in an interactive terminal.
