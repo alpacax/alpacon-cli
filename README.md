@@ -226,7 +226,7 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 
 ## When a command is denied
 
-Under interactive auth (browser login), `websh`, `exec`, `cp`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
+Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
 
 ```
 Error: the command operation requires an active WorkSession on this authentication.
