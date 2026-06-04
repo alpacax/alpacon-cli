@@ -13,30 +13,46 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// sudoNoWorksessionPolicyCode is the server error code surfaced in command
-// output when a non-interactive sudo is denied for lack of a matching
-// MFA-bypass policy in the work session. Kept in sync with
-// alpacon-server utils/error_codes.py ErrorCode.SUDO_NO_WORKSESSION_POLICY.
+// sudoDenialHints map a non-interactive sudo denial code to actionable
+// guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
 //
-// The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
-// codes through its sanitizer into the user-facing denial message; lowercase
-// values are dropped, so this is the form that actually reaches stderr as
-// "Permission denied (SUDO_NO_WORKSESSION_POLICY)".
-const sudoNoWorksessionPolicyCode = "SUDO_NO_WORKSESSION_POLICY"
+// The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_] codes
+// through its sanitizer into the user-facing denial message (lowercase values
+// are dropped), so this is the form that reaches stderr as
+// "Permission denied (<CODE>)". Each hint stays at the denial *category* level
+// (what to do)—the server never sends the risk score or reasoning to a client.
+var sudoDenialHints = []struct {
+	code, guidance string
+}{
+	{
+		"SUDO_NO_WORKSESSION_POLICY",
+		"sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
+			"Add it and re-run (omit SESSION_ID to use the active session):\n" +
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
+	},
+	{
+		"SUDO_PRESENCE_REQUIRED",
+		"sudo needs a recent MFA: complete a step-up, then re-run the command.\n",
+	},
+	{
+		"SUDO_APPROVAL_REQUIRED",
+		"sudo needs approval: an approval request was created. Re-run after a reviewer approves it.\n",
+	},
+	{
+		"SUDO_RISK_DENIED",
+		"sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
+	},
+}
 
 // sudoDenialHint returns actionable guidance when the command output shows a
-// non-interactive sudo denial, telling the caller how to authorize the command
-// via their work session. Returns "" when no such denial is present.
+// non-interactive sudo denial. Returns "" when no such denial is present.
 func sudoDenialHint(output string) string {
-	if !strings.Contains(output, sudoNoWorksessionPolicyCode) {
-		return ""
+	for _, h := range sudoDenialHints {
+		if strings.Contains(output, h.code) {
+			return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), h.guidance)
+		}
 	}
-	return fmt.Sprintf(
-		"%s sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n"+
-			"Add it and re-run (omit SESSION_ID to use the active session):\n"+
-			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
-		utils.Yellow("Hint:"),
-	)
+	return ""
 }
 
 // RunCommandWithRetry executes a remote command with MFA and username-required
