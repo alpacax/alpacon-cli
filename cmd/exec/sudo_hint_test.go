@@ -43,4 +43,10 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.Empty(t, sudoDenialHint("ok\n"))
 		assert.Empty(t, sudoDenialHint(""))
 	})
+
+	t.Run("bare code in command output is not a false positive", func(t *testing.T) {
+		// A command that merely prints the code (no "(CODE)" denial token)
+		// must not trigger a hint.
+		assert.Empty(t, sudoDenialHint("echo SUDO_RISK_DENIED\nSUDO_RISK_DENIED\n"))
+	})
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// sudoDenialHints map a non-interactive sudo denial code to actionable
+// sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
 //
 // The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_] codes
@@ -48,7 +48,10 @@ var sudoDenialHints = []struct {
 // non-interactive sudo denial. Returns "" when no such denial is present.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
-		if strings.Contains(output, h.code) {
+		// Match the parenthesized denial token "(CODE)"—the form
+		// alpacon_approval.c emits—not the bare code, so a command that merely
+		// prints the code string in its own output is not a false positive.
+		if strings.Contains(output, "("+h.code+")") {
 			return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), h.guidance)
 		}
 	}
