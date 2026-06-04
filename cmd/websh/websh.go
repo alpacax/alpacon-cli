@@ -214,7 +214,7 @@ Note: All flags must be placed before the server name.
 			utils.OutputFormat = parsed.OutputFormat
 		}
 
-		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
+		workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
 
 		authMethod := config.ResolveAuthMethod()
 

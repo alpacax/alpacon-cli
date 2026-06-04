@@ -71,7 +71,7 @@ redirections, or '&&' will not work.`,
 			utils.CliErrorWithExit("%s", err)
 		}
 
-		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
+		workSessionID := worksession.ResolveOrExit(flagWorkSession)
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
