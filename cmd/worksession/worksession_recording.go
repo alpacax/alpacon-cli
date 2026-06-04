@@ -26,14 +26,14 @@ var workSessionRecordingCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opRecording, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		sessionID := args[0]
 
 		items, err := wsapi.GetWorkSessionTimeline(ac, sessionID, true)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve work session timeline: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
 		}
 
 		var recordings []wsapi.TimelineItem
@@ -44,12 +44,12 @@ var workSessionRecordingCmd = &cobra.Command{
 		}
 
 		if len(recordings) == 0 {
-			utils.CliErrorWithExit("No recordings found for session %s.", sessionID)
+			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
 		}
 
 		target, idx := findRecording(recordings, recordingIndex)
 		if target == nil {
-			utils.CliErrorWithExit("Recording index %d out of range (session has %d recording(s)).", recordingIndex, len(recordings))
+			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d recording(s)).", recordingIndex, len(recordings))
 		}
 
 		printRecordingHeader(target, idx, len(recordings))

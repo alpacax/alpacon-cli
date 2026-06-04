@@ -41,7 +41,7 @@ func newWorkSessionMutationOutput(operation, message string, session *wsapi.Work
 func newWorkSessionExtendOutput(id, expiresAt string) workSessionMutationOutput {
 	return workSessionMutationOutput{
 		OK:            true,
-		Operation:     "extend",
+		Operation:     opExtend,
 		Message:       fmt.Sprintf("Work session %s extended to %s.", id, expiresAt),
 		WorkSessionID: id,
 		ExpiresAt:     expiresAt,
@@ -72,6 +72,7 @@ func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 
 func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
+		// Plain text on purpose: the envelope uses the same serializer that just failed.
 		utils.CliErrorWithExit("Failed to marshal work-session result: %s", err)
 	}
 }

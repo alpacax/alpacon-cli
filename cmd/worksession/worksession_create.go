@@ -76,19 +76,19 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		purpose = strings.TrimSpace(purpose)
 		if purpose == "" {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("Non-interactive mode requires --purpose.")
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --purpose.")
 			}
 			purpose = utils.PromptForRequiredInput("Purpose: ")
 		}
 		if len(createScopes) == 0 {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("Non-interactive mode requires --scope.")
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --scope.")
 			}
 			createScopes = splitCSV(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "))
 		}
 		if len(createServers) == 0 {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("Non-interactive mode requires --server.")
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --server.")
 			}
 			createServers = splitCSV(utils.PromptForRequiredInput("Servers (comma-separated server names): "))
 		}
@@ -97,31 +97,31 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		if err != nil {
 			if expiresIn == "" && expiresAt == "" {
 				if !utils.IsInteractiveShell() {
-					utils.CliErrorWithExit("Non-interactive mode requires --expires-in or --expires-at.")
+					utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --expires-in or --expires-at.")
 				}
 				expiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
 				expiresAtVal, err = parseExpiryFlag(expiresIn, "")
 				if err != nil {
-					utils.CliErrorWithExit("Invalid expiry: %s.", err)
+					utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid expiry: %s.", err)
 				}
 			} else {
-				utils.CliErrorWithExit("Invalid expiry: %s.", err)
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid expiry: %s.", err)
 			}
 		}
 
 		if requesterType != "user" && requesterType != "agent" {
-			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
 
 		// Pre-validate --use to avoid creating an orphan server-side session that we
 		// can't attach to the workspace.
 		if useAfterCreate {
 			if requesterType == "agent" {
-				utils.CliErrorWithExit("--use cannot be combined with --requester-type=agent (agent sessions are not workspace-attachable).")
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with --requester-type=agent (agent sessions are not workspace-attachable).")
 			}
 			cfg, err := config.LoadConfig()
 			if err != nil || cfg.WorkspaceName == "" {
-				utils.CliErrorWithExit("--use requires an active workspace. Run 'alpacon login' first.")
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires an active workspace. Run 'alpacon login' first.")
 			}
 		}
 
@@ -143,27 +143,27 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		}
 
 		if len(scopeList) == 0 {
-			utils.CliErrorWithExit("--scope must contain at least one valid scope.")
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "--scope must contain at least one valid scope.")
 		}
 		if err := validateScopeEnum(scopeList); err != nil {
-			utils.CliErrorWithExit("Invalid --scope: %s", err)
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --scope: %s", err)
 		}
 		if err := validateAgentScopes(requesterType, scopeList); err != nil {
-			utils.CliErrorWithExit("Invalid --scope: %s", err)
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --scope: %s", err)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opCreate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		serverNames := utils.CompactStrings(createServers)
 		if len(serverNames) == 0 {
-			utils.CliErrorWithExit("--server must contain at least one valid server name.")
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "--server must contain at least one valid server name.")
 		}
 		serverIDs, err := server.ResolveServerNames(ac, serverNames)
 		if err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s.", err)
 		}
 
 		req := wsapi.WorkSessionCreateRequest{
@@ -177,7 +177,7 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 
 		session, err := wsapi.CreateWorkSession(ac, req)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to create work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opCreate, err, "Failed to create work session: %s.", err)
 		}
 
 		if utils.OutputFormat != utils.OutputFormatJSON {
@@ -191,12 +191,12 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 			// Re-fetch so the serialized JSON matches the --wait --use path.
 			activeSession, err := RunUseSession(ac, session.ID)
 			if err != nil {
-				utils.CliErrorWithExit("Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+				utils.CliErrorEnvelopeWithExit(opCreate, err, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 			}
 			message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				active := activeSession.ID
-				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session)+". "+message, activeSession, &active))
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session)+". "+message, activeSession, &active))
 				return
 			}
 			utils.CliSuccess("%s", message)
@@ -204,7 +204,7 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		case useDecisionSkipScheduled:
 			if !waitApproval {
 				if utils.OutputFormat == utils.OutputFormatJSON {
-					printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session), session, nil))
+					printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 					return
 				}
 				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
@@ -212,13 +212,13 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 			}
 		case useDecisionErrorNeedsWait:
 			if !waitApproval {
-				utils.CliErrorWithExit("--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
 			}
 		}
 
 		if !waitApproval {
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session), session, nil))
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 			}
 			return
 		}
@@ -226,13 +226,13 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate)
 		if err != nil {
-			utils.CliErrorWithExit("%s", err)
+			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
 
 		if !useAfterCreate {
 			message := fmt.Sprintf("Work session %s approved.", session.ID)
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", message, finalSession, nil))
+				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
 				return
 			}
 			utils.CliSuccess("%s", message)
@@ -242,12 +242,12 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// Phase 3: --wait --use. pollForApproval(untilActive=true) guarantees status reached active.
 		desc, err := RunUse(ac, session.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+			utils.CliErrorEnvelopeWithExit(opCreate, err, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 		}
 		message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			active := session.ID
-			printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", message, finalSession, &active))
+			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
 			return
 		}
 		utils.CliSuccess("%s", message)

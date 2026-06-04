@@ -16,11 +16,11 @@ var workSessionRejectCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opReject, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := wsapi.RejectWorkSession(ac, args[0]); err != nil {
-			utils.CliErrorWithExit("Failed to reject work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opReject, err, "Failed to reject work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s rejected.", args[0])

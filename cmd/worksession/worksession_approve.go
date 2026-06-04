@@ -27,7 +27,7 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opApprove, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		req := wsapi.WorkSessionApproveRequest{
@@ -37,13 +37,13 @@ Use --scope and --server to narrow down the granted access at approval time.`,
 		if len(approveServers) > 0 {
 			serverIDs, err := server.ResolveServerNames(ac, approveServers)
 			if err != nil {
-				utils.CliErrorWithExit("%s.", err)
+				utils.CliErrorEnvelopeWithExit(opApprove, err, "%s.", err)
 			}
 			req.AdjustedServers = serverIDs
 		}
 
 		if err := wsapi.ApproveWorkSession(ac, args[0], req); err != nil {
-			utils.CliErrorWithExit("Failed to approve work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opApprove, err, "Failed to approve work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s approved.", args[0])
