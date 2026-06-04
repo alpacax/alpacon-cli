@@ -13,13 +13,16 @@ import (
 
 const workSessionURL = "/api/work-sessions/sessions/"
 
-func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType string) ([]WorkSessionAttributes, error) {
+func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
 	params := map[string]string{}
 	if status != "" {
 		params["status"] = status
 	}
 	if requesterType != "" {
 		params["requester_type"] = requesterType
+	}
+	if assignedUser != "" {
+		params["assigned_user"] = assignedUser
 	}
 
 	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
