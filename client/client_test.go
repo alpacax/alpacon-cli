@@ -139,6 +139,68 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
+	// Accessing root / a system account requires MFA: the server returns 401
+	// with {"code": "auth_mfa_required"} and no detail string. This must not be
+	// mislabeled as an authentication failure or suggest re-login—the user is
+	// authenticated and only needs MFA. The code must survive for the MFA flow.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "source": "websh"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "multi-factor authentication")
+	assert.NotContains(t, err.Error(), "authentication failed")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthMFARequired, code)
+	assert.Equal(t, "websh", source)
+}
+
+func TestSendRequest_401MFARequiredPrefersServerDetail(t *testing.T) {
+	// When the server also provides a human detail, surface it—still without a
+	// re-login hint, since a coded 401 is not a stale token.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "source": "websh", "detail": "MFA required to access root"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "MFA required to access root")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthMFARequired, code)
+}
+
+func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
+	// Any coded 401 without a detail must not become "authentication failed" /
+	// re-login; the code is preserved for downstream handling.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "some_policy_denial", "source": "command"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.NotContains(t, err.Error(), "authentication failed")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, "some_policy_denial", code)
+	assert.Equal(t, "command", source)
+}
+
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	callCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
