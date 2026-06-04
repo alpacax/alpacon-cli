@@ -1,9 +1,6 @@
 package worksession_test
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
@@ -44,32 +41,4 @@ func TestResolve_Priority(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
-}
-
-func TestAnnounceIfActive_PrintsToStderr(t *testing.T) {
-	r, w, _ := os.Pipe()
-	origStderr := os.Stderr
-	os.Stderr = w
-	defer func() { os.Stderr = origStderr }()
-
-	worksession.AnnounceIfActive("uuid-x")
-	_ = w.Close()
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-
-	assert.Contains(t, buf.String(), "Using work-session uuid-x")
-}
-
-func TestAnnounceIfActive_SilentWhenEmpty(t *testing.T) {
-	r, w, _ := os.Pipe()
-	origStderr := os.Stderr
-	os.Stderr = w
-	defer func() { os.Stderr = origStderr }()
-
-	worksession.AnnounceIfActive("")
-	_ = w.Close()
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-
-	assert.Equal(t, "", buf.String())
 }
