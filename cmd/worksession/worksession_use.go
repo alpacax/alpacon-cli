@@ -32,7 +32,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if unsetActiveWorkSession {
 			if len(args) > 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUse, "--unset cannot be combined with a SESSION_ID argument")
+				utils.CliUsageErrorEnvelopeWithExit(opUnset, "--unset cannot be combined with a SESSION_ID argument")
 			}
 			// Treat missing config / no active workspace / empty entry as already-unset
 			// so --unset is a true no-op and never surfaces a confusing config error.
@@ -50,7 +50,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				return
 			}
 			if err := RunUnset(); err != nil {
-				utils.CliErrorEnvelopeWithExit(opUse, err, "%s", err)
+				utils.CliErrorEnvelopeWithExit(opUnset, err, "%s", err)
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(workSessionMutationOutput{

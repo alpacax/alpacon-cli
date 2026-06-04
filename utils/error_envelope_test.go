@@ -28,7 +28,7 @@ func TestBuildCliErrorEnvelope_NoCodeOmitsField(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelopeFromErr_ExtractsServerCode(t *testing.T) {
-	// ParseErrorResponse parses the "msg; code: X; source: Y" form produced by parseAPIError.
+	// ParseErrorResponse falls back to parsing the legacy "msg; code: X; source: Y" string form.
 	err := errors.New("WorkSession is not usable; code: work_session_not_usable; source: work_session")
 	env := buildCliErrorEnvelopeFromErr("extend", err, "Failed to extend work session: refused.")
 
