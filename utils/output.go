@@ -28,7 +28,7 @@ type JSONErrorEnvelope[T any] struct {
 	ErrorCode   string   `json:"error_code,omitempty"`
 	Message     string   `json:"message"`
 	Reason      string   `json:"reason,omitempty"`
-	Context     T        `json:"context,omitempty"`
+	Context     T        `json:"context"`
 	NextActions []string `json:"next_actions,omitempty"`
 }
 
