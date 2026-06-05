@@ -90,7 +90,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			utils.OutputFormat = parsed.OutputFormat
 		}
 
-		workSessionID := worksession.ResolveAndAnnounce(parsed.WorkSessionID)
+		workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
 
 		authMethod := config.ResolveAuthMethod()
 
