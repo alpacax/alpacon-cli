@@ -279,7 +279,7 @@ What each refusal code means and what to do next:
 | `work_session_assignee_mismatch` | session assigned to another principal | `work-session use <ID>` with your own session |
 | `work_session_not_usable` | session is no longer usable | `work-session create --use` |
 
-`work-session` subcommand failures (`create`, `use`, `extend`, ...) also emit a JSON error envelope under `--output json`, with exit code `1` and `error_code` carrying the server code when available (`usage_error` for local flag/argument errors). Run `alpacon whoami` to check upfront whether a work session is required for your auth.
+`work-session` subcommand failures (`create`, `use`, `extend`, ...) also emit a JSON error envelope under `--output json`, with exit code `1` and `error_code` carrying the server code when available (`usage_error` for local flag/argument errors). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.
 
 ## Exit codes
 
