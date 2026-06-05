@@ -43,6 +43,7 @@ var workSessionRecordingCmd = &cobra.Command{
 			}
 		}
 
+		// No recordings is a not-found state (no error_code); a bad --index is a usage_error.
 		if len(recordings) == 0 {
 			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
 		}
