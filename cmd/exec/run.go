@@ -13,14 +13,21 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
+// sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
+// alpacon_approval.c via g_plugin_printf ("Alpacon denied this sudo command
+// (CODE)."). The other "Permission denied (CODE)" form is assigned to *errstr,
+// which only reaches the audit log—not the invoking terminal—so it must not be
+// matched. Anchoring on this full prefix (not a bare "(CODE)") stops a command
+// whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
+const sudoDenialLinePrefix = "Alpacon denied this sudo command"
+
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
 //
-// The form is UPPERCASE because alpacon_approval.c only passes [A-Z0-9_] codes
-// through its sanitizer into the user-facing denial message (lowercase values
-// are dropped), so this is the form that reaches stderr as
-// "Permission denied (<CODE>)". Each hint stays at the denial *category* level
-// (what to do)—the server never sends the risk score or reasoning to a client.
+// The codes are UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
+// codes through its sanitizer into the user-facing denial line (lowercase
+// values are dropped). Each hint stays at the denial *category* level (what to
+// do)—the server never sends the risk score or reasoning to a client.
 var sudoDenialHints = []struct {
 	code, guidance string
 }{
@@ -48,10 +55,10 @@ var sudoDenialHints = []struct {
 // non-interactive sudo denial. Returns "" when no such denial is present.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
-		// Match the parenthesized denial token "(CODE)"—the form
-		// alpacon_approval.c emits—not the bare code, so a command that merely
-		// prints the code string in its own output is not a false positive.
-		if strings.Contains(output, "("+h.code+")") {
+		// Anchor on the plugin's full denial line, not a bare "(CODE)" token,
+		// so a command whose own output prints "(SUDO_RISK_DENIED)" cannot forge
+		// a hint on a command that actually succeeded.
+		if strings.Contains(output, sudoDenialLinePrefix+" ("+h.code+")") {
 			return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), h.guidance)
 		}
 	}
