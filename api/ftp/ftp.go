@@ -1,7 +1,6 @@
 package ftp
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -353,26 +352,6 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		readers[i] = readOnly{f}
 	}
 	return executeBulkUpload(ac, request, readers, sizes)
-}
-
-// UploadContent uploads an in-memory payload to remotePath (full path including filename) on the named server, reusing the single-file pipeline. workSessionID is attached when non-empty.
-func UploadContent(ac *client.AlpaconClient, serverName, remotePath string, content []byte, username, groupname string, allowOverwrite bool, workSessionID string) error {
-	serverID, err := server.GetServerIDByName(ac, serverName)
-	if err != nil {
-		return err
-	}
-
-	request := &UploadRequest{
-		Name:           filepath.Base(remotePath),
-		Path:           remotePath,
-		Server:         serverID,
-		Username:       username,
-		Groupname:      groupname,
-		AllowOverwrite: allowOverwrite,
-		WorkSession:    workSessionID,
-	}
-
-	return executeSingleUpload(ac, request, bytes.NewReader(content), int64(len(content)))
 }
 
 // UploadLocalFileAs uploads one local file to the exact remote file path.
