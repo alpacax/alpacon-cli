@@ -1230,3 +1230,105 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 		})
 	}
 }
+
+func TestNextPollInterval(t *testing.T) {
+	tests := []struct {
+		name    string
+		attempt int
+		want    time.Duration
+	}{
+		{name: "first attempt is initial interval", attempt: 0, want: 250 * time.Millisecond},
+		{name: "second doubles", attempt: 1, want: 500 * time.Millisecond},
+		{name: "third doubles", attempt: 2, want: 1 * time.Second},
+		{name: "fourth reaches cap", attempt: 3, want: 2 * time.Second},
+		{name: "beyond cap stays capped", attempt: 4, want: 2 * time.Second},
+		{name: "large attempt does not overflow", attempt: 64, want: 2 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextPollInterval(tt.attempt))
+		})
+	}
+}
+
+func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
+	// Server reports "not yet complete" (success=null) twice, then succeeds.
+	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below
+	// the old fixed 2s+2s = 4s. Assert both the poll count and a loose upper
+	// bound that the old fixed interval could not have met.
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if n < 3 {
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	start := time.Now()
+	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	assert.True(t, success)
+	assert.Equal(t, "done", message)
+	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	// Lower bound proves the two waits actually backed off (250ms+500ms);
+	// loose upper bound proves it beat the old fixed 2s+2s without being
+	// flaky under slow CI scheduling.
+	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
+	assert.Less(t, elapsed, 3*time.Second, "adaptive backoff should finish well under the old fixed 2s+2s")
+}
+
+func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
+	// A 422 with the in-progress code is expected while the transfer runs:
+	// PollTransferStatus must back off and retry, not treat it as fatal.
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		if n < 3 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "webftp_transfer_in_progress"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+
+	require.NoError(t, err)
+	assert.True(t, success)
+	assert.Equal(t, "done", message)
+	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+}
+
+func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
+	// A non-in-progress error (e.g. 403) is fatal: return immediately without
+	// polling again.
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "permission denied"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, _, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+
+	assert.Error(t, err)
+	assert.False(t, success)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fatal error must not be retried")
+}

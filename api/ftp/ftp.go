@@ -27,15 +27,36 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
-	// Polling configuration for transfer status
-	pollInterval       = 2 * time.Second
-	basePollTimeout    = 30 * time.Second
-	perFilePollTimeout = 10 * time.Second
-	perMBPollTimeout   = 5 * time.Second
+	// Polling configuration for transfer status. The poll interval backs off
+	// exponentially from initialPollInterval up to maxPollInterval so small
+	// files that finish quickly are detected within a fraction of a second,
+	// while large transfers settle at the cap where steady-state poll load
+	// matches the old fixed interval. (Bulk transfers polling concurrently can
+	// briefly raise request density during the sub-cap ramp.)
+	initialPollInterval = 250 * time.Millisecond
+	maxPollInterval     = 2 * time.Second
+	pollBackoffFactor   = 2
+	basePollTimeout     = 30 * time.Second
+	perFilePollTimeout  = 10 * time.Second
+	perMBPollTimeout    = 5 * time.Second
 
 	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
+
+// nextPollInterval returns the backoff delay for a 0-based poll attempt:
+// initialPollInterval doubled per attempt, capped at maxPollInterval. The cap
+// is checked each step, so the value never overflows for large attempt counts.
+func nextPollInterval(attempt int) time.Duration {
+	d := initialPollInterval
+	for i := 0; i < attempt; i++ {
+		d *= pollBackoffFactor
+		if d >= maxPollInterval {
+			return maxPollInterval
+		}
+	}
+	return d
+}
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
@@ -49,32 +70,31 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 		statusURL = fmt.Sprintf(downloadStatusURL, id)
 	}
 
-	maxRetries := int(timeout / pollInterval)
-	if maxRetries < 1 {
-		maxRetries = 1
-	}
+	deadline := time.Now().Add(timeout)
 
-	for i := 0; i < maxRetries; i++ {
+	for attempt := 0; ; attempt++ {
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
-			// Check if it's a 422 error (transfer in progress)
-			if strings.Contains(err.Error(), "webftp_transfer_in_progress") {
-				time.Sleep(pollInterval)
-				continue
+			// A 422 (transfer in progress) is expected while the transfer is
+			// still running: back off and retry. Any other error is fatal.
+			if !strings.Contains(err.Error(), "webftp_transfer_in_progress") {
+				return false, "", fmt.Errorf("failed to check transfer status: %w", err)
 			}
-			return false, "", fmt.Errorf("failed to check transfer status: %w", err)
+		} else {
+			var statusResp TransferStatusResponse
+			if err := json.Unmarshal(respBody, &statusResp); err != nil {
+				return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+			}
+			if statusResp.Success != nil {
+				return *statusResp.Success, statusResp.Message, nil
+			}
 		}
 
-		var statusResp TransferStatusResponse
-		if err := json.Unmarshal(respBody, &statusResp); err != nil {
-			return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+		delay := nextPollInterval(attempt)
+		if time.Now().Add(delay).After(deadline) {
+			break
 		}
-
-		if statusResp.Success != nil {
-			return *statusResp.Success, statusResp.Message, nil
-		}
-
-		time.Sleep(pollInterval)
+		time.Sleep(delay)
 	}
 
 	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
