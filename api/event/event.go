@@ -63,16 +63,10 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 
 	var eventList []EventAttributes
 	for _, event := range response.Results {
-		// Oversized commands run as a staged-script wrapper; show the
-		// original (source_line) instead of the wrapper.
-		command := event.Line
-		if event.SourceLine != "" {
-			command = event.SourceLine
-		}
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,
-			Command:     utils.TruncateString(flattenNewlines(command), 100),
+			Command:     utils.TruncateString(flattenNewlines(event.Line), 100),
 			Result:      utils.TruncateString(flattenNewlines(event.Result), 70),
 			Status:      utils.BoolPointerToString(event.Success),
 			Operator:    event.RequestedBy.Name,

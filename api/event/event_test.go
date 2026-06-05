@@ -114,34 +114,6 @@ func TestGetEventList_FiltersAreQueryParams(t *testing.T) {
 	assert.Equal(t, "usr-1", listQuery.Get("requested_by"))
 }
 
-func TestGetEventList_PrefersSourceLineOverWrapper(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[EventDetails]{
-			Count: 2,
-			Results: []EventDetails{
-				{
-					ID:         "cmd-oversized",
-					Line:       "sh /tmp/.alpacon-exec-abc.sh; rc=$?; rm -f /tmp/.alpacon-exec-abc.sh; exit $rc",
-					SourceLine: "echo ORIGINAL",
-				},
-				{
-					ID:   "cmd-inline",
-					Line: "echo small",
-				},
-			},
-		})
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	events, err := GetEventList(ac, 2, "", "")
-	require.NoError(t, err)
-	require.Len(t, events, 2)
-	assert.Equal(t, "echo ORIGINAL", events[0].Command, "oversized rows must show the original, not the wrapper")
-	assert.Equal(t, "echo small", events[1].Command)
-}
-
 func TestGetEventList_FlattensMultilineForTable(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -149,10 +121,9 @@ func TestGetEventList_FlattensMultilineForTable(t *testing.T) {
 			Count: 1,
 			Results: []EventDetails{
 				{
-					ID:         "cmd-multiline",
-					Line:       "sh /tmp/.alpacon-exec-abc.sh; rc=$?; rm -f /tmp/.alpacon-exec-abc.sh; exit $rc",
-					SourceLine: "# padding\n# padding\r\nuname -a",
-					Result:     "loop 1\nloop 2\nloop 3",
+					ID:     "cmd-multiline",
+					Line:   "# padding\n# padding\r\nuname -a",
+					Result: "loop 1\nloop 2\nloop 3",
 				},
 			},
 		})
