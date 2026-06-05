@@ -12,16 +12,14 @@ const inlineCommandLimit = 2048
 // windowsPlatform is the platform string the server reports for Windows hosts.
 const windowsPlatform = "windows"
 
-// exceedsInlineLimit reports whether the command must be sent with the oversized
-// flag so the server stages it as a temp script instead of running it inline.
-// Byte-based: may flag before the server's char limit, never after.
+// exceedsInlineLimit reports whether the command needs the oversized flag
+// (byte-based; may flag before the server's char limit, never after).
 func exceedsInlineLimit(command string) bool {
 	return len(command) > inlineCommandLimit
 }
 
-// ResolveOversized reports whether command must be sent with the oversized flag,
-// failing fast on Windows servers (no sh wrapper); the server enforces this too.
-// Exits on platform lookup failure or unsupported platform. Shared by exec and websh.
+// ResolveOversized reports whether command needs the oversized flag, failing fast
+// on Windows (no sh wrapper). Exits on lookup failure. Shared by exec and websh.
 func ResolveOversized(ac *client.AlpaconClient, serverName, command string) bool {
 	if !exceedsInlineLimit(command) {
 		return false
