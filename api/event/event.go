@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -17,6 +17,13 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 )
+
+// newlineFlattener keeps multiline commands/results on one table row.
+var newlineFlattener = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+func flattenNewlines(s string) string {
+	return newlineFlattener.Replace(s)
+}
 
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
@@ -34,12 +41,17 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		}
 	}
 
-	relativePath := path.Join(serverID, userID)
 	params := map[string]string{}
 	if pageSize > 0 {
 		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, relativePath, params))
+	if serverID != "" {
+		params["server"] = serverID
+	}
+	if userID != "" {
+		params["requested_by"] = userID
+	}
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, "", params))
 	if err != nil {
 		return nil, err
 	}
@@ -51,11 +63,17 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 
 	var eventList []EventAttributes
 	for _, event := range response.Results {
+		// Oversized commands run as a staged-script wrapper; show the
+		// original (source_line) instead of the wrapper.
+		command := event.Line
+		if event.SourceLine != "" {
+			command = event.SourceLine
+		}
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,
-			Command:     event.Line,
-			Result:      utils.TruncateString(event.Result, 70),
+			Command:     utils.TruncateString(flattenNewlines(command), 100),
+			Result:      utils.TruncateString(flattenNewlines(event.Result), 70),
 			Status:      utils.BoolPointerToString(event.Success),
 			Operator:    event.RequestedBy.Name,
 			RequestedAt: utils.TimeUtils(event.AddedAt),

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,6 +74,98 @@ func TestGetEventList_NoExtraPagination(t *testing.T) {
 	if len(events) != 25 {
 		t.Errorf("expected 25 events, got %d", len(events))
 	}
+}
+
+func TestGetEventList_FiltersAreQueryParams(t *testing.T) {
+	var listQuery url.Values
+	var listPath string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+			})
+		case strings.Contains(r.URL.Path, "/api/iam/users/"):
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "usr-1", "username": "admin"}},
+			})
+		case strings.Contains(r.URL.Path, "/api/events/commands/"):
+			listPath = r.URL.Path
+			listQuery = r.URL.Query()
+			_ = json.NewEncoder(w).Encode(api.ListResponse[EventDetails]{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := GetEventList(ac, 5, "server-x", "admin")
+	require.NoError(t, err)
+
+	// IDs must travel as query params; a path segment would hit the
+	// detail endpoint and 404 with "No Command matches the given query."
+	assert.Equal(t, "/api/events/commands/", listPath)
+	assert.Equal(t, "srv-1", listQuery.Get("server"))
+	assert.Equal(t, "usr-1", listQuery.Get("requested_by"))
+}
+
+func TestGetEventList_PrefersSourceLineOverWrapper(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[EventDetails]{
+			Count: 2,
+			Results: []EventDetails{
+				{
+					ID:         "cmd-oversized",
+					Line:       "sh /tmp/.alpacon-exec-abc.sh; rc=$?; rm -f /tmp/.alpacon-exec-abc.sh; exit $rc",
+					SourceLine: "echo ORIGINAL",
+				},
+				{
+					ID:   "cmd-inline",
+					Line: "echo small",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	events, err := GetEventList(ac, 2, "", "")
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "echo ORIGINAL", events[0].Command, "oversized rows must show the original, not the wrapper")
+	assert.Equal(t, "echo small", events[1].Command)
+}
+
+func TestGetEventList_FlattensMultilineForTable(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[EventDetails]{
+			Count: 1,
+			Results: []EventDetails{
+				{
+					ID:         "cmd-multiline",
+					Line:       "sh /tmp/.alpacon-exec-abc.sh; rc=$?; rm -f /tmp/.alpacon-exec-abc.sh; exit $rc",
+					SourceLine: "# padding\n# padding\r\nuname -a",
+					Result:     "loop 1\nloop 2\nloop 3",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	events, err := GetEventList(ac, 1, "", "")
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	// Newlines inside the first truncation window break the table layout.
+	assert.Equal(t, "# padding # padding uname -a", events[0].Command)
+	assert.Equal(t, "loop 1 loop 2 loop 3", events[0].Result)
 }
 
 func TestPollCommandExecution(t *testing.T) {

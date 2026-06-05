@@ -43,6 +43,7 @@ type EventDetails struct {
 	ID            string              `json:"id"`
 	Shell         string              `json:"shell"`
 	Line          string              `json:"line"`
+	SourceLine    string              `json:"source_line"`
 	Success       *bool               `json:"success"`
 	ExitCode      *int                `json:"exit_code"`
 	ErrorPhase    *string             `json:"error_phase"`
