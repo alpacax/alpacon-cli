@@ -191,7 +191,8 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 			// Re-fetch so the serialized JSON matches the --wait --use path.
 			activeSession, err := RunUseSession(ac, session.ID)
 			if err != nil {
-				utils.CliErrorEnvelopeWithExit(opCreate, err, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+				// Partial success (created, use failed)—nil omits the server error_code.
+				utils.CliErrorEnvelopeWithExit(opCreate, nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 			}
 			message := activeWorkSessionSetMessage("", activeSession.ID, activeSession.Description)
 			if utils.OutputFormat == utils.OutputFormatJSON {
@@ -242,7 +243,8 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		// Phase 3: --wait --use. pollForApproval(untilActive=true) guarantees status reached active.
 		desc, err := RunUse(ac, session.ID)
 		if err != nil {
-			utils.CliErrorEnvelopeWithExit(opCreate, err, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
+			// Partial success (approved, use failed)—nil omits the server error_code.
+			utils.CliErrorEnvelopeWithExit(opCreate, nil, "Work session %s approved but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", session.ID, err, session.ID)
 		}
 		message := activeWorkSessionSetMessage(fmt.Sprintf("Work session %s approved. ", session.ID), session.ID, desc)
 		if utils.OutputFormat == utils.OutputFormatJSON {
