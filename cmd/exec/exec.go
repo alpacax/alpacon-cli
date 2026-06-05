@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -105,18 +104,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		// Oversized commands are sent with the same command-create call plus the
 		// oversized flag; the server stages them as a temp script and owns the
 		// path/wrapper/cleanup, auth, and platform gates.
-		oversized := exceedsInlineLimit(parsed.Command)
-
-		// Fail fast on Windows (no sh wrapper); the server enforces this too.
-		if oversized {
-			platform, err := server.GetServerPlatform(alpaconClient, parsed.Server)
-			if err != nil {
-				utils.CliErrorWithExit("Failed to look up server platform: %s", err)
-			}
-			if platform == windowsPlatform {
-				utils.CliErrorWithExit("Oversized commands are not supported on Windows servers.")
-			}
-		}
+		oversized := ResolveOversized(alpaconClient, parsed.Server, parsed.Command)
 
 		if parsed.Detach {
 			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod, oversized)
