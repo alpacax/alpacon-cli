@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -25,8 +26,8 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon exec server 'echo hello;world'
 
-Commands larger than 2KB are uploaded to the server as a temporary file and
-executed under POSIX sh (Browser login / Alpacon Cloud workspaces only).
+Commands larger than 2KB are sent with an oversized flag; the server stages
+them as a temporary script and runs them, judging the original command content.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -101,24 +102,28 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		env := make(map[string]string)
 
-		if exceedsInlineLimit(parsed.Command) {
-			isSaaS, err := config.IsSaaS()
-			if err != nil || !isSaaS {
-				utils.CliErrorWithExit("Large commands (>2KB) are only supported with Browser login (Alpacon Cloud workspaces).\n"+
-					"Your current authentication is %s. Shorten the command, "+
-					"or upload a script with 'alpacon cp' and run the uploaded script with a short 'alpacon exec' command.", authMethod)
-				return
+		// Oversized commands are sent with the same command-create call plus the
+		// oversized flag; the server stages them as a temp script and owns the
+		// path/wrapper/cleanup, auth, and platform gates.
+		oversized := exceedsInlineLimit(parsed.Command)
+
+		// Fail fast on Windows (no sh wrapper); the server enforces this too.
+		if oversized {
+			platform, err := server.GetServerPlatform(alpaconClient, parsed.Server)
+			if err != nil {
+				utils.CliErrorWithExit("Failed to look up server platform: %s", err)
 			}
-			runOversizedCommand(alpaconClient, parsed, env, workSessionID, authMethod)
-			return
+			if platform == windowsPlatform {
+				utils.CliErrorWithExit("Oversized commands are not supported on Windows servers.")
+			}
 		}
 
 		if parsed.Detach {
-			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod)
+			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod, oversized)
 			return
 		}
 
-		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		HandleCommandResult(result, err)
 	},

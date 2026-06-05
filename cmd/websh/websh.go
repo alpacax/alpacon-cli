@@ -231,7 +231,7 @@ Note: All flags must be placed before the server name.
 				}
 			}
 			command := execCmd.ShellJoin(commandArgs)
-			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
+			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, false)
 			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
 			execCmd.HandleCommandResult(result, err)
 		} else {

@@ -44,8 +44,8 @@ func sudoDenialHint(output string) string {
 // error handling and retry logic. Used by both exec and websh commands.
 // workSessionID is forwarded to the server as the work_session field; pass ""
 // to omit it.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, oversized bool) (string, error) {
+	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 	if phased, ok := asPhasedError(err); ok {
 		return result, phased
 	}
@@ -63,7 +63,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 				return err
 			},
 		})
@@ -132,8 +132,8 @@ func clientTimeoutLine() string {
 }
 
 // runDetached submits command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path. Used by inline exec and the oversized bypass.
-func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string) {
-	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID)
+func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string, oversized bool) {
+	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
 	if err != nil {
 		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {
@@ -148,7 +148,7 @@ func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				resp, err = event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID)
+				resp, err = event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
 				return err
 			},
 		})
