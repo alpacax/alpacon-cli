@@ -1252,6 +1252,39 @@ func TestNextPollInterval(t *testing.T) {
 	}
 }
 
+func TestAlignedPollDelay(t *testing.T) {
+	// The delay is the backoff for the attempt, clamped so the poll never lands
+	// past the next maxPollInterval grid boundary. This keeps the adaptive
+	// schedule a superset of a fixed maxPollInterval poller (poll points 0, 250,
+	// 750, 1750, 2000, 4000, 6000, ...), so it is never slower for any completion
+	// time while small files are still detected during the early ramp.
+	tests := []struct {
+		name    string
+		attempt int
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{name: "ramp: first attempt", attempt: 0, elapsed: 0, want: 250 * time.Millisecond},
+		{name: "ramp: second", attempt: 1, elapsed: 250 * time.Millisecond, want: 500 * time.Millisecond},
+		{name: "ramp: third", attempt: 2, elapsed: 750 * time.Millisecond, want: 1 * time.Second},
+		{name: "clamp to first boundary", attempt: 3, elapsed: 1750 * time.Millisecond, want: 250 * time.Millisecond},
+		{name: "steady state on boundary", attempt: 4, elapsed: 2 * time.Second, want: 2 * time.Second},
+		{name: "steady state stays on grid", attempt: 5, elapsed: 4 * time.Second, want: 2 * time.Second},
+		// The cases below exercise the clamp arithmetic in isolation: by attempt 4
+		// nextPollInterval saturates at maxPollInterval, so the result is purely
+		// the distance to the next 2s boundary regardless of the attempt value.
+		{name: "clamp from mid grid cell", attempt: 9, elapsed: 2500 * time.Millisecond, want: 1500 * time.Millisecond},
+		{name: "clamp just before boundary", attempt: 9, elapsed: 3800 * time.Millisecond, want: 200 * time.Millisecond},
+		{name: "large elapsed wraps onto grid", attempt: 9, elapsed: time.Hour + 500*time.Millisecond, want: 1500 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, alignedPollDelay(tt.attempt, tt.elapsed))
+		})
+	}
+}
+
 func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	// Server reports "not yet complete" (success=null) twice, then succeeds.
 	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below

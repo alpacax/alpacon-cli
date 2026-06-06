@@ -58,6 +58,20 @@ func nextPollInterval(attempt int) time.Duration {
 	return d
 }
 
+// alignedPollDelay returns the sleep before the next poll: the backoff for this
+// attempt, clamped so the poll never lands past the next maxPollInterval grid
+// boundary measured from the polling start. Snapping to that grid makes the
+// schedule a superset of a fixed maxPollInterval poller, so faster small-file
+// detection never costs a slower detection for any completion time.
+func alignedPollDelay(attempt int, elapsed time.Duration) time.Duration {
+	backoff := nextPollInterval(attempt)
+	toBoundary := maxPollInterval - elapsed%maxPollInterval
+	if toBoundary < backoff {
+		return toBoundary
+	}
+	return backoff
+}
+
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
 // timeout controls how long to poll before giving up.
@@ -70,7 +84,8 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 		statusURL = fmt.Sprintf(downloadStatusURL, id)
 	}
 
-	deadline := time.Now().Add(timeout)
+	start := time.Now()
+	deadline := start.Add(timeout)
 
 	for attempt := 0; ; attempt++ {
 		respBody, err := ac.SendGetRequest(statusURL)
@@ -90,7 +105,7 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 			}
 		}
 
-		delay := nextPollInterval(attempt)
+		delay := alignedPollDelay(attempt, time.Since(start))
 		if time.Now().Add(delay).After(deadline) {
 			break
 		}
