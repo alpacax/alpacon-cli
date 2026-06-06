@@ -3,6 +3,7 @@ package worksession
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -217,6 +218,20 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 		}
 
 		if !waitApproval {
+			// A session that lands pending needs a human to approve it out of band
+			// (ADR 0015). Emit the structured pending-approval signal and exit with
+			// ExitCodePendingApproval so a machine consumer (AI agent, CI) can branch
+			// on "wait or check later" instead of treating the pending create as a
+			// success. Other statuses (e.g. auto-approved) keep the existing success
+			// output and exit 0.
+			if session.Status == pendingWorkSessionStatus {
+				utils.PrintPendingApproval(
+					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
+					session.ApprovalRequestID,
+					fmt.Sprintf("alpacon work-session use %s  # after approval", session.ID),
+				)
+				os.Exit(utils.ExitCodePendingApproval)
+			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(newWorkSessionMutationOutput("create", createSuccessMessage(session), session, nil))
 			}
