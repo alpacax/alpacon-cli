@@ -51,18 +51,65 @@ var sudoDenialHints = []struct {
 	},
 }
 
+// denialCodePresent reports whether output contains the plugin's terminal denial
+// line for the given code. It anchors on the full "Alpacon denied this sudo
+// command (CODE)" line, never a bare "(CODE)" token, so a command whose own
+// output prints the token cannot forge a match on a command that succeeded.
+// Both sudoDenialHint and hasSudoPresenceDenial route through here so the
+// anchoring logic lives in one place.
+func denialCodePresent(output, code string) bool {
+	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+")")
+}
+
 // sudoDenialHint returns actionable guidance when the command output shows a
 // non-interactive sudo denial. Returns "" when no such denial is present.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
-		// Anchor on the plugin's full denial line, not a bare "(CODE)" token,
-		// so a command whose own output prints "(SUDO_RISK_DENIED)" cannot forge
-		// a hint on a command that actually succeeded.
-		if strings.Contains(output, sudoDenialLinePrefix+" ("+h.code+")") {
+		if denialCodePresent(output, h.code) {
 			return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), h.guidance)
 		}
 	}
 	return ""
+}
+
+// hasSudoPresenceDenial reports whether output carries the non-interactive sudo
+// presence denial (SUDO_PRESENCE_REQUIRED), the only denial the CLI can resolve
+// in-flow via an MFA step-up.
+func hasSudoPresenceDenial(output string) bool {
+	return denialCodePresent(output, "SUDO_PRESENCE_REQUIRED")
+}
+
+// RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
+// is denied for a missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive
+// terminal, offers an MFA step-up and retries once. Non-interactive callers
+// (scripts, CI, AI agents) fall through unchanged so HandleCommandResult prints
+// the static denial hint; non-interactive humans additionally get the
+// verification link they can complete out of band. Only exec uses this; websh
+// keeps its own sudo MFA flow.
+func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
+	result, err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+	if !hasSudoPresenceDenial(result) {
+		return result, err
+	}
+
+	if !utils.IsInteractiveShell() {
+		// Non-interactive: surface the verification link so a human reading the
+		// logs can complete MFA out of band, then re-run. We cannot prompt or
+		// open a browser here.
+		if url, linkErr := mfa.GetMFALinkForSudo(ac, serverName); linkErr == nil && url != "" {
+			utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
+		}
+		return result, err
+	}
+
+	if stepErr := mfa.StepUpForSudo(ac, serverName); stepErr != nil {
+		utils.CliWarning("MFA step-up did not complete: %s", stepErr)
+		return result, err
+	}
+
+	// Presence is fresh—retry once. Any remaining denial falls through to the
+	// static hint in HandleCommandResult.
+	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
 }
 
 // RunCommandWithRetry executes a remote command with MFA and username-required

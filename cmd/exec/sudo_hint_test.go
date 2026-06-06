@@ -56,3 +56,37 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.Empty(t, sudoDenialHint("echo \"(SUDO_RISK_DENIED)\"\n(SUDO_RISK_DENIED)\n"))
 	})
 }
+
+func TestHasSudoPresenceDenial(t *testing.T) {
+	t.Run("true on the real presence denial line", func(t *testing.T) {
+		assert.True(t, hasSudoPresenceDenial(
+			"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n"))
+	})
+
+	t.Run("false for other denial codes", func(t *testing.T) {
+		assert.False(t, hasSudoPresenceDenial(
+			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
+		assert.False(t, hasSudoPresenceDenial(
+			"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"))
+	})
+
+	t.Run("false on clean output", func(t *testing.T) {
+		assert.False(t, hasSudoPresenceDenial("ok\n"))
+		assert.False(t, hasSudoPresenceDenial(""))
+	})
+
+	t.Run("forged parenthesized token does not trigger a step-up", func(t *testing.T) {
+		// A command whose own output prints the bare token, without the plugin's
+		// denial line, must not be mistaken for a presence denial.
+		assert.False(t, hasSudoPresenceDenial(
+			"echo \"(SUDO_PRESENCE_REQUIRED)\"\n(SUDO_PRESENCE_REQUIRED)\n"))
+	})
+
+	t.Run("true when the denial line is buried in real command output", func(t *testing.T) {
+		// The denial line may be preceded by legitimate stdout; the detector
+		// must still fire.
+		assert.True(t, hasSudoPresenceDenial(
+			"reading config...\nApplying changes\n"+
+				"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n"))
+	})
+}
