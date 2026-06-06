@@ -176,12 +176,13 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
 
-	deadline := time.After(approvalWaitTimeout)
+	timer := time.NewTimer(approvalWaitTimeout)
+	defer timer.Stop()
 	ticker := time.NewTicker(approvalWaitPollInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-deadline:
+		case <-timer.C:
 			spinner.Stop()
 			// Return the last pending denial so the caller emits the standard
 			// pending-approval signal and exit code.

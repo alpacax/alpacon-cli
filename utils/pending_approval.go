@@ -34,7 +34,7 @@ func pendingApprovalNextActions(reRunHint string) []string {
 	if reRunHint != "" {
 		actions = append(actions, reRunHint)
 	}
-	return append(actions, "Approve out of band in the Alpacon console (web), then retry, or re-run with --wait to block.")
+	return append(actions, "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait on the original command to block until approval.")
 }
 
 // PrintPendingApproval emits the structured "pending approval" feedback for an
