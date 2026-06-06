@@ -113,6 +113,12 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		}
 	}
 
+	if detach && wait {
+		return RemoteExecArgs{
+			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
+		}
+	}
+
 	// Parse SSH-like user@host syntax
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
 		sshTarget := utils.ParseSSHTarget(server)

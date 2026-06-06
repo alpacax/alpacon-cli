@@ -187,7 +187,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			// pending-approval signal and exit code.
 			return result, err
 		case <-ticker.C:
-			result, err = RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+			// Re-attempt via the presence-aware path so a step-up still fires if
+			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
+			result, err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
 			if isApprovalDenial(result, err) {
 				// Still pending—keep waiting.
 				continue
