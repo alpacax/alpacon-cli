@@ -232,6 +232,7 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 | `1`  | General error (network failure, server error, etc.) |
 | `2`  | Usage error (invalid flags or arguments) |
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
+| `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. Re-run after approval, or pass `--wait` to block. Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` on a `SUDO_APPROVAL_REQUIRED` sudo denial and by `work-session create` when the session lands pending |
 
 ## Contributing
 

@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
+)
+
+const (
+	// approvalWaitPollInterval and approvalWaitTimeout bound the --wait poll for a
+	// SUDO_APPROVAL_REQUIRED denial. The interval is slower than the MFA step-up
+	// poll (api/mfa/mfa.go) because each tick re-submits and re-runs the remote
+	// command, and a human approving out of band in the console works on a
+	// seconds-to-minutes timescale, not sub-second. The 3-minute ceiling mirrors
+	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent.
+	approvalWaitPollInterval = 5 * time.Second
+	approvalWaitTimeout      = 3 * time.Minute
 )
 
 // sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
@@ -80,6 +92,16 @@ func hasSudoPresenceDenial(output string) bool {
 	return denialCodePresent(output, "SUDO_PRESENCE_REQUIRED")
 }
 
+// hasSudoApprovalDenial reports whether output carries the sudo approval-required
+// denial (SUDO_APPROVAL_REQUIRED): a human must approve the request out of band
+// in the Alpacon console before the command can run. Like the other detectors it
+// anchors on the plugin's exact terminal denial line via denialCodePresent, so a
+// command that merely prints the token in its own output cannot forge a pending
+// signal or wedge --wait into an indefinite re-run loop.
+func hasSudoApprovalDenial(output string) bool {
+	return denialCodePresent(output, "SUDO_APPROVAL_REQUIRED")
+}
+
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
 // is denied for a missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive
 // terminal, offers an MFA step-up and retries once. Non-interactive callers
@@ -117,6 +139,84 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
 	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+}
+
+// isApprovalDenial reports whether (result, err) is a SUDO_APPROVAL_REQUIRED
+// denial: the command exited non-zero (a real denial always surfaces as a
+// RemoteCommandError) AND the plugin's exact approval denial line is present.
+// Requiring both guards against a command that merely prints the token but
+// succeeds (err == nil) being mistaken for a pending approval.
+func isApprovalDenial(result string, err error) bool {
+	var remoteErr *event.RemoteCommandError
+	return errors.As(err, &remoteErr) && hasSudoApprovalDenial(result)
+}
+
+// RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
+// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and wait is set,
+// blocks and re-attempts the command on a fixed interval until a reviewer
+// approves it out of band (the re-run then succeeds or hits a different,
+// terminal denial), or the bounded timeout elapses. When wait is false, or the
+// denial is anything other than SUDO_APPROVAL_REQUIRED, it returns the first
+// (result, err) unchanged so the caller's pending/denial handling runs.
+//
+// Re-attempting the command is the only poll available here: the plugin's denial
+// line carries the denial code but no approval request id, and this credential
+// channel has no approval-status endpoint to query (ADR 0015 moves approval out
+// of band). Re-running is side-effect-safe: a sudo command pending approval is
+// denied by the server and never executes, so each poll tick is a no-op denial
+// until a reviewer approves, at which point the command runs exactly once. The
+// poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
+// fixed-interval ticker, and a precise deadline.
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool) (string, error) {
+	result, err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
+	if !wait || !isApprovalDenial(result, err) {
+		return result, err
+	}
+
+	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
+	spinner.Start()
+
+	deadline := time.After(approvalWaitTimeout)
+	ticker := time.NewTicker(approvalWaitPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			spinner.Stop()
+			// Return the last pending denial so the caller emits the standard
+			// pending-approval signal and exit code.
+			return result, err
+		case <-ticker.C:
+			result, err = RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+			if isApprovalDenial(result, err) {
+				// Still pending—keep waiting.
+				continue
+			}
+			spinner.Stop()
+			return result, err
+		}
+	}
+}
+
+// HandlePendingApproval emits the structured pending-approval feedback for an
+// exec sudo command that was denied SUDO_APPROVAL_REQUIRED and not waited on,
+// then exits with ExitCodePendingApproval. It reports true when it handled the
+// (result, err); the caller skips its normal result handling on true. The exec
+// denial line carries no approval request id, so the machine signal omits it.
+// reRunHint is the exact command the caller invoked, so a human can copy-paste
+// it once the request is approved.
+func HandlePendingApproval(result string, err error, reRunHint string) bool {
+	if !isApprovalDenial(result, err) {
+		return false
+	}
+	utils.PrintPendingApproval(
+		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
+			"Re-run after approval, or use --wait to block until it is approved.",
+		"", // the exec sudo denial line carries no approval request id
+		reRunHint,
+	)
+	os.Exit(utils.ExitCodePendingApproval)
+	return true
 }
 
 // RunCommandWithRetry executes a remote command with MFA and username-required

@@ -1,9 +1,12 @@
 package exec
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -95,5 +98,77 @@ func TestHasSudoPresenceDenial(t *testing.T) {
 		// A line that stops at ")" is not the plugin's output and must not match.
 		assert.False(t, hasSudoPresenceDenial(
 			"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED)\n"))
+	})
+}
+
+func TestHasSudoApprovalDenial(t *testing.T) {
+	t.Run("true on the real approval denial line", func(t *testing.T) {
+		assert.True(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"))
+	})
+
+	t.Run("false for other denial codes", func(t *testing.T) {
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
+	})
+
+	t.Run("forged parenthesized token does not trigger a pending signal", func(t *testing.T) {
+		// A command whose own output prints the token, without the plugin's denial
+		// line, must not be mistaken for a pending approval.
+		assert.False(t, hasSudoApprovalDenial(
+			"echo \"(SUDO_APPROVAL_REQUIRED)\"\n(SUDO_APPROVAL_REQUIRED)\n"))
+	})
+
+	t.Run("false on clean output", func(t *testing.T) {
+		assert.False(t, hasSudoApprovalDenial("ok\n"))
+		assert.False(t, hasSudoApprovalDenial(""))
+	})
+}
+
+func TestIsApprovalDenial(t *testing.T) {
+	const denialLine = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
+
+	t.Run("true when the denial line accompanies a non-zero exit", func(t *testing.T) {
+		assert.True(t, isApprovalDenial(denialLine, &event.RemoteCommandError{ExitCode: 1, Output: denialLine}))
+	})
+
+	t.Run("true through a wrapped RemoteCommandError", func(t *testing.T) {
+		wrapped := fmt.Errorf("failed to execute command: %w", &event.RemoteCommandError{ExitCode: 1})
+		assert.True(t, isApprovalDenial(denialLine, wrapped))
+	})
+
+	t.Run("false when the command printed the line but succeeded", func(t *testing.T) {
+		// err == nil means the command did not actually get denied; a command that
+		// merely echoes the denial line must not be treated as pending.
+		assert.False(t, isApprovalDenial(denialLine, nil))
+	})
+
+	t.Run("false for a non-approval denial", func(t *testing.T) {
+		out := "Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"
+		assert.False(t, isApprovalDenial(out, &event.RemoteCommandError{ExitCode: 1, Output: out}))
+	})
+
+	t.Run("false for a plain error without the denial line", func(t *testing.T) {
+		assert.False(t, isApprovalDenial("boom\n", errors.New("nope")))
+	})
+}
+
+func TestReRunHint(t *testing.T) {
+	t.Run("minimal: server and command only", func(t *testing.T) {
+		got := reRunHint(RemoteExecArgs{Server: "web-01", Command: "sudo reboot"})
+		assert.Equal(t, "alpacon exec web-01 -- sudo reboot", got)
+	})
+
+	t.Run("includes user, group, and work-session", func(t *testing.T) {
+		got := reRunHint(RemoteExecArgs{
+			Username:      "root",
+			Groupname:     "docker",
+			WorkSessionID: "ses-1",
+			Server:        "web-01",
+			Command:       "sudo reboot",
+		})
+		assert.Equal(t, "alpacon exec -u root -g docker --work-session ses-1 web-01 -- sudo reboot", got)
 	})
 }

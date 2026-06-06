@@ -1,56 +1,34 @@
 package worksession
 
 import (
-	"github.com/alpacax/alpacon-cli/api/server"
-	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var (
-	approveScopes  []string
-	approveServers []string
-)
+// approveRejectExcludedMessage explains why the CLI no longer approves or rejects
+// work sessions. ADR 0015 makes the CLI an execution/request surface only:
+// approval happens out of band in the Alpacon console (web/Slack), and the server
+// now refuses (HTTP 403) approve/reject from the CLI credential channel. The
+// subcommands stay registered so the message is discoverable and existing scripts
+// get an intentional, actionable exit instead of an "unknown command".
+const approveRejectExcludedMessage = "Approvals must be done in the Alpacon console (web), not the CLI. " +
+	"The CLI is an execution and request surface only; approve and reject happen out of band. " +
+	"Use 'alpacon work-session ls' to track a session's status."
 
 var workSessionApproveCmd = &cobra.Command{
 	Use:   "approve SESSION_ID",
-	Short: "Approve a pending work session",
-	Long: `Approve a pending work session. Superuser only.
+	Short: "Approve a session (moved to the Alpacon console)",
+	Long: `Approving work sessions has moved to the Alpacon console (web).
 
-Without flags, approves the session as originally requested.
-Use --scope and --server to narrow down the granted access at approval time.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session approve ses-abc123
-  alpacon work-session approve ses-abc123 --scope command --scope websh
-  alpacon work-session approve ses-abc123 --scope command,websh --server web-01`,
+The CLI is an execution and request surface only; a human approves or rejects
+out of band in the web console or Slack. The server rejects approve/reject from
+the CLI credential channel. Use 'alpacon work-session ls' to track status.`,
+	Args: cobra.ArbitraryArgs,
+	Example: `  # Approve in the Alpacon console (web), then track status here:
+  alpacon work-session ls --status active`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		req := wsapi.WorkSessionApproveRequest{
-			AdjustedScopes: utils.CompactStrings(approveScopes),
-		}
-
-		if len(approveServers) > 0 {
-			serverIDs, err := server.ResolveServerNames(ac, approveServers)
-			if err != nil {
-				utils.CliErrorWithExit("%s.", err)
-			}
-			req.AdjustedServers = serverIDs
-		}
-
-		if err := wsapi.ApproveWorkSession(ac, args[0], req); err != nil {
-			utils.CliErrorWithExit("Failed to approve work session: %s.", err)
-		}
-
-		utils.CliSuccess("Work session %s approved.", args[0])
+		// Exit non-zero so a script that expected the approval to happen does not
+		// mistake this for success—the CLI must never pretend to approve.
+		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
 	},
-}
-
-func init() {
-	workSessionApproveCmd.Flags().StringSliceVar(&approveScopes, "scope", nil, "Adjust granted scopes (repeatable; comma-separated values also accepted)")
-	workSessionApproveCmd.Flags().StringSliceVar(&approveServers, "server", nil, "Adjust target servers by name (repeatable; comma-separated values also accepted)")
 }
