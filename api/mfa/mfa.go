@@ -99,6 +99,11 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get the MFA step-up link: %w", err)
 	}
+	// GetMFALink can return an empty URL without an error on a malformed
+	// response; fail fast rather than print a blank link and poll until timeout.
+	if stepUpURL == "" {
+		return fmt.Errorf("server returned an empty MFA step-up link")
+	}
 
 	fmt.Fprintf(os.Stderr, "\nsudo needs a recent MFA to proceed. Open this link to verify:\n%s\n", stepUpURL)
 	fmt.Fprintf(os.Stderr, "Press Enter to open it in your browser, or open the link manually.\n")
