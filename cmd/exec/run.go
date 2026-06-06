@@ -53,12 +53,13 @@ var sudoDenialHints = []struct {
 
 // denialCodePresent reports whether output contains the plugin's terminal denial
 // line for the given code. It anchors on the full "Alpacon denied this sudo
-// command (CODE)" line, never a bare "(CODE)" token, so a command whose own
-// output prints the token cannot forge a match on a command that succeeded.
-// Both sudoDenialHint and hasSudoPresenceDenial route through here so the
-// anchoring logic lives in one place.
+// command (CODE)." line—including the trailing period the plugin emits—never a
+// bare "(CODE)" token, so a command whose own output prints the token cannot
+// forge a match on a command that succeeded. Both sudoDenialHint and
+// hasSudoPresenceDenial route through here so the anchoring logic lives in one
+// place.
 func denialCodePresent(output, code string) bool {
-	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+")")
+	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+").")
 }
 
 // sudoDenialHint returns actionable guidance when the command output shows a

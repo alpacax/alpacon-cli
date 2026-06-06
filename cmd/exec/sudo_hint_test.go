@@ -89,4 +89,11 @@ func TestHasSudoPresenceDenial(t *testing.T) {
 			"reading config...\nApplying changes\n"+
 				"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n"))
 	})
+
+	t.Run("denial line without the trailing period does not match", func(t *testing.T) {
+		// The matcher anchors on the plugin's exact line, which ends in a period.
+		// A line that stops at ")" is not the plugin's output and must not match.
+		assert.False(t, hasSudoPresenceDenial(
+			"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED)\n"))
+	})
 }
