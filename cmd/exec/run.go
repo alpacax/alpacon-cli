@@ -88,7 +88,13 @@ func hasSudoPresenceDenial(output string) bool {
 // keeps its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
 	result, err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
-	if !hasSudoPresenceDenial(result) {
+	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
+	// RemoteCommandError carrying the denial line. Require that error as well as
+	// the line match: a command that merely prints the line and SUCCEEDS
+	// (err == nil) must not trigger a step-up and a re-run of a side-effecting
+	// command.
+	var remoteErr *event.RemoteCommandError
+	if !errors.As(err, &remoteErr) || !hasSudoPresenceDenial(result) {
 		return result, err
 	}
 

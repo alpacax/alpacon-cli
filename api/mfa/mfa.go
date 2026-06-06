@@ -103,11 +103,20 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	fmt.Fprintf(os.Stderr, "\nsudo needs a recent MFA to proceed. Open this link to verify:\n%s\n", stepUpURL)
 	fmt.Fprintf(os.Stderr, "Press Enter to open it in your browser, or open the link manually.\n")
 
-	// Open the browser on Enter without blocking the poll. EOF or a closed stdin
-	// simply skips the auto-open; it never aborts the flow. The goroutine ends at
-	// process exit if Enter is never pressed.
+	// Open the browser on Enter without blocking the poll. The done guard makes a
+	// late Enter—pressed after the step-up already completed or timed out—a no-op,
+	// so the browser never opens unexpectedly later in the command flow. EOF or a
+	// closed stdin simply skips the auto-open; it never aborts the flow. The
+	// goroutine ends at process exit if Enter is never pressed.
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		if _, rerr := bufio.NewReader(os.Stdin).ReadString('\n'); rerr == nil {
+		if _, rerr := bufio.NewReader(os.Stdin).ReadString('\n'); rerr != nil {
+			return
+		}
+		select {
+		case <-done:
+		default:
 			utils.OpenBrowser(stepUpURL)
 		}
 	}()
