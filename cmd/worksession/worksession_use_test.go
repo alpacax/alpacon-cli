@@ -90,6 +90,30 @@ func TestRunUse_RejectsNonActiveStatus(t *testing.T) {
 	assert.Equal(t, "", got)
 }
 
+func TestRunUse_RejectsAgentSession(t *testing.T) {
+	setupTmpConfig(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "ses-agent",
+			"description":    "agent job",
+			"status":         "active",
+			"requester_type": "agent",
+		})
+	}))
+	defer ts.Close()
+	ac := newTestClient(ts)
+
+	// Agent sessions are not workspace-attachable; even when active they must be
+	// rejected here so an interactive exec/websh never silently runs against one.
+	_, err := worksession.RunUse(ac, "ses-agent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not workspace-attachable")
+
+	got, _ := config.GetActiveWorkSession()
+	assert.Equal(t, "", got, "config must not be updated for an agent session")
+}
+
 func TestRunUnset_Idempotent(t *testing.T) {
 	setupTmpConfig(t)
 
