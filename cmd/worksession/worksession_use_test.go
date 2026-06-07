@@ -93,6 +93,10 @@ func TestRunUse_RejectsNonActiveStatus(t *testing.T) {
 func TestRunUse_RejectsAgentSession(t *testing.T) {
 	setupTmpConfig(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/api/work-sessions/sessions/ses-agent/") {
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id":             "ses-agent",
