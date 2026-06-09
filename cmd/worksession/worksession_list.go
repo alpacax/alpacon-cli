@@ -62,12 +62,12 @@ var workSessionListCmd = &cobra.Command{
   alpacon work-session ls --user <USER_ID> --status active`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if requesterFilter != "" && requesterFilter != "user" && requesterFilter != "agent" {
-			utils.CliErrorWithExit("Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterFilter)
+			utils.CliUsageErrorEnvelopeWithExit(opList, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterFilter)
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opList, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		status := resolveStatusFilter(statusFilter)
@@ -80,12 +80,12 @@ var workSessionListCmd = &cobra.Command{
 			return currentUser.ID, nil
 		})
 		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve current user: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opList, err, "Failed to resolve current user: %s.", err)
 		}
 
 		sessions, err := wsapi.GetWorkSessionList(ac, status, requesterFilter, assignedUser)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve work sessions: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opList, err, "Failed to retrieve work sessions: %s.", err)
 		}
 
 		// Best-effort active-session decoration; ignore config errors so listing still works.

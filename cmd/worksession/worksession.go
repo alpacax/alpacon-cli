@@ -6,6 +6,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Operation identifiers carried in JSON outputs: success "operation" and error context.operation.
+const (
+	opActivate  = "activate"
+	opComplete  = "complete"
+	opCreate    = "create"
+	opCurrent   = "current"
+	opDescribe  = "describe"
+	opExtend    = "extend"
+	opList      = "list"
+	opRecording = "recording"
+	opRevoke    = "revoke"
+	opTimeline  = "timeline"
+	opUnset     = "unset"
+	opUpdate    = "update"
+	opUse       = "use"
+)
+
 var (
 	statusFilter    string
 	requesterFilter string

@@ -84,24 +84,24 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		} else {
 			resolved, err := Resolve("")
 			if err != nil || resolved == "" {
-				utils.CliErrorWithExit("No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first.")
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first.")
 			}
 			sessionID = resolved
 		}
 
 		newPolicies := buildSudoPolicies(updateSudo, updateSudoReason)
 		if len(newPolicies) == 0 {
-			utils.CliErrorWithExit("Nothing to update. Pass --sudo with at least one command pattern.")
+			utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Nothing to update. Pass --sudo with at least one command pattern.")
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opUpdate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		updated, err := attachSudoPoliciesToSession(ac, sessionID, newPolicies)
 		if err != nil {
-			utils.CliErrorWithExit("%s.", err)
+			utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
 		}
 
 		utils.CliSuccess("Work session %s updated (status: %s).", updated.ID, updated.Status)

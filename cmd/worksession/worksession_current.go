@@ -18,12 +18,12 @@ var workSessionCurrentCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			if err := printCurrentRaw(); err != nil {
-				utils.CliErrorWithExit("%s", err)
+				utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
 			}
 			return
 		}
 		if err := printCurrentTable(); err != nil {
-			utils.CliErrorWithExit("%s", err)
+			utils.CliErrorEnvelopeWithExit(opCurrent, err, "%s", err)
 		}
 	},
 }
