@@ -435,6 +435,11 @@ func validateHostTarget(host string) error {
 	if parsed.Hostname() == "" {
 		return errors.New("host is required (e.g. 'alpacon login alpacon.example.com')")
 	}
+	// Only http/https are valid; anything else (e.g. ssh://) would otherwise
+	// slip past formatHostURL and produce a malformed URL like https://ssh://host.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return unsupportedHostTargetError()
+	}
 	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
 		return unsupportedHostTargetError()
 	}
@@ -442,7 +447,7 @@ func validateHostTarget(host string) error {
 }
 
 func unsupportedHostTargetError() error {
-	return errors.New("URL paths, queries, and fragments are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional scheme and port (e.g. 'alpacon login alpacon.example.com')")
+	return errors.New("URL credentials, paths, queries, and fragments are not supported, and the scheme must be http or https. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional http/https scheme and port (e.g. 'alpacon login alpacon.example.com')")
 }
 
 // formatHostURL normalizes a host argument into a full URL.

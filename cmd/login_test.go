@@ -116,6 +116,8 @@ func TestValidateHostTarget(t *testing.T) {
 		{name: "path is rejected", host: "alpacon.example.com/login", wantErr: true},
 		{name: "query is rejected", host: "alpacon.example.com?a=b", wantErr: true},
 		{name: "userinfo is rejected", host: "admin@alpacon.example.com", wantErr: true},
+		{name: "http scheme allowed", host: "http://alpacon.example.com", wantErr: false},
+		{name: "non-http(s) scheme is rejected", host: "ssh://alpacon.example.com", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -399,7 +401,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://demo.us1.alpacon.io/foo]: ", defaultValue: "https://demo.us1.alpacon.io/foo"},
 		}, calls)
@@ -411,7 +413,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/foo")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -423,7 +425,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=1")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -435,7 +437,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com#frag")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -447,7 +449,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -459,7 +461,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "URL paths, queries, and fragments are not supported")
+		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -602,14 +604,15 @@ func TestResolveLoginTarget(t *testing.T) {
 		{name: "blank region only", region: " ", wantErrSub: "cannot be blank"},
 		{name: "workspace without region", workspace: "demo", wantErrSub: "--region is required"},
 		{name: "region without workspace", region: "us1", wantErrSub: "--workspace is required"},
-		{name: "host with path", args: []string{"alpacon.io/demo"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
-		{name: "host with query", args: []string{"alpacon.example.com?x=1"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
-		{name: "host with fragment", args: []string{"alpacon.example.com#frag"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
-		{name: "host with userinfo", args: []string{"admin@alpacon.example.com"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
-		{name: "host with invalid escaped path", args: []string{"alpacon.example.com/%zz"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
-		{name: "host with invalid escaped query", args: []string{"alpacon.example.com?x=%zz"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
+		{name: "host with path", args: []string{"alpacon.io/demo"}, wantErrSub: "paths, queries, and fragments are not supported"},
+		{name: "host with query", args: []string{"alpacon.example.com?x=1"}, wantErrSub: "paths, queries, and fragments are not supported"},
+		{name: "host with fragment", args: []string{"alpacon.example.com#frag"}, wantErrSub: "paths, queries, and fragments are not supported"},
+		{name: "host with userinfo", args: []string{"admin@alpacon.example.com"}, wantErrSub: "credentials"},
+		{name: "host with non-http(s) scheme", args: []string{"ssh://alpacon.example.com"}, wantErrSub: "scheme must be http or https"},
+		{name: "host with invalid escaped path", args: []string{"alpacon.example.com/%zz"}, wantErrSub: "paths, queries, and fragments are not supported"},
+		{name: "host with invalid escaped query", args: []string{"alpacon.example.com?x=%zz"}, wantErrSub: "paths, queries, and fragments are not supported"},
 		{name: "cloud direct url accepted", args: []string{"demo.us1.alpacon.io"}, wantOK: true, wantURL: "https://demo.us1.alpacon.io", wantName: "demo", wantDomain: "alpacon.io"},
-		{name: "cloud direct url with path reports path error", args: []string{"demo.us1.alpacon.io/foo"}, wantErrSub: "URL paths, queries, and fragments are not supported"},
+		{name: "cloud direct url with path reports path error", args: []string{"demo.us1.alpacon.io/foo"}, wantErrSub: "paths, queries, and fragments are not supported"},
 	}
 
 	for _, tt := range tests {
