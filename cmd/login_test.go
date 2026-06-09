@@ -88,6 +88,16 @@ func TestFormatHostURL(t *testing.T) {
 			expected: "https://127.0.0.1.attacker.com",
 		},
 		{
+			name:     "uppercase localhost gets http",
+			host:     "LOCALHOST:8000",
+			expected: "http://LOCALHOST:8000",
+		},
+		{
+			name:     "mixed-case localhost gets http",
+			host:     "Localhost",
+			expected: "http://Localhost",
+		},
+		{
 			name:     "surrounding whitespace is trimmed",
 			host:     "  alpacon.example.com  ",
 			expected: "https://alpacon.example.com",

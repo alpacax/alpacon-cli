@@ -461,7 +461,7 @@ func formatHostURL(host string) string {
 	scheme := "https"
 	// Match loopback by exact hostname so e.g. localhost.example.com stays https.
 	if parsed, err := parseHostURL(host); err == nil {
-		switch parsed.Hostname() {
+		switch strings.ToLower(parsed.Hostname()) {
 		case "localhost", "127.0.0.1", "::1":
 			scheme = "http"
 		}
