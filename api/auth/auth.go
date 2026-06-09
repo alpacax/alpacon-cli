@@ -35,7 +35,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		},
 	}
 
-	workspaceName := utils.ExtractWorkspaceName(loginReq.WorkspaceURL)
+	workspaceName, baseDomain := loginTargetMetadata(loginReq)
 
 	if token != "" {
 		alpaconClient := &client.AlpaconClient{
@@ -50,7 +50,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 			return err
 		}
 
-		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", "", 0, insecure)
+		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", baseDomain, 0, insecure)
 		if err != nil {
 			return err
 		}
@@ -95,12 +95,25 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		return err
 	}
 
-	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", "", 0, insecure)
+	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", baseDomain, 0, insecure)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func loginTargetMetadata(loginReq *LoginRequest) (workspaceName, baseDomain string) {
+	workspaceName = strings.TrimSpace(loginReq.WorkspaceName)
+	if workspaceName == "" {
+		workspaceName = utils.ExtractWorkspaceName(loginReq.WorkspaceURL)
+	}
+
+	baseDomain = strings.TrimSpace(loginReq.BaseDomain)
+	if baseDomain == "" {
+		baseDomain = utils.ExtractBaseDomain(loginReq.WorkspaceURL)
+	}
+	return workspaceName, baseDomain
 }
 
 func CreateAPIToken(ac *client.AlpaconClient, tokenRequest APITokenRequest) (string, error) {
