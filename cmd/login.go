@@ -440,6 +440,11 @@ func validateHostTarget(host string) error {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return unsupportedHostTargetError()
 	}
+	// A bare '#' yields an empty Fragment with no ForceFragment flag (net/url has
+	// no such field), so check the raw input directly—'#' is never valid in an authority.
+	if strings.Contains(host, "#") {
+		return unsupportedHostTargetError()
+	}
 	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
 		return unsupportedHostTargetError()
 	}
