@@ -72,12 +72,60 @@ func TestFormatHostURL(t *testing.T) {
 			host:     "https://alpacon.example.com/",
 			expected: "https://alpacon.example.com",
 		},
+		{
+			name:     "bare localhost gets http",
+			host:     "localhost",
+			expected: "http://localhost",
+		},
+		{
+			name:     "localhost-prefixed host stays https",
+			host:     "localhost.example.com",
+			expected: "https://localhost.example.com",
+		},
+		{
+			name:     "127.0.0.1-prefixed host stays https",
+			host:     "127.0.0.1.attacker.com",
+			expected: "https://127.0.0.1.attacker.com",
+		},
+		{
+			name:     "surrounding whitespace is trimmed",
+			host:     "  alpacon.example.com  ",
+			expected: "https://alpacon.example.com",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatHostURL(tt.host)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestValidateHostTarget(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		wantErr bool
+	}{
+		{name: "plain host", host: "alpacon.example.com", wantErr: false},
+		{name: "host with scheme and port", host: "https://alpacon.example.com:8443", wantErr: false},
+		{name: "empty host", host: "", wantErr: true},
+		{name: "whitespace only", host: "   ", wantErr: true},
+		{name: "port only", host: ":8443", wantErr: true},
+		{name: "path is rejected", host: "alpacon.example.com/login", wantErr: true},
+		{name: "query is rejected", host: "alpacon.example.com?a=b", wantErr: true},
+		{name: "userinfo is rejected", host: "admin@alpacon.example.com", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateHostTarget(tt.host)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

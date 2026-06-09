@@ -322,6 +322,7 @@ func validateDNSLabel(name, value string) error {
 	return nil
 }
 
+// isCloudWorkspaceURL reports true only for the canonical cloud form, so a custom self-hosted URL is never rewritten.
 func isCloudWorkspaceURL(workspaceURL string) bool {
 	workspace, region, ok := parseCloudWorkspaceURL(workspaceURL)
 	if !ok {
@@ -431,6 +432,9 @@ func validateHostTarget(host string) error {
 	if err != nil {
 		return unsupportedHostTargetError()
 	}
+	if parsed.Hostname() == "" {
+		return errors.New("host is required (e.g. 'alpacon login alpacon.example.com')")
+	}
 	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
 		return unsupportedHostTargetError()
 	}
@@ -444,13 +448,18 @@ func unsupportedHostTargetError() error {
 // formatHostURL normalizes a host argument into a full URL.
 // localhost and 127.0.0.1 default to http://, everything else to https://.
 func formatHostURL(host string) string {
+	host = strings.TrimSpace(host)
 	lowerHost := strings.ToLower(host)
 	if strings.HasPrefix(lowerHost, "http://") || strings.HasPrefix(lowerHost, "https://") {
 		return strings.TrimSuffix(host, "/")
 	}
 	scheme := "https"
-	if strings.HasPrefix(lowerHost, "localhost") || strings.HasPrefix(lowerHost, "127.0.0.1") {
-		scheme = "http"
+	// Match loopback by exact hostname so e.g. localhost.example.com stays https.
+	if parsed, err := parseHostURL(host); err == nil {
+		switch parsed.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			scheme = "http"
+		}
 	}
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
