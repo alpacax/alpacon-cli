@@ -24,20 +24,49 @@ type activeWorkSessionSummary struct {
 }
 
 type whoamiOutput struct {
-	Username            string                    `json:"username,omitempty"`
-	Email               string                    `json:"email,omitempty"`
-	Phone               string                    `json:"phone,omitempty"`
-	WorkspaceName       string                    `json:"workspace_name"`
-	WorkspaceURL        string                    `json:"workspace_url"`
-	AuthMethod          string                    `json:"auth_method"`
-	ExpiresAt           string                    `json:"expires_at,omitempty"`
-	UID                 int                       `json:"uid,omitempty"`
-	Shell               string                    `json:"shell,omitempty"`
-	HomeDirectory       string                    `json:"home_directory,omitempty"`
-	Role                string                    `json:"role,omitempty"`
-	Groups              []iam.GroupMembership     `json:"groups,omitempty"`
-	WorksessionRequired bool                      `json:"work_session_required"`
-	ActiveWorksession   *activeWorkSessionSummary `json:"active_work_session"`
+	Username            string                `json:"username,omitempty"`
+	Email               string                `json:"email,omitempty"`
+	Phone               string                `json:"phone,omitempty"`
+	WorkspaceName       string                `json:"workspace_name"`
+	WorkspaceURL        string                `json:"workspace_url"`
+	AuthMethod          string                `json:"auth_method"`
+	AuthClassification  string                `json:"auth_classification"`
+	ExpiresAt           string                `json:"expires_at,omitempty"`
+	UID                 int                   `json:"uid,omitempty"`
+	Shell               string                `json:"shell,omitempty"`
+	HomeDirectory       string                `json:"home_directory,omitempty"`
+	Role                string                `json:"role,omitempty"`
+	Groups              []iam.GroupMembership `json:"groups,omitempty"`
+	WorksessionRequired bool                  `json:"work_session_required"`
+	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
+	// machine-readable names. The legacy keys remain for compatibility.
+	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
+	ActiveWorksession            *activeWorkSessionSummary `json:"active_work_session"`
+	ActiveWorksessionCanonical   *activeWorkSessionSummary `json:"active_worksession"`
+}
+
+func (o whoamiOutput) MarshalJSON() ([]byte, error) {
+	type wire whoamiOutput
+	normalized := o.normalized()
+	return json.Marshal(wire(normalized))
+}
+
+func (o whoamiOutput) normalized() whoamiOutput {
+	if o.AuthClassification == "" {
+		o.AuthClassification = authClassificationFromMethod(o.AuthMethod)
+	}
+
+	required := o.WorksessionRequired || o.WorksessionRequiredForAccess
+	o.WorksessionRequired = required
+	o.WorksessionRequiredForAccess = required
+
+	active := o.ActiveWorksession
+	if active == nil {
+		active = o.ActiveWorksessionCanonical
+	}
+	o.ActiveWorksession = active
+	o.ActiveWorksessionCanonical = active
+	return o
 }
 
 var whoamiCmd = &cobra.Command{
@@ -54,12 +83,15 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' to authenticate.")
 		}
 
+		worksessionRequired := isWorksessionRequired(cfg)
 		output := whoamiOutput{
-			WorkspaceName:       cfg.WorkspaceName,
-			WorkspaceURL:        cfg.WorkspaceURL,
-			AuthMethod:          config.GetAuthMethod(cfg),
-			ExpiresAt:           getExpiresAt(cfg),
-			WorksessionRequired: isWorksessionRequired(cfg),
+			WorkspaceName:                cfg.WorkspaceName,
+			WorkspaceURL:                 cfg.WorkspaceURL,
+			AuthMethod:                   config.GetAuthMethod(cfg),
+			AuthClassification:           getAuthClassification(cfg),
+			ExpiresAt:                    getExpiresAt(cfg),
+			WorksessionRequired:          worksessionRequired,
+			WorksessionRequiredForAccess: worksessionRequired,
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -107,6 +139,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 				if !ws.ExpiresAt.IsZero() {
 					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
 				}
+				// normalized() mirrors this into ActiveWorksessionCanonical.
 				output.ActiveWorksession = &activeWorkSessionSummary{
 					ID:        ws.ID,
 					Status:    ws.Status,
@@ -137,6 +170,27 @@ func getRole(isStaff, isSuperuser bool) string {
 		return "staff"
 	}
 	return "user"
+}
+
+func getAuthClassification(cfg config.Config) string {
+	if cfg.AccessToken != "" {
+		return "browser_login"
+	}
+	if cfg.Token != "" {
+		return "token"
+	}
+	return "unknown"
+}
+
+func authClassificationFromMethod(method string) string {
+	switch method {
+	case "Browser login":
+		return "browser_login"
+	case "Token":
+		return "token"
+	default:
+		return "unknown"
+	}
 }
 
 func isTokenAuth(cfg config.Config) bool {
@@ -230,6 +284,7 @@ func formatWSRequired(required bool, active *activeWorkSessionSummary) string {
 
 func printWhoami(output whoamiOutput) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
+		// MarshalJSON normalizes, so no need to pre-normalize here.
 		body, err := json.Marshal(output)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to marshal whoami: %s", err)
@@ -238,6 +293,7 @@ func printWhoami(output whoamiOutput) {
 		return
 	}
 
+	output = output.normalized()
 	lines := []struct {
 		label string
 		value string
@@ -247,13 +303,14 @@ func printWhoami(output whoamiOutput) {
 		{"Phone", output.Phone},
 		{"Workspace", fmt.Sprintf("%s (%s)", output.WorkspaceName, output.WorkspaceURL)},
 		{"Auth", output.AuthMethod},
+		{"Auth class", output.AuthClassification},
 		{"Expires", formatExpiresHuman(output.ExpiresAt)},
 		{"UID", fmt.Sprintf("%d", output.UID)},
 		{"Shell", output.Shell},
 		{"Home", output.HomeDirectory},
 		{"Role", output.Role},
 		{"Groups", formatGroups(output.Groups)},
-		{"WS required", formatWSRequired(output.WorksessionRequired, output.ActiveWorksession)},
+		{"WS required", formatWSRequired(output.WorksessionRequiredForAccess, output.ActiveWorksessionCanonical)},
 	}
 
 	for _, l := range lines {

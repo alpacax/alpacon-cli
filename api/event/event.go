@@ -158,10 +158,10 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	}
 }
 
-// RunCommandStreaming runs a command and streams its output to stdout over the
+// RunCommandStreaming runs a command and streams its output to out over the
 // event WebSocket, falling back to polling (runCommandFallback) when WS setup fails.
-func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) error {
-	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, os.Stdout)
+func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
+	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, out)
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {

@@ -23,29 +23,34 @@ var workSessionExtendCmd = &cobra.Command{
 		if err != nil {
 			if extendExpiresIn == "" && extendExpiresAt == "" {
 				if !utils.IsInteractiveShell() {
-					utils.CliErrorWithExit("Non-interactive mode requires --expires-in or --expires-at.")
+					utils.CliUsageErrorEnvelopeWithExit(opExtend, "Non-interactive mode requires --expires-in or --expires-at.")
 				}
 				extendExpiresIn = utils.PromptForRequiredInput("Expires in (e.g. 1h, 2h, 4h): ")
 				expiresAtVal, err = parseExpiryFlag(extendExpiresIn, "")
 				if err != nil {
-					utils.CliErrorWithExit("Invalid expiry: %s.", err)
+					utils.CliUsageErrorEnvelopeWithExit(opExtend, "Invalid expiry: %s.", err)
 				}
 			} else {
-				utils.CliErrorWithExit("Invalid expiry: %s.", err)
+				utils.CliUsageErrorEnvelopeWithExit(opExtend, "Invalid expiry: %s.", err)
 			}
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opExtend, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		req := wsapi.WorkSessionExtendRequest{ExpiresAt: expiresAtVal}
 		if err := wsapi.ExtendWorkSession(ac, args[0], req); err != nil {
-			utils.CliErrorWithExit("Failed to extend work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opExtend, err, "Failed to extend work session: %s.", err)
 		}
 
-		utils.CliSuccess("Work session %s extended to %s.", args[0], expiresAtVal)
+		output := newWorkSessionExtendOutput(args[0], expiresAtVal)
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			printWorkSessionMutationJSON(output)
+			return
+		}
+		utils.CliSuccess("%s", output.Message)
 	},
 }
 

@@ -113,3 +113,32 @@ func TestPrintJson_TableOutput(t *testing.T) {
 	assert.Contains(t, got, "\"name\": \"alpha\"")
 	assert.Contains(t, got, "\"id\": 1")
 }
+
+func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
+	got, err := FormatJSON(map[string]string{"next": `alpacon work-session use <ID>`})
+	assert.NoError(t, err)
+	assert.Contains(t, got, "<ID>")
+	assert.NotContains(t, got, "\\u003c")
+}
+
+func TestPrintJSONError(t *testing.T) {
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
+		ExitCode:  3,
+		ErrorCode: "work_session_required",
+		Message:   "command requires a work session",
+		Context: map[string]string{
+			"required_scope": "command",
+		},
+		NextActions: []string{"alpacon work-session use <ID>"},
+	})
+
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 3,
+		"error_code": "work_session_required",
+		"message": "command requires a work session",
+		"context": {"required_scope": "command"},
+		"next_actions": ["alpacon work-session use <ID>"]
+	}`, buf.String())
+}

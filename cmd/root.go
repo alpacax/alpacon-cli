@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/authority"
 	"github.com/alpacax/alpacon-cli/cmd/cert"
 	"github.com/alpacax/alpacon-cli/cmd/csr"
+	"github.com/alpacax/alpacon-cli/cmd/edit"
 	"github.com/alpacax/alpacon-cli/cmd/event"
 	"github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/ftp"
@@ -38,34 +39,21 @@ var RootCmd = &cobra.Command{
 	Aliases: []string{"ac"},
 	Short:   "Command-line client for Alpacon, the AI-native PAM",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
-With Alpacon, humans, AI agents, and CI/CD pipelines reach and operate
-your entire fleet through a single identity—and every command they run
-is judged at runtime, recorded, and bounded by a scoped work session.
-If a credential leaks or an AI client is compromised, the damage is
-bounded by the session, not by what the credential could touch.
+Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
-Quick start (interactive auth):
+Quick start (for humans and AI agents):
 
-  1. alpacon                                # check current login + workspace
-                                            # (run 'alpacon login' or
-                                            #  'alpacon workspace switch' if
-                                            #  not logged in / wrong place)
-  2. alpacon whoami                         # confirm identity + work
-                                            # session requirement
-  3. alpacon work-session create \          # create + activate a session
-       --purpose "describe the task" \
-       --scope command,websh \
-       --server <server> \
+  1. alpacon server ls                      # find the server to target
+  2. alpacon work-session create \          # open + activate a scoped session
+       --purpose "<what you're doing>" \    #   (prints a SESSION_ID)
+       --scope command,websh \              #   (scopes: command, editor, sudo, tunnel, webftp, websh)
+       --server <SERVER> \
+       --expires-in 1h \                    #   (required non-interactively; or --expires-at <RFC3339>)
        --use --wait
-  4. alpacon exec, websh, cp, tunnel        # operate within the session
+  3. alpacon exec <SERVER> -- <COMMAND>     # run work inside the session
+  4. alpacon work-session complete <SESSION_ID>  # finish the session when done
 
-Token auth (CI/CD, API automation):
-
-  alpacon login -t <token>                  # work session not required
-  alpacon exec ...
-
-See 'alpacon work-session --help' for session lifecycle, gating, and
-common error codes.`,
+See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
 		case utils.OutputFormatTable, utils.OutputFormatJSON:
@@ -120,6 +108,9 @@ func init() {
 
 	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)
+
+	// edit
+	RootCmd.AddCommand(edit.EditCmd)
 
 	// packages
 	RootCmd.AddCommand(packages.PackagesCmd)

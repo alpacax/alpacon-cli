@@ -23,6 +23,12 @@ const (
 	checkPrivilegesURL = "/api/iam/users/-"
 )
 
+type apiError struct {
+	message string
+	code    string
+	source  string
+}
+
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
@@ -89,36 +95,73 @@ func getUserPrivileges(isStaff, isSuperuser bool) string {
 	return "general"
 }
 
-// checkAuthStatus prefers the server-provided detail so policy denials are
-// not masked as stale-token failures.
+// checkAuthStatus prefers the server-provided reason and only suggests
+// re-login for a bare authentication failure—never for a coded condition such
+// as MFA-required or a policy denial, which re-login does not resolve. The
+// error code is always preserved on the returned error so downstream handlers
+// (MFA flow, WorkSession gate) can still route on it.
 func checkAuthStatus(statusCode int, body []byte) error {
-	switch statusCode {
-	case http.StatusUnauthorized:
-		if msg := extractServerDetail(body); msg != "" {
-			return fmt.Errorf("%s (run 'alpacon login' if your session has expired)", msg)
-		}
-		return errors.New("authentication failed: please run 'alpacon login' again")
-	case http.StatusForbidden:
-		if msg := extractServerDetail(body); msg != "" {
-			return errors.New(msg)
-		}
-		return errors.New("permission denied: you do not have the required privileges for this action")
+	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
+		return nil
 	}
-	return nil
+	detail, code, source, hasDetail := parseAuthStatusErrorPayload(body)
+	return newAPIError(authStatusMessage(statusCode, code, detail, hasDetail), code, source)
 }
 
-func extractServerDetail(body []byte) string {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return ""
+// authStatusMessage renders the user-facing message for a 401/403. It prefers
+// the server's human detail; absent that, a known structured code maps to a
+// clear message. A code-less 401 is the only case that suggests re-login—an
+// authenticated user who merely needs MFA, or who hit a policy denial, must not
+// be told to log in again.
+func authStatusMessage(statusCode int, code, detail string, hasDetail bool) string {
+	if hasDetail {
+		if statusCode == http.StatusUnauthorized && code == "" {
+			return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
+		}
+		return detail
+	}
+	if msg, ok := authStatusCodeMessage(code); ok {
+		return msg
+	}
+	if statusCode == http.StatusUnauthorized {
+		if code == "" {
+			return "authentication failed: please run 'alpacon login' again"
+		}
+		// A coded 401 is a deliberate server decision, not a stale token; do not
+		// mislabel it as an authentication failure or suggest re-login.
+		// Deliberately information-light: do not interpolate the raw code into the
+		// message—callers read it via ErrorCode(), and embedding it would break the
+		// no-raw-code contract that TestSendRequest_403CodeWithoutDetailKeepsCodeSource guards.
+		return "request denied by server"
+	}
+	return "permission denied: you do not have the required privileges for this action"
+}
+
+// authStatusCodeMessage maps structured server codes that arrive on a 401/403
+// without a human detail to a clear, actionable message.
+func authStatusCodeMessage(code string) (string, bool) {
+	switch code {
+	case utils.AuthMFARequired:
+		return "multi-factor authentication required—complete MFA to continue", true
+	}
+	return "", false
+}
+
+// parseAuthStatusErrorPayload returns ok=true only with a clean "detail" message;
+// code/source are returned regardless so the WorkSession gate can route to exit 3.
+func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, ok bool) {
+	message, code, source, ok = parseAPIErrorPayload(body)
+	if !ok || message == "" {
+		return "", code, source, false
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
+		return "", code, source, false
 	}
-	if detail, ok := parsed["detail"].(string); ok {
-		return strings.TrimSpace(detail)
+	if stringField(parsed, "detail") == "" {
+		return "", code, source, false
 	}
-	return ""
+	return message, code, source, true
 }
 
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
@@ -351,26 +394,51 @@ func isAccessTokenExpired(cfg config.Config) bool {
 	return time.Now().After(expireTime.Add(-10 * time.Second))
 }
 
+func (e *apiError) Error() string {
+	return e.message
+}
+
+func (e *apiError) ErrorCode() string {
+	return e.code
+}
+
+func (e *apiError) ErrorSource() string {
+	return e.source
+}
+
+func newAPIError(message, code, source string) error {
+	return &apiError{message: message, code: code, source: source}
+}
+
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
 func parseAPIError(body []byte) error {
+	message, code, source, ok := parseAPIErrorPayload(body)
+	if ok {
+		return newAPIError(message, code, source)
+	}
+	return errors.New(message)
+}
+
+func parseAPIErrorPayload(body []byte) (message string, code string, source string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return errors.New("server returned an empty error response")
+		return "server returned an empty error response", "", "", false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
-		return errors.New(truncateBody(raw))
+		return truncateBody(raw), "", "", false
 	}
 
+	code = stringField(parsed, "code")
+	source = stringField(parsed, "source")
+
 	// Case 1: {"detail": "..."}
-	if detail, ok := parsed["detail"]; ok {
-		if s, ok := detail.(string); ok {
-			return errors.New(s)
-		}
+	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
+		return detail, code, source, true
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
@@ -400,11 +468,16 @@ func parseAPIError(body []byte) error {
 	}
 
 	if len(messages) > 0 {
-		return errors.New(strings.Join(messages, "; "))
+		return strings.Join(messages, "; "), code, source, true
 	}
 
 	// Fallback: return truncated raw body
-	return errors.New(truncateBody(raw))
+	return truncateBody(raw), code, source, true
+}
+
+func stringField(values map[string]any, field string) string {
+	value, _ := values[field].(string)
+	return strings.TrimSpace(value)
 }
 
 func truncateBody(s string) string {

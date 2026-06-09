@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,6 +18,10 @@ import (
 )
 
 const defaultBaseDomain = "alpacon.io"
+
+// knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
+// Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
+var knownCloudRegions = []string{"us1", "ap1"}
 
 var (
 	insecure      bool
@@ -48,40 +53,35 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
   # Alpacon Cloud login (non-interactive, for CI/CD or AI agents)
   alpacon login --workspace myworkspace --region us1
 
+  # Alpacon Cloud login with an API token
+  alpacon login --workspace myworkspace --region us1 -t <api-token>
+
   # Self-hosted
   alpacon login alpacon.example.com
 
-  # Direct API URL
-  alpacon login myworkspace.us1.alpacon.io
+  # Self-hosted with an API token
+  alpacon login alpacon.example.com -t <api-token>
 
-  # API token login
-  alpacon login myworkspace.us1.alpacon.io -t <api-token>
-
-  # Username and password
-  alpacon login myworkspace.us1.alpacon.io -u admin -p mypassword
+  # Self-hosted with username and password
+  alpacon login alpacon.example.com -u admin -p mypassword
 
   # Self-signed certificates
   alpacon login alpacon.example.com --insecure
 
   # Headless environment only (no browser available)
   alpacon login --no-browser
-  ALPACON_NO_BROWSER=1 alpacon login`,
+  ALPACON_NO_BROWSER=1 alpacon login
+
+  # Alpacon Cloud via direct URL with an API token (deprecated; prefer --workspace/--region)
+  alpacon login myworkspace.us1.alpacon.io -t <api-token>`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		var workspaceURL, workspaceName, baseDomain string
+		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
+		if err != nil {
+			utils.CliErrorWithExit("%s", err.Error())
+		}
 
-		if len(args) > 0 {
-			// Host mode: self-hosted or direct API URL
-			rejectURLWithPath(args[0])
-			workspaceURL = formatHostURL(args[0])
-			workspaceName = utils.ExtractWorkspaceName(workspaceURL)
-			baseDomain = utils.ExtractBaseDomain(workspaceURL)
-		} else if workspaceFlag != "" || regionFlag != "" {
-			// Alpacon Cloud mode via flags (non-interactive)
-			workspaceName = workspaceFlag
-			baseDomain = defaultBaseDomain
-			workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceFlag, regionFlag, defaultBaseDomain)
-		} else {
+		if !ok {
 			// No args, no flags — try saved config for re-login
 			cfg, err := config.LoadConfig()
 			if err == nil && cfg.WorkspaceURL != "" {
@@ -94,10 +94,13 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 				utils.CliInfo("Using saved workspace: %s", workspaceURL)
 			} else {
 				// Interactive Alpacon Cloud prompts
-				workspaceName = utils.PromptForRequiredInput("Workspace: ")
-				region := utils.PromptForInputWithDefault("Region (default: us1): ", "us1")
+				workspaceName = utils.PromptForRequiredInput("Workspace name: ")
+				region := utils.PromptForInputWithDefault(
+					fmt.Sprintf("Region [%s] (%s): ", knownCloudRegions[0], cloudRegionsHint()),
+					knownCloudRegions[0],
+				)
 				baseDomain = defaultBaseDomain
-				workspaceURL = fmt.Sprintf("https://%s.%s.%s", workspaceName, region, defaultBaseDomain)
+				workspaceURL = buildCloudWorkspaceURL(workspaceName, region)
 			}
 		}
 
@@ -188,7 +191,6 @@ func init() {
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
 	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
-	loginCmd.MarkFlagsRequiredTogether("workspace", "region")
 }
 
 func promptForCredentials(workspaceURL, username, password string) (string, string, string) {
@@ -211,21 +213,91 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 	return workspaceURL, username, password
 }
 
-// rejectURLWithPath exits with a migration hint if the host argument contains a path.
+func cloudRegionsHint() string {
+	return strings.Join(knownCloudRegions, ", ")
+}
+
+// buildCloudWorkspaceURL assembles an Alpacon Cloud workspace URL.
+func buildCloudWorkspaceURL(workspace, region string) string {
+	return fmt.Sprintf("https://%s.%s.%s", workspace, region, defaultBaseDomain)
+}
+
+// normalizeCloudFlags trims flag values and reports whether the user supplied
+// only blank (whitespace-only) values, which must be rejected rather than
+// silently treated as if no flags were passed.
+func normalizeCloudFlags(workspace, region string) (w, r string, blank bool) {
+	w, r = strings.TrimSpace(workspace), strings.TrimSpace(region)
+	blank = (workspace != "" || region != "") && w == "" && r == ""
+	return w, r, blank
+}
+
+// resolveLoginTarget resolves the non-interactive login target from the HOST
+// argument and the cloud --workspace/--region flags, applying all combination
+// guards. ok is false when neither a HOST nor cloud flags were supplied, so the
+// caller falls back to saved config or interactive prompts.
+func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, workspaceName, baseDomain string, ok bool, err error) {
+	// Trim cloud flag values so whitespace-only input is rejected up front
+	// instead of slipping past validation or building a malformed URL.
+	workspace, region, blank := normalizeCloudFlags(workspace, region)
+	if blank {
+		return "", "", "", false, errors.New("--workspace/--region cannot be blank")
+	}
+	if len(args) > 0 && (workspace != "" || region != "") {
+		return "", "", "", false, errors.New("cannot combine a HOST argument with --workspace/--region. Use a HOST for self-hosted, or --workspace/--region for Alpacon Cloud")
+	}
+
+	switch {
+	case len(args) > 0:
+		// Host mode: self-hosted, plus deprecated Alpacon Cloud direct URLs (backward compat).
+		if err := checkURLPath(args[0]); err != nil {
+			return "", "", "", false, err
+		}
+		workspaceURL = formatHostURL(args[0])
+		return workspaceURL, utils.ExtractWorkspaceName(workspaceURL), utils.ExtractBaseDomain(workspaceURL), true, nil
+	case workspace != "" || region != "":
+		// Alpacon Cloud mode via flags (non-interactive)
+		if err := validateCloudFlags(workspace, region); err != nil {
+			return "", "", "", false, err
+		}
+		return buildCloudWorkspaceURL(workspace, region), workspace, defaultBaseDomain, true, nil
+	default:
+		return "", "", "", false, nil
+	}
+}
+
+// validateCloudFlags rejects the case where exactly one of workspace/region is set.
+func validateCloudFlags(workspace, region string) error {
+	if workspace != "" && region == "" {
+		return fmt.Errorf(
+			"--region is required for Alpacon Cloud.\nAvailable regions: %s\nTry: alpacon login --workspace %s --region %s",
+			cloudRegionsHint(), workspace, knownCloudRegions[0],
+		)
+	}
+	if region != "" && workspace == "" {
+		return fmt.Errorf(
+			"--workspace is required for Alpacon Cloud.\nTry: alpacon login --workspace <name> --region %s",
+			region,
+		)
+	}
+	return nil
+}
+
+// checkURLPath returns a migration-hint error if the host argument contains a path.
 // This catches the legacy alpacon.io/workspace format that is no longer supported.
 // TODO: remove once the new workspace/region flow is well-established.
-func rejectURLWithPath(host string) {
+func checkURLPath(host string) error {
 	raw := host
 	if !strings.Contains(raw, "://") {
 		raw = "https://" + raw
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return
+		return nil
 	}
 	if p := strings.TrimSuffix(parsed.Path, "/"); p != "" {
-		utils.CliErrorWithExit("URL paths are not supported. Use 'alpacon login --workspace <name> --region <region>' instead")
+		return errors.New("URL paths are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass the host without a path (e.g. 'alpacon login alpacon.example.com')")
 	}
+	return nil
 }
 
 // formatHostURL normalizes a host argument into a full URL.

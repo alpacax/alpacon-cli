@@ -32,6 +32,25 @@ func TestGetAuthMethod(t *testing.T) {
 	}
 }
 
+func TestGetAuthClassification(t *testing.T) {
+	tests := []struct {
+		name     string
+		cfg      config.Config
+		expected string
+	}{
+		{"browser login", config.Config{AccessToken: "some-access-token"}, "browser_login"},
+		{"token", config.Config{Token: "some-token"}, "token"},
+		{"both tokens prefers browser", config.Config{Token: "some-token", AccessToken: "some-access-token"}, "browser_login"},
+		{"no tokens", config.Config{}, "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, getAuthClassification(tt.cfg))
+		})
+	}
+}
+
 func TestGetRole(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -186,6 +205,7 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			output := whoamiOutput{
+				AuthMethod:          "Browser login",
 				WorksessionRequired: tt.worksessionRequired,
 				ActiveWorksession:   tt.activeWorksession,
 			}
@@ -198,12 +218,21 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 			// Contract: both keys must always be present in the JSON output,
 			// so callers can rely on them without checking for missing fields.
 			_, hasRequired := got["work_session_required"]
+			_, hasRequiredForAccess := got["worksession_required_for_access"]
 			_, hasActive := got["active_work_session"]
+			_, hasActiveCanonical := got["active_worksession"]
+			_, hasAuthClassification := got["auth_classification"]
 			assert.True(t, hasRequired, "work_session_required key must always be present")
+			assert.True(t, hasRequiredForAccess, "worksession_required_for_access key must always be present")
 			assert.True(t, hasActive, "active_work_session key must always be present")
+			assert.True(t, hasActiveCanonical, "active_worksession key must always be present")
+			assert.True(t, hasAuthClassification, "auth_classification key must always be present")
 
 			assert.JSONEq(t, strconv.FormatBool(tt.worksessionRequired), string(got["work_session_required"]))
+			assert.JSONEq(t, strconv.FormatBool(tt.worksessionRequired), string(got["worksession_required_for_access"]))
 			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_work_session"]))
+			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_worksession"]))
+			assert.JSONEq(t, `"browser_login"`, string(got["auth_classification"]))
 		})
 	}
 }

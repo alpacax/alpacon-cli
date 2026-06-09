@@ -99,9 +99,9 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		// Resolve and announce after argument/path validation so stderr stays
-		// clean on early usage errors.
-		workSessionID := worksession.ResolveAndAnnounce(flagWorkSession)
+		// Resolve after argument/path validation so resolution errors don't
+		// mask early usage errors.
+		workSessionID := worksession.ResolveOrExit(flagWorkSession)
 
 		authMethod := config.ResolveAuthMethod()
 

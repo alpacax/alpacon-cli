@@ -15,11 +15,11 @@ var workSessionActivateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opActivate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := wsapi.ActivateWorkSession(ac, args[0]); err != nil {
-			utils.CliErrorWithExit("Failed to activate work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opActivate, err, "Failed to activate work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s activated.", args[0])

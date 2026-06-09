@@ -10,6 +10,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +48,20 @@ func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
 	assert.ErrorContains(t, err, "authentication failed")
 }
 
+func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "authentication failed")
+	assert.NotContains(t, err.Error(), "{}")
+}
+
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -60,6 +75,27 @@ func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 	assert.ErrorContains(t, err, "missing scope: sudo")
 }
 
+func TestSendRequest_403PreservesWorkSessionCodeAndSource(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{
+			"code": "work_session_required",
+			"source": "command",
+			"detail": "WorkSession required"
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "WorkSession required")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.WorkSessionRequired, code)
+	assert.Equal(t, "command", source)
+}
+
 func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
@@ -69,6 +105,100 @@ func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	assert.ErrorContains(t, err, "permission denied")
+}
+
+func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": ""}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "detail:")
+}
+
+func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "work_session_required", "source": "command"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	// Detail-less denial: generic message, but code/source must survive for exit-3 routing.
+	assert.ErrorContains(t, err, "permission denied")
+	assert.NotContains(t, err.Error(), "work_session_required")
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.WorkSessionRequired, code)
+	assert.Equal(t, "command", source)
+}
+
+func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
+	// Accessing root / a system account requires MFA: the server returns 401
+	// with {"code": "auth_mfa_required"} and no detail string. This must not be
+	// mislabeled as an authentication failure or suggest re-login—the user is
+	// authenticated and only needs MFA. The code must survive for the MFA flow.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "source": "websh"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "multi-factor authentication")
+	assert.NotContains(t, err.Error(), "authentication failed")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthMFARequired, code)
+	assert.Equal(t, "websh", source)
+}
+
+func TestSendRequest_401MFARequiredPrefersServerDetail(t *testing.T) {
+	// When the server also provides a human detail, surface it—still without a
+	// re-login hint, since a coded 401 is not a stale token.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "source": "websh", "detail": "MFA required to access root"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "MFA required to access root")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthMFARequired, code)
+}
+
+func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
+	// Any coded 401 without a detail must not become "authentication failed" /
+	// re-login; the code is preserved for downstream handling.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "some_policy_denial", "source": "command"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.NotContains(t, err.Error(), "authentication failed")
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, source := utils.ParseErrorResponse(err)
+	assert.Equal(t, "some_policy_denial", code)
+	assert.Equal(t, "command", source)
 }
 
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {

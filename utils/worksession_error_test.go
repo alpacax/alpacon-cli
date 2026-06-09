@@ -1,8 +1,8 @@
 package utils
 
 import (
-	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,28 +30,40 @@ func TestIsWorkSessionCode(t *testing.T) {
 
 func TestBuildWorkSessionDiagnostic(t *testing.T) {
 	tests := []struct {
-		code       string
-		wantReason string
-		wantNext   string
+		code          string
+		wantReason    string
+		wantNext      string
+		hasCreate     bool // suggests 'create --use', which must carry an expiry flag
+		reuseVsCreate bool // distinguishes reuse (use) vs create-and-attach paths
 	}{
-		{WorkSessionRequired, "no WorkSession selected", "work-session ls"},
-		{WorkSessionNotActive, "not yet active", "work-session current"},
-		{WorkSessionExpired, "has expired", "work-session extend"},
-		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create"},
-		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create"},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use"},
-		{WorkSessionNotUsable, "no longer usable", "work-session create"},
+		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
+		{WorkSessionNotActive, "not yet active", "work-session current", false, false},
+		{WorkSessionExpired, "has expired", "work-session extend", true, false},
+		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
+		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false, false},
+		{WorkSessionNotUsable, "no longer usable", "work-session create", true, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
 			got := buildWorkSessionDiagnostic(tt.code, "websh", "prod-1", "Browser login", "")
+			assert.Contains(t, got, "the websh operation requires an active WorkSession")
 			assert.Contains(t, got, tt.wantReason)
 			assert.Contains(t, got, tt.wantNext)
 			assert.Contains(t, got, "required scope")
 			assert.Contains(t, got, "prod-1")
 			assert.Contains(t, got, "Browser login (interactive)")
 			assert.Contains(t, got, "Note:")
+			if tt.hasCreate {
+				assert.Contains(t, got, "--expires-in")
+				assert.Contains(t, got, "--use")
+			}
+			if tt.reuseVsCreate {
+				assert.Contains(t, got, "alpacon work-session use <ID>")
+				assert.Contains(t, got, "reuse an existing")
+				assert.Contains(t, got, "create a new")
+			}
 		})
 	}
 }
@@ -62,7 +74,7 @@ func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	assert.NotContains(t, got, "(interactive)")
 }
 
-func TestBuildWorkSessionJSON(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 	tests := []string{
 		WorkSessionRequired,
 		WorkSessionNotActive,
@@ -75,13 +87,12 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 
 	for _, code := range tests {
 		t.Run(code, func(t *testing.T) {
-			got := buildWorkSessionJSON(code, "command", "srv-1", "API token", "")
+			envelope := buildWorkSessionErrorEnvelope(code, "command", "srv-1", "API token", "")
 
-			var envelope workSessionErrorJSON
-			assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 			assert.False(t, envelope.OK)
 			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
 			assert.Equal(t, code, envelope.ErrorCode)
+			assert.Equal(t, "the command operation requires an active WorkSession on this authentication.", envelope.Message)
 			assert.Equal(t, workSessionReasonMap[code], envelope.Reason)
 			assert.Equal(t, "command", envelope.Context.RequiredScope)
 			assert.Equal(t, []string{"srv-1"}, envelope.Context.TargetServers)
@@ -91,11 +102,9 @@ func TestBuildWorkSessionJSON(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
-	got := buildWorkSessionJSON(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
+func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
 	// Expired case: <ID> placeholder must be substituted with the known active UUID.
@@ -105,23 +114,20 @@ func TestBuildWorkSessionJSON_WithActiveWS(t *testing.T) {
 	}
 }
 
-func TestBuildWorkSessionJSON_ExpiredWithoutActiveWS(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	// When activeWS is unknown, the placeholder must remain.
-	got := buildWorkSessionJSON(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
 	assert.Contains(t, envelope.NextActions, "alpacon work-session extend <ID>")
 }
 
-func TestBuildWorkSessionJSON_RequiredKeepsPlaceholder(t *testing.T) {
+func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
 	// so the placeholder must NOT be substituted even when activeWS is known.
-	got := buildWorkSessionJSON(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
 
-	var envelope workSessionErrorJSON
-	assert.NoError(t, json.Unmarshal([]byte(got), &envelope))
-	assert.Contains(t, envelope.NextActions, "alpacon work-session use <ID>")
+	// The use action carries an inline comment, so match as a substring.
+	assert.Contains(t, strings.Join(envelope.NextActions, "\n"), "alpacon work-session use <ID>")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
