@@ -24,13 +24,13 @@ var workSessionDescribeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			body, err := wsapi.GetWorkSessionRaw(ac, args[0])
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve work session: %s.", err)
+				utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
 			}
 			utils.PrintJson(body)
 			return
@@ -38,7 +38,7 @@ var workSessionDescribeCmd = &cobra.Command{
 
 		session, err := wsapi.GetWorkSession(ac, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
 		}
 
 		serverNames := make([]string, len(session.Servers))

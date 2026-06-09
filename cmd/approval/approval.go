@@ -13,22 +13,21 @@ var ApprovalCmd = &cobra.Command{
 	Long: `Approval requests are created when actions require administrator
 review—work session creation, sudo policy grants, IAM username
 conflicts, and service token issuance all generate requests that
-a superuser must approve or reject before the action proceeds.
+a human must approve or reject before the action proceeds.
 
-Subcommands for reviewers (superuser only):
-  ls        List pending approval requests
+Approving and rejecting happen out of band in the Alpacon console
+(web) or Slack, not the CLI. The CLI is an execution and request
+surface only; use it to create requests and track their status.
+
+Subcommands for tracking:
+  ls        List approval requests (--my for your own)
   describe  Show details of a request
-  approve   Approve a pending request
-  reject    Reject a pending request
-
-Subcommands for requesters:
-  ls --my   List your own pending requests
   cancel    Cancel a pending request you submitted`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := cmd.Help(); err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon approval ls', 'alpacon approval describe', 'alpacon approval approve', 'alpacon approval reject', or 'alpacon approval cancel'. Run 'alpacon approval --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon approval ls', 'alpacon approval describe', or 'alpacon approval cancel'. Approve and reject happen in the Alpacon console (web). Run 'alpacon approval --help' for more information")
 	},
 }
 

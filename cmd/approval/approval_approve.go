@@ -1,55 +1,34 @@
 package approval
 
 import (
-	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
-	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-var (
-	approveScopes  []string
-	approveServers []string
-)
+// approveRejectExcludedMessage explains why the CLI no longer performs approve or
+// reject. ADR 0015 makes the CLI an execution/request surface only: approval
+// happens out of band in the Alpacon console (web/Slack), and the server now
+// refuses (HTTP 403) any approve/reject coming from the CLI credential channel.
+// The subcommands remain registered so the message is discoverable and existing
+// scripts get an actionable, intentional exit instead of an "unknown command".
+const approveRejectExcludedMessage = "Approvals must be done in the Alpacon console (web), not the CLI. " +
+	"The CLI is an execution and request surface only; approve and reject happen out of band. " +
+	"Use 'alpacon approval ls' to track a request's status."
 
 var approvalApproveCmd = &cobra.Command{
 	Use:   "approve REQUEST_ID",
-	Short: "Approve a pending approval request",
-	Long: `Approve a pending approval request. Superuser only.
+	Short: "Approve a request (moved to the Alpacon console)",
+	Long: `Approving requests has moved to the Alpacon console (web).
 
-For work_session requests, use --scope and --server to narrow
-the granted access at approval time. Omitting these flags
-approves the request exactly as submitted.`,
-	Args: cobra.ExactArgs(1),
-	Example: `  alpacon approval approve apr-abc123
-  alpacon approval approve apr-abc123 --scope command --scope websh
-  alpacon approval approve apr-abc123 --scope command,websh --server web-01`,
+The CLI is an execution and request surface only; a human approves or rejects
+out of band in the web console or Slack. The server rejects approve/reject from
+the CLI credential channel. Use 'alpacon approval ls' to track status.`,
+	Args: cobra.ArbitraryArgs,
+	Example: `  # Approve in the Alpacon console (web), then track status here:
+  alpacon approval ls --status approved`,
 	Run: func(cmd *cobra.Command, args []string) {
-		ac, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		req := approvalapi.ApproveOptions{
-			AdjustedScopes: utils.CompactStrings(approveScopes),
-		}
-
-		serverIDs, err := server.ResolveServerNames(ac, approveServers)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve server names: %s.", err)
-		}
-		req.AdjustedServers = serverIDs
-
-		if err := approvalapi.ApproveRequest(ac, args[0], req); err != nil {
-			utils.CliErrorWithExit("Failed to approve request: %s.", err)
-		}
-
-		utils.CliSuccess("Approval request %s approved.", args[0])
+		// Exit non-zero so a script that expected the approval to happen does not
+		// mistake this for success—the CLI must never pretend to approve.
+		utils.CliErrorWithExit("%s", approveRejectExcludedMessage)
 	},
-}
-
-func init() {
-	approvalApproveCmd.Flags().StringSliceVar(&approveScopes, "scope", nil, "Adjust granted scopes (work_session only; repeatable or comma-separated)")
-	approvalApproveCmd.Flags().StringSliceVar(&approveServers, "server", nil, "Adjust target servers by name (work_session only; repeatable or comma-separated)")
 }

@@ -32,7 +32,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if unsetActiveWorkSession {
 			if len(args) > 0 {
-				utils.CliErrorWithExit("--unset cannot be combined with a SESSION_ID argument")
+				utils.CliUsageErrorEnvelopeWithExit(opUnset, "--unset cannot be combined with a SESSION_ID argument")
 			}
 			// Treat missing config / no active workspace / empty entry as already-unset
 			// so --unset is a true no-op and never surfaces a confusing config error.
@@ -40,7 +40,7 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				if utils.OutputFormat == utils.OutputFormatJSON {
 					printWorkSessionMutationJSON(workSessionMutationOutput{
 						OK:                true,
-						Operation:         "unset",
+						Operation:         opUnset,
 						Message:           "No active work-session to unset.",
 						ActiveWorksession: nil,
 					})
@@ -50,12 +50,12 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 				return
 			}
 			if err := RunUnset(); err != nil {
-				utils.CliErrorWithExit("%s", err)
+				utils.CliErrorEnvelopeWithExit(opUnset, err, "%s", err)
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(workSessionMutationOutput{
 					OK:                true,
-					Operation:         "unset",
+					Operation:         opUnset,
 					Message:           "Active work-session cleared.",
 					ActiveWorksession: nil,
 				})
@@ -66,20 +66,20 @@ Pass --unset (with no SESSION_ID) to clear the active work-session.`,
 		}
 
 		if len(args) != 1 {
-			utils.CliErrorWithExit("SESSION_ID argument is required (or pass --unset)")
+			utils.CliUsageErrorEnvelopeWithExit(opUse, "SESSION_ID argument is required (or pass --unset)")
 		}
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opUse, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 		ws, err := RunUseSession(ac, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("%s", err)
+			utils.CliErrorEnvelopeWithExit(opUse, err, "%s", err)
 		}
 		message := activeWorkSessionSetMessage("", ws.ID, ws.Description)
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			active := ws.ID
-			printWorkSessionMutationJSON(newWorkSessionMutationOutput("use", message, ws, &active))
+			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUse, message, ws, &active))
 			return
 		}
 		utils.CliSuccess("%s", message)
@@ -104,6 +104,13 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	}
 	if ws.Status != activeWorkSessionStatus {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
+	}
+	// Agent sessions are not workspace-attachable (mirrors the create --use guard):
+	// they run non-interactively via their assigned token, not the interactive
+	// current-session path. Attaching one would let interactive exec/websh run
+	// against it and fail opaquely, so reject it here with a clear message.
+	if ws.RequesterType == "agent" {
+		return nil, fmt.Errorf("work-session %s is an agent session and is not workspace-attachable; agent sessions run non-interactively via their assigned token", ws.ID)
 	}
 	// Persist the canonical ID from the API rather than the raw argument so config
 	// stays consistent with server-side canonicalization and the printed JSON fields.

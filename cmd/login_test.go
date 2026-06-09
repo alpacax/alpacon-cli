@@ -141,8 +141,8 @@ func TestResolveLoginTarget(t *testing.T) {
 		{name: "workspace without region", workspace: "demo", wantErrSub: "--region is required"},
 		{name: "region without workspace", region: "us1", wantErrSub: "--workspace is required"},
 		{name: "host with path", args: []string{"alpacon.io/demo"}, wantErrSub: "URL paths are not supported"},
-		{name: "cloud direct url rejected", args: []string{"demo.us1.alpacon.io"}, wantErrSub: "direct URLs are not supported"},
-		// Path check runs before the cloud-direct check, so a cloud URL with a path reports the path error.
+		{name: "cloud direct url accepted", args: []string{"demo.us1.alpacon.io"}, wantOK: true, wantURL: "https://demo.us1.alpacon.io", wantName: "demo", wantDomain: "alpacon.io"},
+		// Path check runs first, so a cloud URL with a path reports the path error.
 		{name: "cloud direct url with path reports path error", args: []string{"demo.us1.alpacon.io/foo"}, wantErrSub: "URL paths are not supported"},
 	}
 
@@ -213,30 +213,6 @@ func TestValidateCloudFlags(t *testing.T) {
 			for _, sub := range tt.contains {
 				assert.ErrorContains(t, err, sub)
 			}
-		})
-	}
-}
-
-func TestIsCloudDirectURL(t *testing.T) {
-	tests := []struct {
-		name     string
-		url      string
-		expected bool
-	}{
-		{name: "cloud subdomain", url: "https://demo.us1.alpacon.io", expected: true},
-		{name: "mixed-case cloud subdomain", url: "https://DeMo.us1.AlPaCoN.iO", expected: true},
-		{name: "cloud base domain with trailing dot", url: "https://alpacon.io.", expected: true},
-		{name: "cloud subdomain with trailing dot", url: "https://demo.us1.alpacon.io.", expected: true},
-		{name: "cloud subdomain with port", url: "https://demo.us1.alpacon.io:8443", expected: true},
-		{name: "cloud region subdomain", url: "https://foo.alpacon.io", expected: true},
-		{name: "cloud base domain", url: "https://alpacon.io", expected: true},
-		{name: "self-hosted domain", url: "https://alpacon.example.com", expected: false},
-		{name: "localhost", url: "http://localhost:8000", expected: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isCloudDirectURL(tt.url))
 		})
 	}
 }

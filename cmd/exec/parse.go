@@ -15,6 +15,7 @@ type RemoteExecArgs struct {
 	Server        string
 	Command       string
 	Detach        bool
+	Wait          bool
 	ShowHelp      bool
 	Err           string
 }
@@ -35,8 +36,9 @@ type RemoteExecArgs struct {
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
-		commandParts                                              []string
-		detach                                                    bool
+		commandParts                                             []string
+		detach                                                   bool
+		wait                                                     bool
 	)
 
 	for i := 0; i < len(args); i++ {
@@ -100,10 +102,20 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
 			return RemoteExecArgs{Err: "--detach does not accept a value; use --detach alone"}
+		case arg == "--wait":
+			wait = true
+		case strings.HasPrefix(arg, "--wait="):
+			return RemoteExecArgs{Err: "--wait does not accept a value; use --wait alone"}
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
 			server = arg
+		}
+	}
+
+	if detach && wait {
+		return RemoteExecArgs{
+			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
 		}
 	}
 
@@ -124,6 +136,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		Server:        server,
 		Command:       ShellJoin(commandParts),
 		Detach:        detach,
+		Wait:          wait,
 	}
 }
 

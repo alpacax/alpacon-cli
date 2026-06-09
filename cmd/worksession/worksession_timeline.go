@@ -36,7 +36,7 @@ var workSessionTimelineCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opTimeline, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		id := args[0]
@@ -59,7 +59,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Wait()
 
 		if timelineErr != nil {
-			utils.CliErrorWithExit("Failed to retrieve work session timeline: %s.", timelineErr)
+			utils.CliErrorEnvelopeWithExit(opTimeline, timelineErr, "Failed to retrieve work session timeline: %s.", timelineErr)
 		}
 
 		serverMap := map[string]string{}
@@ -200,7 +200,7 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.Time
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
-		utils.CliErrorWithExit("Failed to serialize timeline: %s.", err)
+		utils.CliErrorEnvelopeWithExit(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
 	fmt.Println(string(b))
 }

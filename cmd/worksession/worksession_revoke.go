@@ -16,11 +16,11 @@ var workSessionRevokeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+			utils.CliErrorEnvelopeWithExit(opRevoke, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		if err := wsapi.RevokeWorkSession(ac, args[0]); err != nil {
-			utils.CliErrorWithExit("Failed to revoke work session: %s.", err)
+			utils.CliErrorEnvelopeWithExit(opRevoke, err, "Failed to revoke work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s revoked.", args[0])

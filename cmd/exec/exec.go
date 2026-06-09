@@ -1,6 +1,8 @@
 package exec
 
 import (
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -37,9 +39,15 @@ Flags:
   --detach                      Submit the command and return immediately without
                                 waiting for completion. Prints the job ID to stdout.
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
+  --wait                        When a sudo command needs human approval, block and
+                                re-attempt until a reviewer approves it in the Alpacon
+                                console (web), or the wait times out.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
+Exit code 4 indicates the sudo command is pending human approval (approve it in
+the Alpacon console, then re-run, or pass --wait to block); --output json emits
+{"status":"pending_approval", ...} on stdout.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
@@ -111,8 +119,33 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		result, err := RunCommandWithRetry(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
+		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, oversized)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+		// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
+		// not --wait on emits a machine-readable pending signal and exits before the
+		// normal result handling treats the denial as a plain failure.
+		if HandlePendingApproval(result, err, reRunHint(parsed)) {
+			return
+		}
 		HandleCommandResult(result, err)
 	},
+}
+
+// reRunHint reconstructs the exec invocation (server, optional user/group, and
+// command) so the pending-approval message can tell a human exactly what to
+// re-run once the request is approved. It uses -- before the command so remote
+// flags are never re-parsed as alpacon flags.
+func reRunHint(parsed RemoteExecArgs) string {
+	parts := []string{"alpacon exec"}
+	if parsed.Username != "" {
+		parts = append(parts, "-u "+parsed.Username)
+	}
+	if parsed.Groupname != "" {
+		parts = append(parts, "-g "+parsed.Groupname)
+	}
+	if parsed.WorkSessionID != "" {
+		parts = append(parts, "--work-session "+parsed.WorkSessionID)
+	}
+	parts = append(parts, parsed.Server, "--", parsed.Command)
+	return strings.Join(parts, " ")
 }

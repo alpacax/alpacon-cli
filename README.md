@@ -224,6 +224,63 @@ $ alpacon audit <filters>                        # workspace audit log
 
 Run `alpacon --help` for the full list, or `alpacon <command> --help` for details on any command.
 
+## When a command is denied
+
+Under interactive auth (browser login), `websh`, `exec`, `cp`, `edit`, and `tunnel` require an active work session. Without one, the command is refused with a diagnostic and exit code `3`:
+
+```
+Error: the command operation requires an active WorkSession on this authentication.
+
+  auth          : Browser login (interactive)
+  reason        : no WorkSession selected for this shell
+  required scope: command
+  target server : prod-1
+
+Next:
+  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --use  # create a new session and attach it
+  alpacon work-session ls --status active  # or reuse an existing active session
+  alpacon work-session use <ID>
+
+Note: Tokens issued by Alpacon (service or personal API token) bypass this check.
+```
+
+With `--output json`, the same refusal is a structured envelope on stderr—scripts and AI agents branch on `error_code` and run `next_actions` verbatim:
+
+```json
+{
+  "ok": false,
+  "exit_code": 3,
+  "error_code": "work_session_required",
+  "message": "the command operation requires an active WorkSession on this authentication.",
+  "reason": "no WorkSession selected for this shell",
+  "context": {
+    "auth_method": "Browser login",
+    "required_scope": "command",
+    "target_servers": ["prod-1"],
+    "current_worksession": null
+  },
+  "next_actions": [
+    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use  # create a new session and attach it",
+    "alpacon work-session ls --status active  # or reuse an existing active session",
+    "alpacon work-session use <ID>"
+  ]
+}
+```
+
+What each refusal code means and what to do next:
+
+| `error_code` | Meaning | Next |
+|---|---|---|
+| `work_session_required` | no session selected for this shell | `work-session create --use` or `work-session use <ID>` |
+| `work_session_not_active` | session not yet active (check `starts_at`) | wait, then `work-session current` |
+| `work_session_expired` | session has expired | `work-session extend <ID>` or create a new one |
+| `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
+| `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |
+| `work_session_assignee_mismatch` | session assigned to another principal | `work-session use <ID>` with your own session |
+| `work_session_not_usable` | session is no longer usable | `work-session create --use` |
+
+`work-session` subcommand failures (`create`, `use`, `extend`, ...) also emit a JSON error envelope under `--output json`, with exit code `1` and `error_code` carrying the server code when available (`usage_error` for local flag/argument errors). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -232,6 +289,7 @@ Run `alpacon --help` for the full list, or `alpacon <command> --help` for detail
 | `1`  | General error (network failure, server error, etc.) |
 | `2`  | Usage error (invalid flags or arguments) |
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
+| `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. For `exec`, re-run the command after approval (or pass `--wait` on the original command to block); for `work-session create` the session already exists—after approval attach it with `alpacon work-session use <id>` (or pass `--wait` on the original create to block). Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` on a `SUDO_APPROVAL_REQUIRED` sudo denial and by `work-session create` when the session lands pending |
 
 ## Contributing
 
