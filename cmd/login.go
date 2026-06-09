@@ -70,7 +70,10 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 
   # Headless environment only (no browser available)
   alpacon login --no-browser
-  ALPACON_NO_BROWSER=1 alpacon login`,
+  ALPACON_NO_BROWSER=1 alpacon login
+
+  # Alpacon Cloud via direct URL with an API token (deprecated; prefer --workspace/--region)
+  alpacon login myworkspace.us1.alpacon.io -t <api-token>`,
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
@@ -245,14 +248,11 @@ func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, 
 
 	switch {
 	case len(args) > 0:
-		// Host mode: self-hosted only. Cloud direct URLs are deprecated.
+		// Host mode: self-hosted, plus deprecated Alpacon Cloud direct URLs (backward compat).
 		if err := checkURLPath(args[0]); err != nil {
 			return "", "", "", false, err
 		}
 		workspaceURL = formatHostURL(args[0])
-		if isCloudDirectURL(workspaceURL) {
-			return "", "", "", false, errors.New("direct URLs are not supported for Alpacon Cloud. Use 'alpacon login --workspace <name> --region <region>' instead")
-		}
 		return workspaceURL, utils.ExtractWorkspaceName(workspaceURL), utils.ExtractBaseDomain(workspaceURL), true, nil
 	case workspace != "" || region != "":
 		// Alpacon Cloud mode via flags (non-interactive)
@@ -280,18 +280,6 @@ func validateCloudFlags(workspace, region string) error {
 		)
 	}
 	return nil
-}
-
-// isCloudDirectURL reports whether a host-mode URL targets the Alpacon Cloud base
-// domain (alpacon.io or a subdomain). Such direct URLs are deprecated.
-func isCloudDirectURL(workspaceURL string) bool {
-	parsed, err := url.Parse(workspaceURL)
-	if err != nil {
-		return false
-	}
-	// Normalize for case-insensitive hostnames and the trailing-dot FQDN form.
-	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
-	return host == defaultBaseDomain || strings.HasSuffix(host, "."+defaultBaseDomain)
 }
 
 // checkURLPath returns a migration-hint error if the host argument contains a path.

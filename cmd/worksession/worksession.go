@@ -9,7 +9,6 @@ import (
 // Operation identifiers carried in JSON outputs: success "operation" and error context.operation.
 const (
 	opActivate  = "activate"
-	opApprove   = "approve"
 	opComplete  = "complete"
 	opCreate    = "create"
 	opCurrent   = "current"
@@ -17,7 +16,6 @@ const (
 	opExtend    = "extend"
 	opList      = "list"
 	opRecording = "recording"
-	opReject    = "reject"
 	opRevoke    = "revoke"
 	opTimeline  = "timeline"
 	opUnset     = "unset"

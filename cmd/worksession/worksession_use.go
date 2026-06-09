@@ -105,6 +105,13 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if ws.Status != activeWorkSessionStatus {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}
+	// Agent sessions are not workspace-attachable (mirrors the create --use guard):
+	// they run non-interactively via their assigned token, not the interactive
+	// current-session path. Attaching one would let interactive exec/websh run
+	// against it and fail opaquely, so reject it here with a clear message.
+	if ws.RequesterType == "agent" {
+		return nil, fmt.Errorf("work-session %s is an agent session and is not workspace-attachable; agent sessions run non-interactively via their assigned token", ws.ID)
+	}
 	// Persist the canonical ID from the API rather than the raw argument so config
 	// stays consistent with server-side canonicalization and the printed JSON fields.
 	if err := config.SetActiveWorkSession(ws.ID); err != nil {
