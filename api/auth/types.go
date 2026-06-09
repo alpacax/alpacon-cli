@@ -3,9 +3,11 @@ package auth
 import "time"
 
 type LoginRequest struct {
-	WorkspaceURL string `json:"workspace_url"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
+	WorkspaceURL  string `json:"workspace_url"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	WorkspaceName string `json:"-"`
+	BaseDomain    string `json:"-"`
 }
 
 type LoginResponse struct {
