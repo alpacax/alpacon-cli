@@ -440,7 +440,7 @@ func validateHostTarget(host string) error {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return unsupportedHostTargetError()
 	}
-	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
+	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
 		return unsupportedHostTargetError()
 	}
 	return nil

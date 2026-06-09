@@ -125,6 +125,7 @@ func TestValidateHostTarget(t *testing.T) {
 		{name: "port only", host: ":8443", wantErr: true},
 		{name: "path is rejected", host: "alpacon.example.com/login", wantErr: true},
 		{name: "query is rejected", host: "alpacon.example.com?a=b", wantErr: true},
+		{name: "bare query separator is rejected", host: "alpacon.example.com?", wantErr: true},
 		{name: "userinfo is rejected", host: "admin@alpacon.example.com", wantErr: true},
 		{name: "http scheme allowed", host: "http://alpacon.example.com", wantErr: false},
 		{name: "non-http(s) scheme is rejected", host: "ssh://alpacon.example.com", wantErr: true},
