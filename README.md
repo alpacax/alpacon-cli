@@ -29,8 +29,7 @@ For production usage, see the [official documentation](https://docs.alpacax.com/
 
 ### macOS (Homebrew)
 ```bash
-brew tap alpacax/alpacon
-brew install alpacon-cli
+brew install alpacax/alpacon/alpacon-cli
 ```
 
 ### Linux (Debian / Ubuntu)
