@@ -67,6 +67,9 @@ type CommandRequest struct {
 	Server      string            `json:"server"`
 	RunAfter    []string          `json:"run_after"`
 	WorkSession string            `json:"work_session,omitempty"`
+	// Oversized signals that Line exceeds the inline limit and the server must
+	// stage it as a temp script and execute it (server owns path/wrapper/cleanup).
+	Oversized bool `json:"oversized,omitempty"`
 }
 
 type CommandResponse struct {

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -109,8 +110,8 @@ func hasSudoApprovalDenial(output string) bool {
 // the static denial hint; non-interactive humans additionally get the
 // verification link they can complete out of band. Only exec uses this; websh
 // keeps its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, oversized bool) (string, error) {
+	result, err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
 	// RemoteCommandError carrying the denial line. Require that error as well as
 	// the line match: a command that merely prints the line and SUCCEEDS
@@ -138,7 +139,7 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
-	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 }
 
 // isApprovalDenial reports whether (result, err) is a SUDO_APPROVAL_REQUIRED
@@ -167,8 +168,8 @@ func isApprovalDenial(result string, err error) bool {
 // until a reviewer approves, at which point the command runs exactly once. The
 // poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
 // fixed-interval ticker, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool) (string, error) {
-	result, err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait, oversized bool) (string, error) {
+	result, err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 	if !wait || !isApprovalDenial(result, err) {
 		return result, err
 	}
@@ -190,7 +191,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		case <-ticker.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
-			result, err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
+			result, err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 			if isApprovalDenial(result, err) {
 				// Still pending—keep waiting.
 				continue
@@ -226,8 +227,8 @@ func HandlePendingApproval(result string, err error, reRunHint string) bool {
 // error handling and retry logic. Used by both exec and websh commands.
 // workSessionID is forwarded to the server as the work_session field; pass ""
 // to omit it.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, oversized bool) (string, error) {
+	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 	if phased, ok := asPhasedError(err); ok {
 		return result, phased
 	}
@@ -245,7 +246,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 				return err
 			},
 		})
@@ -311,6 +312,49 @@ func asPhasedError(err error) (error, bool) {
 func clientTimeoutLine() string {
 	const phase = "client_timeout"
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
+}
+
+// runDetached submits command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path. Used by inline exec and the oversized bypass.
+func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string, oversized bool) {
+	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
+	if err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+			OnMFARequired: func(srv string) error {
+				return mfa.HandleMFAError(ac, srv)
+			},
+			OnUsernameRequired: func() error {
+				_, e := iam.HandleUsernameRequired()
+				return e
+			},
+			CheckMFACompleted: func() (bool, error) {
+				return mfa.CheckMFACompletion(ac)
+			},
+			RefreshToken: ac.RefreshToken,
+			RetryOperation: func() error {
+				resp, err = event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
+				return err
+			},
+		})
+	}
+	if err != nil {
+		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+		utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
+		return
+	}
+
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		data, mErr := json.Marshal(map[string]string{"job_id": resp.ID})
+		if mErr != nil {
+			utils.CliErrorWithExit("failed to marshal JSON: %s", mErr)
+			return
+		}
+		utils.PrintJson(data)
+		return
+	}
+
+	line1, line2 := detachResultLines(resp.ID)
+	fmt.Println(line1)
+	fmt.Fprintln(os.Stderr, line2)
 }
 
 func detachResultLines(jobID string) (string, string) {

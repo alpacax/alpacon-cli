@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -17,6 +17,13 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 )
+
+// newlineFlattener keeps multiline commands/results on one table row.
+var newlineFlattener = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+func flattenNewlines(s string) string {
+	return newlineFlattener.Replace(s)
+}
 
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
@@ -34,12 +41,17 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		}
 	}
 
-	relativePath := path.Join(serverID, userID)
 	params := map[string]string{}
 	if pageSize > 0 {
 		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, relativePath, params))
+	if serverID != "" {
+		params["server"] = serverID
+	}
+	if userID != "" {
+		params["requested_by"] = userID
+	}
+	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, "", params))
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +66,8 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,
-			Command:     event.Line,
-			Result:      utils.TruncateString(event.Result, 70),
+			Command:     utils.TruncateString(flattenNewlines(event.Line), 100),
+			Result:      utils.TruncateString(flattenNewlines(event.Result), 70),
 			Status:      utils.BoolPointerToString(event.Success),
 			Operator:    event.RequestedBy.Name,
 			RequestedAt: utils.TimeUtils(event.AddedAt),
@@ -64,7 +76,7 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 	return eventList, nil
 }
 
-func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (CommandResponse, error) {
+func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string, oversized bool) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return CommandResponse{}, err
@@ -78,6 +90,7 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 		Server:      serverID,
 		RunAfter:    []string{},
 		WorkSession: workSessionID,
+		Oversized:   oversized,
 	}
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
@@ -93,8 +106,8 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	return cmdResponse[0], nil
 }
 
-func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	cmdResponse, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
+func RunCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string, oversized bool) (string, error) {
+	cmdResponse, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
 	if err != nil {
 		return "", err
 	}

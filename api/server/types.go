@@ -111,6 +111,7 @@ type ServerStatusMeta struct {
 type ServerDetails struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
+	Platform         string            `json:"platform"`
 	RemoteIP         string            `json:"remote_ip"`
 	Status           ServerStatus      `json:"status"`
 	IsConnected      bool              `json:"is_connected"`
