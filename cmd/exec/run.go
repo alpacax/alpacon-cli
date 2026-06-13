@@ -3,6 +3,7 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -109,16 +110,16 @@ func hasSudoApprovalDenial(output string) bool {
 // the static denial hint; non-interactive humans additionally get the
 // verification link they can complete out of band. Only exec uses this; websh
 // keeps its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
+	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
 	// RemoteCommandError carrying the denial line. Require that error as well as
 	// the line match: a command that merely prints the line and SUCCEEDS
 	// (err == nil) must not trigger a step-up and a re-run of a side-effecting
 	// command.
 	var remoteErr *event.RemoteCommandError
-	if !errors.As(err, &remoteErr) || !hasSudoPresenceDenial(result) {
-		return result, err
+	if !errors.As(err, &remoteErr) || !hasSudoPresenceDenial(remoteErr.Output) {
+		return err
 	}
 
 	if !utils.IsInteractiveShell() {
@@ -128,27 +129,28 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 		if url, linkErr := mfa.GetMFALinkForSudo(ac, serverName); linkErr == nil && url != "" {
 			utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
 		}
-		return result, err
+		return err
 	}
 
 	if stepErr := mfa.StepUpForSudo(ac, serverName); stepErr != nil {
 		utils.CliWarning("MFA step-up did not complete: %s", stepErr)
-		return result, err
+		return err
 	}
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
-	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID)
+	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
 }
 
-// isApprovalDenial reports whether (result, err) is a SUDO_APPROVAL_REQUIRED
-// denial: the command exited non-zero (a real denial always surfaces as a
-// RemoteCommandError) AND the plugin's exact approval denial line is present.
-// Requiring both guards against a command that merely prints the token but
-// succeeds (err == nil) being mistaken for a pending approval.
-func isApprovalDenial(result string, err error) bool {
+// isApprovalDenial reports whether err is a SUDO_APPROVAL_REQUIRED denial: the
+// command exited non-zero (a real denial always surfaces as a
+// RemoteCommandError) AND the plugin's exact approval denial line is present in
+// the error's captured output. Requiring both guards against a command that
+// merely prints the token but succeeds (err == nil) being mistaken for a
+// pending approval.
+func isApprovalDenial(err error) bool {
 	var remoteErr *event.RemoteCommandError
-	return errors.As(err, &remoteErr) && hasSudoApprovalDenial(result)
+	return errors.As(err, &remoteErr) && hasSudoApprovalDenial(remoteErr.Output)
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
@@ -157,7 +159,7 @@ func isApprovalDenial(result string, err error) bool {
 // approves it out of band (the re-run then succeeds or hits a different,
 // terminal denial), or the bounded timeout elapses. When wait is false, or the
 // denial is anything other than SUDO_APPROVAL_REQUIRED, it returns the first
-// (result, err) unchanged so the caller's pending/denial handling runs.
+// err unchanged so the caller's pending/denial handling runs.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
@@ -167,10 +169,10 @@ func isApprovalDenial(result string, err error) bool {
 // until a reviewer approves, at which point the command runs exactly once. The
 // poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
 // fixed-interval ticker, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool) (string, error) {
-	result, err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
-	if !wait || !isApprovalDenial(result, err) {
-		return result, err
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool, out io.Writer) error {
+	err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+	if !wait || !isApprovalDenial(err) {
+		return err
 	}
 
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
@@ -186,17 +188,17 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			spinner.Stop()
 			// Return the last pending denial so the caller emits the standard
 			// pending-approval signal and exit code.
-			return result, err
+			return err
 		case <-ticker.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
-			result, err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID)
-			if isApprovalDenial(result, err) {
+			err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+			if isApprovalDenial(err) {
 				// Still pending—keep waiting.
 				continue
 			}
 			spinner.Stop()
-			return result, err
+			return err
 		}
 	}
 }
@@ -204,12 +206,12 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // HandlePendingApproval emits the structured pending-approval feedback for an
 // exec sudo command that was denied SUDO_APPROVAL_REQUIRED and not waited on,
 // then exits with ExitCodePendingApproval. It reports true when it handled the
-// (result, err); the caller skips its normal result handling on true. The exec
-// denial line carries no approval request id, so the machine signal omits it.
-// reRunHint is the exact command the caller invoked, so a human can copy-paste
-// it once the request is approved.
-func HandlePendingApproval(result string, err error, reRunHint string) bool {
-	if !isApprovalDenial(result, err) {
+// err; the caller skips its normal result handling on true. The exec denial line
+// carries no approval request id, so the machine signal omits it. reRunHint is
+// the exact command the caller invoked, so a human can copy-paste it once the
+// request is approved.
+func HandlePendingApproval(err error, reRunHint string) bool {
+	if !isApprovalDenial(err) {
 		return false
 	}
 	utils.PrintPendingApproval(
@@ -222,14 +224,13 @@ func HandlePendingApproval(result string, err error, reRunHint string) bool {
 	return true
 }
 
-// RunCommandWithRetry executes a remote command with MFA and username-required
-// error handling and retry logic. Used by both exec and websh commands.
-// workSessionID is forwarded to the server as the work_session field; pass ""
-// to omit it.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string) (string, error) {
-	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
+// RunCommandWithRetry executes a remote command with MFA/username-required error
+// handling and retry logic, streaming output to out. Used by exec and websh.
+// workSessionID is forwarded as the work_session field; pass "" to omit it.
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
+	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
 	if phased, ok := asPhasedError(err); ok {
-		return result, phased
+		return phased
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -245,34 +246,32 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				result, err = event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID)
-				return err
+				return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
 			},
 		})
 		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.
 		if phased, ok := asPhasedError(err); ok {
-			return result, phased
+			return phased
 		}
 		if err != nil {
-			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
+			return fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
 		}
 	}
-	return result, nil
+	return nil
 }
 
-// HandleCommandResult prints result on success, or exits appropriately on error.
-func HandleCommandResult(result string, err error) {
+// HandleCommandResult exits appropriately on error. Output is streamed to stdout
+// during execution; on a remote failure the error carries that output, used here
+// only to surface the sudo-denial hint (not re-printed).
+func HandleCommandResult(err error) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			stdoutLine, stderrLine, exitCode := remoteCommandOutcome(result, remoteErr)
-			if stdoutLine != "" {
-				fmt.Println(stdoutLine)
-			}
+			stderrLine, exitCode := remoteCommandOutcome(remoteErr)
 			if stderrLine != "" {
 				fmt.Fprint(os.Stderr, stderrLine)
 			}
-			if hint := sudoDenialHint(result); hint != "" {
+			if hint := sudoDenialHint(remoteErr.Output); hint != "" {
 				fmt.Fprint(os.Stderr, hint)
 			}
 			os.Exit(exitCode)
@@ -283,11 +282,6 @@ func HandleCommandResult(result string, err error) {
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)
-		return
-	}
-	fmt.Println(result)
-	if hint := sudoDenialHint(result); hint != "" {
-		fmt.Fprint(os.Stderr, hint)
 	}
 }
 
@@ -318,17 +312,15 @@ func detachResultLines(jobID string) (string, string) {
 		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)
 }
 
-// remoteCommandOutcome is the testable core of HandleCommandResult's
-// RemoteCommandError branch. stderrLine already includes its trailing newline.
-func remoteCommandOutcome(result string, remoteErr *event.RemoteCommandError) (stdoutLine, stderrLine string, exitCode int) {
-	if result != "" {
-		stdoutLine = result
-	}
+// remoteCommandOutcome renders the stderr phase line and exit code for a remote
+// command failure. The command's stdout was already streamed during execution,
+// so it is not re-emitted here. stderrLine already includes its trailing newline.
+func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
 	if remoteErr.ErrorPhase != "" {
 		stderrLine = fmt.Sprintf("%s: [%s] %s\n",
 			utils.Red("Error"),
 			remoteErr.ErrorPhase,
 			event.DescribePhase(remoteErr.ErrorPhase))
 	}
-	return stdoutLine, stderrLine, remoteErr.ExitCode
+	return stderrLine, remoteErr.ExitCode
 }
