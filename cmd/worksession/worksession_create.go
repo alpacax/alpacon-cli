@@ -70,11 +70,11 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.
 
 When an AI agent (rather than a human) drives the session, pass --requester-type agent
 so it is recorded and scoped accordingly.`,
-	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "nginx fix"
+	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
-  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "automated remediation" --requester-type agent
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent
   alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -421,7 +421,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*ws
 }
 
 func init() {
-	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose (required in non-interactive mode)")
+	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "What you're doing and why; be specific. Markdown supported. (required in non-interactive mode)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
