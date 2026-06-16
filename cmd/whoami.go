@@ -172,20 +172,20 @@ func getRole(isStaff, isSuperuser bool) string {
 	return "user"
 }
 
+// getAuthClassification returns the machine-readable auth classification for cfg.
+// It delegates to GetAuthMethod + authClassificationFromMethod so the auth-method
+// buckets live in exactly one place (config.GetAuthMethod) rather than being
+// re-derived here.
 func getAuthClassification(cfg config.Config) string {
-	if cfg.AccessToken != "" {
-		return "browser_login"
-	}
-	if cfg.Token != "" {
-		return "token"
-	}
-	return "unknown"
+	return authClassificationFromMethod(config.GetAuthMethod(cfg))
 }
 
 func authClassificationFromMethod(method string) string {
 	switch method {
 	case "Browser login":
 		return "browser_login"
+	case "Service token":
+		return "service_token"
 	case "Token":
 		return "token"
 	default:

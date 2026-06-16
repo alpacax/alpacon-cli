@@ -19,6 +19,7 @@ func TestGetAuthMethod(t *testing.T) {
 		expected string
 	}{
 		{"browser login", "", "some-access-token", "Browser login"},
+		{"service token", "alpst-abc", "", "Service token"},
 		{"token", "some-token", "", "Token"},
 		{"both tokens prefers browser", "some-token", "some-access-token", "Browser login"},
 		{"no tokens", "", "", "unknown"},
@@ -39,6 +40,7 @@ func TestGetAuthClassification(t *testing.T) {
 		expected string
 	}{
 		{"browser login", config.Config{AccessToken: "some-access-token"}, "browser_login"},
+		{"service token", config.Config{Token: "alpst-x"}, "service_token"},
 		{"token", config.Config{Token: "some-token"}, "token"},
 		{"both tokens prefers browser", config.Config{Token: "some-token", AccessToken: "some-access-token"}, "browser_login"},
 		{"no tokens", config.Config{}, "unknown"},
@@ -47,6 +49,25 @@ func TestGetAuthClassification(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, getAuthClassification(tt.cfg))
+		})
+	}
+}
+
+func TestAuthClassificationFromMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		expected string
+	}{
+		{"browser login", "Browser login", "browser_login"},
+		{"service token", "Service token", "service_token"},
+		{"token", "Token", "token"},
+		{"unknown", "something else", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, authClassificationFromMethod(tt.method))
 		})
 	}
 }
