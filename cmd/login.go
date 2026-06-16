@@ -482,10 +482,11 @@ func formatHostURL(host string) string {
 }
 
 // shouldFailOnProfileError reports whether a failed user-profile load should abort
-// login. Browser/password logins (no token) always have a user profile and were not
-// separately credential-checked, so a failure there is fatal. Token logins already
-// validated the credential against /api/status/ in LoginAndSaveCredentials, so a
-// missing user profile (e.g. a service token, an application principal) is non-fatal.
+// login. Browser (Auth0) and username/password logins are human logins that always
+// have a user profile, so a failed preload signals a real problem and is fatal. Token
+// logins were already validated against /api/status/ in LoginAndSaveCredentials, and a
+// service token is an application principal that legitimately has no user profile, so a
+// failed preload is non-fatal.
 func shouldFailOnProfileError(token string) bool {
 	return token == ""
 }
