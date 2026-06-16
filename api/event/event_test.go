@@ -618,7 +618,7 @@ func TestWaitForCommandApproval_ResolvesToSuccess(t *testing.T) {
 	assert.Equal(t, "done", result)
 }
 
-func TestWaitForCommandApproval_TolueratesTransitionError(t *testing.T) {
+func TestWaitForCommandApproval_ToleratesTransitionError(t *testing.T) {
 	// After approval the server briefly reports the unreachable "error" fallback
 	// (verification flipped to approved, delivered_at not yet set) before the
 	// command is delivered. The approval poll must wait through it, not fail.

@@ -181,8 +181,12 @@ func isApprovalTransitionStatus(status string) bool {
 func WaitForCommandApproval(ac *client.AlpaconClient, commandID string, timeout, tick time.Duration) (string, error) {
 	result, err := pollCommand(ac, commandID, timeout, tick, true)
 	if err != nil {
+		// The wait elapsed while the job was still parked or transitioning
+		// through approval (awaiting_approval or the transient "error" state
+		// pollCommand also keeps polling). Surface the pending-approval signal so
+		// the caller emits exit 4 rather than a generic timeout.
 		var clientTimeout *ClientTimeoutError
-		if errors.As(err, &clientTimeout) && IsAwaitingApprovalStatus(result.Status) {
+		if errors.As(err, &clientTimeout) && isApprovalTransitionStatus(result.Status) {
 			return result.Result, &PendingApprovalError{CommandID: commandID}
 		}
 		return result.Result, err
