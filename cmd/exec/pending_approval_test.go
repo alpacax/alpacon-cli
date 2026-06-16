@@ -47,6 +47,80 @@ func newApprovalDenialServer() *httptest.Server {
 	}))
 }
 
+// newAwaitingApprovalServer returns a test server whose exec command parks at the
+// server-side "awaiting_approval" status (HITL hold), so the command is pending
+// human approval without ever producing a denial line.
+func newAwaitingApprovalServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     "cmd-1",
+				"status": "awaiting_approval",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// TestExecStatusAwaitingApprovalExits4WithJSONSignal drives the status-level HITL
+// hold (server status "awaiting_approval", no denial line) through the real exec
+// command and asserts it converges on the same pending-approval contract as the
+// denial-code path: exit 4 and a {"status":"pending_approval", ...} envelope.
+func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
+	ts := newAwaitingApprovalServer()
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+
+	helper := osexec.Command(
+		os.Args[0],
+		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
+		"--",
+		"exec-worksession-helper",
+		"--output",
+		"json",
+		"prod",
+		"--",
+		"sudo",
+		"reboot",
+	)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var stdout, stderr bytes.Buffer
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
+
+	var got struct {
+		OK          bool     `json:"ok"`
+		Status      string   `json:"status"`
+		ExitCode    int      `json:"exit_code"`
+		NextActions []string `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
+	assert.False(t, got.OK)
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
+	require.NotEmpty(t, got.NextActions)
+	assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0], "hint should point at exec logs for the held job")
+}
+
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	ts := newApprovalDenialServer()
 	defer ts.Close()
