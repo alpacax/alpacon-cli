@@ -16,8 +16,10 @@ const (
 	ConfigFileName = "config.json"
 	ConfigFileDir  = ".alpacon"
 
-	// ServiceTokenPrefix is the default key prefix for service tokens
-	// (server setting SERVICE_TOKEN_PREFIX). Personal API tokens use "alpat-".
+	// ServiceTokenPrefix is the default service-token key prefix, hard-coded here.
+	// It matches the server's default SERVICE_TOKEN_PREFIX; if a self-hosted server
+	// overrides that setting, its service tokens will not match this prefix and are
+	// treated as generic tokens. Personal API tokens use "alpat-".
 	ServiceTokenPrefix = "alpst-"
 )
 
