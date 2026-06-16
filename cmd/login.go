@@ -166,8 +166,15 @@ with the saved target as the default. Non-interactive login requires a HOST or
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		if err := ac.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+		if config.IsServiceToken(token) {
+			// Service tokens are application principals with no user profile, so the
+			// preload would always 401. Skip it and report the credential directly.
+			utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
+		} else if err := ac.LoadCurrentUser(); err != nil {
+			if shouldFailOnProfileError(token) {
+				utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+			}
+			utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
 		}
 
 		utils.CliSuccess("Login succeeded!")
@@ -472,4 +479,14 @@ func formatHostURL(host string) string {
 		}
 	}
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
+}
+
+// shouldFailOnProfileError reports whether a failed user-profile load should abort
+// login. It is only consulted for non-service-token logins; service tokens skip the
+// preload entirely. Browser (Auth0) and username/password logins are human logins that
+// always have a user profile, so a failed preload signals a real problem and is fatal.
+// A personal API token was already validated against /api/status/ in
+// LoginAndSaveCredentials, so a failed preload is non-fatal.
+func shouldFailOnProfileError(token string) bool {
+	return token == ""
 }

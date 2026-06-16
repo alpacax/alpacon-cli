@@ -718,6 +718,16 @@ func TestValidateCloudFlags(t *testing.T) {
 	}
 }
 
+func TestShouldFailOnProfileError(t *testing.T) {
+	// Browser/password login (no token) → profile failure is fatal.
+	assert.True(t, shouldFailOnProfileError(""))
+	// Any token login → profile failure is non-fatal (credential already validated via
+	// /api/status/). Service tokens skip the preload entirely; these cases cover the
+	// personal-token path and the pure predicate.
+	assert.False(t, shouldFailOnProfileError("alpst-x"))
+	assert.False(t, shouldFailOnProfileError("alpat-x"))
+}
+
 func runPromptForLoginTarget(t *testing.T, cfg config.Config, responses ...string) (workspaceURL, workspaceName, baseDomain string, calls []promptCall, err error) {
 	t.Helper()
 
