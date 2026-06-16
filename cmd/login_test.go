@@ -216,3 +216,12 @@ func TestValidateCloudFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldFailOnProfileError(t *testing.T) {
+	// Browser/password login (no token) → profile failure is fatal.
+	assert.True(t, shouldFailOnProfileError(""))
+	// Service token → credential already validated, profile failure is non-fatal.
+	assert.False(t, shouldFailOnProfileError("alpst-x"))
+	// Personal token → preload failure is non-fatal (re-fetched later if needed).
+	assert.False(t, shouldFailOnProfileError("alpat-x"))
+}
