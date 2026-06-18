@@ -24,6 +24,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/alpacax/alpacon-cli/cmd/token"
 	"github.com/alpacax/alpacon-cli/cmd/tunnel"
+	"github.com/alpacax/alpacon-cli/cmd/username"
 	"github.com/alpacax/alpacon-cli/cmd/webftp"
 	"github.com/alpacax/alpacon-cli/cmd/webhook"
 	"github.com/alpacax/alpacon-cli/cmd/websh"
@@ -138,6 +139,9 @@ func init() {
 
 	// tunnel
 	RootCmd.AddCommand(tunnel.TunnelCmd)
+
+	// username
+	RootCmd.AddCommand(username.UsernameCmd)
 
 	// workspace
 	RootCmd.AddCommand(workspace.WorkspaceCmd)
