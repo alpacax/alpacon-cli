@@ -18,5 +18,6 @@ var UsernameCmd = &cobra.Command{
 }
 
 func init() {
+	UsernameCmd.AddCommand(usernameGetCmd)
 	UsernameCmd.AddCommand(usernameSetCmd)
 }
