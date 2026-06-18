@@ -1,6 +1,8 @@
 package username
 
 import (
+	"fmt"
+
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -22,13 +24,18 @@ var usernameSetCmd = &cobra.Command{
 
 		response, err := iam.SetUsername(name)
 		if err != nil {
-			code, _ := utils.ParseErrorResponse(err)
-			if msg, ok := iam.UsernameErrorMessage(code); ok {
-				utils.CliErrorWithExit("%s", msg)
-			}
-			utils.CliErrorWithExit("Failed to set username: %s", err)
+			utils.CliErrorWithExit("%s", setUsernameErrorText(err))
 		}
 
 		utils.CliSuccess("Username set to %q", response.Username)
 	},
+}
+
+// setUsernameErrorText maps a SetUsername error to the message shown to the user.
+func setUsernameErrorText(err error) string {
+	code, _ := utils.ParseErrorResponse(err)
+	if msg, ok := iam.UsernameErrorMessage(code); ok {
+		return msg
+	}
+	return fmt.Sprintf("Failed to set username: %s", err)
 }
