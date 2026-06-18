@@ -1,8 +1,8 @@
 package username
 
 import (
-	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
@@ -34,11 +34,9 @@ var usernameGetCmd = &cobra.Command{
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			out, err := json.Marshal(map[string]string{"username": user.Username})
-			if err != nil {
+			if err := utils.PrintJSONValue(os.Stdout, map[string]string{"username": user.Username}); err != nil {
 				utils.CliErrorWithExit("Failed to encode username: %s.", err)
 			}
-			utils.PrintJson(out)
 			return
 		}
 
