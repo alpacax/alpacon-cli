@@ -35,7 +35,7 @@ var usernameGetCmd = &cobra.Command{
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			if err := utils.PrintJSONValue(os.Stdout, map[string]string{"username": user.Username}); err != nil {
-				utils.CliErrorWithExit("Failed to encode username: %s.", err)
+				utils.CliErrorEnvelopeWithExit(opGet, err, "Failed to encode username: %s.", err)
 			}
 			return
 		}
