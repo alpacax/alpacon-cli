@@ -396,8 +396,7 @@ func SetUsername(username string) (*SetUsernameResponse, error) {
 	return &response, nil
 }
 
-// UsernameErrorMessage maps a server username error code to a human-readable
-// message. Returns ("", false) for unrecognized codes.
+// UsernameErrorMessage maps a server username error code to a human-readable message; ok is false for unrecognized codes.
 func UsernameErrorMessage(code string) (string, bool) {
 	switch code {
 	case codeUsernameInvalid:
@@ -415,8 +414,7 @@ func UsernameErrorMessage(code string) (string, bool) {
 	}
 }
 
-// isRetryableUsernameError reports whether the error can be resolved by
-// entering a different username.
+// isRetryableUsernameError reports whether re-entering a different username can resolve the error.
 func isRetryableUsernameError(code string) bool {
 	switch code {
 	case codeUsernameInvalid, codeUsernameDisallowed, codeUsernameInUse:
