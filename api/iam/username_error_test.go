@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -43,7 +44,21 @@ func TestIsRetryableUsernameError(t *testing.T) {
 }
 
 func TestHandleUsernameRequired_NonTTY(t *testing.T) {
-	_, err := HandleUsernameRequired()
+	// Replace stdin with a pipe so IsInteractiveShell() reports non-TTY; otherwise
+	// running `go test` from a terminal would enter the prompt loop and hang.
+	orig := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Stdin = orig
+		_ = r.Close()
+		_ = w.Close()
+	})
+	os.Stdin = r
+
+	_, err = HandleUsernameRequired()
 	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "alpacon username set")
 		assert.NotContains(t, err.Error(), "Please enter")
