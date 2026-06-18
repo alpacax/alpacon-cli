@@ -27,7 +27,7 @@ var usernameSetCmd = &cobra.Command{
 			utils.CliErrorWithExit("%s", setUsernameErrorText(err))
 		}
 
-		utils.CliSuccess("Username set to %q", response.Username)
+		utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
 	},
 }
 

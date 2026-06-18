@@ -25,6 +25,9 @@ const (
 	codeUsernameApproval   = "approval_superuser_approve_required"
 )
 
+// UsernameSetSuccessFmt is the confirmation format shown after a username is set.
+const UsernameSetSuccessFmt = "Username set to %q"
+
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
 var usernameErrors = map[string]struct {
 	message   string
@@ -367,7 +370,7 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 
 		response, err := SetUsername(username)
 		if err == nil {
-			utils.CliSuccess("Username set to %q", response.Username)
+			utils.CliSuccess(UsernameSetSuccessFmt, response.Username)
 			return response, nil
 		}
 
