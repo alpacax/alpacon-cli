@@ -6,6 +6,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// opGet is the operation identifier carried in JSON error envelopes (context.operation).
+const opGet = "get"
+
 var UsernameCmd = &cobra.Command{
 	Use:   "username",
 	Short: "Manage the username for your account's server access",
