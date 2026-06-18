@@ -25,6 +25,18 @@ const (
 	codeUsernameApproval   = "approval_superuser_approve_required"
 )
 
+// usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
+var usernameErrors = map[string]struct {
+	message   string
+	retryable bool
+}{
+	codeUsernameInvalid:    {"invalid username format: use lowercase letters, digits, '-', '_', and start with a letter", true},
+	codeUsernameDisallowed: {"this username is reserved and cannot be used (e.g. alpacon, root, admin)", true},
+	codeUsernameInUse:      {"this username is already in use", true},
+	codeUsernameAlreadySet: {"username is already set and cannot be changed here", false},
+	codeUsernameApproval:   {"this username conflicts with an existing system account and is pending superuser approval", false},
+}
+
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
 	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
 	if err != nil {
@@ -398,28 +410,11 @@ func SetUsername(username string) (*SetUsernameResponse, error) {
 
 // UsernameErrorMessage maps a server username error code to a human-readable message; ok is false for unrecognized codes.
 func UsernameErrorMessage(code string) (string, bool) {
-	switch code {
-	case codeUsernameInvalid:
-		return "invalid username format: use lowercase letters, digits, '-', '_', and start with a letter", true
-	case codeUsernameDisallowed:
-		return "this username is reserved and cannot be used (e.g. alpacon, root, admin)", true
-	case codeUsernameInUse:
-		return "this username is already in use", true
-	case codeUsernameAlreadySet:
-		return "username is already set and cannot be changed here", true
-	case codeUsernameApproval:
-		return "this username conflicts with an existing system account and is pending superuser approval", true
-	default:
-		return "", false
-	}
+	info, ok := usernameErrors[code]
+	return info.message, ok
 }
 
 // isRetryableUsernameError reports whether re-entering a different username can resolve the error.
 func isRetryableUsernameError(code string) bool {
-	switch code {
-	case codeUsernameInvalid, codeUsernameDisallowed, codeUsernameInUse:
-		return true
-	default:
-		return false
-	}
+	return usernameErrors[code].retryable
 }
