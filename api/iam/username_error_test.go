@@ -41,3 +41,11 @@ func TestIsRetryableUsernameError(t *testing.T) {
 	assert.False(t, isRetryableUsernameError("approval_superuser_approve_required"))
 	assert.False(t, isRetryableUsernameError("unknown"))
 }
+
+func TestHandleUsernameRequired_NonTTY(t *testing.T) {
+	_, err := HandleUsernameRequired()
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "alpacon username set")
+		assert.NotContains(t, err.Error(), "Please enter")
+	}
+}

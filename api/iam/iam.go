@@ -343,17 +343,33 @@ func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembers
 }
 
 func HandleUsernameRequired() (*SetUsernameResponse, error) {
-	utils.CliInfo("Username is required for your account.")
-	username := utils.PromptForRequiredInput("Please enter your username: ")
-
-	response, err := SetUsername(username)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set username: %v", err)
+	if !utils.IsInteractiveShell() {
+		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
 	}
 
-	utils.CliSuccess("Username set to %q", response.Username)
+	utils.CliInfo("Username is required for your account.")
+	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
 
-	return response, nil
+	for {
+		username := utils.PromptForRequiredInput("Please enter your username: ")
+
+		response, err := SetUsername(username)
+		if err == nil {
+			utils.CliSuccess("Username set to %q", response.Username)
+			return response, nil
+		}
+
+		code, _ := utils.ParseErrorResponse(err)
+		msg, known := UsernameErrorMessage(code)
+		if known {
+			if isRetryableUsernameError(code) {
+				utils.CliWarning("%s", msg)
+				continue
+			}
+			return nil, errors.New(msg)
+		}
+		return nil, fmt.Errorf("failed to set username: %v", err)
+	}
 }
 
 func SetUsername(username string) (*SetUsernameResponse, error) {
