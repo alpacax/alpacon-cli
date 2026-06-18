@@ -381,6 +381,11 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 				utils.CliWarning("%s", msg)
 				continue
 			}
+			if code == codeUsernameAlreadySet {
+				// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
+				utils.CliInfo("Username is already set; continuing.")
+				return nil, nil
+			}
 			return nil, errors.New(msg)
 		}
 		return nil, fmt.Errorf("failed to set username: %v", err)
