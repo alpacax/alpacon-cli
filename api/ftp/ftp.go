@@ -27,12 +27,7 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
-	// Polling configuration for transfer status. The poll interval backs off
-	// exponentially from initialPollInterval up to maxPollInterval so small
-	// files that finish quickly are detected within a fraction of a second,
-	// while large transfers settle at the cap where steady-state poll load
-	// matches the old fixed interval. (Bulk transfers polling concurrently can
-	// briefly raise request density during the sub-cap ramp.)
+	// Poll interval backs off exponentially up to maxPollInterval.
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 	pollBackoffFactor   = 2
@@ -45,8 +40,7 @@ const (
 )
 
 // nextPollInterval returns the backoff delay for a 0-based poll attempt:
-// initialPollInterval doubled per attempt, capped at maxPollInterval. The cap
-// is checked each step, so the value never overflows for large attempt counts.
+// initialPollInterval doubled per attempt, capped at maxPollInterval.
 func nextPollInterval(attempt int) time.Duration {
 	d := initialPollInterval
 	for i := 0; i < attempt; i++ {
