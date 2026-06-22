@@ -29,8 +29,7 @@ For production usage, see the [official documentation](https://docs.alpacax.com/
 
 ### macOS (Homebrew)
 ```bash
-brew tap alpacax/alpacon
-brew install alpacon-cli
+brew install alpacax/alpacon/alpacon-cli
 ```
 
 ### Linux (Debian / Ubuntu)
@@ -99,14 +98,15 @@ See `alpacon work-session --help` for session lifecycle, gating, and error codes
 ```bash
 $ alpacon login                                  # browser OAuth (default)
 $ alpacon login --workspace my-ws --region us1   # cloud workspace by name/region
-$ alpacon login myws.us1.alpacon.io              # by URL
 $ alpacon login alpacon.example.com              # self-hosted
 $ alpacon login <URL> -t <TOKEN_KEY>             # API token
-$ alpacon login --no-browser                     # CI / headless (or ALPACON_NO_BROWSER=1)
+$ alpacon login myws.us1.alpacon.io              # cloud direct URL (deprecated)
+$ alpacon login --workspace my-ws --region us1 -t <TOKEN_KEY> # CI / automation
+$ alpacon login --workspace my-ws --region us1 --no-browser   # manual login from a headless shell
 $ alpacon logout
 ```
 
-Successful login writes `~/.alpacon/config.json` containing the workspace URL, API token, and token expiry (~1 week). Re-login reuses the stored workspace URL unless one is provided.
+Successful login writes `~/.alpacon/config.json` containing the workspace target and credentials. Browser OAuth stores access/refresh tokens and access-token expiry; `-t` stores the supplied API token. In an interactive shell, re-login prompts with the stored target as the default instead of silently reusing it; non-interactive login requires an explicit host or `--workspace/--region`.
 
 For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 

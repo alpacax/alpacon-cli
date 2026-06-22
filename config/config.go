@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xtaci/smux"
@@ -14,6 +15,12 @@ import (
 const (
 	ConfigFileName = "config.json"
 	ConfigFileDir  = ".alpacon"
+
+	// ServiceTokenPrefix is the default service-token key prefix, hard-coded here.
+	// It matches the server's default SERVICE_TOKEN_PREFIX; if a self-hosted server
+	// overrides that setting, its service tokens will not match this prefix and are
+	// treated as generic tokens. Personal API tokens use "alpat-".
+	ServiceTokenPrefix = "alpst-"
 )
 
 func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, refreshToken, baseDomain string, expiresIn int, insecure bool) error {
@@ -191,10 +198,19 @@ func GetActiveWorkSession() (string, error) {
 	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
 }
 
+// IsServiceToken reports whether token is a service token, identified by its key
+// prefix. Service tokens are application principals and have no user profile.
+func IsServiceToken(token string) bool {
+	return strings.HasPrefix(strings.TrimSpace(token), ServiceTokenPrefix)
+}
+
 // GetAuthMethod returns a human-readable authentication method string for cfg.
 func GetAuthMethod(cfg Config) string {
 	if cfg.AccessToken != "" {
 		return "Browser login"
+	}
+	if IsServiceToken(cfg.Token) {
+		return "Service token"
 	}
 	if cfg.Token != "" {
 		return "Token"
