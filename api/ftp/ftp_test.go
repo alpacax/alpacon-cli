@@ -1365,3 +1365,25 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	assert.False(t, success)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fatal error must not be retried")
 }
+
+func TestPollTransferStatus_TimesOut(t *testing.T) {
+	// Server never completes (success=null). With a timeout below the initial
+	// poll interval, the deadline check breaks before the first sleep, so a
+	// single poll happens and the timeout error is returned.
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, _, err := PollTransferStatus(ac, "upload", "test-id", 50*time.Millisecond)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.False(t, success)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls))
+}
