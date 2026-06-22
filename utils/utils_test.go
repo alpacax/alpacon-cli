@@ -321,3 +321,24 @@ func TestZipToWriter(t *testing.T) {
 	assert.Equal(t, "hello", contents[filepath.ToSlash(filepath.Join(folderName, "file.txt"))])
 	assert.Equal(t, "world", contents[filepath.ToSlash(filepath.Join(folderName, "nested", "child.txt"))])
 }
+
+func TestSplitAndTrim(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"normal", "command,websh", []string{"command", "websh"}},
+		{"whitespace around values", " command , websh ", []string{"command", "websh"}},
+		{"trailing comma", "command,websh,", []string{"command", "websh"}},
+		{"leading comma", ",command,websh", []string{"command", "websh"}},
+		{"empty input", "", nil},
+		{"single value", "command", []string{"command"}},
+		{"only commas", ",,,", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SplitAndTrim(tt.input, ","))
+		})
+	}
+}

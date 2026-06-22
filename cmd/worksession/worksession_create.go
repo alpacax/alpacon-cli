@@ -89,13 +89,13 @@ so it is recorded and scoped accordingly.`,
 			if !utils.IsInteractiveShell() {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --scope.")
 			}
-			createScopes = splitCSV(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "))
+			createScopes = utils.SplitAndTrim(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "), ",")
 		}
 		if len(createServers) == 0 {
 			if !utils.IsInteractiveShell() {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --server.")
 			}
-			createServers = splitCSV(utils.PromptForRequiredInput("Servers (comma-separated server names): "))
+			createServers = utils.SplitAndTrim(utils.PromptForRequiredInput("Servers (comma-separated server names): "), ",")
 		}
 
 		expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
@@ -357,7 +357,7 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	var policies []wsapi.SudoPolicyInline
 	for _, spec := range specs {
-		commands := splitCSV(spec)
+		commands := utils.SplitAndTrim(spec, ",")
 		if len(commands) == 0 {
 			continue
 		}
@@ -368,19 +368,6 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 		})
 	}
 	return policies
-}
-
-// splitCSV splits a comma-separated string and trims whitespace.
-func splitCSV(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
 }
 
 // pollForApproval polls every 10 seconds until the session reaches a terminal state.

@@ -578,11 +578,6 @@ func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, re
 	return filePath, written, err
 }
 
-func downloadSingleFile(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) error {
-	_, err := downloadSingleFileWithResult(ac, remotePath, dest, serverID, username, groupname, resourceType, workSessionID, recursive)
-	return err
-}
-
 func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (DownloadedFile, error) {
 	downloadRequest := &DownloadRequest{
 		Path:         remotePath,
@@ -737,7 +732,8 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 		resourceType = "folder"
 	}
 
-	return downloadSingleFile(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, workSessionID, recursive)
+	_, err = downloadSingleFileWithResult(ac, remotePaths[0], dest, serverID, username, groupname, resourceType, workSessionID, recursive)
+	return err
 }
 
 func DownloadFileToPath(ac *client.AlpaconClient, serverName, remotePath, localPath, username, groupname, workSessionID string) (DownloadedFile, error) {
