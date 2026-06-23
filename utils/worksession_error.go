@@ -121,6 +121,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	createOrReuse := []string{
 		"alpacon work-session ls --status active  # find an existing active session",
 		"alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
+		"# AI agent: reuse by passing --work-session <ID> (an active ID from ls) to the gated command",
 		createCmd + "  # none active? create a new one (human)",
 		agentCreateCmd + "  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)",
 	}
@@ -137,12 +138,12 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		if activeWS != "" {
 			extendCmd = fmt.Sprintf("alpacon work-session extend %s", activeWS)
 		}
-		return []string{extendCmd, createCmd}
+		return []string{extendCmd, createCmd, agentCreateCmd}
 	case WorkSessionAssigneeMismatch:
 		return []string{"alpacon work-session use <ID>"}
 	case WorkSessionNotUsable:
 		return createOrReuse
 	default: // scope_not_allowed, server_not_allowed
-		return []string{createCmd}
+		return []string{createCmd, agentCreateCmd}
 	}
 }
