@@ -272,7 +272,7 @@ What each refusal code means and what to do next:
 | `error_code` | Meaning | Next |
 |---|---|---|
 | `work_session_required` | no session selected for this shell | `work-session create --use` or `work-session use <ID>` |
-| `work_session_not_active` | session not yet active (check `starts_at`) | wait, then `work-session current` |
+| `work_session_not_active` | session not active (pending, completed, or revoked) | if pending, wait; otherwise create or reuse a session |
 | `work_session_expired` | session has expired | `work-session extend <ID>` or create a new one |
 | `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
 | `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |
