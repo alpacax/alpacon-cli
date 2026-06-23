@@ -99,6 +99,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			req.ExpiresAt = val
 			changed++
 		}
+		if cmd.Flags().Changed("server") {
+			changed++ // resolved below once the client exists
+		}
 		if cmd.Flags().Changed("sudo") {
 			newSudo = buildSudoPolicies(updateSudo, updateSudoReason)
 			changed++
