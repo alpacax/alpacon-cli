@@ -109,8 +109,12 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 			}
 		}
 
-		delay := alignedPollDelay(attempt, time.Since(start))
-		if time.Now().Add(delay).After(deadline) {
+		now := time.Now()
+		delay := alignedPollDelay(attempt, now.Sub(start))
+		// Break if the next poll would start at or after the deadline: a single
+		// captured now keeps the loop strictly deadline-based, so no request
+		// fires past the timeout window even if time.Sleep oversleeps.
+		if !now.Add(delay).Before(deadline) {
 			break
 		}
 		time.Sleep(delay)
