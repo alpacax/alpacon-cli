@@ -1320,8 +1320,8 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 }
 
 func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
-	// A 422 with the in-progress code is expected while the transfer runs:
-	// PollTransferStatus must back off and retry, not treat it as fatal.
+	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
+	// status: PollTransferStatus must back off and retry, not treat it as fatal.
 	var calls int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&calls, 1)
