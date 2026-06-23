@@ -116,13 +116,12 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
 		operation, serverArg,
 	)
-	// Reuse first (ls → use/export), then create as the fallback—for human and agent alike.
+	// Reuse first (ls → use), then create as the fallback—for human and agent alike.
 	createOrReuse := []string{
 		"alpacon work-session ls --status active  # find an existing active session",
 		"alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
-		"export ALPACON_WORK_SESSION=<ID>  # agent: use an existing session",
 		createCmd + "  # none active? create a new one (human)",
-		agentCreateCmd + "  # none active? create a new one (AI agent; not attachable via --use)",
+		agentCreateCmd + "  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)",
 	}
 	switch code {
 	case WorkSessionRequired:

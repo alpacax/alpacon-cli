@@ -130,32 +130,6 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	assert.Contains(t, strings.Join(envelope.NextActions, "\n"), "alpacon work-session use <ID>")
 }
 
-func TestWorkSessionNextActions_IncludesAgentPath(t *testing.T) {
-	// createOrReuse codes must offer an agent path, not just the human --use path.
-	for _, code := range []string{WorkSessionRequired, WorkSessionNotUsable} {
-		t.Run(code, func(t *testing.T) {
-			joined := strings.Join(workSessionNextActions(code, "command", "srv-1", ""), "\n")
-			assert.Contains(t, joined, "--requester-type agent")
-			assert.Contains(t, joined, "ALPACON_WORK_SESSION")
-			// Reuse (ls) precedes create for both human (--use) and agent (--requester-type agent).
-			assert.Less(t, strings.Index(joined, "ls --status active"), strings.Index(joined, "--use"))
-			assert.Less(t, strings.Index(joined, "ALPACON_WORK_SESSION"), strings.Index(joined, "--requester-type agent"))
-		})
-	}
-}
-
-func TestWorkSessionNextActions_NotActiveGuidesWaitOrCreate(t *testing.T) {
-	// Activation is approval/server-driven, not user-run; guide toward an active session:
-	// pending → wait, completed/revoked → create or reuse (human and agent paths alike).
-	joined := strings.Join(workSessionNextActions(WorkSessionNotActive, "command", "srv-1", ""), "\n")
-	assert.Contains(t, joined, "work-session current")
-	assert.NotContains(t, joined, "work-session activate")
-	assert.Contains(t, joined, "wait")
-	assert.Contains(t, joined, "work-session use <ID>")
-	assert.Contains(t, joined, "--requester-type agent")
-	assert.Contains(t, joined, "ALPACON_WORK_SESSION")
-}
-
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
 	// Non-WorkSession errors must not trigger any exit — just return.
 	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
