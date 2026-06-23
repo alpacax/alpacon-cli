@@ -131,9 +131,7 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 }
 
 func TestWorkSessionNextActions_IncludesAgentPath(t *testing.T) {
-	// The createOrReuse codes must offer a non-interactive agent path alongside
-	// the human --use path, so an AI agent hitting the gate is not steered into
-	// a user session it cannot attach.
+	// createOrReuse codes must offer an agent path, not just the human --use path.
 	for _, code := range []string{WorkSessionRequired, WorkSessionNotUsable} {
 		t.Run(code, func(t *testing.T) {
 			joined := strings.Join(workSessionNextActions(code, "command", "srv-1", ""), "\n")
