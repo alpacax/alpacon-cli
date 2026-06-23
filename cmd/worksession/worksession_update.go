@@ -68,15 +68,24 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		var newSudo []wsapi.SudoPolicyInline
 		changed := 0
 		if cmd.Flags().Changed("title") {
+			if strings.TrimSpace(updateTitle) == "" {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--title cannot be empty.")
+			}
 			req.Title = updateTitle
 			changed++
 		}
 		if cmd.Flags().Changed("description") {
+			if strings.TrimSpace(updateDescription) == "" {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--description cannot be empty.")
+			}
 			req.Description = updateDescription
 			changed++
 		}
 		if cmd.Flags().Changed("scope") {
 			scopes := utils.CompactStrings(updateScopes)
+			if len(scopes) == 0 {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--scope must contain at least one scope.")
+			}
 			if err := validateScopeEnum(scopes); err != nil {
 				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Invalid --scope: %s", err)
 			}
@@ -104,6 +113,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		}
 		if cmd.Flags().Changed("sudo") {
 			newSudo = buildSudoPolicies(updateSudo, updateSudoReason)
+			if len(newSudo) == 0 {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--sudo must contain at least one command pattern.")
+			}
 			changed++
 		}
 
