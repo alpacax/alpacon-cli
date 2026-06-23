@@ -54,10 +54,11 @@ type WorkSessionCreateRequest struct {
 // server binds the policy to the session assignee automatically so it never
 // applies to other workspace users.
 //
-// ID is set only on read and on modify: an update PATCH sends the FULL desired
-// set, so existing policies must be echoed back with their ID (modify in place)
-// alongside new entries without an ID (additions). Omitting an existing policy
-// from the set deletes it, so callers must preserve the current entries.
+// ID is set only on read and on modify: the sudo_policies field of an update
+// PATCH is the FULL desired set, so existing policies must be echoed back with
+// their ID (modify in place) alongside new entries without an ID (additions).
+// Omitting an existing policy from the set deletes it, so callers must preserve
+// the current entries.
 type SudoPolicyInline struct {
 	ID             string   `json:"id,omitempty"`
 	Commands       []string `json:"commands"`
@@ -65,18 +66,15 @@ type SudoPolicyInline struct {
 	AllowBypassMFA bool     `json:"allow_bypass_mfa"`
 }
 
-// WorkSessionUpdateRequest carries the FULL desired sudo policy set (PUT-style):
-// the server deletes any existing policy absent from the list. Callers that
-// only mean to add must echo the existing policies back.
-//
-// Note on Go JSON encoding: a nil slice marshals to JSON `null` (treated by
-// the server as "field not provided" → no change). To explicitly clear all
-// policies, pass an explicitly empty slice (`[]SudoPolicyInline{}`), which
-// marshals to `[]`. The current CLI never sends nil here because the update
-// command guards `len(newPolicies) == 0` upstream and always builds the
-// desired slice via `make(...)`.
+// Partial update (omitempty leaves unset fields untouched); SudoPolicies is PUT-style — echo existing back or they're deleted.
 type WorkSessionUpdateRequest struct {
-	SudoPolicies []SudoPolicyInline `json:"sudo_policies"`
+	Title        string             `json:"title,omitempty"`
+	Description  string             `json:"description,omitempty"`
+	Scopes       []string           `json:"scopes,omitempty"`
+	Servers      []string           `json:"servers,omitempty"`
+	StartsAt     string             `json:"starts_at,omitempty"`
+	ExpiresAt    string             `json:"expires_at,omitempty"`
+	SudoPolicies []SudoPolicyInline `json:"sudo_policies,omitempty"`
 }
 
 type WorkSessionExtendRequest struct {
