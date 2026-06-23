@@ -57,6 +57,14 @@ func nextPollInterval(attempt int) time.Duration {
 // boundary measured from the polling start. Snapping to that grid makes the
 // schedule a superset of a fixed maxPollInterval poller, so faster small-file
 // detection never costs a slower detection for any completion time.
+//
+// Aligning to absolute grid boundaries (rather than sleeping a full interval
+// after each response) absorbs request latency into the sleep, so in steady
+// state polls fire ~every maxPollInterval from the start instead of
+// maxPollInterval+RTT. This keeps detection bounded but makes the request rate
+// slightly higher than the old poller on high-latency links—negligible for the
+// short-lived transfers this polls, and a deliberate trade for the superset
+// guarantee.
 func alignedPollDelay(attempt int, elapsed time.Duration) time.Duration {
 	backoff := nextPollInterval(attempt)
 	toBoundary := maxPollInterval - elapsed%maxPollInterval
@@ -84,8 +92,10 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 	for attempt := 0; ; attempt++ {
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
-			// A 422 (transfer in progress) is expected while the transfer is
-			// still running: back off and retry. Any other error is fatal.
+			// A "webftp_transfer_in_progress" payload is expected while the
+			// transfer is still running: back off and retry. Any other error
+			// is fatal. SendGetRequest returns the parsed API error message,
+			// not the HTTP status, so we key off the payload text.
 			if !strings.Contains(err.Error(), "webftp_transfer_in_progress") {
 				return false, "", fmt.Errorf("failed to check transfer status: %w", err)
 			}
