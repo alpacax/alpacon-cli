@@ -8,6 +8,7 @@ import (
 
 type WorkSession struct {
 	ID                string                `json:"id"`
+	Title             string                `json:"title"`
 	Description       string                `json:"description"`
 	Status            string                `json:"status"`
 	RequesterType     string                `json:"requester_type"`
@@ -16,6 +17,7 @@ type WorkSession struct {
 	CreatedBy         *types.UserSummary    `json:"created_by"`
 	AssignedUser      *types.UserSummary    `json:"assigned_user"`
 	ApprovalRequestID string                `json:"approval_request_id"`
+	StartsAt          *time.Time            `json:"starts_at"`
 	ExpiresAt         time.Time             `json:"expires_at"`
 	StartedAt         *time.Time            `json:"started_at"`
 	CompletedAt       *time.Time            `json:"completed_at"`

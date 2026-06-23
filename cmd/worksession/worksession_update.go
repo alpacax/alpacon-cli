@@ -35,7 +35,7 @@ Only the flags you pass are changed; the rest are left untouched. Which fields
 the server accepts depends on the session status (e.g. --starts-at/--expires-at
 on a pending session; --sudo on an approved/active one). The CLI sends what you
 provide and surfaces the server's validation error if a field isn't editable for
-the current status.
+the current status (--sudo is also validated locally before the request).
 
 --scope and --server replace the whole list (not append). --sudo adds MFA-bypass
 sudo command patterns to the session's existing policies; this is the recovery
@@ -68,17 +68,19 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		var newSudo []wsapi.SudoPolicyInline
 		changed := 0
 		if cmd.Flags().Changed("title") {
-			if strings.TrimSpace(updateTitle) == "" {
+			title := strings.TrimSpace(updateTitle)
+			if title == "" {
 				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--title cannot be empty.")
 			}
-			req.Title = updateTitle
+			req.Title = title
 			changed++
 		}
 		if cmd.Flags().Changed("description") {
-			if strings.TrimSpace(updateDescription) == "" {
+			description := strings.TrimSpace(updateDescription)
+			if description == "" {
 				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--description cannot be empty.")
 			}
-			req.Description = updateDescription
+			req.Description = description
 			changed++
 		}
 		if cmd.Flags().Changed("scope") {
