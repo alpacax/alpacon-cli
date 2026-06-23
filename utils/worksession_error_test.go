@@ -61,8 +61,8 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 			}
 			if tt.reuseVsCreate {
 				assert.Contains(t, got, "alpacon work-session use <ID>")
-				assert.Contains(t, got, "reuse an existing")
-				assert.Contains(t, got, "create a new")
+				assert.Contains(t, got, "existing active session") // reuse path comes first
+				assert.Contains(t, got, "create a new one")         // create is the fallback
 			}
 		})
 	}
@@ -137,6 +137,9 @@ func TestWorkSessionNextActions_IncludesAgentPath(t *testing.T) {
 			joined := strings.Join(workSessionNextActions(code, "command", "srv-1", ""), "\n")
 			assert.Contains(t, joined, "--requester-type agent")
 			assert.Contains(t, joined, "ALPACON_WORK_SESSION")
+			// Reuse (ls) precedes create for both human (--use) and agent (--requester-type agent).
+			assert.Less(t, strings.Index(joined, "ls --status active"), strings.Index(joined, "--use"))
+			assert.Less(t, strings.Index(joined, "ALPACON_WORK_SESSION"), strings.Index(joined, "--requester-type agent"))
 		})
 	}
 }
