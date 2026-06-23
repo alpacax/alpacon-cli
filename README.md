@@ -237,9 +237,10 @@ Error: the command operation requires an active WorkSession on this authenticati
   target server : prod-1
 
 Next:
-  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --use  # create a new session and attach it
-  alpacon work-session ls --status active  # or reuse an existing active session
-  alpacon work-session use <ID>
+  alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it via --work-session <ID> on the gated command
+  alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)
+  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --use  # none active? create a new one (human)
+  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)
 
 Note: Tokens issued by Alpacon (service or personal API token) bypass this check.
 ```
@@ -260,9 +261,10 @@ With `--output json`, the same refusal is a structured envelope on stderr—scri
     "current_worksession": null
   },
   "next_actions": [
-    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use  # create a new session and attach it",
-    "alpacon work-session ls --status active  # or reuse an existing active session",
-    "alpacon work-session use <ID>"
+    "alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it via --work-session <ID> on the gated command",
+    "alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
+    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use  # none active? create a new one (human)",
+    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --requester-type agent  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)"
   ]
 }
 ```
@@ -272,7 +274,7 @@ What each refusal code means and what to do next:
 | `error_code` | Meaning | Next |
 |---|---|---|
 | `work_session_required` | no session selected for this shell | `work-session create --use` or `work-session use <ID>` |
-| `work_session_not_active` | session not active (pending, completed, or revoked) | if pending, wait; otherwise create or reuse a session |
+| `work_session_not_active` | session not active (pending, approved, completed, or revoked) | if pending or approved, wait; otherwise create or reuse a session |
 | `work_session_expired` | session has expired | `work-session extend <ID>` or create a new one |
 | `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
 | `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |

@@ -50,7 +50,7 @@ Lifecycle:  pending → approved → active → complete | expired | revoked
 
 Error codes returned when a session check fails:
   work_session_required           no session selected for this shell
-  work_session_not_active         session not active (pending, completed, or revoked)
+  work_session_not_active         session not active (pending, approved, completed, or revoked)
   work_session_expired            session has expired
   work_session_scope_not_allowed  operation not in session scopes
   work_session_server_not_allowed target server not in session
