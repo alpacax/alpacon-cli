@@ -112,11 +112,18 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
 		operation, serverArg,
 	)
-	// createOrReuse leads with create-and-attach, then the reuse path.
+	// Agent sessions are not workspace-attachable (no --use); they run non-interactively
+	// via an explicitly passed session, so guide AI agents down their own path.
+	agentCreateCmd := fmt.Sprintf(
+		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
+		operation, serverArg,
+	)
+	// createOrReuse leads with create-and-attach, then the reuse path, then the agent path.
 	createOrReuse := []string{
-		createCmd + "  # create a new session and attach it",
+		createCmd + "  # create a new session and attach it (human)",
 		"alpacon work-session ls --status active  # or reuse an existing active session",
 		"alpacon work-session use <ID>",
+		agentCreateCmd + "  # AI agent: then export ALPACON_WORK_SESSION=<ID> (agent sessions aren't attachable via --use)",
 	}
 	switch code {
 	case WorkSessionRequired:

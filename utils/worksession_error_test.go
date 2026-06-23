@@ -130,6 +130,19 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	assert.Contains(t, strings.Join(envelope.NextActions, "\n"), "alpacon work-session use <ID>")
 }
 
+func TestWorkSessionNextActions_IncludesAgentPath(t *testing.T) {
+	// The createOrReuse codes must offer a non-interactive agent path alongside
+	// the human --use path, so an AI agent hitting the gate is not steered into
+	// a user session it cannot attach.
+	for _, code := range []string{WorkSessionRequired, WorkSessionNotUsable} {
+		t.Run(code, func(t *testing.T) {
+			joined := strings.Join(workSessionNextActions(code, "command", "srv-1", ""), "\n")
+			assert.Contains(t, joined, "--requester-type agent")
+			assert.Contains(t, joined, "ALPACON_WORK_SESSION")
+		})
+	}
+}
+
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
 	// Non-WorkSession errors must not trigger any exit — just return.
 	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
