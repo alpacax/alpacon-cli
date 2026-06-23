@@ -37,7 +37,7 @@ on a pending session; --sudo on an approved/active one). The CLI sends what you
 provide and surfaces the server's validation error if a field isn't editable for
 the current status.
 
---scope and --server REPLACE the whole list (not append). --sudo adds MFA-bypass
+--scope and --server replace the whole list (not append). --sudo adds MFA-bypass
 sudo command patterns to the session's existing policies; this is the recovery
 path when an 'exec' sudo was denied. The additions may require approval before
 they take effect.
@@ -202,8 +202,8 @@ func parseRFC3339Flag(flag, val string) (string, error) {
 func init() {
 	workSessionUpdateCmd.Flags().StringVar(&updateTitle, "title", "", "New session title")
 	workSessionUpdateCmd.Flags().StringVar(&updateDescription, "description", "", "New session description (markdown supported)")
-	workSessionUpdateCmd.Flags().StringSliceVar(&updateScopes, "scope", nil, "Replace the session scopes. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted; REPLACES the whole list)")
-	workSessionUpdateCmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; REPLACES the whole list)")
+	workSessionUpdateCmd.Flags().StringSliceVar(&updateScopes, "scope", nil, "Replace the session scopes. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted; replaces the whole list)")
+	workSessionUpdateCmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; replaces the whole list)")
 	workSessionUpdateCmd.Flags().StringVar(&updateStartsAt, "starts-at", "", "New scheduled start time (RFC3339; pending sessions only)")
 	workSessionUpdateCmd.Flags().StringVar(&updateExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339; pending sessions only — use 'extend' for approved/active sessions)")
 	workSessionUpdateCmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as MFA-bypass policies (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
