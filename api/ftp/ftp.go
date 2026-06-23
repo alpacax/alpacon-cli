@@ -27,15 +27,52 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
-	// Polling configuration for transfer status
-	pollInterval       = 2 * time.Second
-	basePollTimeout    = 30 * time.Second
-	perFilePollTimeout = 10 * time.Second
-	perMBPollTimeout   = 5 * time.Second
+	// Poll interval backs off exponentially up to maxPollInterval.
+	initialPollInterval = 250 * time.Millisecond
+	maxPollInterval     = 2 * time.Second
+	pollBackoffFactor   = 2
+	basePollTimeout     = 30 * time.Second
+	perFilePollTimeout  = 10 * time.Second
+	perMBPollTimeout    = 5 * time.Second
 
 	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
+
+// nextPollInterval returns the backoff delay for a 0-based poll attempt:
+// initialPollInterval doubled per attempt, capped at maxPollInterval.
+func nextPollInterval(attempt int) time.Duration {
+	d := initialPollInterval
+	for i := 0; i < attempt; i++ {
+		d *= pollBackoffFactor
+		if d >= maxPollInterval {
+			return maxPollInterval
+		}
+	}
+	return d
+}
+
+// alignedPollDelay returns the sleep before the next poll: the backoff for this
+// attempt, clamped so the poll never lands past the next maxPollInterval grid
+// boundary measured from the polling start. Snapping to that grid makes the
+// schedule a superset of a fixed maxPollInterval poller, so faster small-file
+// detection never costs a slower detection for any completion time.
+//
+// Aligning to absolute grid boundaries (rather than sleeping a full interval
+// after each response) absorbs request latency into the sleep, so in steady
+// state polls fire ~every maxPollInterval from the start instead of
+// maxPollInterval+RTT. This keeps detection bounded but makes the request rate
+// slightly higher than the old poller on high-latency links—negligible for the
+// short-lived transfers this polls, and a deliberate trade for the superset
+// guarantee.
+func alignedPollDelay(attempt int, elapsed time.Duration) time.Duration {
+	backoff := nextPollInterval(attempt)
+	toBoundary := maxPollInterval - elapsed%maxPollInterval
+	if toBoundary < backoff {
+		return toBoundary
+	}
+	return backoff
+}
 
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
@@ -49,32 +86,43 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 		statusURL = fmt.Sprintf(downloadStatusURL, id)
 	}
 
-	maxRetries := int(timeout / pollInterval)
-	if maxRetries < 1 {
-		maxRetries = 1
-	}
+	start := time.Now()
+	deadline := start.Add(timeout)
 
-	for i := 0; i < maxRetries; i++ {
+	for attempt := 0; ; attempt++ {
+		// Enforce the deadline before every request: time.Sleep can oversleep, so
+		// this top-of-loop check is what actually prevents a request firing past
+		// the timeout window.
+		if !time.Now().Before(deadline) {
+			break
+		}
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
-			// Check if it's a 422 error (transfer in progress)
-			if strings.Contains(err.Error(), "webftp_transfer_in_progress") {
-				time.Sleep(pollInterval)
-				continue
+			// A "webftp_transfer_in_progress" payload is expected while the
+			// transfer is still running: back off and retry. Any other error
+			// is fatal. SendGetRequest returns the parsed API error message,
+			// not the HTTP status, so we key off the payload text.
+			if !strings.Contains(err.Error(), "webftp_transfer_in_progress") {
+				return false, "", fmt.Errorf("failed to check transfer status: %w", err)
 			}
-			return false, "", fmt.Errorf("failed to check transfer status: %w", err)
+		} else {
+			var statusResp TransferStatusResponse
+			if err := json.Unmarshal(respBody, &statusResp); err != nil {
+				return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+			}
+			if statusResp.Success != nil {
+				return *statusResp.Success, statusResp.Message, nil
+			}
 		}
 
-		var statusResp TransferStatusResponse
-		if err := json.Unmarshal(respBody, &statusResp); err != nil {
-			return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+		now := time.Now()
+		delay := alignedPollDelay(attempt, now.Sub(start))
+		// Avoid sleeping into a poll whose scheduled start is already at or past
+		// the deadline; the top-of-loop check handles oversleep.
+		if !now.Add(delay).Before(deadline) {
+			break
 		}
-
-		if statusResp.Success != nil {
-			return *statusResp.Success, statusResp.Message, nil
-		}
-
-		time.Sleep(pollInterval)
+		time.Sleep(delay)
 	}
 
 	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
