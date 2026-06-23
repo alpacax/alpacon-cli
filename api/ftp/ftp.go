@@ -90,6 +90,12 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 	deadline := start.Add(timeout)
 
 	for attempt := 0; ; attempt++ {
+		// Enforce the deadline before every request: time.Sleep can oversleep, so
+		// this top-of-loop check is what actually prevents a request firing past
+		// the timeout window.
+		if !time.Now().Before(deadline) {
+			break
+		}
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
 			// A "webftp_transfer_in_progress" payload is expected while the
@@ -111,9 +117,8 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 
 		now := time.Now()
 		delay := alignedPollDelay(attempt, now.Sub(start))
-		// Break if the next poll would start at or after the deadline: a single
-		// captured now keeps the loop strictly deadline-based, so no request
-		// fires past the timeout window even if time.Sleep oversleeps.
+		// Avoid sleeping into a poll whose scheduled start is already at or past
+		// the deadline; the top-of-loop check handles oversleep.
 		if !now.Add(delay).Before(deadline) {
 			break
 		}
