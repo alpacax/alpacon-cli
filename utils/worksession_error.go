@@ -120,7 +120,8 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		createCmd + "  # create a new session and attach it (human)",
 		"alpacon work-session ls --status active  # or reuse an existing active session",
 		"alpacon work-session use <ID>",
-		agentCreateCmd + "  # AI agent: then export ALPACON_WORK_SESSION=<ID> (agent sessions aren't attachable via --use)",
+		agentCreateCmd + "  # AI agent (non-interactive); agent sessions aren't attachable via --use",
+		"export ALPACON_WORK_SESSION=<ID>",
 	}
 	switch code {
 	case WorkSessionRequired:
