@@ -18,7 +18,7 @@ type workSessionErrorCtx struct {
 var workSessionReasonMap = map[string]string{
 	WorkSessionRequired:         "no WorkSession selected for this shell",
 	WorkSessionNotUsable:        "session is no longer usable",
-	WorkSessionNotActive:        "selected session is not yet active",
+	WorkSessionNotActive:        "selected session is not active",
 	WorkSessionExpired:          "selected session has expired",
 	WorkSessionScopeNotAllowed:  "session does not include this scope",
 	WorkSessionServerNotAllowed: "target server is not in this session",
@@ -127,7 +127,10 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	case WorkSessionRequired:
 		return createOrReuse
 	case WorkSessionNotActive:
-		return []string{"alpacon work-session current"}
+		// Activation is approval/server-driven, not user-run; guide toward an active session.
+		return append([]string{
+			"alpacon work-session current  # pending: wait until active; completed/revoked: create or reuse below",
+		}, createOrReuse...)
 	case WorkSessionExpired:
 		extendCmd := "alpacon work-session extend <ID>"
 		if activeWS != "" {

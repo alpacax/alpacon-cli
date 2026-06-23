@@ -37,7 +37,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		reuseVsCreate bool // distinguishes reuse (use) vs create-and-attach paths
 	}{
 		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
-		{WorkSessionNotActive, "not yet active", "work-session current", false, false},
+		{WorkSessionNotActive, "not active", "work-session current", true, true},
 		{WorkSessionExpired, "has expired", "work-session extend", true, false},
 		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
 		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
@@ -139,6 +139,18 @@ func TestWorkSessionNextActions_IncludesAgentPath(t *testing.T) {
 			assert.Contains(t, joined, "ALPACON_WORK_SESSION")
 		})
 	}
+}
+
+func TestWorkSessionNextActions_NotActiveGuidesWaitOrCreate(t *testing.T) {
+	// Activation is approval/server-driven, not user-run; guide toward an active session:
+	// pending → wait, completed/revoked → create or reuse (human and agent paths alike).
+	joined := strings.Join(workSessionNextActions(WorkSessionNotActive, "command", "srv-1", ""), "\n")
+	assert.Contains(t, joined, "work-session current")
+	assert.NotContains(t, joined, "work-session activate")
+	assert.Contains(t, joined, "wait")
+	assert.Contains(t, joined, "work-session use <ID>")
+	assert.Contains(t, joined, "--requester-type agent")
+	assert.Contains(t, joined, "ALPACON_WORK_SESSION")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
