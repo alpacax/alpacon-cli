@@ -169,7 +169,7 @@ func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) e
 	}
 	if !slices.Contains(scopes, "sudo") {
 		return fmt.Errorf(
-			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Add it with --scope (e.g. --scope sudo) in this same update, or create a new session with --sudo (which adds the 'sudo' scope automatically)",
+			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Include 'sudo' in the scope list via --scope in this same update (note --scope replaces the whole list, so list every scope you want to keep), or create a new session with --sudo (which adds the 'sudo' scope automatically)",
 			session.ID,
 		)
 	}
