@@ -68,7 +68,10 @@ type SudoPolicyInline struct {
 	AllowBypassMFA bool     `json:"allow_bypass_mfa"`
 }
 
-// Partial update (omitempty leaves unset fields untouched); SudoPolicies is PUT-style — echo existing back or they're deleted ([] is omitted too, so it can't clear them).
+// WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields
+// untouched. SudoPolicies is PUT-style — the server replaces the whole set, so
+// existing policies must be echoed back or they are deleted. An empty slice is
+// also omitted (omitempty), so this request cannot clear policies.
 type WorkSessionUpdateRequest struct {
 	Title        string             `json:"title,omitempty"`
 	Description  string             `json:"description,omitempty"`
