@@ -14,11 +14,12 @@ import (
 
 func TestValidateSessionForSudoUpdate(t *testing.T) {
 	t.Run("pending session is rejected with actionable message", func(t *testing.T) {
-		err := validateSessionForSudoUpdate(&wsapi.WorkSession{
+		session := &wsapi.WorkSession{
 			ID:     "ses-pending",
 			Status: pendingWorkSessionStatus,
 			Scopes: []string{"command", "sudo"},
-		})
+		}
+		err := validateSessionForSudoUpdate(session, session.Scopes)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-pending")
 		assert.Contains(t, err.Error(), "pending")
@@ -26,11 +27,12 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 	})
 
 	t.Run("missing sudo scope is rejected with guidance", func(t *testing.T) {
-		err := validateSessionForSudoUpdate(&wsapi.WorkSession{
+		session := &wsapi.WorkSession{
 			ID:     "ses-no-sudo",
 			Status: "active",
 			Scopes: []string{"command"},
-		})
+		}
+		err := validateSessionForSudoUpdate(session, session.Scopes)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-no-sudo")
 		assert.Contains(t, err.Error(), "'sudo' scope")
@@ -40,19 +42,31 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 	})
 
 	t.Run("active session with sudo scope passes", func(t *testing.T) {
-		assert.NoError(t, validateSessionForSudoUpdate(&wsapi.WorkSession{
+		session := &wsapi.WorkSession{
 			ID:     "ses-ok",
 			Status: "active",
 			Scopes: []string{"command", "sudo"},
-		}))
+		}
+		assert.NoError(t, validateSessionForSudoUpdate(session, session.Scopes))
 	})
 
 	t.Run("approved session with sudo scope passes (pre-active is allowed)", func(t *testing.T) {
-		assert.NoError(t, validateSessionForSudoUpdate(&wsapi.WorkSession{
+		session := &wsapi.WorkSession{
 			ID:     "ses-approved",
 			Status: "approved",
 			Scopes: []string{"sudo"},
-		}))
+		}
+		assert.NoError(t, validateSessionForSudoUpdate(session, session.Scopes))
+	})
+
+	t.Run("sudo scope added via --scope in the same update passes", func(t *testing.T) {
+		session := &wsapi.WorkSession{
+			ID:     "ses-add-scope",
+			Status: "active",
+			Scopes: []string{"command"},
+		}
+		// req.Scopes replaces the list and adds 'sudo', so the effective scopes include it.
+		assert.NoError(t, validateSessionForSudoUpdate(session, []string{"command", "sudo"}))
 	})
 }
 

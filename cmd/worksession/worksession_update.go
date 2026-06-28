@@ -159,14 +159,15 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 	},
 }
 
-func validateSessionForSudoUpdate(session *wsapi.WorkSession) error {
+// scopes is the effective scope list: req.Scopes when --scope replaces the list, else the session's current scopes.
+func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) error {
 	if session.Status == pendingWorkSessionStatus {
 		return fmt.Errorf(
 			"work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved",
 			session.ID,
 		)
 	}
-	if !slices.Contains(session.Scopes, "sudo") {
+	if !slices.Contains(scopes, "sudo") {
 		return fmt.Errorf(
 			"work session %s does not include the 'sudo' scope; sudo policies cannot be added. Create a new session with --sudo (it adds the 'sudo' scope automatically)",
 			session.ID,
@@ -182,7 +183,11 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 		if err != nil {
 			return nil, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
 		}
-		if err := validateSessionForSudoUpdate(session); err != nil {
+		effectiveScopes := session.Scopes
+		if len(req.Scopes) > 0 {
+			effectiveScopes = req.Scopes
+		}
+		if err := validateSessionForSudoUpdate(session, effectiveScopes); err != nil {
 			return nil, err
 		}
 		desired := make([]wsapi.SudoPolicyInline, 0, len(session.SudoPolicies)+len(newSudo))
