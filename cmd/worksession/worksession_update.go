@@ -27,7 +27,7 @@ var (
 )
 
 var workSessionUpdateCmd = &cobra.Command{
-	Use:   "update [SESSION_ID] [flags]",
+	Use:   "update [SESSION_ID]",
 	Short: "Update an existing work session",
 	Long: `Update fields of an existing work session.
 
