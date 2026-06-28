@@ -110,8 +110,13 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			req.ExpiresAt = val
 			changed++
 		}
+		var serverNames []string
 		if cmd.Flags().Changed("server") {
-			changed++ // resolved below once the client exists
+			serverNames = utils.CompactStrings(updateServers)
+			if len(serverNames) == 0 {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--server must contain at least one valid server name.")
+			}
+			changed++ // names resolved to IDs below once the client exists
 		}
 		if cmd.Flags().Changed("sudo") {
 			newSudo = buildSudoPolicies(updateSudo, updateSudoReason)
@@ -119,6 +124,8 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--sudo must contain at least one command pattern.")
 			}
 			changed++
+		} else if cmd.Flags().Changed("sudo-reason") {
+			utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--sudo-reason has no effect without --sudo.")
 		}
 
 		if changed == 0 {
@@ -130,12 +137,8 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			utils.CliErrorEnvelopeWithExit(opUpdate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if cmd.Flags().Changed("server") {
-			names := utils.CompactStrings(updateServers)
-			if len(names) == 0 {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--server must contain at least one valid server name.")
-			}
-			ids, err := server.ResolveServerNames(ac, names)
+		if len(serverNames) > 0 {
+			ids, err := server.ResolveServerNames(ac, serverNames)
 			if err != nil {
 				utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
 			}
