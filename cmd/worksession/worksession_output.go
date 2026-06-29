@@ -80,20 +80,31 @@ func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 	}
 }
 
+func joinOrNone(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
+}
+
 func serverDiffNames(servers []types.ServerSummary) []string {
 	names := make([]string, len(servers))
 	for i, s := range servers {
-		names[i] = s.Name
+		name := s.Name
+		if s.IsDeleted != nil && *s.IsDeleted {
+			name += " (deleted)"
+		}
+		names[i] = name
 	}
 	return names
 }
 
 func formatScopeDiff(d *wsapi.ScopeDiff) string {
-	return strings.Join(d.Old, ", ") + " → " + strings.Join(d.New, ", ")
+	return joinOrNone(d.Old) + " → " + joinOrNone(d.New)
 }
 
 func formatServerDiff(d *wsapi.ServerDiff) string {
-	return strings.Join(serverDiffNames(d.Old), ", ") + " → " + strings.Join(serverDiffNames(d.New), ", ")
+	return joinOrNone(serverDiffNames(d.Old)) + " → " + joinOrNone(serverDiffNames(d.New))
 }
 
 func formatRecommendation(r wsapi.WorkSessionRecommendation) string {

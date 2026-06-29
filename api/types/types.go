@@ -13,4 +13,5 @@ type ServerSummary struct {
 	Name        string  `json:"name"`
 	OS          *string `json:"os"`
 	IsConnected bool    `json:"is_connected"`
+	IsDeleted   *bool   `json:"is_deleted,omitempty"`
 }

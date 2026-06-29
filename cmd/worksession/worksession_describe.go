@@ -44,12 +44,13 @@ func describeRows(session *wsapi.WorkSession) []describeRow {
 		{"Requester type", session.RequesterType},
 		{"Scopes", strings.Join(session.Scopes, ", ")},
 	}
-	if session.Adjustments != nil && session.Adjustments.Scopes != nil {
-		rows = append(rows, describeRow{"Scopes adjusted", formatScopeDiff(session.Adjustments.Scopes)})
+	adj := session.Adjustments
+	if adj != nil && adj.Scopes != nil {
+		rows = append(rows, describeRow{"Scopes adjusted", formatScopeDiff(adj.Scopes)})
 	}
 	rows = append(rows, describeRow{"Servers", strings.Join(serverNames, ", ")})
-	if session.Adjustments != nil && session.Adjustments.Servers != nil {
-		rows = append(rows, describeRow{"Servers adjusted", formatServerDiff(session.Adjustments.Servers)})
+	if adj != nil && adj.Servers != nil {
+		rows = append(rows, describeRow{"Servers adjusted", formatServerDiff(adj.Servers)})
 	}
 	rows = append(rows,
 		describeRow{"Created by", createdBy},

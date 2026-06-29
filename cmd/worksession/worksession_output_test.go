@@ -364,3 +364,14 @@ func TestWriteApprovalNotice(t *testing.T) {
 	writeApprovalNotice(&empty, &wsapi.WorkSession{})
 	assert.Empty(t, empty.String())
 }
+
+func TestFormatDiffEdgeCases(t *testing.T) {
+	del := true
+	assert.Equal(t, "command, logs → (none)",
+		formatScopeDiff(&wsapi.ScopeDiff{Old: []string{"command", "logs"}, New: nil}))
+	assert.Equal(t, "web-01, db-01 (deleted) → web-01",
+		formatServerDiff(&wsapi.ServerDiff{
+			Old: []types.ServerSummary{{Name: "web-01"}, {Name: "db-01", IsDeleted: &del}},
+			New: []types.ServerSummary{{Name: "web-01"}},
+		}))
+}
