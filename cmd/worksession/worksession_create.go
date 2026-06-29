@@ -255,6 +255,7 @@ so it is recorded and scoped accordingly.`,
 				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, nil))
 				return
 			}
+			writeApprovalNotice(os.Stderr, finalSession)
 			utils.CliSuccess("%s", message)
 			return
 		}
@@ -271,6 +272,7 @@ so it is recorded and scoped accordingly.`,
 			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, message, finalSession, &active))
 			return
 		}
+		writeApprovalNotice(os.Stderr, finalSession)
 		utils.CliSuccess("%s", message)
 	},
 }
