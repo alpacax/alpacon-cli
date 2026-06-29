@@ -66,11 +66,15 @@ MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI 
 running 'exec') can run those exact sudo commands without an interactive MFA
 prompt. The 'sudo' scope is added automatically, and the policies are submitted for
 approval together with the session. If a sudo command is later denied, add it to the
-session with 'alpacon work-session update <id> --sudo "<command>"'.`,
-	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "nginx fix"
+session with 'alpacon work-session update <id> --sudo "<command>"'.
+
+When an AI agent (rather than a human) drives the session, pass --requester-type agent
+so it is recorded and scoped accordingly.`,
+	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent
   alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -85,13 +89,13 @@ session with 'alpacon work-session update <id> --sudo "<command>"'.`,
 			if !utils.IsInteractiveShell() {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --scope.")
 			}
-			createScopes = splitCSV(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "))
+			createScopes = utils.SplitAndTrim(utils.PromptForRequiredInput("Scopes (comma-separated, e.g. command,websh): "), ",")
 		}
 		if len(createServers) == 0 {
 			if !utils.IsInteractiveShell() {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "Non-interactive mode requires --server.")
 			}
-			createServers = splitCSV(utils.PromptForRequiredInput("Servers (comma-separated server names): "))
+			createServers = utils.SplitAndTrim(utils.PromptForRequiredInput("Servers (comma-separated server names): "), ",")
 		}
 
 		expiresAtVal, err := parseExpiryFlag(expiresIn, expiresAt)
@@ -353,7 +357,7 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	var policies []wsapi.SudoPolicyInline
 	for _, spec := range specs {
-		commands := splitCSV(spec)
+		commands := utils.SplitAndTrim(spec, ",")
 		if len(commands) == 0 {
 			continue
 		}
@@ -364,19 +368,6 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 		})
 	}
 	return policies
-}
-
-// splitCSV splits a comma-separated string and trims whitespace.
-func splitCSV(s string) []string {
-	parts := strings.Split(s, ",")
-	result := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
 }
 
 // pollForApproval polls every 10 seconds until the session reaches a terminal state.
@@ -417,12 +408,12 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*ws
 }
 
 func init() {
-	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "Session purpose (required in non-interactive mode)")
+	workSessionCreateCmd.Flags().StringVar(&purpose, "purpose", "", "What you're doing and why; be specific. Markdown supported. (required in non-interactive mode)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createScopes, "scope", nil, "Scopes to request. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
-	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: user or agent")
+	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent' (set when an AI agent drives the session)")
 	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (does not set as active; combine with --use to attach automatically)")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
 	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")

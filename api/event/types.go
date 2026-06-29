@@ -29,6 +29,15 @@ type RemoteCommandError struct {
 // result before the server reported a terminal status.
 type ClientTimeoutError struct{}
 
+// PendingApprovalError is returned when the server parked a command at the
+// "awaiting_approval" status: the job was accepted but a human must approve it
+// out of band in the Alpacon console before it runs. CommandID identifies the
+// parked job so a --wait caller can poll it to completion—re-submitting would
+// create a duplicate command (and a duplicate approval request).
+type PendingApprovalError struct {
+	CommandID string
+}
+
 type EventAttributes struct {
 	Server      string `json:"server"`
 	Shell       string `json:"shell"`
@@ -94,6 +103,10 @@ func (*ClientTimeoutError) Error() string {
 	return "CLI timed out waiting for command result"
 }
 
+func (*PendingApprovalError) Error() string {
+	return "command is awaiting human approval"
+}
+
 // DescribePhase returns the human-readable description for an error_phase,
 // or the raw identifier when the phase is unknown.
 func DescribePhase(phase string) string {
@@ -111,4 +124,12 @@ func IsRunningStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+// IsAwaitingApprovalStatus reports whether status is the server's hold state for a
+// command parked pending out-of-band human approval (HITL). The server exposes
+// this via Command.compute_status when verification_status is "awaiting_approval"
+// and the command has not yet been delivered to the agent.
+func IsAwaitingApprovalStatus(status string) bool {
+	return status == "awaiting_approval"
 }

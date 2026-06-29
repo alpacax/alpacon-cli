@@ -16,7 +16,29 @@ const (
 	membershipURL = "/api/iam/memberships/"
 	usernameURL   = "/api/iam/username/"
 	inviteUserURL = "/api/workspaces/users/invite/"
+
+	// Server username error codes (alpacon-server iam/api/serializers.py)
+	codeUsernameInvalid    = "user_username_invalid"
+	codeUsernameDisallowed = "user_username_disallowed"
+	codeUsernameInUse      = "user_username_in_use"
+	codeUsernameAlreadySet = "user_username_already_set"
+	codeUsernameApproval   = "approval_superuser_approve_required"
 )
+
+// UsernameSetSuccessFmt is the confirmation format shown after a username is set.
+const UsernameSetSuccessFmt = "Username set to %q"
+
+// usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
+var usernameErrors = map[string]struct {
+	message   string
+	retryable bool
+}{
+	codeUsernameInvalid:    {"invalid username format: use lowercase letters, digits, '-', '_', and start with a letter", true},
+	codeUsernameDisallowed: {"this username is reserved and cannot be used (e.g. alpacon, root, admin)", true},
+	codeUsernameInUse:      {"this username is already in use", true},
+	codeUsernameAlreadySet: {"username is already set and cannot be changed here", false},
+	codeUsernameApproval:   {"this username conflicts with an existing system account and is pending superuser approval", false},
+}
 
 func GetUserList(ac *client.AlpaconClient) ([]UserAttributes, error) {
 	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
@@ -336,17 +358,38 @@ func GetUserMemberships(ac *client.AlpaconClient, userID string) ([]GroupMembers
 }
 
 func HandleUsernameRequired() (*SetUsernameResponse, error) {
-	utils.CliInfo("Username is required for your account.")
-	username := utils.PromptForRequiredInput("Please enter your username: ")
-
-	response, err := SetUsername(username)
-	if err != nil {
-		return nil, fmt.Errorf("failed to set username: %v", err)
+	if !utils.IsInteractiveShell() {
+		return nil, errors.New("username is not set for your account; run 'alpacon username set <name>' to set it (lowercase letters, digits, '-', '_'; must start with a letter)")
 	}
 
-	utils.CliSuccess("Username set to %q", response.Username)
+	utils.CliInfo("Username is required for your account.")
+	utils.CliInfo("You can also set it anytime with 'alpacon username set <name>'.")
 
-	return response, nil
+	for {
+		username := utils.PromptForRequiredInput("Please enter your username: ")
+
+		response, err := SetUsername(username)
+		if err == nil {
+			utils.CliSuccess(UsernameSetSuccessFmt, response.Username)
+			return response, nil
+		}
+
+		code, _ := utils.ParseErrorResponse(err)
+		msg, known := UsernameErrorMessage(code)
+		if known {
+			if isRetryableUsernameError(code) {
+				utils.CliWarning("%s", msg)
+				continue
+			}
+			if code == codeUsernameAlreadySet {
+				// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
+				utils.CliInfo("Username is already set; continuing.")
+				return nil, nil
+			}
+			return nil, errors.New(msg)
+		}
+		return nil, fmt.Errorf("failed to set username: %v", err)
+	}
 }
 
 func SetUsername(username string) (*SetUsernameResponse, error) {
@@ -371,4 +414,15 @@ func SetUsername(username string) (*SetUsernameResponse, error) {
 	}
 
 	return &response, nil
+}
+
+// UsernameErrorMessage maps a server username error code to a human-readable message; ok is false for unrecognized codes.
+func UsernameErrorMessage(code string) (string, bool) {
+	info, ok := usernameErrors[code]
+	return info.message, ok
+}
+
+// isRetryableUsernameError reports whether re-entering a different username can resolve the error.
+func isRetryableUsernameError(code string) bool {
+	return usernameErrors[code].retryable
 }

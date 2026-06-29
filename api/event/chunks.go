@@ -1,6 +1,7 @@
 package event
 
 import (
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ type Chunk struct {
 // ascending. The streaming consumers rely on that order, so we sort defensively
 // in case the server does not honor the ordering param.
 func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq int) ([]Chunk, error) {
-	endpoint := "/api/events/commands/" + cmdID + "/chunks/"
+	endpoint := "/api/events/commands/" + url.PathEscape(cmdID) + "/chunks/"
 	params := map[string]string{
 		"seq__gte": strconv.Itoa(fromSeq),
 		"ordering": "seq",

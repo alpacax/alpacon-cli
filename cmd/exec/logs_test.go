@@ -60,6 +60,20 @@ func TestLogsCommandOutcome(t *testing.T) {
 			wantExitCode:       0,
 		},
 		{
+			name:               "awaiting approval is informational, exit 0",
+			details:            event.EventDetails{ID: "job-3", Status: "awaiting_approval"},
+			wantStdoutLine:     "",
+			wantStderrContains: []string{"awaiting approval", "status: awaiting_approval", "job-3"},
+			wantExitCode:       0,
+		},
+		{
+			name:               "rejected exits 1",
+			details:            event.EventDetails{ID: "job-4", Status: "rejected"},
+			wantStdoutLine:     "",
+			wantStderrContains: []string{"rejected", "status: rejected"},
+			wantExitCode:       1,
+		},
+		{
 			name:               "stuck without phase",
 			details:            event.EventDetails{ID: "job-1", Status: "stuck"},
 			wantStdoutLine:     "",

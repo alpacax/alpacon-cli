@@ -117,7 +117,7 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			}
 
 			utils.CliWarning("Tunnel closed: %s", cause)
-			interruptProcess(localCmd)
+			signalProcess(localCmd, os.Interrupt)
 			err := waitForProcessExit(waitCh, localCmd, remoteCloseGracePeriod)
 			exitCode := exitCodeFromProcessError(err)
 			if exitCode == 0 {
@@ -130,7 +130,7 @@ func monitorLocalCommand(runtime tunnelCommandRuntime, localCmd *exec.Cmd) (int,
 			if interruptCount == 1 {
 				if sig == os.Interrupt {
 					utils.CliInfo("Interrupt received. Stopping local command... (Press Ctrl+C again to force stop)")
-					interruptProcess(localCmd)
+					signalProcess(localCmd, os.Interrupt)
 				} else {
 					utils.CliInfo("Termination signal received. Stopping local command...")
 					signalProcess(localCmd, sig)
@@ -173,15 +173,11 @@ func waitForProcessExit(waitCh <-chan error, localCmd *exec.Cmd, timeout time.Du
 	}
 }
 
-func interruptProcess(localCmd *exec.Cmd) {
-	signalProcess(localCmd, os.Interrupt)
-}
-
 func killProcess(localCmd *exec.Cmd) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
-	if err := killCommandProcess(localCmd); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := localCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		utils.CliWarning("Failed to force stop local command: %s", err)
 	}
 }
@@ -190,7 +186,7 @@ func signalProcess(localCmd *exec.Cmd, sig os.Signal) {
 	if localCmd == nil || localCmd.Process == nil {
 		return
 	}
-	if err := signalCommandProcess(localCmd, sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := localCmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		utils.CliWarning("Failed to signal local command: %s", err)
 	}
 }
@@ -207,18 +203,4 @@ func exitCodeFromProcessError(err error) int {
 		}
 	}
 	return 1
-}
-
-func signalCommandProcess(cmd *exec.Cmd, sig os.Signal) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
-	}
-	return cmd.Process.Signal(sig)
-}
-
-func killCommandProcess(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
-	}
-	return cmd.Process.Kill()
 }

@@ -76,6 +76,23 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return "", stderrLine, 0
 	}
 
+	// HITL: the command is held pending out-of-band human approval. It runs once
+	// approved, so report it as in-progress (exit 0) and point at a later re-check
+	// rather than treating it as an unrecognised terminal status.
+	if event.IsAwaitingApprovalStatus(details.Status) {
+		stderrLine = fmt.Sprintf(
+			"command is awaiting approval (status: %s).\nIt runs once a reviewer approves it in the Alpacon console (web). Run `alpacon exec logs %s` again to check later.\n",
+			details.Status, details.ID,
+		)
+		return "", stderrLine, 0
+	}
+
+	if details.Status == "rejected" {
+		stderrLine = fmt.Sprintf("%s: command was rejected by a reviewer (status: %s)\n",
+			utils.Red("Error"), details.Status)
+		return "", stderrLine, 1
+	}
+
 	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",

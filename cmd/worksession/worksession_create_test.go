@@ -152,24 +152,3 @@ func TestDecideUseAction(t *testing.T) {
 		})
 	}
 }
-
-func TestSplitCSV(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  []string
-	}{
-		{"normal", "command,websh", []string{"command", "websh"}},
-		{"whitespace around values", " command , websh ", []string{"command", "websh"}},
-		{"trailing comma", "command,websh,", []string{"command", "websh"}},
-		{"leading comma", ",command,websh", []string{"command", "websh"}},
-		{"empty input", "", []string{}},
-		{"single value", "command", []string{"command"}},
-		{"only commas", ",,,", []string{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, splitCSV(tt.input))
-		})
-	}
-}

@@ -153,7 +153,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond)
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -314,6 +314,56 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 	}
 }
 
+func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
+	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "awaiting_approval"})
+	var pending *PendingApprovalError
+	require.True(t, errors.As(err, &pending), "err must be *PendingApprovalError")
+	assert.Equal(t, "cmd-9", pending.CommandID)
+}
+
+func TestErrorFromDetails_RejectedReturnsError(t *testing.T) {
+	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected by a reviewer")
+}
+
+func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
+	// awaiting_approval, then the transient "error" the server emits in the
+	// approve→deliver window, then completed: waitApproval must poll through both.
+	seq := []string{"awaiting_approval", "awaiting_approval", "error", "completed"}
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		i := int(calls.Add(1)) - 1
+		if i >= len(seq) {
+			i = len(seq) - 1
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: boolPtr(true)})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+}
+
+func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		heldPolls:    2,
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, "approved\n", stdoutBuf.String())
+}
+
 func boolPtr(b bool) *bool    { return &b }
 func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
@@ -327,7 +377,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond)
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
@@ -343,7 +393,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond)
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -808,8 +858,9 @@ type streamingServerConfig struct {
 	serverID     string
 	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
 	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
+	heldPolls    int               // number of "awaiting_approval" detail polls before running
 	runningPolls int               // number of "running" detail polls before the terminal one
-	terminal     EventDetails      // returned by the detail poll once runningPolls elapse
+	terminal     EventDetails      // returned by the detail poll once held+running elapse
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -874,7 +925,11 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			pollCount++
 			n := pollCount
 			mu.Unlock()
-			if n <= cfg.runningPolls {
+			if n <= cfg.heldPolls {
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval"}`))
+				return
+			}
+			if n <= cfg.heldPolls+cfg.runningPolls {
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running"}`))
 				return
 			}
