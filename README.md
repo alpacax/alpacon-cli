@@ -237,10 +237,10 @@ Error: the command operation requires an active WorkSession on this authenticati
   target server : prod-1
 
 Next:
-  alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it via --work-session <ID> on the gated command
+  alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>
   alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)
   alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --use  # none active? create a new one (human)
-  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)
+  alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)
 
 Note: Tokens issued by Alpacon (service or personal API token) bypass this check.
 ```
@@ -261,10 +261,10 @@ With `--output json`, the same refusal is a structured envelope on stderr—scri
     "current_worksession": null
   },
   "next_actions": [
-    "alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it via --work-session <ID> on the gated command",
+    "alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>",
     "alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
     "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use  # none active? create a new one (human)",
-    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --requester-type agent  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)"
+    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --requester-type agent  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)"
   ]
 }
 ```

@@ -119,10 +119,10 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
 	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
 	createOrReuse := []string{
-		"alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it via --work-session <ID> on the gated command",
+		"alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>",
 		"alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
 		createCmd + "  # none active? create a new one (human)",
-		agentCreateCmd + "  # none active? create a new one (AI agent; pass --work-session <ID> to subsequent commands)",
+		agentCreateCmd + "  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)",
 	}
 	switch code {
 	case WorkSessionRequired:
