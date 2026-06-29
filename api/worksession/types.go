@@ -45,7 +45,6 @@ type ServerDiff struct {
 	New []types.ServerSummary `json:"new"`
 }
 
-// WorkSessionRecommendation is an approver-attached recommendation.
 type WorkSessionRecommendation struct {
 	ID            string `json:"id"`
 	Text          string `json:"text"`

@@ -111,8 +111,7 @@ func formatRecommendation(r wsapi.WorkSessionRecommendation) string {
 	return fmt.Sprintf("[%s] (%s) %s", r.Severity, r.Source, r.Text)
 }
 
-// writeApprovalNotice surfaces approver adjustments/recommendations after a
-// --wait approval so the requester sees any reduced scope. No-op when absent.
+// writeApprovalNotice surfaces approver adjustments after a --wait approval so the requester sees any reduced scope.
 func writeApprovalNotice(w io.Writer, s *wsapi.WorkSession) {
 	adj := s.Adjustments
 	if adj != nil && (adj.Scopes != nil || adj.Servers != nil) {
