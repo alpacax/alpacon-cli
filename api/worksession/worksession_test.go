@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(ts *httptest.Server) *client.AlpaconClient {
@@ -320,6 +321,38 @@ func TestUpdateWorkSession(t *testing.T) {
 	assert.Len(t, gotBody.SudoPolicies, 2)
 	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
 	assert.Empty(t, gotBody.SudoPolicies[1].ID)
+}
+
+func TestGetWorkSessionDecodesAdjustmentsAndRecommendations(t *testing.T) {
+	body := `{
+		"id": "ses-1",
+		"status": "active",
+		"scopes": ["command"],
+		"adjustments": {
+			"scopes": {"old": ["command", "logs"], "new": ["command"]},
+			"servers": {"old": [{"id": "s1", "name": "web-01"}, {"id": "s2", "name": "db-01"}], "new": [{"id": "s1", "name": "web-01"}]}
+		},
+		"recommendations": [
+			{"id": "r1", "text": "no destructive cmds", "severity": "high", "source": "admin_added", "auto_checkable": false}
+		]
+	}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer ts.Close()
+
+	session, err := GetWorkSession(newTestClient(ts), "ses-1")
+	assert.NoError(t, err)
+	require.NotNil(t, session.Adjustments)
+	require.NotNil(t, session.Adjustments.Scopes)
+	assert.Equal(t, []string{"command", "logs"}, session.Adjustments.Scopes.Old)
+	assert.Equal(t, []string{"command"}, session.Adjustments.Scopes.New)
+	require.NotNil(t, session.Adjustments.Servers)
+	assert.Equal(t, "db-01", session.Adjustments.Servers.Old[1].Name)
+	require.Len(t, session.Recommendations, 1)
+	assert.Equal(t, "high", session.Recommendations[0].Severity)
+	assert.Equal(t, "admin_added", session.Recommendations[0].Source)
 }
 
 func newString(s string) *string { return &s }
