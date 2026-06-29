@@ -105,18 +105,18 @@ func formatRecommendation(r wsapi.WorkSessionRecommendation) string {
 func writeApprovalNotice(w io.Writer, s *wsapi.WorkSession) {
 	adj := s.Adjustments
 	if adj != nil && (adj.Scopes != nil || adj.Servers != nil) {
-		fmt.Fprintln(w, utils.Yellow("⚠ Approver adjusted your request:"))
+		_, _ = fmt.Fprintln(w, utils.Yellow("⚠ Approver adjusted your request:"))
 		if adj.Scopes != nil {
-			fmt.Fprintf(w, "  scopes:  %s\n", formatScopeDiff(adj.Scopes))
+			_, _ = fmt.Fprintf(w, "  scopes:  %s\n", formatScopeDiff(adj.Scopes))
 		}
 		if adj.Servers != nil {
-			fmt.Fprintf(w, "  servers: %s\n", formatServerDiff(adj.Servers))
+			_, _ = fmt.Fprintf(w, "  servers: %s\n", formatServerDiff(adj.Servers))
 		}
 	}
 	if len(s.Recommendations) > 0 {
-		fmt.Fprintln(w, "Recommendations:")
+		_, _ = fmt.Fprintln(w, "Recommendations:")
 		for _, r := range s.Recommendations {
-			fmt.Fprintf(w, "  %s\n", formatRecommendation(r))
+			_, _ = fmt.Fprintf(w, "  %s\n", formatRecommendation(r))
 		}
 	}
 }

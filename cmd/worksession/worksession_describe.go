@@ -14,6 +14,61 @@ type describeRow struct {
 	Value string `table:"Value"`
 }
 
+func describeRows(session *wsapi.WorkSession) []describeRow {
+	serverNames := make([]string, len(session.Servers))
+	for i, s := range session.Servers {
+		serverNames[i] = s.Name
+	}
+
+	createdBy := ""
+	if session.CreatedBy != nil {
+		createdBy = session.CreatedBy.Name
+	}
+	assignedUser := ""
+	if session.AssignedUser != nil {
+		assignedUser = session.AssignedUser.Name
+	}
+	startedAt := ""
+	if session.StartedAt != nil {
+		startedAt = session.StartedAt.Local().Format("2006-01-02 15:04")
+	}
+	completedAt := ""
+	if session.CompletedAt != nil {
+		completedAt = session.CompletedAt.Local().Format("2006-01-02 15:04")
+	}
+
+	rows := []describeRow{
+		{"ID", session.ID},
+		{"Description", session.Description},
+		{"Status", session.Status},
+		{"Requester type", session.RequesterType},
+		{"Scopes", strings.Join(session.Scopes, ", ")},
+	}
+	if session.Adjustments != nil && session.Adjustments.Scopes != nil {
+		rows = append(rows, describeRow{"Scopes adjusted", formatScopeDiff(session.Adjustments.Scopes)})
+	}
+	rows = append(rows, describeRow{"Servers", strings.Join(serverNames, ", ")})
+	if session.Adjustments != nil && session.Adjustments.Servers != nil {
+		rows = append(rows, describeRow{"Servers adjusted", formatServerDiff(session.Adjustments.Servers)})
+	}
+	rows = append(rows,
+		describeRow{"Created by", createdBy},
+		describeRow{"Assigned user", assignedUser},
+		describeRow{"Expires at", session.ExpiresAt.Local().Format("2006-01-02 15:04")},
+		describeRow{"Started at", startedAt},
+		describeRow{"Completed at", completedAt},
+		describeRow{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
+	)
+	if len(session.Recommendations) > 0 {
+		recs := make([]string, len(session.Recommendations))
+		for i, r := range session.Recommendations {
+			recs[i] = formatRecommendation(r)
+		}
+		rows = append(rows, describeRow{"Recommendations", strings.Join(recs, "; ")})
+	}
+	return rows
+}
+
 var workSessionDescribeCmd = &cobra.Command{
 	Use:     "describe SESSION_ID",
 	Aliases: []string{"desc"},
@@ -41,43 +96,6 @@ var workSessionDescribeCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opDescribe, err, "Failed to retrieve work session: %s.", err)
 		}
 
-		serverNames := make([]string, len(session.Servers))
-		for i, s := range session.Servers {
-			serverNames[i] = s.Name
-		}
-
-		createdBy := ""
-		if session.CreatedBy != nil {
-			createdBy = session.CreatedBy.Name
-		}
-		assignedUser := ""
-		if session.AssignedUser != nil {
-			assignedUser = session.AssignedUser.Name
-		}
-		startedAt := ""
-		if session.StartedAt != nil {
-			startedAt = session.StartedAt.Local().Format("2006-01-02 15:04")
-		}
-		completedAt := ""
-		if session.CompletedAt != nil {
-			completedAt = session.CompletedAt.Local().Format("2006-01-02 15:04")
-		}
-
-		rows := []describeRow{
-			{"ID", session.ID},
-			{"Description", session.Description},
-			{"Status", session.Status},
-			{"Requester type", session.RequesterType},
-			{"Scopes", strings.Join(session.Scopes, ", ")},
-			{"Servers", strings.Join(serverNames, ", ")},
-			{"Created by", createdBy},
-			{"Assigned user", assignedUser},
-			{"Expires at", session.ExpiresAt.Local().Format("2006-01-02 15:04")},
-			{"Started at", startedAt},
-			{"Completed at", completedAt},
-			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},
-		}
-
-		utils.PrintTable(rows)
+		utils.PrintTable(describeRows(session))
 	},
 }
