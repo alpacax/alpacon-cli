@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -328,4 +329,38 @@ func captureWorkSessionCommandOutput(t *testing.T, fn func()) (stdout string, st
 	})
 
 	return <-stdoutDone, <-stderrDone
+}
+
+func TestFormatDiffsAndRecommendation(t *testing.T) {
+	assert.Equal(t, "command, logs → command",
+		formatScopeDiff(&wsapi.ScopeDiff{Old: []string{"command", "logs"}, New: []string{"command"}}))
+	assert.Equal(t, "web-01, db-01 → web-01",
+		formatServerDiff(&wsapi.ServerDiff{
+			Old: []types.ServerSummary{{Name: "web-01"}, {Name: "db-01"}},
+			New: []types.ServerSummary{{Name: "web-01"}},
+		}))
+	assert.Equal(t, "[high] (admin_added) no destructive cmds",
+		formatRecommendation(wsapi.WorkSessionRecommendation{Severity: "high", Source: "admin_added", Text: "no destructive cmds"}))
+}
+
+func TestWriteApprovalNotice(t *testing.T) {
+	session := &wsapi.WorkSession{
+		Adjustments: &wsapi.WorkSessionAdjustments{
+			Scopes:  &wsapi.ScopeDiff{Old: []string{"command", "logs"}, New: []string{"command"}},
+			Servers: &wsapi.ServerDiff{Old: []types.ServerSummary{{Name: "web-01"}, {Name: "db-01"}}, New: []types.ServerSummary{{Name: "web-01"}}},
+		},
+		Recommendations: []wsapi.WorkSessionRecommendation{
+			{Severity: "high", Source: "admin_added", Text: "no destructive cmds"},
+		},
+	}
+	var buf bytes.Buffer
+	writeApprovalNotice(&buf, session)
+	out := buf.String()
+	assert.Contains(t, out, "scopes:  command, logs → command")
+	assert.Contains(t, out, "servers: web-01, db-01 → web-01")
+	assert.Contains(t, out, "[high] (admin_added) no destructive cmds")
+
+	var empty bytes.Buffer
+	writeApprovalNotice(&empty, &wsapi.WorkSession{})
+	assert.Empty(t, empty.String())
 }

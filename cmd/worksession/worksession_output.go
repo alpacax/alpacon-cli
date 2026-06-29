@@ -2,9 +2,12 @@ package worksession
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -74,5 +77,46 @@ func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 	if err := utils.PrintJSONValue(os.Stdout, output); err != nil {
 		// Keeps stderr structured; PrintJSONError falls back to minimal JSON if marshalling fails again.
 		utils.CliErrorEnvelopeWithExit(output.Operation, err, "Failed to marshal work-session result: %s", err)
+	}
+}
+
+func serverDiffNames(servers []types.ServerSummary) []string {
+	names := make([]string, len(servers))
+	for i, s := range servers {
+		names[i] = s.Name
+	}
+	return names
+}
+
+func formatScopeDiff(d *wsapi.ScopeDiff) string {
+	return strings.Join(d.Old, ", ") + " → " + strings.Join(d.New, ", ")
+}
+
+func formatServerDiff(d *wsapi.ServerDiff) string {
+	return strings.Join(serverDiffNames(d.Old), ", ") + " → " + strings.Join(serverDiffNames(d.New), ", ")
+}
+
+func formatRecommendation(r wsapi.WorkSessionRecommendation) string {
+	return fmt.Sprintf("[%s] (%s) %s", r.Severity, r.Source, r.Text)
+}
+
+// writeApprovalNotice surfaces approver adjustments/recommendations after a
+// --wait approval so the requester sees any reduced scope. No-op when absent.
+func writeApprovalNotice(w io.Writer, s *wsapi.WorkSession) {
+	adj := s.Adjustments
+	if adj != nil && (adj.Scopes != nil || adj.Servers != nil) {
+		fmt.Fprintln(w, utils.Yellow("⚠ Approver adjusted your request:"))
+		if adj.Scopes != nil {
+			fmt.Fprintf(w, "  scopes:  %s\n", formatScopeDiff(adj.Scopes))
+		}
+		if adj.Servers != nil {
+			fmt.Fprintf(w, "  servers: %s\n", formatServerDiff(adj.Servers))
+		}
+	}
+	if len(s.Recommendations) > 0 {
+		fmt.Fprintln(w, "Recommendations:")
+		for _, r := range s.Recommendations {
+			fmt.Fprintf(w, "  %s\n", formatRecommendation(r))
+		}
 	}
 }
