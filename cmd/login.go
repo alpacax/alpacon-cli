@@ -17,7 +17,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultBaseDomain = "alpacon.io"
+const (
+	defaultBaseDomain = "alpacon.io"
+
+	// whoami verification outcomes (see classifyWhoamiVerification).
+	whoamiVerified = "verified"
+	whoamiFallback = "fallback"
+	whoamiFail     = "fail"
+)
 
 // knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
 // Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
@@ -166,15 +173,17 @@ with the saved target as the default. Non-interactive login requires a HOST or
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		if config.IsServiceToken(token) {
-			// Service tokens are application principals with no user profile, so the
-			// preload would always 401. Skip it and report the credential directly.
-			utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
-		} else if err := ac.LoadCurrentUser(); err != nil {
-			if shouldFailOnProfileError(token) {
-				utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+		who, whoErr := auth.GetWhoami(ac)
+		switch classifyWhoamiVerification(whoErr) {
+		case whoamiVerified:
+			if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
+				utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
 			}
-			utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
+		case whoamiFallback:
+			// Old server without whoami: fall back to legacy prefix-based verification.
+			verifyLoginLegacy(ac, token)
+		default:
+			utils.CliErrorWithExit("Login succeeded but failed to verify your credential: %s. Please try logging in again.", whoErr)
 		}
 
 		utils.CliSuccess("Login succeeded!")
@@ -479,6 +488,33 @@ func formatHostURL(host string) string {
 		}
 	}
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
+}
+
+// classifyWhoamiVerification maps a whoami error to verified / fallback (404) /
+// fail (401 or any other error—never swallowed as a fallback).
+func classifyWhoamiVerification(whoErr error) string {
+	switch {
+	case whoErr == nil:
+		return whoamiVerified
+	case utils.HTTPStatusCode(whoErr) == http.StatusNotFound:
+		return whoamiFallback
+	default:
+		return whoamiFail
+	}
+}
+
+// verifyLoginLegacy is the pre-whoami verification used against servers without the whoami endpoint.
+func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
+	if config.IsServiceToken(token) {
+		utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
+		return
+	}
+	if err := ac.LoadCurrentUser(); err != nil {
+		if shouldFailOnProfileError(token) {
+			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+		}
+		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
+	}
 }
 
 // shouldFailOnProfileError reports whether a failed user-profile load should abort

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -716,6 +717,19 @@ func TestValidateCloudFlags(t *testing.T) {
 			}
 		})
 	}
+}
+
+type stubStatusErr struct{ code int }
+
+func (e stubStatusErr) Error() string       { return "stub" }
+func (e stubStatusErr) HTTPStatusCode() int { return e.code }
+
+func TestClassifyWhoamiVerification(t *testing.T) {
+	assert.Equal(t, whoamiVerified, classifyWhoamiVerification(nil))
+	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{code: http.StatusNotFound}))
+	// 401 must fail, never fall back, so an invalid token cannot slip through.
+	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{code: http.StatusUnauthorized}))
+	assert.Equal(t, whoamiFail, classifyWhoamiVerification(errors.New("network down")))
 }
 
 func TestShouldFailOnProfileError(t *testing.T) {
