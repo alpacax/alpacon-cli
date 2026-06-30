@@ -24,9 +24,10 @@ const (
 )
 
 type apiError struct {
-	message string
-	code    string
-	source  string
+	message    string
+	code       string
+	source     string
+	statusCode int
 }
 
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
@@ -203,7 +204,7 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 func readJSONResponse(resp *http.Response) ([]byte, error) {
 	body, readErr := io.ReadAll(resp.Body)
 	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
-		return nil, err
+		return nil, withStatus(err, resp.StatusCode)
 	}
 	if readErr != nil {
 		return nil, readErr
@@ -229,7 +230,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, parseAPIError(respBody)
+		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
 	}
 
 	return respBody, nil
@@ -310,7 +311,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, parseAPIError(respBody)
+		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
 	}
 
 	return respBody, nil
@@ -406,18 +407,28 @@ func (e *apiError) ErrorSource() string {
 	return e.source
 }
 
+func (e *apiError) HTTPStatusCode() int {
+	return e.statusCode
+}
+
 func newAPIError(message, code, source string) error {
 	return &apiError{message: message, code: code, source: source}
+}
+
+// withStatus tags an *apiError with its HTTP status so callers can tell 404 from 401.
+func withStatus(err error, statusCode int) error {
+	var ae *apiError
+	if errors.As(err, &ae) {
+		ae.statusCode = statusCode
+	}
+	return err
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
 func parseAPIError(body []byte) error {
-	message, code, source, ok := parseAPIErrorPayload(body)
-	if ok {
-		return newAPIError(message, code, source)
-	}
-	return errors.New(message)
+	message, code, source, _ := parseAPIErrorPayload(body)
+	return newAPIError(message, code, source)
 }
 
 func parseAPIErrorPayload(body []byte) (message string, code string, source string, ok bool) {

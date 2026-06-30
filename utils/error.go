@@ -46,6 +46,20 @@ type codedError interface {
 	ErrorSource() string
 }
 
+type statusCoder interface {
+	HTTPStatusCode() int
+}
+
+// HTTPStatusCode returns the HTTP status carried by err, or 0 if none — lets callers tell 404 from 401.
+func HTTPStatusCode(err error) int {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if sc, ok := e.(statusCoder); ok {
+			return sc.HTTPStatusCode()
+		}
+	}
+	return 0
+}
+
 func ParseErrorResponse(err error) (string, string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if coded, ok := e.(codedError); ok {
