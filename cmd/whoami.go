@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
@@ -24,20 +25,26 @@ type activeWorkSessionSummary struct {
 }
 
 type whoamiOutput struct {
-	Username            string                `json:"username,omitempty"`
-	Email               string                `json:"email,omitempty"`
-	Phone               string                `json:"phone,omitempty"`
-	WorkspaceName       string                `json:"workspace_name"`
-	WorkspaceURL        string                `json:"workspace_url"`
-	AuthMethod          string                `json:"auth_method"`
-	AuthClassification  string                `json:"auth_classification"`
-	ExpiresAt           string                `json:"expires_at,omitempty"`
-	UID                 int                   `json:"uid,omitempty"`
-	Shell               string                `json:"shell,omitempty"`
-	HomeDirectory       string                `json:"home_directory,omitempty"`
-	Role                string                `json:"role,omitempty"`
-	Groups              []iam.GroupMembership `json:"groups,omitempty"`
-	WorksessionRequired bool                  `json:"work_session_required"`
+	Username           string                `json:"username,omitempty"`
+	Email              string                `json:"email,omitempty"`
+	Phone              string                `json:"phone,omitempty"`
+	WorkspaceName      string                `json:"workspace_name"`
+	WorkspaceURL       string                `json:"workspace_url"`
+	AuthMethod         string                `json:"auth_method"`
+	AuthClassification string                `json:"auth_classification"`
+	ExpiresAt          string                `json:"expires_at,omitempty"`
+	UID                int                   `json:"uid,omitempty"`
+	Shell              string                `json:"shell,omitempty"`
+	HomeDirectory      string                `json:"home_directory,omitempty"`
+	Role               string                `json:"role,omitempty"`
+	Groups             []iam.GroupMembership `json:"groups,omitempty"`
+	// Application-principal fields (service tokens). Empty for user principals.
+	PrincipalType       string   `json:"principal_type,omitempty"`
+	ApplicationName     string   `json:"application_name,omitempty"`
+	ServiceType         string   `json:"service_type,omitempty"`
+	ServiceAccount      string   `json:"service_account,omitempty"`
+	Scopes              []string `json:"scopes,omitempty"`
+	WorksessionRequired bool     `json:"work_session_required"`
 	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
 	// machine-readable names. The legacy keys remain for compatibility.
 	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
@@ -103,6 +110,17 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			return
 		}
 
+		// Only a service token can be an application principal, so skip the whoami
+		// round-trip for user credentials, which fall through to the user path below.
+		if config.IsServiceToken(cfg.Token) {
+			if who, whoErr := auth.GetWhoami(ac); whoErr == nil && who.PrincipalType == auth.PrincipalTypeApplication {
+				output = applyApplicationPrincipal(output, who)
+				warnIfExpiringSoon(cfg)
+				printWhoami(output)
+				return
+			}
+		}
+
 		user, err := iam.GetCurrentUser(ac)
 		if err != nil {
 			utils.CliWarning("Could not fetch user info: %s", err)
@@ -160,6 +178,18 @@ func getExpiresAt(cfg config.Config) string {
 		return cfg.ExpiresAt
 	}
 	return ""
+}
+
+// applyApplicationPrincipal fills out's application fields from an application-principal whoami response.
+func applyApplicationPrincipal(out whoamiOutput, who *auth.WhoamiResponse) whoamiOutput {
+	out.PrincipalType = auth.PrincipalTypeApplication
+	if who.Application != nil {
+		out.ApplicationName = who.Application.Name
+		out.ServiceType = who.Application.ServiceType
+		out.ServiceAccount = who.Application.Username
+	}
+	out.Scopes = who.Auth.Scopes
+	return out
 }
 
 func getRole(isStaff, isSuperuser bool) string {
@@ -299,6 +329,10 @@ func printWhoami(output whoamiOutput) {
 		value string
 	}{
 		{"User", output.Username},
+		{"Application", output.ApplicationName},
+		{"Service type", output.ServiceType},
+		{"Service account", output.ServiceAccount},
+		{"Scopes", strings.Join(output.Scopes, ", ")},
 		{"Email", output.Email},
 		{"Phone", output.Phone},
 		{"Workspace", fmt.Sprintf("%s (%s)", output.WorkspaceName, output.WorkspaceURL)},
