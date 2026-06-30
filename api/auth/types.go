@@ -2,6 +2,9 @@ package auth
 
 import "time"
 
+// PrincipalTypeApplication is the whoami principal_type for service/application tokens.
+const PrincipalTypeApplication = "application"
+
 type LoginRequest struct {
 	WorkspaceURL  string `json:"workspace_url"`
 	Username      string `json:"username"`
@@ -59,4 +62,22 @@ type TokenScopeAttributes struct {
 	Name    string `json:"name" table:"Resource"`
 	Actions string `json:"actions" table:"Actions"`
 	ACL     string `json:"acl" table:"ACL"`
+}
+
+// WhoamiResponse is the GET /api/auth/whoami/ identity. Only the application
+// branch is consumed; user principals fall through to iam.GetCurrentUser.
+type WhoamiResponse struct {
+	PrincipalType string             `json:"principal_type"`
+	Auth          WhoamiAuth         `json:"auth"`
+	Application   *WhoamiApplication `json:"application,omitempty"`
+}
+
+type WhoamiAuth struct {
+	Scopes []string `json:"scopes"`
+}
+
+type WhoamiApplication struct {
+	Name        string `json:"name"`
+	ServiceType string `json:"service_type"`
+	Username    string `json:"username"` // service account name
 }
