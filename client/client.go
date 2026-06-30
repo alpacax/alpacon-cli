@@ -30,6 +30,17 @@ type apiError struct {
 	statusCode int
 }
 
+// statusError carries an HTTP status on errors that aren't *apiError (e.g. an
+// HTML 404 page), so utils.HTTPStatusCode can still read it.
+type statusError struct {
+	err        error
+	statusCode int
+}
+
+func (e *statusError) Error() string      { return e.err.Error() }
+func (e *statusError) Unwrap() error       { return e.err }
+func (e *statusError) HTTPStatusCode() int { return e.statusCode }
+
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
@@ -212,7 +223,7 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 
 	// Empty content type is allowed for responses without content (e.g. PATCH).
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
-		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
+		return nil, withStatus(fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct), resp.StatusCode)
 	}
 	return body, nil
 }
@@ -415,13 +426,18 @@ func newAPIError(message, code, source string) error {
 	return &apiError{message: message, code: code, source: source}
 }
 
-// withStatus tags an *apiError with its HTTP status so callers can tell 404 from 401.
+// withStatus tags err with its HTTP status so callers can tell 404 from 401,
+// wrapping non-*apiError errors so the status survives the error chain.
 func withStatus(err error, statusCode int) error {
+	if err == nil {
+		return nil
+	}
 	var ae *apiError
 	if errors.As(err, &ae) {
 		ae.statusCode = statusCode
+		return err
 	}
-	return err
+	return &statusError{err: err, statusCode: statusCode}
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
