@@ -23,13 +23,21 @@ const (
 var OutputFormat string
 
 type JSONErrorEnvelope[T any] struct {
-	OK          bool     `json:"ok"`
-	ExitCode    int      `json:"exit_code,omitempty"`
-	ErrorCode   string   `json:"error_code,omitempty"`
-	Message     string   `json:"message"`
-	Reason      string   `json:"reason,omitempty"`
-	Context     T        `json:"context"`
-	NextActions []string `json:"next_actions,omitempty"`
+	OK          bool         `json:"ok"`
+	ExitCode    int          `json:"exit_code,omitempty"`
+	ErrorCode   string       `json:"error_code,omitempty"`
+	Message     string       `json:"message"`
+	Reason      string       `json:"reason,omitempty"`
+	Context     T            `json:"context"`
+	NextActions []NextAction `json:"next_actions,omitempty"`
+}
+
+// NextAction is one actionable follow-up. Command is a pure, runnable command
+// (no inline comments) for machine consumers; Description carries the human hint
+// and is omitted when the command is self-explanatory.
+type NextAction struct {
+	Command     string `json:"command"`
+	Description string `json:"description,omitempty"`
 }
 
 func FormatJSON(value any) (string, error) {

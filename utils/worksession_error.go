@@ -66,7 +66,11 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
 	for _, action := range workSessionNextActions(code, operation, serverName, activeWS) {
-		fmt.Fprintf(&sb, "  %s\n", action)
+		if action.Description != "" {
+			fmt.Fprintf(&sb, "  %s  # %s\n", action.Command, action.Description)
+		} else {
+			fmt.Fprintf(&sb, "  %s\n", action.Command)
+		}
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprint(&sb, "Note: Tokens issued by Alpacon (service or personal API token) bypass this check.")
@@ -102,7 +106,7 @@ func targetServerList(serverName string) []string {
 	return []string{serverName}
 }
 
-func workSessionNextActions(code, operation, serverName, activeWS string) []string {
+func workSessionNextActions(code, operation, serverName, activeWS string) []NextAction {
 	serverArg := serverName
 	if serverArg == "" {
 		// Some call sites have no target server (e.g. exec logs); keep the suggestion runnable.
@@ -118,26 +122,26 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	)
 	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
 	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
-	createOrReuse := []string{
-		"alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>",
-		"alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
-		createCmd + "  # none active? create a new one (human)",
-		agentCreateCmd + "  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)",
+	createOrReuse := []NextAction{
+		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>"},
+		{Command: "alpacon work-session use <ID>", Description: "human: attach an existing session (rejects agent sessions)"},
+		{Command: createCmd, Description: "none active? create a new one (human)"},
+		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)"},
 	}
 	switch code {
 	case WorkSessionRequired:
 		return createOrReuse
 	case WorkSessionNotActive:
 		// Activation is approval/server-driven, not user-run; guide toward an active session.
-		return append([]string{
-			"alpacon work-session current  # pending/approved: wait until active; completed/revoked: create or reuse below",
+		return append([]NextAction{
+			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked: create or reuse below"},
 		}, createOrReuse...)
 	case WorkSessionExpired:
 		extendCmd := "alpacon work-session extend <ID>"
 		if activeWS != "" {
 			extendCmd = fmt.Sprintf("alpacon work-session extend %s", activeWS)
 		}
-		return []string{extendCmd, createCmd, agentCreateCmd}
+		return []NextAction{{Command: extendCmd}, {Command: createCmd}, {Command: agentCreateCmd}}
 	case WorkSessionAssigneeMismatch:
 		// Session belongs to another principal; reuse/create one owned by this caller.
 		// Agents can't `use`, so route through the agent-aware reuse+create path.
@@ -145,6 +149,6 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	case WorkSessionNotUsable:
 		return createOrReuse
 	default: // scope_not_allowed, server_not_allowed
-		return []string{createCmd, agentCreateCmd}
+		return []NextAction{{Command: createCmd}, {Command: agentCreateCmd}}
 	}
 }
