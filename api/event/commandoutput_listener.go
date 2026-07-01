@@ -12,9 +12,10 @@ import (
 
 const (
 	// Mirror sudolistener backoff to keep reconnection behavior consistent.
-	commandOutputReconnectBase = 1 * time.Second
-	commandOutputReconnectMax  = 30 * time.Second
-	commandOutputChunkBuffer   = 256
+	commandOutputReconnectBase  = 1 * time.Second
+	commandOutputReconnectMax   = 30 * time.Second
+	commandOutputChunkBuffer    = 256
+	commandOutputConnectTimeout = 5 * time.Second
 )
 
 // ChunkEvent is a single command_output chunk emitted by the listener.
@@ -164,7 +165,8 @@ func (l *CommandOutputListener) listenLoop() {
 // connectAndListen dials, reads frames until the connection drops or Stop is
 // called, and returns whether a connection was established (to reset backoff).
 func (l *CommandOutputListener) connectAndListen() (connected bool) {
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	// Match the WaitConnected budget so a slow dial can't outlive the wait and leak past fallback.
+	dialer := websocket.Dialer{HandshakeTimeout: commandOutputConnectTimeout}
 	conn, _, dialErr := dialer.Dial(l.wsURL, l.wsHeader)
 	if dialErr != nil {
 		return false

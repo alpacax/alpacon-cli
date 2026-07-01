@@ -181,7 +181,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 
 	listener := NewCommandOutputListener(ac, session.WebsocketURL, "")
 	listener.Start()
-	if !listener.WaitConnected(5 * time.Second) {
+	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
 		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, fmt.Errorf("event websocket connect timeout"))
 	}
@@ -208,7 +208,7 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	}
 	listener := NewCommandOutputListener(ac, session.WebsocketURL, cmdID)
 	listener.Start()
-	if !listener.WaitConnected(5 * time.Second) {
+	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, true, fmt.Errorf("event websocket connect timeout"))
 	}
