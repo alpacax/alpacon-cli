@@ -62,7 +62,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 			if tt.reuseVsCreate {
 				assert.Contains(t, got, "alpacon work-session use <ID>")
 				assert.Contains(t, got, "existing active session") // reuse path comes first
-				assert.Contains(t, got, "create a new one")         // create is the fallback
+				assert.Contains(t, got, "create a new one")        // create is the fallback
 			}
 		})
 	}
