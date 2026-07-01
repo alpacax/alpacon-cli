@@ -33,11 +33,26 @@ type JSONErrorEnvelope[T any] struct {
 }
 
 // NextAction is one actionable follow-up. Command is a pure, runnable command
-// (no inline comments) for machine consumers; Description carries the human hint
-// and is omitted when the command is self-explanatory.
+// (no inline comments) for machine consumers; Description carries the human hint.
+// Either may be empty—a pure command needs no hint, and a guidance-only pointer
+// (e.g. "approve it in the console") carries no runnable command—so both fields
+// are omitempty.
 type NextAction struct {
-	Command     string `json:"command"`
+	Command     string `json:"command,omitempty"`
 	Description string `json:"description,omitempty"`
+}
+
+// PlainText renders the action as a human-facing line: "command  # description",
+// or just the command or description when the other is empty.
+func (a NextAction) PlainText() string {
+	switch {
+	case a.Command != "" && a.Description != "":
+		return a.Command + "  # " + a.Description
+	case a.Command != "":
+		return a.Command
+	default:
+		return a.Description
+	}
 }
 
 func FormatJSON(value any) (string, error) {

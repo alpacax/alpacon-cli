@@ -66,11 +66,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
 	for _, action := range workSessionNextActions(code, operation, serverName, activeWS) {
-		if action.Description != "" {
-			fmt.Fprintf(&sb, "  %s  # %s\n", action.Command, action.Description)
-		} else {
-			fmt.Fprintf(&sb, "  %s\n", action.Command)
-		}
+		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprint(&sb, "Note: Tokens issued by Alpacon (service or personal API token) bypass this check.")
