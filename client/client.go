@@ -37,7 +37,7 @@ type statusError struct {
 	statusCode int
 }
 
-func (e *statusError) Error() string      { return e.err.Error() }
+func (e *statusError) Error() string       { return e.err.Error() }
 func (e *statusError) Unwrap() error       { return e.err }
 func (e *statusError) HTTPStatusCode() int { return e.statusCode }
 

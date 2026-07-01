@@ -16,66 +16,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type activeWorkSessionSummary struct {
-	ID        string   `json:"id"`
-	Status    string   `json:"status"`
-	Scopes    []string `json:"scopes"`
-	Servers   []string `json:"servers"`
-	ExpiresAt string   `json:"expires_at,omitempty"`
-}
-
-type whoamiOutput struct {
-	Username           string                `json:"username,omitempty"`
-	Email              string                `json:"email,omitempty"`
-	Phone              string                `json:"phone,omitempty"`
-	WorkspaceName      string                `json:"workspace_name"`
-	WorkspaceURL       string                `json:"workspace_url"`
-	AuthMethod         string                `json:"auth_method"`
-	AuthClassification string                `json:"auth_classification"`
-	ExpiresAt          string                `json:"expires_at,omitempty"`
-	UID                int                   `json:"uid,omitempty"`
-	Shell              string                `json:"shell,omitempty"`
-	HomeDirectory      string                `json:"home_directory,omitempty"`
-	Role               string                `json:"role,omitempty"`
-	Groups             []iam.GroupMembership `json:"groups,omitempty"`
-	// Application-principal fields (service tokens). Empty for user principals.
-	PrincipalType       string   `json:"principal_type,omitempty"`
-	ApplicationName     string   `json:"application_name,omitempty"`
-	ServiceType         string   `json:"service_type,omitempty"`
-	ServiceAccount      string   `json:"service_account,omitempty"`
-	Scopes              []string `json:"scopes,omitempty"`
-	WorksessionRequired bool     `json:"work_session_required"`
-	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
-	// machine-readable names. The legacy keys remain for compatibility.
-	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
-	ActiveWorksession            *activeWorkSessionSummary `json:"active_work_session"`
-	ActiveWorksessionCanonical   *activeWorkSessionSummary `json:"active_worksession"`
-}
-
-func (o whoamiOutput) MarshalJSON() ([]byte, error) {
-	type wire whoamiOutput
-	normalized := o.normalized()
-	return json.Marshal(wire(normalized))
-}
-
-func (o whoamiOutput) normalized() whoamiOutput {
-	if o.AuthClassification == "" {
-		o.AuthClassification = authClassificationFromMethod(o.AuthMethod)
-	}
-
-	required := o.WorksessionRequired || o.WorksessionRequiredForAccess
-	o.WorksessionRequired = required
-	o.WorksessionRequiredForAccess = required
-
-	active := o.ActiveWorksession
-	if active == nil {
-		active = o.ActiveWorksessionCanonical
-	}
-	o.ActiveWorksession = active
-	o.ActiveWorksessionCanonical = active
-	return o
-}
-
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami [flags]",
 	Short: "Display current authenticated identity",
@@ -171,6 +111,66 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		warnIfExpiringSoon(cfg)
 		printWhoami(output)
 	},
+}
+
+type activeWorkSessionSummary struct {
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Scopes    []string `json:"scopes"`
+	Servers   []string `json:"servers"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+}
+
+type whoamiOutput struct {
+	Username           string                `json:"username,omitempty"`
+	Email              string                `json:"email,omitempty"`
+	Phone              string                `json:"phone,omitempty"`
+	WorkspaceName      string                `json:"workspace_name"`
+	WorkspaceURL       string                `json:"workspace_url"`
+	AuthMethod         string                `json:"auth_method"`
+	AuthClassification string                `json:"auth_classification"`
+	ExpiresAt          string                `json:"expires_at,omitempty"`
+	UID                int                   `json:"uid,omitempty"`
+	Shell              string                `json:"shell,omitempty"`
+	HomeDirectory      string                `json:"home_directory,omitempty"`
+	Role               string                `json:"role,omitempty"`
+	Groups             []iam.GroupMembership `json:"groups,omitempty"`
+	// Application-principal fields (service tokens). Empty for user principals.
+	PrincipalType       string   `json:"principal_type,omitempty"`
+	ApplicationName     string   `json:"application_name,omitempty"`
+	ServiceType         string   `json:"service_type,omitempty"`
+	ServiceAccount      string   `json:"service_account,omitempty"`
+	Scopes              []string `json:"scopes,omitempty"`
+	WorksessionRequired bool     `json:"work_session_required"`
+	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
+	// machine-readable names. The legacy keys remain for compatibility.
+	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
+	ActiveWorksession            *activeWorkSessionSummary `json:"active_work_session"`
+	ActiveWorksessionCanonical   *activeWorkSessionSummary `json:"active_worksession"`
+}
+
+func (o whoamiOutput) MarshalJSON() ([]byte, error) {
+	type wire whoamiOutput
+	normalized := o.normalized()
+	return json.Marshal(wire(normalized))
+}
+
+func (o whoamiOutput) normalized() whoamiOutput {
+	if o.AuthClassification == "" {
+		o.AuthClassification = authClassificationFromMethod(o.AuthMethod)
+	}
+
+	required := o.WorksessionRequired || o.WorksessionRequiredForAccess
+	o.WorksessionRequired = required
+	o.WorksessionRequiredForAccess = required
+
+	active := o.ActiveWorksession
+	if active == nil {
+		active = o.ActiveWorksessionCanonical
+	}
+	o.ActiveWorksession = active
+	o.ActiveWorksessionCanonical = active
+	return o
 }
 
 func getExpiresAt(cfg config.Config) string {
