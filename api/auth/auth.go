@@ -23,7 +23,26 @@ const (
 	tokenURL       = "/api/auth/tokens/"
 	tokenScopesURL = "/api/auth/tokens/scopes/"
 	statusURL      = "/api/status/"
+	whoamiURL      = "/api/auth/whoami/"
 )
+
+// GetWhoami fetches the caller's identity; a 404 means the endpoint is absent (old server).
+func GetWhoami(ac *client.AlpaconClient) (*WhoamiResponse, error) {
+	body, err := ac.SendGetRequest(whoamiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp WhoamiResponse
+	if err = json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	// Fail closed: a 200 without a principal_type is a malformed identity response.
+	if resp.PrincipalType == "" {
+		return nil, errors.New("whoami response missing principal_type")
+	}
+	return &resp, nil
+}
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
 	httpClient := &http.Client{

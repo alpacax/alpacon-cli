@@ -24,10 +24,22 @@ const (
 )
 
 type apiError struct {
-	message string
-	code    string
-	source  string
+	message    string
+	code       string
+	source     string
+	statusCode int
 }
+
+// statusError carries an HTTP status on errors that aren't *apiError (e.g. an
+// HTML 404 page), so utils.HTTPStatusCode can still read it.
+type statusError struct {
+	err        error
+	statusCode int
+}
+
+func (e *statusError) Error() string       { return e.err.Error() }
+func (e *statusError) Unwrap() error       { return e.err }
+func (e *statusError) HTTPStatusCode() int { return e.statusCode }
 
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
@@ -203,7 +215,7 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 func readJSONResponse(resp *http.Response) ([]byte, error) {
 	body, readErr := io.ReadAll(resp.Body)
 	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
-		return nil, err
+		return nil, withStatus(err, resp.StatusCode)
 	}
 	if readErr != nil {
 		return nil, readErr
@@ -211,7 +223,7 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 
 	// Empty content type is allowed for responses without content (e.g. PATCH).
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
-		return nil, fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
+		return nil, withStatus(fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct), resp.StatusCode)
 	}
 	return body, nil
 }
@@ -229,7 +241,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, parseAPIError(respBody)
+		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
 	}
 
 	return respBody, nil
@@ -310,7 +322,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, parseAPIError(respBody)
+		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
 	}
 
 	return respBody, nil
@@ -406,18 +418,33 @@ func (e *apiError) ErrorSource() string {
 	return e.source
 }
 
+func (e *apiError) HTTPStatusCode() int {
+	return e.statusCode
+}
+
 func newAPIError(message, code, source string) error {
 	return &apiError{message: message, code: code, source: source}
+}
+
+// withStatus tags err with its HTTP status so callers can tell 404 from 401,
+// wrapping non-*apiError errors so the status survives the error chain.
+func withStatus(err error, statusCode int) error {
+	if err == nil {
+		return nil
+	}
+	var ae *apiError
+	if errors.As(err, &ae) {
+		ae.statusCode = statusCode
+		return err
+	}
+	return &statusError{err: err, statusCode: statusCode}
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
 func parseAPIError(body []byte) error {
-	message, code, source, ok := parseAPIErrorPayload(body)
-	if ok {
-		return newAPIError(message, code, source)
-	}
-	return errors.New(message)
+	message, code, source, _ := parseAPIErrorPayload(body)
+	return newAPIError(message, code, source)
 }
 
 func parseAPIErrorPayload(body []byte) (message string, code string, source string, ok bool) {
