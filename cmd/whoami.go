@@ -347,10 +347,22 @@ func printWhoami(output whoamiOutput) {
 		{"WS required", formatWSRequired(output.WorksessionRequiredForAccess, output.ActiveWorksessionCanonical)},
 	}
 
+	// Pad to the widest printed label so columns align regardless of which rows appear.
+	pad := 0
 	for _, l := range lines {
 		if l.value == "" || l.value == "0" {
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "%-13s%s\n", l.label+":", l.value)
+		if n := len(l.label) + 1; n > pad {
+			pad = n
+		}
+	}
+	pad++ // guarantee at least one space after the widest label
+
+	for _, l := range lines {
+		if l.value == "" || l.value == "0" {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "%-*s%s\n", pad, l.label+":", l.value)
 	}
 }
