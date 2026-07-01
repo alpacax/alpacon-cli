@@ -37,11 +37,11 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		reuseVsCreate bool // distinguishes reuse (use) vs create-and-attach paths
 	}{
 		{WorkSessionRequired, "no WorkSession selected", "work-session ls", true, true},
-		{WorkSessionNotActive, "not yet active", "work-session current", false, false},
+		{WorkSessionNotActive, "not active", "work-session current", true, true},
 		{WorkSessionExpired, "has expired", "work-session extend", true, false},
 		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
 		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false, false},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", true, true},
 		{WorkSessionNotUsable, "no longer usable", "work-session create", true, true},
 	}
 
@@ -61,8 +61,8 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 			}
 			if tt.reuseVsCreate {
 				assert.Contains(t, got, "alpacon work-session use <ID>")
-				assert.Contains(t, got, "reuse an existing")
-				assert.Contains(t, got, "create a new")
+				assert.Contains(t, got, "existing active session") // reuse path comes first
+				assert.Contains(t, got, "create a new one")        // create is the fallback
 			}
 		})
 	}
