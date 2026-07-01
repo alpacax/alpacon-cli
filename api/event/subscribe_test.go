@@ -2,12 +2,14 @@ package event
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCreateEventSession(t *testing.T) {
@@ -94,4 +96,33 @@ func TestSubscribeSudoEvent_ServerError(t *testing.T) {
 
 	err := SubscribeSudoEvent(ac, "channel-456", "session-123")
 	assert.Error(t, err)
+}
+
+func TestSubscribeCommandOutput_SendsExpectedPayload(t *testing.T) {
+	channelID := "channel-uuid"
+	cmdID := "command-uuid"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Contains(t, r.URL.Path, "events/subscriptions")
+
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var req EventSubscriptionRequest
+		require.NoError(t, json.Unmarshal(body, &req))
+		assert.Equal(t, channelID, req.Channel)
+		assert.Equal(t, "command_output", req.EventType)
+		assert.Equal(t, cmdID, req.TargetID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := SubscribeCommandOutput(ac, channelID, cmdID)
+	assert.NoError(t, err)
 }

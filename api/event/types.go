@@ -18,7 +18,7 @@ var phaseDescriptions = map[string]string{
 
 // RemoteCommandError is returned when the remote command completed but exited
 // with a non-zero status. Callers populate ExitCode from the server response;
-// RunCommand falls back to 1 when the server omits exit_code.
+// errorFromDetails falls back to 1 when the server omits exit_code.
 type RemoteCommandError struct {
 	Output     string
 	ExitCode   int

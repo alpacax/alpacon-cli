@@ -1,12 +1,14 @@
 package event
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +18,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -150,7 +153,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond)
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -186,13 +189,9 @@ func (c *runCommandBodyCapture) snapshot() (hadKey bool, ws string, seen bool) {
 	return c.hadWorkSessionKey, c.workSession, c.postSeen
 }
 
-// newRunCommandBodyCaptureServer returns a test server that:
-//   - responds to GET /api/servers/servers/?name=... with a 1-item server list
-//   - captures the POST body for /api/events/commands/ and returns a minimal
-//     CommandResponse list
-//   - responds to PollCommandExecution's GET /api/events/commands/{id}/ with
-//     a terminal status so RunCommand returns synchronously instead of
-//     leaving a long-running goroutine behind.
+// newRunCommandBodyCaptureServer returns a test server that responds to
+// GET /api/servers/servers/?name=... with a 1-item server list and captures the
+// POST body for /api/events/commands/, returning a minimal CommandResponse list.
 func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,28 +214,18 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
 			return
 		}
-		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(EventDetails{
-				ID:     "cmd-1",
-				Status: "completed",
-				Result: "done",
-			})
-			return
-		}
 		http.NotFound(w, r)
 	}))
 }
 
-func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+func TestSubmitCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
+	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
 	require.NoError(t, err)
 
 	hadKey, ws, _ := capture.snapshot()
@@ -244,73 +233,21 @@ func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 	assert.Equal(t, "ses-abc", ws)
 }
 
-func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+func TestSubmitCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
+	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "")
 	require.NoError(t, err)
 
 	hadKey, _, _ := capture.snapshot()
 	assert.False(t, hadKey, "body must omit work_session field when ID is empty")
 }
 
-func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	for _, status := range []string{"stuck", "error", "cancelled"} {
-		t.Run(status, func(t *testing.T) {
-			ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: status})
-			defer ts.Close()
-
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
-			require.Error(t, err)
-			assert.Empty(t, result)
-			assert.Contains(t, err.Error(), status)
-		})
-	}
-}
-
-func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "denied"})
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unrecognised status")
-	assert.Contains(t, err.Error(), "denied")
-}
-
-func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	ts := newRunCommandServerWithDetails(t, EventDetails{
-		ID:      "cmd-1",
-		Status:  "completed",
-		Success: boolPtr(false),
-		Result:  "command output here",
-	})
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
-	require.Error(t, err)
-
-	var remoteErr *RemoteCommandError
-	require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
-	assert.Equal(t, "command output here", result)
-	assert.Equal(t, "command output here", remoteErr.Output)
-	assert.Equal(t, 1, remoteErr.ExitCode, "legacy response without exit_code must fall back to 1")
-	assert.Empty(t, remoteErr.ErrorPhase, "no phase when server omits error_phase")
-}
-
-func TestRunCommand_PropagatesExitCode(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 	tests := []struct {
 		name           string
 		respSuccess    *bool
@@ -359,23 +296,17 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ts := newRunCommandServerWithDetails(t, EventDetails{
-				ID:         "cmd-1",
+			err := errorFromDetails(EventDetails{
 				Status:     "completed",
 				Success:    tt.respSuccess,
 				ExitCode:   tt.respExitCode,
 				ErrorPhase: tt.respErrorPhase,
 				Result:     tt.respResult,
 			})
-			defer ts.Close()
-
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 			require.Error(t, err)
 
 			var remoteErr *RemoteCommandError
 			require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
-			assert.Equal(t, tt.wantOutput, result)
 			assert.Equal(t, tt.wantOutput, remoteErr.Output)
 			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode)
 			assert.Equal(t, tt.wantErrorPhase, remoteErr.ErrorPhase)
@@ -383,63 +314,54 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 	}
 }
 
-func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	tests := []struct {
-		name           string
-		respStatus     string
-		respErrorPhase *string
-		wantSubstrings []string
-	}{
-		{
-			name:           "stuck_agent_timeout",
-			respStatus:     "stuck",
-			respErrorPhase: strPtr("agent_timeout"),
-			wantSubstrings: []string{"agent_timeout", "status=stuck"},
-		},
-		{
-			name:           "stuck_agent_disconnected",
-			respStatus:     "stuck",
-			respErrorPhase: strPtr("agent_disconnected"),
-			wantSubstrings: []string{"agent_disconnected", "status=stuck"},
-		},
-		{
-			name:           "stuck_no_phase_keeps_legacy_message",
-			respStatus:     "stuck",
-			respErrorPhase: nil,
-			wantSubstrings: []string{"command failed with status: stuck"},
-		},
-		{
-			name:           "error_with_phase",
-			respStatus:     "error",
-			respErrorPhase: strPtr("agent_disconnected"),
-			wantSubstrings: []string{"agent_disconnected", "status=error"},
-		},
-	}
+func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
+	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "awaiting_approval"})
+	var pending *PendingApprovalError
+	require.True(t, errors.As(err, &pending), "err must be *PendingApprovalError")
+	assert.Equal(t, "cmd-9", pending.CommandID)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts := newRunCommandServerWithDetails(t, EventDetails{
-				ID:         "cmd-1",
-				Status:     tt.respStatus,
-				ErrorPhase: tt.respErrorPhase,
-			})
-			defer ts.Close()
+func TestErrorFromDetails_RejectedReturnsError(t *testing.T) {
+	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected by a reviewer")
+}
 
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
-			require.Error(t, err)
-			assert.Empty(t, result)
+func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
+	// awaiting_approval, then the transient "error" the server emits in the
+	// approve→deliver window, then completed: waitApproval must poll through both.
+	seq := []string{"awaiting_approval", "awaiting_approval", "error", "completed"}
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		i := int(calls.Add(1)) - 1
+		if i >= len(seq) {
+			i = len(seq) - 1
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: boolPtr(true)})
+	}))
+	defer ts.Close()
 
-			var remoteErr *RemoteCommandError
-			assert.False(t, errors.As(err, &remoteErr),
-				"stuck/error must remain infra error, not RemoteCommandError")
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+}
 
-			for _, sub := range tt.wantSubstrings {
-				assert.Contains(t, err.Error(), sub)
-			}
-		})
-	}
+func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		heldPolls:    2,
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, "approved\n", stdoutBuf.String())
 }
 
 func boolPtr(b bool) *bool    { return &b }
@@ -455,7 +377,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond)
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
@@ -471,7 +393,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond)
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -549,7 +471,7 @@ func TestExecTimeout_InvalidEnvFallsBackToDefault(t *testing.T) {
 	assert.Equal(t, 30*time.Minute, execTimeout())
 }
 
-func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
+func TestSubmitCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
@@ -569,7 +491,7 @@ func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "id", "root", "", nil, "ses-abc")
+	_, err := SubmitCommand(ac, "server-x", "id", "root", "", nil, "ses-abc")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "denied by policy")
@@ -577,125 +499,588 @@ func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	assert.Contains(t, err.Error(), "alpacon login")
 }
 
-func TestRunCommand_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "awaiting_approval"})
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "")
-	require.Error(t, err)
-	var pending *PendingApprovalError
-	require.True(t, errors.As(err, &pending), "expected PendingApprovalError, got %T: %v", err, err)
-	assert.Equal(t, "cmd-1", pending.CommandID)
-}
-
-func TestRunCommand_RejectedReturnsError(t *testing.T) {
-	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
-	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "rejected"})
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rejected")
-	var pending *PendingApprovalError
-	assert.False(t, errors.As(err, &pending), "rejected must not be a PendingApprovalError")
-}
-
-func TestWaitForCommandApproval_ResolvesToSuccess(t *testing.T) {
-	ts := newCommandPollServer([]EventDetails{
-		{ID: "cmd-1", Status: "awaiting_approval"},
-		{ID: "cmd-1", Status: "awaiting_approval"},
-		{ID: "cmd-1", Status: "running"},
-		{ID: "cmd-1", Status: "success", Success: boolPtr(true), Result: "done"},
+func TestRunCommandStreaming_NormalFlow(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
-	defer ts.Close()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	result, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
-	assert.Equal(t, "done", result)
+	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
 
-func TestWaitForCommandApproval_ToleratesTransitionError(t *testing.T) {
-	// After approval the server briefly reports the unreachable "error" fallback
-	// (verification flipped to approved, delivered_at not yet set) before the
-	// command is delivered. The approval poll must wait through it, not fail.
-	ts := newCommandPollServer([]EventDetails{
-		{ID: "cmd-1", Status: "awaiting_approval"},
-		{ID: "cmd-1", Status: "error"},
-		{ID: "cmd-1", Status: "running"},
-		{ID: "cmd-1", Status: "success", Success: boolPtr(true), Result: "done"},
+func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// WS delivers seq 0 then 3; the missing 1,2 come from the gap-fill fetch.
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}, {Seq: 3, Content: "s3\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			if fromSeq == 1 {
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}}
+			}
+			return nil
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
-	defer ts.Close()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	result, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
-	assert.Equal(t, "done", result)
+	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
 
-func TestWaitForCommandApproval_TimeoutReturnsPendingApproval(t *testing.T) {
-	ts := newCommandPollServer([]EventDetails{{ID: "cmd-1", Status: "awaiting_approval"}})
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	// The job never leaves awaiting_approval, so the bounded wait elapses and we
-	// surface a PendingApprovalError so the caller emits the pending signal.
-	_, err := WaitForCommandApproval(ac, "cmd-1", 40*time.Millisecond, 5*time.Millisecond)
-	require.Error(t, err)
-	var pending *PendingApprovalError
-	require.True(t, errors.As(err, &pending), "expected PendingApprovalError on timeout, got %T: %v", err, err)
-	assert.Equal(t, "cmd-1", pending.CommandID)
-}
-
-func TestWaitForCommandApproval_RejectedReturnsError(t *testing.T) {
-	ts := newCommandPollServer([]EventDetails{
-		{ID: "cmd-1", Status: "awaiting_approval"},
-		{ID: "cmd-1", Status: "rejected"},
+// TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk guards against
+// advancing lastSeq past a gap during the warm-fire drain. If the persisted
+// chunks contain a hole (seq 0,1,3 with 2 missing), lastSeq must stop at the
+// last contiguous seq (1) so a later seq 2 arriving over the WS is still
+// written rather than skipped as a duplicate. seq 3 is then filled by the
+// terminal drain in order.
+func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// seq 2 is absent from the persisted set; it arrives only over the WS.
+		wsChunks: []ChunkEvent{{Seq: 2, Content: "s2\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			persisted := []Chunk{{Seq: 0, Content: "s0\n"}, {Seq: 1, Content: "s1\n"}, {Seq: 3, Content: "s3\n"}}
+			var out []Chunk
+			for _, c := range persisted {
+				if c.Seq >= fromSeq {
+					out = append(out, c)
+				}
+			}
+			return out
+		},
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
-	defer ts.Close()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rejected")
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
 
-// newCommandPollServer serves GET /api/events/commands/{id}/ by returning each
-// EventDetails in seq on successive calls; the final entry repeats. Used to drive
-// WaitForCommandApproval through a status transition.
-func newCommandPollServer(seq []EventDetails) *httptest.Server {
-	var calls atomic.Int32
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// The second seq 1 must be dropped.
+		wsChunks: []ChunkEvent{
+			{Seq: 0, Content: "s0\n"},
+			{Seq: 1, Content: "s1\n"},
+			{Seq: 1, Content: "s1\n"},
+			{Seq: 2, Content: "s2\n"},
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
+}
+
+// TestRunCommandStreaming_FailedStatusPropagatesExitCode guards that terminal
+// status "failed" yields a *RemoteCommandError carrying the exit code.
+func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "before-exit\n"}},
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", stdoutBuf)
+	require.Error(t, err)
+	var remoteErr *RemoteCommandError
+	require.True(t, errors.As(err, &remoteErr), "failed status must yield *RemoteCommandError")
+	assert.Equal(t, 23, remoteErr.ExitCode)
+	assert.Equal(t, "before-exit\n", stdoutBuf.String())
+}
+
+// TestRunCommandStreaming_GapFillRaceDoesNotDropChunk guards that when a gap-fill
+// fetch returns a hole (seq 1,3; 2 not yet persisted), applyChunk stops at the
+// hole so the later WS seq 2 isn't dropped as a duplicate.
+func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		// WS order 0,3,2: seq 3 opens a gap; seq 2 arrives only afterwards.
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}, {Seq: 3, Content: "s3\n"}, {Seq: 2, Content: "s2\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			persisted := []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}, {Seq: 3, Content: "s3\n"}}
+			if fromSeq == 1 {
+				// Race: seq 2 is not yet persisted when the gap-fill fetch runs.
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 3, Content: "s3\n"}}
+			}
+			var out []Chunk
+			for _, c := range persisted {
+				if c.Seq >= fromSeq {
+					out = append(out, c)
+				}
+			}
+			return out
+		},
+		runningPolls: 3,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
+}
+
+func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	// WS server just upgrades and waits; subscribe will fail so chunks shouldn't matter
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer wsServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	var submitCount int
+	var pollCount int
+	var mu sync.Mutex
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		idx := int(calls.Add(1)) - 1
-		if idx >= len(seq) {
-			idx = len(seq) - 1
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
+		case "/api/events/commands/":
+			mu.Lock()
+			submitCount++
+			mu.Unlock()
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/subscriptions/":
+			// Force subscribe failure -> fallback path with existing cmdID
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			// No chunks persisted: fallback must use the buffered Result.
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "reused-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		_ = json.NewEncoder(w).Encode(seq[idx])
 	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "reused-output\n", stdoutBuf.String())
+
+	// Key assertion: SubmitCommand was called exactly once
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 1, submitCount, "fallback must not re-submit the command")
 }
 
-func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
-				Count:   1,
-				Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
-			})
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "cmd-1"}})
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(details)
+// TestRunCommandStreaming_FallbackDrainsChunks guards that the polling fallback
+// reconstructs output from chunks when the server leaves Result empty (the
+// chunk-streaming contract), instead of silently dropping it.
+func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			w.WriteHeader(http.StatusInternalServerError) // force fallback
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			resp := api.ListResponse[Chunk]{Count: 2, Results: []Chunk{{Seq: 0, Content: "chunk-a\n"}, {Seq: 1, Content: "chunk-b\n"}}}
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				// Result empty: output lives only in chunks (server contract).
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: cmdID, Status: "completed", Success: boolPtr(true), Result: ""})
+			}
 		default:
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
+}
+
+func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			// Force fallback
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			// No chunks persisted: fallback must use the buffered Result.
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "fallback-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
+}
+
+// TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable: when the chunks
+// endpoint errors, the polling fallback emits the buffered Result, not an error.
+func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	cmdID := "cmd-uuid"
+	serverID := "srv-uuid"
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
+		case "/api/events/sessions/":
+			w.WriteHeader(http.StatusInternalServerError) // force fallback
+		case "/api/events/commands/":
+			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
+		case "/api/events/commands/" + cmdID + "/chunks/":
+			w.WriteHeader(http.StatusNotFound) // server without chunk support
+		case "/api/events/commands/" + cmdID + "/":
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n < 2 {
+				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
+			} else {
+				success := true
+				resp := EventDetails{ID: cmdID, Status: "completed", Success: &success, Result: "buffered-output\n"}
+				_ = json.NewEncoder(w).Encode(resp)
+			}
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer apiServer.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
+}
+
+// streamingServerConfig configures the fake event servers for streaming tests.
+type streamingServerConfig struct {
+	cmdID        string
+	serverID     string
+	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
+	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
+	heldPolls    int               // number of "awaiting_approval" detail polls before running
+	runningPolls int               // number of "running" detail polls before the terminal one
+	terminal     EventDetails      // returned by the detail poll once held+running elapse
+}
+
+// newStreamingServers starts a WS + API server pair and returns a client for
+// them. The WS emits cfg.wsChunks after the subscription POST arrives.
+func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.AlpaconClient {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	subscribed := make(chan struct{})
+	var subOnce sync.Once
+
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+		defer func() { _ = conn.Close() }()
+		select {
+		case <-subscribed:
+		case <-time.After(10 * time.Second):
+			t.Error("timeout waiting for subscription signal")
+			return
+		}
+		for _, c := range cfg.wsChunks {
+			env := map[string]any{
+				"event_type": "command_output",
+				"payload":    map[string]any{"command_id": cfg.cmdID, "seq": c.Seq, "content": c.Content},
+			}
+			b, _ := json.Marshal(env)
+			_ = conn.WriteMessage(websocket.TextMessage, b)
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(wsServer.Close)
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	var pollCount int
+	var mu sync.Mutex
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + cfg.serverID + `","name":"srv"}]}`))
+		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
+		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `"}]`))
+		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
+			subOnce.Do(func() { close(subscribed) })
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/chunks/" && r.Method == http.MethodGet:
+			fromSeq, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+			var results []Chunk
+			if cfg.chunksFor != nil {
+				results = cfg.chunksFor(fromSeq)
+			}
+			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
+			mu.Lock()
+			pollCount++
+			n := pollCount
+			mu.Unlock()
+			if n <= cfg.heldPolls {
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval"}`))
+				return
+			}
+			if n <= cfg.heldPolls+cfg.runningPolls {
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running"}`))
+				return
+			}
+			term := cfg.terminal
+			term.ID = cfg.cmdID
+			_ = json.NewEncoder(w).Encode(term)
+		default:
+			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+
+	return &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
+}
+
+// TestRunCommandStreaming_NoDuplicateOutputOnFailure guards the duplicate-output
+// fix: a failed command's buffered Result must not be re-written to stdout after
+// the chunks were already streamed. The Result is still carried on the error so
+// cmd/exec can inspect it (e.g. for the sudo-denial hint) without reprinting.
+func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+
+	// Streamed once: the buffered Result is not appended to the writer.
+	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
+	// Retained on the error for inspection (cmd/exec must not reprint it).
+	var remoteErr *RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Equal(t, "hello\nworld\n", remoteErr.Output)
+}
+
+// TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil
+// branches reached through the streaming select loop.
+func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
+	tests := []struct {
+		name     string
+		terminal EventDetails
+		check    func(t *testing.T, err error)
+	}{
+		{
+			name:     "success false returns RemoteCommandError with exit code",
+			terminal: EventDetails{Status: "completed", Success: boolPtr(false), ExitCode: intPtr(7)},
+			check: func(t *testing.T, err error) {
+				var re *RemoteCommandError
+				require.ErrorAs(t, err, &re)
+				assert.Equal(t, 7, re.ExitCode)
+			},
+		},
+		{
+			name:     "stuck status without phase keeps legacy message",
+			terminal: EventDetails{Status: "stuck"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "command failed with status: stuck")
+			},
+		},
+		{
+			name:     "error status without phase keeps legacy message",
+			terminal: EventDetails{Status: "error"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "command failed with status: error")
+			},
+		},
+		{
+			name:     "cancelled status without phase keeps legacy message",
+			terminal: EventDetails{Status: "cancelled"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "command failed with status: cancelled")
+			},
+		},
+		{
+			name:     "stuck status with phase carries phase identifier",
+			terminal: EventDetails{Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "[agent_timeout]")
+				assert.Contains(t, err.Error(), "status=stuck")
+			},
+		},
+		{
+			name:     "unrecognized status returns unexpected-status error",
+			terminal: EventDetails{Status: "denied"},
+			check: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "unexpected command status")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdoutBuf := &bytes.Buffer{}
+			ac := newStreamingServers(t, streamingServerConfig{
+				cmdID:        "cmd-uuid",
+				serverID:     "srv-uuid",
+				runningPolls: 1,
+				terminal:     tt.terminal,
+			})
+			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+			tt.check(t, err)
+		})
+	}
+}
+
+// TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the drain path:
+// trailing chunks never seen over the WS are recovered by the final REST drain.
+func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "s0\n"}},
+		chunksFor: func(fromSeq int) []Chunk {
+			// Warm-fire (seq>=0) is empty; the final drain (seq>=1) yields the tail.
+			if fromSeq >= 1 {
+				return []Chunk{{Seq: 1, Content: "s1\n"}, {Seq: 2, Content: "s2\n"}}
+			}
+			return nil
+		},
+		runningPolls: 2,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
+}
+
+// TestRunCommandStreaming_FallbackToResultWhenNothingStreamed covers the
+// last-resort path: when no chunks arrive over the WS and none are persisted,
+// the buffered Result must still be written so output is never silently dropped.
+func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:        "cmd-uuid",
+		serverID:     "srv-uuid",
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }

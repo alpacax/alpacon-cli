@@ -1,8 +1,10 @@
 package exec
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -155,15 +157,27 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait)
+		// JSON mode buffers output to keep stdout clean for a pending-approval
+		// signal; it is flushed below on success or plain failure. Table mode streams live.
+		var out io.Writer = os.Stdout
+		var buf *bytes.Buffer
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			buf = &bytes.Buffer{}
+			out = buf
+		}
+
+		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, out)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
 		// not --wait on emits a machine-readable pending signal and exits before the
 		// normal result handling treats the denial as a plain failure.
-		if HandlePendingApproval(result, err, reRunHint(parsed)) {
+		if HandlePendingApproval(err, reRunHint(parsed)) {
 			return
 		}
-		HandleCommandResult(result, err)
+		if buf != nil {
+			_, _ = os.Stdout.Write(buf.Bytes())
+		}
+		HandleCommandResult(err)
 	},
 }
 
