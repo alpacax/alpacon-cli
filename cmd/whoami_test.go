@@ -6,10 +6,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestApplyApplicationPrincipal(t *testing.T) {
+	who := &auth.WhoamiResponse{
+		PrincipalType: "application",
+		Auth:          auth.WhoamiAuth{Scopes: []string{"server:read", "command:create"}},
+		Application:   &auth.WhoamiApplication{Name: "ci-runner", ServiceType: "ci_cd", Username: "svc-ci"},
+	}
+
+	out := applyApplicationPrincipal(whoamiOutput{}, who)
+
+	assert.Equal(t, "application", out.PrincipalType)
+	assert.Equal(t, "ci-runner", out.ApplicationName)
+	assert.Equal(t, "ci_cd", out.ServiceType)
+	assert.Equal(t, "svc-ci", out.ServiceAccount)
+	assert.Equal(t, []string{"server:read", "command:create"}, out.Scopes)
+}
+
+func TestApplicationFieldsOmittedForUserPrincipal(t *testing.T) {
+	// A user principal's JSON must not carry application keys (output unchanged).
+	body, err := json.Marshal(whoamiOutput{Username: "alice", AuthMethod: "Browser login"})
+	assert.NoError(t, err)
+
+	var got map[string]json.RawMessage
+	assert.NoError(t, json.Unmarshal(body, &got))
+	for _, k := range []string{"principal_type", "application_name", "service_type", "service_account", "scopes"} {
+		_, present := got[k]
+		assert.Falsef(t, present, "key %q must be absent for a user principal", k)
+	}
+}
 
 func TestGetAuthMethod(t *testing.T) {
 	tests := []struct {
