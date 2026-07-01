@@ -1,14 +1,8 @@
 package exec
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
 	"strings"
 
-	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -32,6 +26,9 @@ All flags must be placed before the server name.
 Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon exec server 'echo hello;world'
+
+Commands larger than 2KB are sent with an oversized flag; the server stages
+them as a temporary script and runs them, judging the original command content.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -67,9 +64,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
   alpacon exec logs <JOB_ID>`,
-	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
-	// would otherwise be consumed by Cobra's flag parser.
-	// All flags are parsed manually in the Run function.
+	// DisableFlagParsing is required so remote command args (e.g. -U, -d) aren't consumed by Cobra; all flags are parsed manually in Run.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed := ParseRemoteExecArgs(args)
@@ -114,48 +109,17 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		env := make(map[string]string)
 
+		// Oversized commands are sent with the same command-create call plus the
+		// oversized flag; the server stages them as a temp script and owns the
+		// path/wrapper/cleanup, auth, and platform gates.
+		oversized := ResolveOversized(alpaconClient, parsed.Server, parsed.Command)
+
 		if parsed.Detach {
-			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-			if err != nil {
-				err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-						return err
-					},
-				})
-			}
-			if err != nil {
-				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
-				return
-			}
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				data, err := json.Marshal(map[string]string{"job_id": resp.ID})
-				if err != nil {
-					utils.CliErrorWithExit("failed to marshal JSON: %s", err)
-					return
-				}
-				utils.PrintJson(data)
-			} else {
-				line1, line2 := detachResultLines(resp.ID)
-				fmt.Println(line1)
-				fmt.Fprintln(os.Stderr, line2)
-			}
+			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod, oversized)
 			return
 		}
 
-		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait)
+		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, oversized)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
 		// not --wait on emits a machine-readable pending signal and exits before the

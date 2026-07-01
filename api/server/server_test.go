@@ -509,3 +509,30 @@ func TestDeleteServer(t *testing.T) {
 		t.Error("DELETE request was not sent")
 	}
 }
+
+func TestGetServerPlatform(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// GetServerDetail first resolves the name to an ID via ?name=, then
+		// GETs the detail object.
+		if r.URL.Query().Get("name") != "" {
+			_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{
+				Count:   1,
+				Results: []ServerDetails{{ID: "srv-1", Name: "my-server"}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ServerDetails{ID: "srv-1", Name: "my-server", Platform: "windows"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	platform, err := GetServerPlatform(ac, "my-server")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if platform != "windows" {
+		t.Fatalf("expected platform %q, got %q", "windows", platform)
+	}
+}

@@ -225,7 +225,9 @@ Note: All flags must be placed before the server name.
 
 		if len(commandArgs) > 0 {
 			command := execCmd.ShellJoin(commandArgs)
-			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID)
+			// Oversized commands take the same staging path as exec (Windows fail-fast included).
+			oversized := execCmd.ResolveOversized(alpaconClient, serverName, command)
+			result, err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, oversized)
 			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
 			execCmd.HandleCommandResult(result, err)
 		} else {
