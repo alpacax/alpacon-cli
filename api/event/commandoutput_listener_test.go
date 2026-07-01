@@ -127,7 +127,6 @@ func TestCommandOutputListener_StopIsIdempotent(t *testing.T) {
 	l := &CommandOutputListener{
 		chunks:    make(chan ChunkEvent, 1),
 		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
 		connected: make(chan struct{}),
 	}
 	l.Stop()

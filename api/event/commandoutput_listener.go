@@ -34,7 +34,6 @@ type CommandOutputListener struct {
 	commandID   string
 	chunks      chan ChunkEvent
 	done        chan struct{}
-	stopped     chan struct{}
 	connected   chan struct{}
 	connectOnce sync.Once
 	closeOnce   sync.Once
@@ -99,7 +98,6 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 		commandID: commandID,
 		chunks:    make(chan ChunkEvent, commandOutputChunkBuffer),
 		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
 		connected: make(chan struct{}),
 	}
 }
@@ -107,17 +105,11 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 // Start begins the WebSocket receive loop in a background goroutine.
 // It automatically reconnects with exponential backoff until Stop() is called.
 func (l *CommandOutputListener) Start() {
-	go func() {
-		defer close(l.stopped)
-		l.listenLoop()
-	}()
+	go l.listenLoop()
 }
 
 // Chunks returns a receive-only channel of parsed chunk events.
 func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
-
-// Done returns a channel closed when the listener has fully stopped.
-func (l *CommandOutputListener) Done() <-chan struct{} { return l.stopped }
 
 // WaitConnected blocks until the first successful WS connection is made or
 // timeout / shutdown intervenes. Returns true on success.
