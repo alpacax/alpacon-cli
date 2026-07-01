@@ -362,9 +362,9 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
-// runDetached submits command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path. Used by inline exec and the oversized bypass.
-func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string, env map[string]string, workSessionID, authMethod string, oversized bool) {
-	resp, err := event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
+// runDetached submits the command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path.
+func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, env map[string]string, workSessionID, authMethod string, oversized bool) {
+	resp, err := event.SubmitCommand(ac, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
 	if err != nil {
 		err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
 			OnMFARequired: func(srv string) error {
@@ -379,7 +379,7 @@ func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, command string
 			},
 			RefreshToken: ac.RefreshToken,
 			RetryOperation: func() error {
-				resp, err = event.SubmitCommand(ac, parsed.Server, command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
+				resp, err = event.SubmitCommand(ac, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, oversized)
 				return err
 			},
 		})

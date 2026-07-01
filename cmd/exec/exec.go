@@ -115,7 +115,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		oversized := ResolveOversized(alpaconClient, parsed.Server, parsed.Command)
 
 		if parsed.Detach {
-			runDetached(alpaconClient, parsed, parsed.Command, env, workSessionID, authMethod, oversized)
+			runDetached(alpaconClient, parsed, env, workSessionID, authMethod, oversized)
 			return
 		}
 

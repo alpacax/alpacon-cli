@@ -22,10 +22,6 @@ const (
 // newlineFlattener keeps multiline commands/results on one table row.
 var newlineFlattener = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
-func flattenNewlines(s string) string {
-	return newlineFlattener.Replace(s)
-}
-
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
 	var err error
@@ -67,8 +63,8 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,
-			Command:     utils.TruncateString(flattenNewlines(event.Line), 100),
-			Result:      utils.TruncateString(flattenNewlines(event.Result), 70),
+			Command:     utils.TruncateString(newlineFlattener.Replace(event.Line), 100),
+			Result:      utils.TruncateString(newlineFlattener.Replace(event.Result), 70),
 			Status:      utils.BoolPointerToString(event.Success),
 			Operator:    event.RequestedBy.Name,
 			RequestedAt: utils.TimeUtils(event.AddedAt),
