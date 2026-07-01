@@ -139,7 +139,9 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		}
 		return []string{extendCmd, createCmd, agentCreateCmd}
 	case WorkSessionAssigneeMismatch:
-		return []string{"alpacon work-session use <ID>"}
+		// Session belongs to another principal; reuse/create one owned by this caller.
+		// Agents can't `use`, so route through the agent-aware reuse+create path.
+		return createOrReuse
 	case WorkSessionNotUsable:
 		return createOrReuse
 	default: // scope_not_allowed, server_not_allowed

@@ -41,7 +41,7 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 		{WorkSessionExpired, "has expired", "work-session extend", true, false},
 		{WorkSessionScopeNotAllowed, "does not include this scope", "work-session create", true, false},
 		{WorkSessionServerNotAllowed, "target server is not in this session", "work-session create", true, false},
-		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", false, false},
+		{WorkSessionAssigneeMismatch, "assigned to another principal", "work-session use", true, true},
 		{WorkSessionNotUsable, "no longer usable", "work-session create", true, true},
 	}
 
