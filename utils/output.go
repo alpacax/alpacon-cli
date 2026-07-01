@@ -23,13 +23,36 @@ const (
 var OutputFormat string
 
 type JSONErrorEnvelope[T any] struct {
-	OK          bool     `json:"ok"`
-	ExitCode    int      `json:"exit_code,omitempty"`
-	ErrorCode   string   `json:"error_code,omitempty"`
-	Message     string   `json:"message"`
-	Reason      string   `json:"reason,omitempty"`
-	Context     T        `json:"context"`
-	NextActions []string `json:"next_actions,omitempty"`
+	OK          bool         `json:"ok"`
+	ExitCode    int          `json:"exit_code,omitempty"`
+	ErrorCode   string       `json:"error_code,omitempty"`
+	Message     string       `json:"message"`
+	Reason      string       `json:"reason,omitempty"`
+	Context     T            `json:"context"`
+	NextActions []NextAction `json:"next_actions,omitempty"`
+}
+
+// NextAction is one actionable follow-up. Command is a pure, runnable command
+// (no inline comments) for machine consumers; Description carries the human hint.
+// Either may be empty—a pure command needs no hint, and a guidance-only pointer
+// (e.g. "approve it in the console") carries no runnable command—so both fields
+// are omitempty.
+type NextAction struct {
+	Command     string `json:"command,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// PlainText renders the action as a human-facing line: "command  # description",
+// or just the command or description when the other is empty.
+func (a NextAction) PlainText() string {
+	switch {
+	case a.Command != "" && a.Description != "":
+		return a.Command + "  # " + a.Description
+	case a.Command != "":
+		return a.Command
+	default:
+		return a.Description
+	}
 }
 
 func FormatJSON(value any) (string, error) {

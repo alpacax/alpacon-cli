@@ -233,7 +233,7 @@ so it is recorded and scoped accordingly.`,
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
 					session.ApprovalRequestID,
-					fmt.Sprintf("alpacon work-session use %s  # after approval", session.ID),
+					utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", session.ID), Description: "after approval"},
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
