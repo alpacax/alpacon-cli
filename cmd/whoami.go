@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
@@ -14,60 +15,6 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-type activeWorkSessionSummary struct {
-	ID        string   `json:"id"`
-	Status    string   `json:"status"`
-	Scopes    []string `json:"scopes"`
-	Servers   []string `json:"servers"`
-	ExpiresAt string   `json:"expires_at,omitempty"`
-}
-
-type whoamiOutput struct {
-	Username            string                `json:"username,omitempty"`
-	Email               string                `json:"email,omitempty"`
-	Phone               string                `json:"phone,omitempty"`
-	WorkspaceName       string                `json:"workspace_name"`
-	WorkspaceURL        string                `json:"workspace_url"`
-	AuthMethod          string                `json:"auth_method"`
-	AuthClassification  string                `json:"auth_classification"`
-	ExpiresAt           string                `json:"expires_at,omitempty"`
-	UID                 int                   `json:"uid,omitempty"`
-	Shell               string                `json:"shell,omitempty"`
-	HomeDirectory       string                `json:"home_directory,omitempty"`
-	Role                string                `json:"role,omitempty"`
-	Groups              []iam.GroupMembership `json:"groups,omitempty"`
-	WorksessionRequired bool                  `json:"work_session_required"`
-	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
-	// machine-readable names. The legacy keys remain for compatibility.
-	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
-	ActiveWorksession            *activeWorkSessionSummary `json:"active_work_session"`
-	ActiveWorksessionCanonical   *activeWorkSessionSummary `json:"active_worksession"`
-}
-
-func (o whoamiOutput) MarshalJSON() ([]byte, error) {
-	type wire whoamiOutput
-	normalized := o.normalized()
-	return json.Marshal(wire(normalized))
-}
-
-func (o whoamiOutput) normalized() whoamiOutput {
-	if o.AuthClassification == "" {
-		o.AuthClassification = authClassificationFromMethod(o.AuthMethod)
-	}
-
-	required := o.WorksessionRequired || o.WorksessionRequiredForAccess
-	o.WorksessionRequired = required
-	o.WorksessionRequiredForAccess = required
-
-	active := o.ActiveWorksession
-	if active == nil {
-		active = o.ActiveWorksessionCanonical
-	}
-	o.ActiveWorksession = active
-	o.ActiveWorksessionCanonical = active
-	return o
-}
 
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami [flags]",
@@ -98,6 +45,24 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 		if err != nil {
 			utils.CliWarning("Could not create authenticated API client: %s", err)
 			utils.CliWarning("Showing local config only. Server fields are unavailable.")
+			warnIfExpiringSoon(cfg)
+			printWhoami(output)
+			return
+		}
+
+		// Only a service token can be an application principal. Service tokens have no
+		// user profile, so resolve identity via whoami and return without falling
+		// through to the user-only IAM endpoint, which would always fail for them.
+		if config.IsServiceToken(cfg.Token) {
+			who, whoErr := auth.GetWhoami(ac)
+			switch {
+			case whoErr != nil:
+				utils.CliWarning("Could not fetch application identity: %s", whoErr)
+			case who.PrincipalType == auth.PrincipalTypeApplication:
+				output = applyApplicationPrincipal(output, who)
+			default:
+				utils.CliWarning("Unexpected principal type %q for service token.", who.PrincipalType)
+			}
 			warnIfExpiringSoon(cfg)
 			printWhoami(output)
 			return
@@ -155,11 +120,83 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 	},
 }
 
+type activeWorkSessionSummary struct {
+	ID        string   `json:"id"`
+	Status    string   `json:"status"`
+	Scopes    []string `json:"scopes"`
+	Servers   []string `json:"servers"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+}
+
+type whoamiOutput struct {
+	Username           string                `json:"username,omitempty"`
+	Email              string                `json:"email,omitempty"`
+	Phone              string                `json:"phone,omitempty"`
+	WorkspaceName      string                `json:"workspace_name"`
+	WorkspaceURL       string                `json:"workspace_url"`
+	AuthMethod         string                `json:"auth_method"`
+	AuthClassification string                `json:"auth_classification"`
+	ExpiresAt          string                `json:"expires_at,omitempty"`
+	UID                int                   `json:"uid,omitempty"`
+	Shell              string                `json:"shell,omitempty"`
+	HomeDirectory      string                `json:"home_directory,omitempty"`
+	Role               string                `json:"role,omitempty"`
+	Groups             []iam.GroupMembership `json:"groups,omitempty"`
+	// Application-principal fields (service tokens). Empty for user principals.
+	PrincipalType       string   `json:"principal_type,omitempty"`
+	ApplicationName     string   `json:"application_name,omitempty"`
+	ServiceType         string   `json:"service_type,omitempty"`
+	ServiceAccount      string   `json:"service_account,omitempty"`
+	Scopes              []string `json:"scopes,omitempty"`
+	WorksessionRequired bool     `json:"work_session_required"`
+	// WorksessionRequiredForAccess and ActiveWorksessionCanonical are the
+	// machine-readable names. The legacy keys remain for compatibility.
+	WorksessionRequiredForAccess bool                      `json:"worksession_required_for_access"`
+	ActiveWorksession            *activeWorkSessionSummary `json:"active_work_session"`
+	ActiveWorksessionCanonical   *activeWorkSessionSummary `json:"active_worksession"`
+}
+
+func (o whoamiOutput) MarshalJSON() ([]byte, error) {
+	type wire whoamiOutput
+	normalized := o.normalized()
+	return json.Marshal(wire(normalized))
+}
+
+func (o whoamiOutput) normalized() whoamiOutput {
+	if o.AuthClassification == "" {
+		o.AuthClassification = authClassificationFromMethod(o.AuthMethod)
+	}
+
+	required := o.WorksessionRequired || o.WorksessionRequiredForAccess
+	o.WorksessionRequired = required
+	o.WorksessionRequiredForAccess = required
+
+	active := o.ActiveWorksession
+	if active == nil {
+		active = o.ActiveWorksessionCanonical
+	}
+	o.ActiveWorksession = active
+	o.ActiveWorksessionCanonical = active
+	return o
+}
+
 func getExpiresAt(cfg config.Config) string {
 	if cfg.Token != "" && cfg.ExpiresAt != "" {
 		return cfg.ExpiresAt
 	}
 	return ""
+}
+
+// applyApplicationPrincipal fills out's application fields from an application-principal whoami response.
+func applyApplicationPrincipal(out whoamiOutput, who *auth.WhoamiResponse) whoamiOutput {
+	out.PrincipalType = auth.PrincipalTypeApplication
+	if who.Application != nil {
+		out.ApplicationName = who.Application.Name
+		out.ServiceType = who.Application.ServiceType
+		out.ServiceAccount = who.Application.Username
+	}
+	out.Scopes = who.Auth.Scopes
+	return out
 }
 
 func getRole(isStaff, isSuperuser bool) string {
@@ -299,6 +336,10 @@ func printWhoami(output whoamiOutput) {
 		value string
 	}{
 		{"User", output.Username},
+		{"Application", output.ApplicationName},
+		{"Service type", output.ServiceType},
+		{"Service account", output.ServiceAccount},
+		{"Scopes", strings.Join(output.Scopes, ", ")},
 		{"Email", output.Email},
 		{"Phone", output.Phone},
 		{"Workspace", fmt.Sprintf("%s (%s)", output.WorkspaceName, output.WorkspaceURL)},
@@ -313,10 +354,22 @@ func printWhoami(output whoamiOutput) {
 		{"WS required", formatWSRequired(output.WorksessionRequiredForAccess, output.ActiveWorksessionCanonical)},
 	}
 
+	// Pad to the widest printed label so columns align regardless of which rows appear.
+	pad := 0
 	for _, l := range lines {
 		if l.value == "" || l.value == "0" {
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "%-13s%s\n", l.label+":", l.value)
+		if n := len(l.label) + 1; n > pad {
+			pad = n
+		}
+	}
+	pad++ // guarantee at least one space after the widest label
+
+	for _, l := range lines {
+		if l.value == "" || l.value == "0" {
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "%-*s%s\n", pad, l.label+":", l.value)
 	}
 }

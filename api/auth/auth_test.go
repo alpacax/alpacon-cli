@@ -477,3 +477,73 @@ func TestGetTokenScopes(t *testing.T) {
 		t.Errorf("expected empty ACL, got %q", scopes[2].ACL)
 	}
 }
+
+func TestGetWhoamiApplicationPrincipal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != whoamiURL {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"principal_type": "application",
+			"auth": {"method": "service_token", "scopes": ["server:read", "command:create"]},
+			"application": {"id": "app-1", "name": "ci-runner", "service_type": "ci_cd", "username": "svc-ci"}
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "alpst-x"}
+	resp, err := GetWhoami(ac)
+	if err != nil {
+		t.Fatalf("GetWhoami returned error: %v", err)
+	}
+	if resp.PrincipalType != "application" {
+		t.Errorf("principal_type = %q, want application", resp.PrincipalType)
+	}
+	if len(resp.Auth.Scopes) != 2 || resp.Auth.Scopes[0] != "server:read" {
+		t.Errorf("auth.scopes = %v", resp.Auth.Scopes)
+	}
+	if resp.Application == nil {
+		t.Fatal("application block is nil")
+	}
+	if resp.Application.Name != "ci-runner" || resp.Application.ServiceType != "ci_cd" || resp.Application.Username != "svc-ci" {
+		t.Errorf("application = %+v", resp.Application)
+	}
+}
+
+func TestGetWhoamiUserPrincipal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"principal_type": "user",
+			"auth": {"method": "jwt", "scopes": []},
+			"user": {"id": "u-1", "username": "alice", "email": "alice@example.com", "role": "superuser"}
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
+	resp, err := GetWhoami(ac)
+	if err != nil {
+		t.Fatalf("GetWhoami returned error: %v", err)
+	}
+	if resp.PrincipalType != "user" {
+		t.Errorf("principal_type = %q, want user", resp.PrincipalType)
+	}
+	if resp.Application != nil {
+		t.Errorf("application block should be nil for a user principal, got %+v", resp.Application)
+	}
+}
+
+func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
+	if _, err := GetWhoami(ac); err == nil {
+		t.Fatal("GetWhoami returned nil error for a response missing principal_type; want fail-closed error")
+	}
+}
