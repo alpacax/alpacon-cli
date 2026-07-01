@@ -37,6 +37,10 @@ func GetWhoami(ac *client.AlpaconClient) (*WhoamiResponse, error) {
 	if err = json.Unmarshal(body, &resp); err != nil {
 		return nil, err
 	}
+	// Fail closed: a 200 without a principal_type is a malformed identity response.
+	if resp.PrincipalType == "" {
+		return nil, errors.New("whoami response missing principal_type")
+	}
 	return &resp, nil
 }
 

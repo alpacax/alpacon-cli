@@ -534,3 +534,16 @@ func TestGetWhoamiUserPrincipal(t *testing.T) {
 		t.Errorf("application block should be nil for a user principal, got %+v", resp.Application)
 	}
 }
+
+func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
+	if _, err := GetWhoami(ac); err == nil {
+		t.Fatal("GetWhoami returned nil error for a response missing principal_type; want fail-closed error")
+	}
+}
