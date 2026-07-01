@@ -43,8 +43,9 @@ func pendingApprovalNextActions(retry NextAction) []NextAction {
 // --output json it writes a {"status":"pending_approval", ...} envelope to
 // stdout; otherwise it writes an actionable message to stderr. requestID may be
 // empty when the surface cannot supply one. retry is a surface-specific retry
-// action (e.g. the exact command to re-run); its Command stays a pure, execable
-// string so a machine consumer can run it directly, with any hint in Description.
+// action (e.g. the exact command to re-run); its Command stays a pure,
+// executable string so a machine consumer can run it directly, with any hint in
+// Description.
 // It never exits — the caller owns process exit so the exit-code contract stays
 // in one place.
 func PrintPendingApproval(message, requestID string, retry NextAction) {

@@ -37,7 +37,7 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 	assert.Equal(t, "apr-123", got.Context.RequestID)
 	assert.Equal(t, "needs approval", got.Message)
 	require.NotEmpty(t, got.NextActions)
-	// The re-run hint leads the next actions as a pure, execable command.
+	// The re-run hint leads the next actions as a pure, executable command.
 	assert.Equal(t, "alpacon exec srv -- sudo reboot", got.NextActions[0].Command)
 	// The console-approval pointer is guidance only—no runnable command.
 	last := got.NextActions[len(got.NextActions)-1]
