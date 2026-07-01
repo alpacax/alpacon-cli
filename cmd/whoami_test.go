@@ -6,10 +6,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestApplyApplicationPrincipal(t *testing.T) {
+	who := &auth.WhoamiResponse{
+		PrincipalType: "application",
+		Auth:          auth.WhoamiAuth{Scopes: []string{"server:read", "command:create"}},
+		Application:   &auth.WhoamiApplication{Name: "ci-runner", ServiceType: "ci_cd", Username: "svc-ci"},
+	}
+
+	out := applyApplicationPrincipal(whoamiOutput{}, who)
+
+	assert.Equal(t, "application", out.PrincipalType)
+	assert.Equal(t, "ci-runner", out.ApplicationName)
+	assert.Equal(t, "ci_cd", out.ServiceType)
+	assert.Equal(t, "svc-ci", out.ServiceAccount)
+	assert.Equal(t, []string{"server:read", "command:create"}, out.Scopes)
+}
+
+func TestApplicationFieldsOmittedForUserPrincipal(t *testing.T) {
+	// A user principal's JSON must not carry application keys (output unchanged).
+	body, err := json.Marshal(whoamiOutput{Username: "alice", AuthMethod: "Browser login"})
+	assert.NoError(t, err)
+
+	var got map[string]json.RawMessage
+	assert.NoError(t, json.Unmarshal(body, &got))
+	for _, k := range []string{"principal_type", "application_name", "service_type", "service_account", "scopes"} {
+		_, present := got[k]
+		assert.Falsef(t, present, "key %q must be absent for a user principal", k)
+	}
+}
 
 func TestGetAuthMethod(t *testing.T) {
 	tests := []struct {
@@ -19,6 +49,7 @@ func TestGetAuthMethod(t *testing.T) {
 		expected string
 	}{
 		{"browser login", "", "some-access-token", "Browser login"},
+		{"service token", "alpst-abc", "", "Service token"},
 		{"token", "some-token", "", "Token"},
 		{"both tokens prefers browser", "some-token", "some-access-token", "Browser login"},
 		{"no tokens", "", "", "unknown"},
@@ -39,6 +70,7 @@ func TestGetAuthClassification(t *testing.T) {
 		expected string
 	}{
 		{"browser login", config.Config{AccessToken: "some-access-token"}, "browser_login"},
+		{"service token", config.Config{Token: "alpst-x"}, "service_token"},
 		{"token", config.Config{Token: "some-token"}, "token"},
 		{"both tokens prefers browser", config.Config{Token: "some-token", AccessToken: "some-access-token"}, "browser_login"},
 		{"no tokens", config.Config{}, "unknown"},
@@ -47,6 +79,25 @@ func TestGetAuthClassification(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, getAuthClassification(tt.cfg))
+		})
+	}
+}
+
+func TestAuthClassificationFromMethod(t *testing.T) {
+	tests := []struct {
+		name     string
+		method   string
+		expected string
+	}{
+		{"browser login", "Browser login", "browser_login"},
+		{"service token", "Service token", "service_token"},
+		{"token", "Token", "token"},
+		{"unknown", "something else", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, authClassificationFromMethod(tt.method))
 		})
 	}
 }

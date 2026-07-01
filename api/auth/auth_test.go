@@ -13,7 +13,110 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	configpkg "github.com/alpacax/alpacon-cli/config"
 )
+
+func TestLoginAndSaveCredentialsTokenPreservesTargetMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != statusURL {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != `token="token-value"` {
+			t.Errorf("unexpected authorization header %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	err := LoginAndSaveCredentials(&LoginRequest{
+		WorkspaceURL:  ts.URL,
+		WorkspaceName: "tenant",
+		BaseDomain:    "private.example.com",
+	}, "token-value", false)
+	if err != nil {
+		t.Fatalf("LoginAndSaveCredentials returned error: %v", err)
+	}
+
+	assertSavedTarget(t, ts.URL, "tenant", "private.example.com", "token-value")
+}
+
+func TestLoginAndSaveCredentialsPasswordPreservesTargetMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	const expiresAt = "2026-06-09T00:00:00Z"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != loginURL {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode login request: %v", err)
+		}
+		wantKeys := map[string]bool{"workspace_url": true, "username": true, "password": true}
+		if len(body) != len(wantKeys) {
+			t.Errorf("request keys = %v, want only workspace_url, username, password", reflect.ValueOf(body).MapKeys())
+		}
+		for key := range body {
+			if !wantKeys[key] {
+				t.Errorf("unexpected request key %q", key)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(LoginResponse{
+			Token:     "session-token",
+			ExpiresAt: expiresAt,
+		})
+	}))
+	defer ts.Close()
+
+	err := LoginAndSaveCredentials(&LoginRequest{
+		WorkspaceURL:  ts.URL,
+		Username:      "admin",
+		Password:      "password",
+		WorkspaceName: "tenant",
+		BaseDomain:    "private.example.com",
+	}, "", false)
+	if err != nil {
+		t.Fatalf("LoginAndSaveCredentials returned error: %v", err)
+	}
+
+	cfg := assertSavedTarget(t, ts.URL, "tenant", "private.example.com", "session-token")
+	if cfg.ExpiresAt != expiresAt {
+		t.Errorf("ExpiresAt = %q, want %q", cfg.ExpiresAt, expiresAt)
+	}
+}
+
+// assertSavedTarget loads the persisted config and verifies the saved target metadata.
+func assertSavedTarget(t *testing.T, wantURL, wantName, wantBaseDomain, wantToken string) configpkg.Config {
+	t.Helper()
+
+	cfg, err := configpkg.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if cfg.WorkspaceURL != wantURL {
+		t.Errorf("WorkspaceURL = %q, want %q", cfg.WorkspaceURL, wantURL)
+	}
+	if cfg.WorkspaceName != wantName {
+		t.Errorf("WorkspaceName = %q, want %q", cfg.WorkspaceName, wantName)
+	}
+	if cfg.BaseDomain != wantBaseDomain {
+		t.Errorf("BaseDomain = %q, want %q", cfg.BaseDomain, wantBaseDomain)
+	}
+	if cfg.Token != wantToken {
+		t.Errorf("Token = %q, want %q", cfg.Token, wantToken)
+	}
+	return cfg
+}
 
 func TestGetAPITokenList_Pagination(t *testing.T) {
 	var requestCount atomic.Int32
@@ -135,12 +238,12 @@ func TestResolveTokenID(t *testing.T) {
 	)
 
 	tests := []struct {
-		name      string
-		input     string
-		count     int
-		wantID    string
-		wantHTTP  bool
-		wantErr   bool
+		name     string
+		input    string
+		count    int
+		wantID   string
+		wantHTTP bool
+		wantErr  bool
 	}{
 		{"uuid fast-path — no HTTP request", validUUID, 0, validUUID, false, false},
 		{"name found", tokenName, 1, tokenID, true, false},
@@ -372,5 +475,75 @@ func TestGetTokenScopes(t *testing.T) {
 	}
 	if scopes[2].ACL != "" {
 		t.Errorf("expected empty ACL, got %q", scopes[2].ACL)
+	}
+}
+
+func TestGetWhoamiApplicationPrincipal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != whoamiURL {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"principal_type": "application",
+			"auth": {"method": "service_token", "scopes": ["server:read", "command:create"]},
+			"application": {"id": "app-1", "name": "ci-runner", "service_type": "ci_cd", "username": "svc-ci"}
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "alpst-x"}
+	resp, err := GetWhoami(ac)
+	if err != nil {
+		t.Fatalf("GetWhoami returned error: %v", err)
+	}
+	if resp.PrincipalType != "application" {
+		t.Errorf("principal_type = %q, want application", resp.PrincipalType)
+	}
+	if len(resp.Auth.Scopes) != 2 || resp.Auth.Scopes[0] != "server:read" {
+		t.Errorf("auth.scopes = %v", resp.Auth.Scopes)
+	}
+	if resp.Application == nil {
+		t.Fatal("application block is nil")
+	}
+	if resp.Application.Name != "ci-runner" || resp.Application.ServiceType != "ci_cd" || resp.Application.Username != "svc-ci" {
+		t.Errorf("application = %+v", resp.Application)
+	}
+}
+
+func TestGetWhoamiUserPrincipal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"principal_type": "user",
+			"auth": {"method": "jwt", "scopes": []},
+			"user": {"id": "u-1", "username": "alice", "email": "alice@example.com", "role": "superuser"}
+		}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
+	resp, err := GetWhoami(ac)
+	if err != nil {
+		t.Fatalf("GetWhoami returned error: %v", err)
+	}
+	if resp.PrincipalType != "user" {
+		t.Errorf("principal_type = %q, want user", resp.PrincipalType)
+	}
+	if resp.Application != nil {
+		t.Errorf("application block should be nil for a user principal, got %+v", resp.Application)
+	}
+}
+
+func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
+	if _, err := GetWhoami(ac); err == nil {
+		t.Fatal("GetWhoami returned nil error for a response missing principal_type; want fail-closed error")
 	}
 }

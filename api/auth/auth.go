@@ -23,7 +23,26 @@ const (
 	tokenURL       = "/api/auth/tokens/"
 	tokenScopesURL = "/api/auth/tokens/scopes/"
 	statusURL      = "/api/status/"
+	whoamiURL      = "/api/auth/whoami/"
 )
+
+// GetWhoami fetches the caller's identity; a 404 means the endpoint is absent (old server).
+func GetWhoami(ac *client.AlpaconClient) (*WhoamiResponse, error) {
+	body, err := ac.SendGetRequest(whoamiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp WhoamiResponse
+	if err = json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+	// Fail closed: a 200 without a principal_type is a malformed identity response.
+	if resp.PrincipalType == "" {
+		return nil, errors.New("whoami response missing principal_type")
+	}
+	return &resp, nil
+}
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
 	httpClient := &http.Client{
@@ -35,7 +54,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		},
 	}
 
-	workspaceName := utils.ExtractWorkspaceName(loginReq.WorkspaceURL)
+	workspaceName, baseDomain := loginTargetMetadata(loginReq)
 
 	if token != "" {
 		alpaconClient := &client.AlpaconClient{
@@ -50,7 +69,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 			return err
 		}
 
-		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", "", 0, insecure)
+		err = config.CreateConfig(loginReq.WorkspaceURL, workspaceName, token, "", "", "", baseDomain, 0, insecure)
 		if err != nil {
 			return err
 		}
@@ -95,12 +114,25 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		return err
 	}
 
-	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", "", 0, insecure)
+	err = config.CreateConfig(workspaceURL, workspaceName, loginResponse.Token, loginResponse.ExpiresAt, "", "", baseDomain, 0, insecure)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func loginTargetMetadata(loginReq *LoginRequest) (workspaceName, baseDomain string) {
+	workspaceName = strings.TrimSpace(loginReq.WorkspaceName)
+	if workspaceName == "" {
+		workspaceName = utils.ExtractWorkspaceName(loginReq.WorkspaceURL)
+	}
+
+	baseDomain = strings.TrimSpace(loginReq.BaseDomain)
+	if baseDomain == "" {
+		baseDomain = utils.ExtractBaseDomain(loginReq.WorkspaceURL)
+	}
+	return workspaceName, baseDomain
 }
 
 func CreateAPIToken(ac *client.AlpaconClient, tokenRequest APITokenRequest) (string, error) {

@@ -170,6 +170,23 @@ func isApprovalDenial(result string, err error) bool {
 // fixed-interval ticker, and a precise deadline.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait, oversized bool) (string, error) {
 	result, err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, oversized)
+
+	// Status-level hold: the server parked this job at "awaiting_approval". With
+	// --wait, poll the SAME job until a reviewer approves it (re-submitting would
+	// create a duplicate command and approval request). Without --wait, return so
+	// the caller emits the pending-approval signal.
+	var pendingErr *event.PendingApprovalError
+	if errors.As(err, &pendingErr) {
+		if !wait {
+			return result, err
+		}
+		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
+		spinner.Start()
+		result, err = event.WaitForCommandApproval(ac, pendingErr.CommandID, approvalWaitTimeout, approvalWaitPollInterval)
+		spinner.Stop()
+		return result, err
+	}
+
 	if !wait || !isApprovalDenial(result, err) {
 		return result, err
 	}
@@ -210,6 +227,21 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // reRunHint is the exact command the caller invoked, so a human can copy-paste
 // it once the request is approved.
 func HandlePendingApproval(result string, err error, reRunHint string) bool {
+	// Status-level hold: the server parked the command at "awaiting_approval".
+	// The held job runs once approved, so point the user at `exec logs` to fetch
+	// the result later (re-running would submit a new, separately-held command).
+	var pendingErr *event.PendingApprovalError
+	if errors.As(err, &pendingErr) {
+		utils.PrintPendingApproval(
+			"Approval required—this command is held for human approval in the Alpacon console (web). "+
+				"It runs automatically once approved; pass --wait to block until then.",
+			"", // the command detail carries no approval request id
+			fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID),
+		)
+		os.Exit(utils.ExitCodePendingApproval)
+		return true
+	}
+
 	if !isApprovalDenial(result, err) {
 		return false
 	}
@@ -229,8 +261,8 @@ func HandlePendingApproval(result string, err error, reRunHint string) bool {
 // to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, oversized bool) (string, error) {
 	result, err := event.RunCommand(ac, serverName, command, username, groupname, env, workSessionID, oversized)
-	if phased, ok := asPhasedError(err); ok {
-		return result, phased
+	if propagated, ok := propagateCommandError(err); ok {
+		return result, propagated
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
@@ -250,9 +282,9 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 				return err
 			},
 		})
-		// RetryOperation may surface a phased error; re-check after HandleCommonErrors.
-		if phased, ok := asPhasedError(err); ok {
-			return result, phased
+		// RetryOperation may surface a command-outcome error; re-check after HandleCommonErrors.
+		if propagated, ok := propagateCommandError(err); ok {
+			return result, propagated
 		}
 		if err != nil {
 			return "", fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
@@ -290,6 +322,22 @@ func HandleCommandResult(result string, err error) {
 	if hint := sudoDenialHint(result); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
+}
+
+// propagateCommandError reports errors that represent a command outcome the
+// caller must receive unchanged: phased errors (RemoteCommandError,
+// ClientTimeoutError) and a PendingApprovalError (a job held for human approval).
+// RunCommandWithRetry returns these as-is so they are never MFA-retried or
+// wrapped, keeping the result intact for the caller's outcome handling.
+func propagateCommandError(err error) (error, bool) {
+	if phased, ok := asPhasedError(err); ok {
+		return phased, true
+	}
+	var pending *event.PendingApprovalError
+	if errors.As(err, &pending) {
+		return pending, true
+	}
+	return nil, false
 }
 
 // asPhasedError unwraps err to a RemoteCommandError or ClientTimeoutError.

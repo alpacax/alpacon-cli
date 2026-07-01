@@ -17,7 +17,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultBaseDomain = "alpacon.io"
+const (
+	defaultBaseDomain = "alpacon.io"
+
+	// whoami verification outcomes (see classifyWhoamiVerification).
+	whoamiVerified = "verified"
+	whoamiFallback = "fallback"
+	whoamiFail     = "fail"
+)
 
 // knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
 // Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
@@ -35,25 +42,28 @@ var loginCmd = &cobra.Command{
 	Short: "Log in to Alpacon",
 	Long: `Log in to Alpacon.
 
-Browser authentication is required. The CLI opens the browser automatically
-and waits for completion. Do not use --no-browser unless running in a
+Browser authentication is the default interactive flow. The CLI opens the
+browser automatically and waits for completion. Use -t with an explicit
+target for CI/CD or automation. Do not use --no-browser unless running in a
 headless environment (SSH, containers) where no browser is available.
 
   Alpacon Cloud:
     alpacon login                                      (interactive prompts)
-    alpacon login --workspace <name> --region <region>  (non-interactive)
+    alpacon login --workspace <name> --region <region>  (explicit target)
 
   Self-hosted:
     alpacon login <host>
 
-Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
+Re-login: in an interactive shell, 'alpacon login' without arguments prompts
+with the saved target as the default. Non-interactive login requires a HOST or
+--workspace/--region.`,
 	Example: `  # Alpacon Cloud login (interactive)
   alpacon login
 
-  # Alpacon Cloud login (non-interactive, for CI/CD or AI agents)
+  # Alpacon Cloud login with an explicit target
   alpacon login --workspace myworkspace --region us1
 
-  # Alpacon Cloud login with an API token
+  # Alpacon Cloud login with an API token (for CI/CD or AI agents)
   alpacon login --workspace myworkspace --region us1 -t <api-token>
 
   # Self-hosted
@@ -68,9 +78,9 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
   # Self-signed certificates
   alpacon login alpacon.example.com --insecure
 
-  # Headless environment only (no browser available)
-  alpacon login --no-browser
-  ALPACON_NO_BROWSER=1 alpacon login
+  # Manual headless login (no browser available)
+  alpacon login --workspace myworkspace --region us1 --no-browser
+  ALPACON_NO_BROWSER=1 alpacon login --workspace myworkspace --region us1
 
   # Alpacon Cloud via direct URL with an API token (deprecated; prefer --workspace/--region)
   alpacon login myworkspace.us1.alpacon.io -t <api-token>`,
@@ -82,25 +92,13 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 		}
 
 		if !ok {
-			// No args, no flags — try saved config for re-login
-			cfg, err := config.LoadConfig()
-			if err == nil && cfg.WorkspaceURL != "" {
-				workspaceURL = cfg.WorkspaceURL
-				workspaceName = cfg.WorkspaceName
-				baseDomain = cfg.BaseDomain
-				if baseDomain == "" {
-					baseDomain = utils.ExtractBaseDomain(workspaceURL)
-				}
-				utils.CliInfo("Using saved workspace: %s", workspaceURL)
-			} else {
-				// Interactive Alpacon Cloud prompts
-				workspaceName = utils.PromptForRequiredInput("Workspace name: ")
-				region := utils.PromptForInputWithDefault(
-					fmt.Sprintf("Region [%s] (%s): ", knownCloudRegions[0], cloudRegionsHint()),
-					knownCloudRegions[0],
-				)
-				baseDomain = defaultBaseDomain
-				workspaceURL = buildCloudWorkspaceURL(workspaceName, region)
+			if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
+				utils.CliErrorWithExit("%s", err.Error())
+			}
+			cfg, _ := config.LoadConfig()
+			workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)
+			if err != nil {
+				utils.CliErrorWithExit("%s", err.Error())
 			}
 		}
 
@@ -150,14 +148,16 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 			}
 
 		} else {
-			if (workspaceURL == "" || username == "" || password == "") && token == "" {
-				workspaceURL, username, password = promptForCredentials(workspaceURL, username, password)
+			if (username == "" || password == "") && token == "" {
+				username, password = promptForCredentials(username, password)
 			}
 
 			loginRequest := &auth.LoginRequest{
-				WorkspaceURL: workspaceURL,
-				Username:     username,
-				Password:     password,
+				WorkspaceURL:  workspaceURL,
+				Username:      username,
+				Password:      password,
+				WorkspaceName: workspaceName,
+				BaseDomain:    baseDomain,
 			}
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
@@ -173,8 +173,17 @@ Re-login: 'alpacon login' without arguments reuses the saved workspace.`,
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
-		if err := ac.LoadCurrentUser(); err != nil {
-			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+		who, whoErr := auth.GetWhoami(ac)
+		switch classifyWhoamiVerification(whoErr) {
+		case whoamiVerified:
+			if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
+				utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
+			}
+		case whoamiFallback:
+			// Old server without whoami: fall back to legacy prefix-based verification.
+			verifyLoginLegacy(ac, token)
+		default:
+			utils.CliErrorWithExit("Login succeeded but failed to verify your credential: %s. Please try logging in again.", whoErr)
 		}
 
 		utils.CliSuccess("Login succeeded!")
@@ -193,15 +202,66 @@ func init() {
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
 }
 
-func promptForCredentials(workspaceURL, username, password string) (string, string, string) {
-	if workspaceURL == "" {
-		configFile, err := config.LoadConfig()
-		if err == nil && configFile.WorkspaceURL != "" {
-			workspaceURL = configFile.WorkspaceURL
-			utils.CliInfo("Using saved workspace: %s", configFile.WorkspaceURL)
+func promptForLoginTarget(cfg config.Config) (workspaceURL, workspaceName, baseDomain string, err error) {
+	return promptForLoginTargetWithPrompts(cfg, utils.PromptForInputWithDefault, utils.PromptForRequiredInput)
+}
+
+func promptForLoginTargetWithPrompts(
+	cfg config.Config,
+	promptWithDefault func(promptText, defaultValue string) string,
+	promptRequired func(promptText string) string,
+) (workspaceURL, workspaceName, baseDomain string, err error) {
+	if cfg.WorkspaceURL != "" && !isCloudWorkspaceURL(cfg.WorkspaceURL) {
+		savedURL := formatHostURL(cfg.WorkspaceURL)
+		host := promptWithDefault(
+			fmt.Sprintf("Host [%s]: ", savedURL),
+			savedURL,
+		)
+		if err := validateHostTarget(host); err != nil {
+			return "", "", "", err
 		}
+		workspaceURL = formatHostURL(host)
+		baseDomain = utils.ExtractBaseDomain(workspaceURL)
+		if hostBelongsToBaseDomain(workspaceURL, cfg.BaseDomain) {
+			baseDomain = cfg.BaseDomain
+		}
+		workspaceName = utils.ExtractWorkspaceName(workspaceURL)
+		if workspaceURL == savedURL && cfg.WorkspaceName != "" {
+			workspaceName = cfg.WorkspaceName
+		}
+		return workspaceURL, workspaceName, baseDomain, nil
 	}
 
+	defaultWorkspace, defaultRegion := cloudLoginDefaults(cfg)
+	if defaultWorkspace == "" {
+		workspaceName = promptRequired("Workspace name: ")
+	} else {
+		workspaceName = promptWithDefault(
+			fmt.Sprintf("Workspace name [%s]: ", defaultWorkspace),
+			defaultWorkspace,
+		)
+	}
+
+	region := promptWithDefault(
+		fmt.Sprintf("Region [%s] (%s): ", defaultRegion, cloudRegionsHint()),
+		defaultRegion,
+	)
+	workspaceName = strings.TrimSpace(workspaceName)
+	region = strings.TrimSpace(region)
+	if err := validateCloudTargetParts(workspaceName, region); err != nil {
+		return "", "", "", err
+	}
+	return buildCloudWorkspaceURL(workspaceName, region), workspaceName, defaultBaseDomain, nil
+}
+
+func validateInteractiveLoginTargetPrompt(isInteractive bool) error {
+	if isInteractive {
+		return nil
+	}
+	return errors.New("login target is required in non-interactive mode. Pass a HOST or use --workspace and --region; use -t with an explicit target for CI/CD or automation")
+}
+
+func promptForCredentials(username, password string) (string, string) {
 	if username == "" {
 		username = utils.PromptForRequiredInput("Username: ")
 	}
@@ -210,16 +270,113 @@ func promptForCredentials(workspaceURL, username, password string) (string, stri
 		password = utils.PromptForPassword("Password: ")
 	}
 
-	return workspaceURL, username, password
+	return username, password
 }
 
 func cloudRegionsHint() string {
 	return strings.Join(knownCloudRegions, ", ")
 }
 
+func cloudLoginDefaults(cfg config.Config) (workspace, region string) {
+	workspace, region, ok := parseCloudWorkspaceURL(cfg.WorkspaceURL)
+	if ok {
+		return workspace, region
+	}
+
+	if cfg.WorkspaceName != "" {
+		workspace = cfg.WorkspaceName
+	}
+	return workspace, knownCloudRegions[0]
+}
+
+func hostBelongsToBaseDomain(workspaceURL, baseDomain string) bool {
+	baseDomain = strings.Trim(strings.ToLower(strings.TrimSpace(baseDomain)), ".")
+	if baseDomain == "" {
+		return false
+	}
+
+	parsed, err := url.Parse(formatHostURL(workspaceURL))
+	if err != nil {
+		return false
+	}
+	hostname := strings.Trim(strings.ToLower(parsed.Hostname()), ".")
+	return hostname == baseDomain || strings.HasSuffix(hostname, "."+baseDomain)
+}
+
 // buildCloudWorkspaceURL assembles an Alpacon Cloud workspace URL.
 func buildCloudWorkspaceURL(workspace, region string) string {
 	return fmt.Sprintf("https://%s.%s.%s", workspace, region, defaultBaseDomain)
+}
+
+func validateCloudTargetParts(workspace, region string) error {
+	if err := validateDNSLabel("workspace", workspace); err != nil {
+		return err
+	}
+	if err := validateDNSLabel("region", region); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDNSLabel(name, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fmt.Errorf("%s cannot be blank", name)
+	}
+	if len(value) > 63 {
+		return fmt.Errorf("%s must be 63 characters or fewer", name)
+	}
+	if strings.HasPrefix(value, "-") || strings.HasSuffix(value, "-") {
+		return fmt.Errorf("%s cannot start or end with '-'", name)
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' {
+			continue
+		}
+		return fmt.Errorf("%s must contain only letters, numbers, and hyphens", name)
+	}
+	return nil
+}
+
+// isCloudWorkspaceURL reports true only for the canonical cloud form, so a custom self-hosted URL is never rewritten.
+func isCloudWorkspaceURL(workspaceURL string) bool {
+	workspace, region, ok := parseCloudWorkspaceURL(workspaceURL)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(formatHostURL(workspaceURL), buildCloudWorkspaceURL(workspace, region))
+}
+
+// parseHostURL trims the input, defaults a missing scheme to https, and parses it.
+func parseHostURL(raw string) (*url.URL, error) {
+	raw = strings.TrimSpace(raw)
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	return url.Parse(raw)
+}
+
+func parseCloudWorkspaceURL(workspaceURL string) (workspace, region string, ok bool) {
+	if strings.TrimSpace(workspaceURL) == "" {
+		return "", "", false
+	}
+
+	parsed, err := parseHostURL(workspaceURL)
+	if err != nil {
+		return "", "", false
+	}
+
+	parts := strings.Split(parsed.Hostname(), ".")
+	if len(parts) != 4 {
+		return "", "", false
+	}
+	if !strings.EqualFold(strings.Join(parts[2:], "."), defaultBaseDomain) {
+		return "", "", false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // normalizeCloudFlags trims flag values and reports whether the user supplied
@@ -249,7 +406,7 @@ func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, 
 	switch {
 	case len(args) > 0:
 		// Host mode: self-hosted, plus deprecated Alpacon Cloud direct URLs (backward compat).
-		if err := checkURLPath(args[0]); err != nil {
+		if err := validateHostTarget(args[0]); err != nil {
 			return "", "", "", false, err
 		}
 		workspaceURL = formatHostURL(args[0])
@@ -265,8 +422,11 @@ func resolveLoginTarget(args []string, workspace, region string) (workspaceURL, 
 	}
 }
 
-// validateCloudFlags rejects the case where exactly one of workspace/region is set.
+// validateCloudFlags validates the paired --workspace/--region flags.
 func validateCloudFlags(workspace, region string) error {
+	if workspace == "" && region == "" {
+		return nil
+	}
 	if workspace != "" && region == "" {
 		return fmt.Errorf(
 			"--region is required for Alpacon Cloud.\nAvailable regions: %s\nTry: alpacon login --workspace %s --region %s",
@@ -279,36 +439,90 @@ func validateCloudFlags(workspace, region string) error {
 			region,
 		)
 	}
+	return validateCloudTargetParts(workspace, region)
+}
+
+// validateHostTarget rejects HOST values beyond scheme, host, and optional port.
+func validateHostTarget(host string) error {
+	parsed, err := parseHostURL(host)
+	if err != nil {
+		return unsupportedHostTargetError()
+	}
+	if parsed.Hostname() == "" {
+		return errors.New("host is required (e.g. 'alpacon login alpacon.example.com')")
+	}
+	// Only http/https are valid; anything else (e.g. ssh://) would otherwise
+	// slip past formatHostURL and produce a malformed URL like https://ssh://host.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return unsupportedHostTargetError()
+	}
+	// A bare '#' yields an empty Fragment with no ForceFragment flag (net/url has
+	// no such field), so check the raw input directly—'#' is never valid in an authority.
+	if strings.Contains(host, "#") {
+		return unsupportedHostTargetError()
+	}
+	if parsed.User != nil || parsed.Opaque != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.TrimSuffix(parsed.Path, "/") != "" {
+		return unsupportedHostTargetError()
+	}
 	return nil
 }
 
-// checkURLPath returns a migration-hint error if the host argument contains a path.
-// This catches the legacy alpacon.io/workspace format that is no longer supported.
-// TODO: remove once the new workspace/region flow is well-established.
-func checkURLPath(host string) error {
-	raw := host
-	if !strings.Contains(raw, "://") {
-		raw = "https://" + raw
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return nil
-	}
-	if p := strings.TrimSuffix(parsed.Path, "/"); p != "" {
-		return errors.New("URL paths are not supported. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass the host without a path (e.g. 'alpacon login alpacon.example.com')")
-	}
-	return nil
+func unsupportedHostTargetError() error {
+	return errors.New("URL credentials, paths, queries, and fragments are not supported, and the scheme must be http or https. For Alpacon Cloud use 'alpacon login --workspace <name> --region <region>'; for self-hosted pass only the host, with optional http/https scheme and port (e.g. 'alpacon login alpacon.example.com')")
 }
 
 // formatHostURL normalizes a host argument into a full URL.
 // localhost and 127.0.0.1 default to http://, everything else to https://.
 func formatHostURL(host string) string {
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+	host = strings.TrimSpace(host)
+	lowerHost := strings.ToLower(host)
+	if strings.HasPrefix(lowerHost, "http://") || strings.HasPrefix(lowerHost, "https://") {
 		return strings.TrimSuffix(host, "/")
 	}
 	scheme := "https"
-	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") {
-		scheme = "http"
+	// Match loopback by exact hostname so e.g. localhost.example.com stays https.
+	if parsed, err := parseHostURL(host); err == nil {
+		switch strings.ToLower(parsed.Hostname()) {
+		case "localhost", "127.0.0.1", "::1":
+			scheme = "http"
+		}
 	}
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
+}
+
+// classifyWhoamiVerification maps a whoami error to verified / fallback (404) /
+// fail (401 or any other error—never swallowed as a fallback).
+func classifyWhoamiVerification(whoErr error) string {
+	switch {
+	case whoErr == nil:
+		return whoamiVerified
+	case utils.HTTPStatusCode(whoErr) == http.StatusNotFound:
+		return whoamiFallback
+	default:
+		return whoamiFail
+	}
+}
+
+// verifyLoginLegacy is the pre-whoami verification used against servers without the whoami endpoint.
+func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
+	if config.IsServiceToken(token) {
+		utils.CliInfo("Authenticated with a service token. Service tokens are application principals and have no user profile, so user details are unavailable.")
+		return
+	}
+	if err := ac.LoadCurrentUser(); err != nil {
+		if shouldFailOnProfileError(token) {
+			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+		}
+		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
+	}
+}
+
+// shouldFailOnProfileError reports whether a failed user-profile load should abort
+// login. It is only consulted for non-service-token logins; service tokens skip the
+// preload entirely. Browser (Auth0) and username/password logins are human logins that
+// always have a user profile, so a failed preload signals a real problem and is fatal.
+// A personal API token was already validated against /api/status/ in
+// LoginAndSaveCredentials, so a failed preload is non-fatal.
+func shouldFailOnProfileError(token string) bool {
+	return token == ""
 }

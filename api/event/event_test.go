@@ -685,6 +685,107 @@ func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	assert.Contains(t, err.Error(), "alpacon login")
 }
 
+func TestRunCommand_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "awaiting_approval"})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "", false)
+	require.Error(t, err)
+	var pending *PendingApprovalError
+	require.True(t, errors.As(err, &pending), "expected PendingApprovalError, got %T: %v", err, err)
+	assert.Equal(t, "cmd-1", pending.CommandID)
+}
+
+func TestRunCommand_RejectedReturnsError(t *testing.T) {
+	t.Setenv("ALPACON_EXEC_TIMEOUT", "")
+	ts := newRunCommandServerWithDetails(t, EventDetails{ID: "cmd-1", Status: "rejected"})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "", false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected")
+	var pending *PendingApprovalError
+	assert.False(t, errors.As(err, &pending), "rejected must not be a PendingApprovalError")
+}
+
+func TestWaitForCommandApproval_ResolvesToSuccess(t *testing.T) {
+	ts := newCommandPollServer([]EventDetails{
+		{ID: "cmd-1", Status: "awaiting_approval"},
+		{ID: "cmd-1", Status: "awaiting_approval"},
+		{ID: "cmd-1", Status: "running"},
+		{ID: "cmd-1", Status: "success", Success: boolPtr(true), Result: "done"},
+	})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	result, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, "done", result)
+}
+
+func TestWaitForCommandApproval_ToleratesTransitionError(t *testing.T) {
+	// After approval the server briefly reports the unreachable "error" fallback
+	// (verification flipped to approved, delivered_at not yet set) before the
+	// command is delivered. The approval poll must wait through it, not fail.
+	ts := newCommandPollServer([]EventDetails{
+		{ID: "cmd-1", Status: "awaiting_approval"},
+		{ID: "cmd-1", Status: "error"},
+		{ID: "cmd-1", Status: "running"},
+		{ID: "cmd-1", Status: "success", Success: boolPtr(true), Result: "done"},
+	})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	result, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
+	require.NoError(t, err)
+	assert.Equal(t, "done", result)
+}
+
+func TestWaitForCommandApproval_TimeoutReturnsPendingApproval(t *testing.T) {
+	ts := newCommandPollServer([]EventDetails{{ID: "cmd-1", Status: "awaiting_approval"}})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	// The job never leaves awaiting_approval, so the bounded wait elapses and we
+	// surface a PendingApprovalError so the caller emits the pending signal.
+	_, err := WaitForCommandApproval(ac, "cmd-1", 40*time.Millisecond, 5*time.Millisecond)
+	require.Error(t, err)
+	var pending *PendingApprovalError
+	require.True(t, errors.As(err, &pending), "expected PendingApprovalError on timeout, got %T: %v", err, err)
+	assert.Equal(t, "cmd-1", pending.CommandID)
+}
+
+func TestWaitForCommandApproval_RejectedReturnsError(t *testing.T) {
+	ts := newCommandPollServer([]EventDetails{
+		{ID: "cmd-1", Status: "awaiting_approval"},
+		{ID: "cmd-1", Status: "rejected"},
+	})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := WaitForCommandApproval(ac, "cmd-1", time.Second, time.Millisecond)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rejected")
+}
+
+// newCommandPollServer serves GET /api/events/commands/{id}/ by returning each
+// EventDetails in seq on successive calls; the final entry repeats. Used to drive
+// WaitForCommandApproval through a status transition.
+func newCommandPollServer(seq []EventDetails) *httptest.Server {
+	var calls atomic.Int32
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		idx := int(calls.Add(1)) - 1
+		if idx >= len(seq) {
+			idx = len(seq) - 1
+		}
+		_ = json.NewEncoder(w).Encode(seq[idx])
+	}))
+}
+
 func newRunCommandServerWithDetails(t *testing.T, details EventDetails) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

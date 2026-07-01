@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -60,6 +61,67 @@ func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
 	_, err := ac.SendGetRequest("/api/test/")
 	assert.ErrorContains(t, err, "authentication failed")
 	assert.NotContains(t, err.Error(), "{}")
+}
+
+func TestSendRequest_404ExposesStatusCode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail": "not found"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+}
+
+func TestSendRequest_404EmptyBodyExposesStatusCode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+}
+
+func TestSendRequest_404HTMLBodyExposesStatusCode(t *testing.T) {
+	// An old server/proxy without the endpoint may answer 404 with an HTML page;
+	// the status must still reach callers so the whoami legacy fallback triggers.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<html><body>404 Not Found</body></html>`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+}
+
+func TestSendRequest_401ExposesStatusCode(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail": "invalid token"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+}
+
+func TestHTTPStatusCode_NonAPIErrorIsZero(t *testing.T) {
+	assert.Equal(t, 0, utils.HTTPStatusCode(errors.New("boom")))
+	assert.Equal(t, 0, utils.HTTPStatusCode(nil))
 }
 
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
