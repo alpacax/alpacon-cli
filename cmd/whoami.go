@@ -50,15 +50,22 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			return
 		}
 
-		// Only a service token can be an application principal, so skip the whoami
-		// round-trip for user credentials, which fall through to the user path below.
+		// Only a service token can be an application principal. Service tokens have no
+		// user profile, so resolve identity via whoami and return without falling
+		// through to the user-only IAM endpoint, which would always fail for them.
 		if config.IsServiceToken(cfg.Token) {
-			if who, whoErr := auth.GetWhoami(ac); whoErr == nil && who.PrincipalType == auth.PrincipalTypeApplication {
+			who, whoErr := auth.GetWhoami(ac)
+			switch {
+			case whoErr != nil:
+				utils.CliWarning("Could not fetch application identity: %s", whoErr)
+			case who.PrincipalType == auth.PrincipalTypeApplication:
 				output = applyApplicationPrincipal(output, who)
-				warnIfExpiringSoon(cfg)
-				printWhoami(output)
-				return
+			default:
+				utils.CliWarning("Unexpected principal type %q for service token.", who.PrincipalType)
 			}
+			warnIfExpiringSoon(cfg)
+			printWhoami(output)
+			return
 		}
 
 		user, err := iam.GetCurrentUser(ac)
