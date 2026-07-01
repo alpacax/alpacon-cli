@@ -245,7 +245,7 @@ Next:
 Note: Tokens issued by Alpacon (service or personal API token) bypass this check.
 ```
 
-With `--output json`, the same refusal is a structured envelope on stderr—scripts and AI agents branch on `error_code` and run `next_actions` verbatim:
+With `--output json`, the same refusal is a structured envelope on stderr—scripts and AI agents branch on `error_code` and exec each `next_actions[].command` directly (the human hint, when present, is a separate `description` field):
 
 ```json
 {
@@ -261,10 +261,10 @@ With `--output json`, the same refusal is a structured envelope on stderr—scri
     "current_worksession": null
   },
   "next_actions": [
-    "alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>",
-    "alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
-    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use  # none active? create a new one (human)",
-    "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --requester-type agent  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)"
+    {"command": "alpacon work-session ls --status active", "description": "find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>"},
+    {"command": "alpacon work-session use <ID>", "description": "human: attach an existing session (rejects agent sessions)"},
+    {"command": "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --use", "description": "none active? create a new one (human)"},
+    {"command": "alpacon work-session create --scope command --server prod-1 --expires-in 1h --purpose \"<intent>\" --requester-type agent", "description": "none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)"}
   ]
 }
 ```
