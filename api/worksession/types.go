@@ -34,11 +34,13 @@ type Adjustments struct {
 	Servers *ServerDiff `json:"servers,omitempty"`
 }
 
+// ScopeDiff holds the requested (old) and granted (new) scope lists.
 type ScopeDiff struct {
 	Old []string `json:"old"`
 	New []string `json:"new"`
 }
 
+// ServerDiff holds the requested (old) and granted (new) server lists.
 type ServerDiff struct {
 	Old []types.ServerSummary `json:"old"`
 	New []types.ServerSummary `json:"new"`
