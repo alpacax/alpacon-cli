@@ -323,3 +323,42 @@ func TestUpdateWorkSession(t *testing.T) {
 }
 
 func newString(s string) *string { return &s }
+
+func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
+	body := []byte(`{
+		"id": "ses-1",
+		"status": "approved",
+		"adjustments": {
+			"scopes": {"old": ["command", "websh"], "new": ["command"]},
+			"servers": {
+				"old": [{"id": "srv-1", "name": "web-01"}, {"id": "srv-2", "name": "db-01"}],
+				"new": [{"id": "srv-1", "name": "web-01"}]
+			}
+		},
+		"recommendations": [
+			{"id": "r1", "text": "Rotate the key", "severity": "high", "source": "admin_added", "auto_checkable": false},
+			{"id": "r2", "text": "Prefer reload", "severity": "low", "source": "ai_suggested", "auto_checkable": true}
+		]
+	}`)
+
+	var ws WorkSession
+	assert.NoError(t, json.Unmarshal(body, &ws))
+
+	assert.NotNil(t, ws.Adjustments)
+	assert.Equal(t, []string{"command", "websh"}, ws.Adjustments.Scopes.Old)
+	assert.Equal(t, []string{"command"}, ws.Adjustments.Scopes.New)
+	assert.Equal(t, "web-01", ws.Adjustments.Servers.Old[0].Name)
+	assert.Len(t, ws.Adjustments.Servers.New, 1)
+
+	assert.Len(t, ws.Recommendations, 2)
+	assert.Equal(t, "high", ws.Recommendations[0].Severity)
+	assert.Equal(t, "Rotate the key", ws.Recommendations[0].Text)
+	assert.True(t, ws.Recommendations[1].AutoCheckable)
+}
+
+func TestWorkSessionUnmarshalNoAdjustments(t *testing.T) {
+	var ws WorkSession
+	assert.NoError(t, json.Unmarshal([]byte(`{"id":"ses-1","adjustments":null,"recommendations":[]}`), &ws))
+	assert.Nil(t, ws.Adjustments)
+	assert.Empty(t, ws.Recommendations)
+}
