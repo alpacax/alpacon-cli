@@ -24,8 +24,8 @@ type WorkSession struct {
 	AddedAt           time.Time             `json:"added_at"`
 	UpdatedAt         time.Time             `json:"updated_at"`
 	SudoPolicies      []SudoPolicyInline    `json:"sudo_policies"`
-	Adjustments       *Adjustments          `json:"adjustments,omitempty"`
-	Recommendations   []Recommendation      `json:"recommendations,omitempty"`
+	Adjustments       *Adjustments          `json:"adjustments"`
+	Recommendations   []Recommendation      `json:"recommendations"`
 }
 
 // Adjustments is the approver's diff; each dimension is set only when changed, nil when unchanged.
