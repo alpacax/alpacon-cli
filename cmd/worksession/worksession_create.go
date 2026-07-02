@@ -206,6 +206,7 @@ so it is recorded and scoped accordingly.`,
 				return
 			}
 			utils.CliSuccess("%s", message)
+			printSessionAdvisories(activeSession)
 			return
 		case useDecisionSkipScheduled:
 			if !waitApproval {
@@ -214,6 +215,7 @@ so it is recorded and scoped accordingly.`,
 					return
 				}
 				utils.CliInfo("Session is scheduled to activate. Run 'alpacon work-session use %s' once active.", session.ID)
+				printSessionAdvisories(session)
 				return
 			}
 		case useDecisionErrorNeedsWait:
@@ -239,7 +241,9 @@ so it is recorded and scoped accordingly.`,
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
+				return
 			}
+			printSessionAdvisories(session)
 			return
 		}
 
