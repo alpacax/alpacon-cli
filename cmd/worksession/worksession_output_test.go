@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -246,6 +247,53 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "extend", got.Operation)
 	assert.Equal(t, "ses-active", got.WorkSessionID)
 	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
+}
+
+func TestFormatAdjustments(t *testing.T) {
+	tests := []struct {
+		name string
+		adj  *wsapi.Adjustments
+		want string
+	}{
+		{"nil", nil, ""},
+		{
+			"scopes only",
+			&wsapi.Adjustments{Scopes: &wsapi.ScopeDiff{Old: []string{"command", "websh"}, New: []string{"command"}}},
+			"  scopes:  command, websh → command",
+		},
+		{
+			"servers only",
+			&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+				Old: []types.ServerSummary{{Name: "web-01"}, {Name: "db-01"}},
+				New: []types.ServerSummary{{Name: "web-01"}},
+			}},
+			"  servers: web-01, db-01 → web-01",
+		},
+		{
+			"both",
+			&wsapi.Adjustments{
+				Scopes:  &wsapi.ScopeDiff{Old: []string{"command"}, New: []string{}},
+				Servers: &wsapi.ServerDiff{Old: []types.ServerSummary{{Name: "web-01"}}, New: []types.ServerSummary{{Name: "web-01"}}},
+			},
+			"  scopes:  command → none\n  servers: web-01 → web-01",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatAdjustments(tt.adj))
+		})
+	}
+}
+
+func TestFormatRecommendations(t *testing.T) {
+	assert.Equal(t, "", formatRecommendations(nil))
+	assert.Equal(t, "", formatRecommendations([]wsapi.Recommendation{}))
+
+	got := formatRecommendations([]wsapi.Recommendation{
+		{Severity: "high", Text: "Rotate the key"},
+		{Severity: "low", Text: "Prefer reload"},
+	})
+	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload", got)
 }
 
 func setupWorkSessionCommandConfig(t *testing.T, workspaceURL string) {

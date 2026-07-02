@@ -3,8 +3,10 @@ package worksession
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -75,4 +77,53 @@ func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 		// Keeps stderr structured; PrintJSONError falls back to minimal JSON if marshalling fails again.
 		utils.CliErrorEnvelopeWithExit(output.Operation, err, "Failed to marshal work-session result: %s", err)
 	}
+}
+
+// formatAdjustments renders the approver's scope/server diff as an indented
+// multi-line block, or "" when there was no adjustment.
+func formatAdjustments(adj *wsapi.Adjustments) string {
+	if adj == nil {
+		return ""
+	}
+	var lines []string
+	if adj.Scopes != nil {
+		lines = append(lines, fmt.Sprintf("  scopes:  %s → %s",
+			joinOrNone(adj.Scopes.Old), joinOrNone(adj.Scopes.New)))
+	}
+	if adj.Servers != nil {
+		lines = append(lines, fmt.Sprintf("  servers: %s → %s",
+			joinServerNames(adj.Servers.Old), joinServerNames(adj.Servers.New)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// formatRecommendations renders approver recommendations, one "[SEVERITY] text"
+// line each in server-provided order, or "" when there are none.
+func formatRecommendations(recs []wsapi.Recommendation) string {
+	if len(recs) == 0 {
+		return ""
+	}
+	lines := make([]string, len(recs))
+	for i, r := range recs {
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(r.Severity), r.Text)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func joinOrNone(items []string) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ", ")
+}
+
+func joinServerNames(servers []types.ServerSummary) string {
+	if len(servers) == 0 {
+		return "none"
+	}
+	names := make([]string, len(servers))
+	for i, s := range servers {
+		names[i] = s.Name
+	}
+	return strings.Join(names, ", ")
 }
