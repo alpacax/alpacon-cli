@@ -110,6 +110,18 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	return strings.Join(lines, "\n")
 }
 
+// printSessionAdvisories surfaces the approver's adjustments (as a warning,
+// since requested access may have been reduced) and recommendations. Text mode
+// only — JSON callers return before reaching this.
+func printSessionAdvisories(session *wsapi.WorkSession) {
+	if block := formatAdjustments(session.Adjustments); block != "" {
+		utils.CliWarning("Approver adjusted your request:\n%s", block)
+	}
+	if block := formatRecommendations(session.Recommendations); block != "" {
+		utils.CliInfo("Recommendations from approver:\n%s", block)
+	}
+}
+
 func joinOrNone(items []string) string {
 	if len(items) == 0 {
 		return "none"
