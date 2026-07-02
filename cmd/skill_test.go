@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -161,6 +162,11 @@ func TestSkillGateCodesMatchCLI(t *testing.T) {
 	for _, code := range wantCodes {
 		assert.True(t, found[code], "skill missing gate code %q", code)
 	}
+}
+
+func TestSkillExitCodesMatchCLI(t *testing.T) {
+	assert.Contains(t, skills.SkillMD, fmt.Sprintf("| `%d` | work-session gate denied", utils.ExitCodeWorkSessionDenied))
+	assert.Contains(t, skills.SkillMD, fmt.Sprintf("| `%d` | pending human approval", utils.ExitCodePendingApproval))
 }
 
 func TestSkillFrontmatter(t *testing.T) {
