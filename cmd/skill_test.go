@@ -115,3 +115,13 @@ func TestSkillFrontmatter(t *testing.T) {
 	assert.Contains(t, skills.SkillMD, "description: >-")
 	assert.Contains(t, skills.SkillMD, "cli-version: unknown", "version placeholder required for 'alpacon skill' stamping")
 }
+
+func TestRenderSkillStampsVersion(t *testing.T) {
+	rendered := renderSkill()
+	assert.NotContains(t, rendered, "cli-version: unknown")
+	assert.Contains(t, rendered, "cli-version: "+utils.Version)
+}
+
+func TestSkillCommandRegistered(t *testing.T) {
+	assert.NotNil(t, findSubcommand(RootCmd, "skill"))
+}

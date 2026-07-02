@@ -166,6 +166,9 @@ func init() {
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)
+
+	// skill
+	RootCmd.AddCommand(skillCmd)
 }
 
 // buildWelcomeLines composes the right-side text lines rendered next to the
