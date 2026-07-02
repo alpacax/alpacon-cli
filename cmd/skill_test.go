@@ -15,19 +15,14 @@ import (
 var (
 	subcommandToken = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
-	skillGateCodes = map[string]bool{
-		utils.WorkSessionRequired:         true,
-		utils.WorkSessionNotUsable:        true,
-		utils.WorkSessionNotActive:        true,
-		utils.WorkSessionExpired:          true,
-		utils.WorkSessionScopeNotAllowed:  true,
-		utils.WorkSessionServerNotAllowed: true,
-		utils.WorkSessionAssigneeMismatch: true,
-	}
+	// inlineAlpaconSpan matches inline single-backtick `alpacon ...` references
+	// in prose (as opposed to fenced-block invocations).
+	inlineAlpaconSpan = regexp.MustCompile("`(alpacon [^`]+)`")
 )
 
-// skillInvocations extracts `alpacon ...` lines from fenced code blocks,
-// returning the tokens after "alpacon" for each invocation.
+// skillInvocations extracts `alpacon ...` command references from the skill
+// doc—both fenced-block lines and inline single-backtick spans—returning the
+// tokens after "alpacon" for each invocation.
 func skillInvocations(t *testing.T) [][]string {
 	t.Helper()
 	var invocations [][]string
@@ -38,11 +33,16 @@ func skillInvocations(t *testing.T) [][]string {
 			inBlock = !inBlock
 			continue
 		}
-		trimmed = strings.TrimPrefix(trimmed, "$ ")
-		if !inBlock || !strings.HasPrefix(trimmed, "alpacon ") {
+		if inBlock {
+			trimmed = strings.TrimPrefix(trimmed, "$ ")
+			if strings.HasPrefix(trimmed, "alpacon ") {
+				invocations = append(invocations, strings.Fields(trimmed)[1:])
+			}
 			continue
 		}
-		invocations = append(invocations, strings.Fields(trimmed)[1:])
+		for _, m := range inlineAlpaconSpan.FindAllStringSubmatch(line, -1) {
+			invocations = append(invocations, strings.Fields(m[1])[1:])
+		}
 	}
 	require.NotEmpty(t, invocations, "skill must contain alpacon command examples")
 	return invocations
@@ -93,13 +93,18 @@ func TestSkillFlagsExist(t *testing.T) {
 }
 
 func TestSkillGateCodesMatchCLI(t *testing.T) {
+	gateCodes := make(map[string]bool, len(utils.WorkSessionGateCodes))
+	for _, code := range utils.WorkSessionGateCodes {
+		gateCodes[code] = true
+	}
+
 	re := regexp.MustCompile(`work_session_[a-z_]+`)
 	found := map[string]bool{}
 	for _, m := range re.FindAllString(skills.SkillMD, -1) {
-		assert.True(t, skillGateCodes[m], "skill references unknown gate code %q", m)
+		assert.True(t, gateCodes[m], "skill references unknown gate code %q", m)
 		found[m] = true
 	}
-	for code := range skillGateCodes {
+	for _, code := range utils.WorkSessionGateCodes {
 		assert.True(t, found[code], "skill missing gate code %q", code)
 	}
 }

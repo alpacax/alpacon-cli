@@ -36,6 +36,18 @@ const (
 	PendingApprovalStatus = "pending_approval"
 )
 
+// WorkSessionGateCodes is the single source of truth enumerating the WorkSession
+// gate codes above, for callers (e.g. skill drift tests) that need the full set.
+var WorkSessionGateCodes = []string{
+	WorkSessionRequired,
+	WorkSessionNotUsable,
+	WorkSessionNotActive,
+	WorkSessionExpired,
+	WorkSessionScopeNotAllowed,
+	WorkSessionServerNotAllowed,
+	WorkSessionAssigneeMismatch,
+}
+
 type ErrorResponse struct {
 	Code   string `json:"code"`
 	Source string `json:"source"`
