@@ -21,7 +21,7 @@ func TestResolveOversized(t *testing.T) {
 		{"multibyte counts bytes", strings.Repeat("가", 683), "linux", true, false},
 		{"windows oversized is an error", strings.Repeat("a", 2049), "windows", false, true},
 		{"windows inline is fine", "dir", "windows", false, false},
-		{"unknown platform allowed", strings.Repeat("a", 2049), "", true, false},
+		{"unknown platform rejected", strings.Repeat("a", 2049), "", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
