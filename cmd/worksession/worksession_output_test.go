@@ -292,8 +292,9 @@ func TestFormatRecommendations(t *testing.T) {
 	got := formatRecommendations([]wsapi.Recommendation{
 		{Severity: "high", Text: "Rotate the key"},
 		{Severity: "low", Text: "Prefer reload"},
+		{Severity: "", Text: "No severity set"},
 	})
-	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload", got)
+	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set", got)
 }
 
 func setupWorkSessionCommandConfig(t *testing.T, workspaceURL string) {

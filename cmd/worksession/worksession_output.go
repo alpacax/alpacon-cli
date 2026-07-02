@@ -101,7 +101,11 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	}
 	lines := make([]string, len(recs))
 	for i, r := range recs {
-		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(r.Severity), r.Text)
+		sev := r.Severity
+		if sev == "" {
+			sev = "info"
+		}
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sev), r.Text)
 	}
 	return strings.Join(lines, "\n")
 }
