@@ -33,7 +33,6 @@ func skillInvocations(t *testing.T) [][]string {
 			continue
 		}
 		if inBlock {
-			trimmed = strings.TrimPrefix(trimmed, "$ ")
 			if cont != "" {
 				trimmed = cont + " " + trimmed
 				cont = ""
@@ -108,7 +107,6 @@ func TestSkillFlagsExist(t *testing.T) {
 		flagsStarted := false
 		for _, tok := range tokens {
 			switch {
-			case tok == "--": // exec's remote-command separator, not a flag
 			case strings.HasPrefix(tok, "-"):
 				flagsStarted = true
 				// DisableFlagParsing commands (e.g. exec) hand-roll flags, so they're not in cobra's FlagSet; their own parser tests cover them.
@@ -139,8 +137,18 @@ func TestSkillFlagDefinedRejectsUnknown(t *testing.T) {
 }
 
 func TestSkillGateCodesMatchCLI(t *testing.T) {
-	gateCodes := make(map[string]bool, len(utils.WorkSessionGateCodes))
-	for _, code := range utils.WorkSessionGateCodes {
+	// Keep in sync with the utils.WorkSession* gate constants.
+	wantCodes := []string{
+		utils.WorkSessionRequired,
+		utils.WorkSessionNotUsable,
+		utils.WorkSessionNotActive,
+		utils.WorkSessionExpired,
+		utils.WorkSessionScopeNotAllowed,
+		utils.WorkSessionServerNotAllowed,
+		utils.WorkSessionAssigneeMismatch,
+	}
+	gateCodes := make(map[string]bool, len(wantCodes))
+	for _, code := range wantCodes {
 		gateCodes[code] = true
 	}
 
@@ -150,7 +158,7 @@ func TestSkillGateCodesMatchCLI(t *testing.T) {
 		assert.True(t, gateCodes[m], "skill references unknown gate code %q", m)
 		found[m] = true
 	}
-	for _, code := range utils.WorkSessionGateCodes {
+	for _, code := range wantCodes {
 		assert.True(t, found[code], "skill missing gate code %q", code)
 	}
 }

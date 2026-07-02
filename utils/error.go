@@ -36,17 +36,6 @@ const (
 	PendingApprovalStatus = "pending_approval"
 )
 
-// WorkSessionGateCodes lists the gate codes above; keep in sync with the WorkSession* constants.
-var WorkSessionGateCodes = []string{
-	WorkSessionRequired,
-	WorkSessionNotUsable,
-	WorkSessionNotActive,
-	WorkSessionExpired,
-	WorkSessionScopeNotAllowed,
-	WorkSessionServerNotAllowed,
-	WorkSessionAssigneeMismatch,
-}
-
 type ErrorResponse struct {
 	Code   string `json:"code"`
 	Source string `json:"source"`
