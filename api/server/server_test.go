@@ -14,6 +14,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetServerList_PaginationBug(t *testing.T) {
@@ -535,4 +537,34 @@ func TestGetServerPlatform(t *testing.T) {
 	if platform != "windows" {
 		t.Fatalf("expected platform %q, got %q", "windows", platform)
 	}
+}
+
+func TestGetServerByName(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "my-server", r.URL.Query().Get("name"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{
+			Count:   1,
+			Results: []ServerDetails{{ID: "srv-1", Name: "my-server", Platform: "windows"}},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	srv, err := GetServerByName(ac, "my-server")
+	require.NoError(t, err)
+	assert.Equal(t, "srv-1", srv.ID)
+	assert.Equal(t, "windows", srv.Platform)
+}
+
+func TestGetServerByName_NotFound(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{Count: 0})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := GetServerByName(ac, "ghost")
+	require.Error(t, err)
 }

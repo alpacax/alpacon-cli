@@ -94,26 +94,34 @@ func DeleteServer(ac *client.AlpaconClient, serverName string) error {
 	return nil
 }
 
-func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
+// GetServerByName resolves a server name to its full list projection in one lookup.
+func GetServerByName(ac *client.AlpaconClient, serverName string) (ServerDetails, error) {
 	params := map[string]string{
 		"name": serverName,
 	}
 	body, err := ac.SendGetRequest(utils.BuildURL(serverURL, "", params))
 	if err != nil {
-		return "", err
+		return ServerDetails{}, err
 	}
 
 	var response api.ListResponse[ServerDetails]
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		return "", err
+	if err := json.Unmarshal(body, &response); err != nil {
+		return ServerDetails{}, err
 	}
 
 	if response.Count == 0 {
-		return "", errors.New("no server found with the given name")
+		return ServerDetails{}, errors.New("no server found with the given name")
 	}
 
-	return response.Results[0].ID, nil
+	return response.Results[0], nil
+}
+
+func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
+	srv, err := GetServerByName(ac, serverName)
+	if err != nil {
+		return "", err
+	}
+	return srv.ID, nil
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
