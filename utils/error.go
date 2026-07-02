@@ -36,8 +36,8 @@ const (
 	PendingApprovalStatus = "pending_approval"
 )
 
-// WorkSessionGateCodes is the single source of truth enumerating the WorkSession
-// gate codes above, for callers (e.g. skill drift tests) that need the full set.
+// WorkSessionGateCodes is a hand-maintained list of the gate codes above; keep
+// it in sync with the constants when adding or removing a WorkSession code.
 var WorkSessionGateCodes = []string{
 	WorkSessionRequired,
 	WorkSessionNotUsable,

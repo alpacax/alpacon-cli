@@ -105,7 +105,6 @@ flags go before the server name; use `--` to pass flags to the remote command.
 ```bash
 alpacon exec <server> "uptime"
 alpacon exec root@<server> "docker ps"
-alpacon exec --env="KEY=VALUE" <server> "echo $KEY"
 alpacon cp ./local.txt <server>:/tmp/
 alpacon cp <server>:/var/log/app.log .
 alpacon tunnel <server> -l 9000 -r 8082
