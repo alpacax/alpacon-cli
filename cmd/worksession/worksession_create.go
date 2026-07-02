@@ -256,6 +256,7 @@ so it is recorded and scoped accordingly.`,
 				return
 			}
 			utils.CliSuccess("%s", message)
+			printSessionAdvisories(finalSession)
 			return
 		}
 
@@ -272,6 +273,7 @@ so it is recorded and scoped accordingly.`,
 			return
 		}
 		utils.CliSuccess("%s", message)
+		printSessionAdvisories(finalSession)
 	},
 }
 

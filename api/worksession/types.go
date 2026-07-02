@@ -24,6 +24,33 @@ type WorkSession struct {
 	AddedAt           time.Time             `json:"added_at"`
 	UpdatedAt         time.Time             `json:"updated_at"`
 	SudoPolicies      []SudoPolicyInline    `json:"sudo_policies"`
+	Adjustments       *Adjustments          `json:"adjustments,omitempty"`
+	Recommendations   []Recommendation      `json:"recommendations,omitempty"`
+}
+
+// Adjustments is the approver's diff; each dimension is set only when changed, nil when unchanged.
+type Adjustments struct {
+	Scopes  *ScopeDiff  `json:"scopes,omitempty"`
+	Servers *ServerDiff `json:"servers,omitempty"`
+}
+
+type ScopeDiff struct {
+	Old []string `json:"old"`
+	New []string `json:"new"`
+}
+
+type ServerDiff struct {
+	Old []types.ServerSummary `json:"old"`
+	New []types.ServerSummary `json:"new"`
+}
+
+// Recommendation is an admin-confirmed note attached at approval time.
+type Recommendation struct {
+	ID            string `json:"id"`
+	Text          string `json:"text"`
+	Severity      string `json:"severity"`
+	Source        string `json:"source"`
+	AutoCheckable bool   `json:"auto_checkable"`
 }
 
 type WorkSessionAttributes struct {

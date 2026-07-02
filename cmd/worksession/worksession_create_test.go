@@ -1,11 +1,15 @@
 package worksession
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
@@ -151,4 +155,93 @@ func TestDecideUseAction(t *testing.T) {
 			assert.Equal(t, tt.want, decideUseAction(tt.status, tt.useEnabled))
 		})
 	}
+}
+
+func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+			_, _ = w.Write([]byte(`{
+				"id":"ses-x","status":"approved","expires_at":"2026-06-01T12:00:00Z",
+				"adjustments":{"scopes":{"old":["command","websh"],"new":["command"]}},
+				"recommendations":[{"id":"r1","text":"Rotate the key","severity":"high"}]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	setupWorkSessionCommandConfig(t, ts.URL)
+	resetCreateCommandState(t)
+	purpose = "incident"
+	createScopes = []string{"command", "websh"}
+	createServers = []string{"prod"}
+	expiresAt = "2026-06-01T12:00:00Z"
+	waitApproval = true
+
+	_, stderr := captureWorkSessionCommandOutput(t, func() {
+		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+	})
+
+	assert.Contains(t, stderr, "approved")
+	assert.Contains(t, stderr, "Approver adjusted your request")
+	assert.Contains(t, stderr, "command, websh → command")
+	assert.Contains(t, stderr, "[HIGH] Rotate the key")
+}
+
+func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+			_, _ = w.Write([]byte(`{
+				"id":"ses-x","status":"approved","expires_at":"2026-06-01T12:00:00Z",
+				"adjustments":{"scopes":{"old":["command","websh"],"new":["command"]}},
+				"recommendations":[{"id":"r1","text":"Rotate the key","severity":"high"}]
+			}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	setupWorkSessionCommandConfig(t, ts.URL)
+	withWorkSessionCommandJSONMode(t)
+	resetCreateCommandState(t)
+	purpose = "incident"
+	createScopes = []string{"command", "websh"}
+	createServers = []string{"prod"}
+	expiresAt = "2026-06-01T12:00:00Z"
+	waitApproval = true
+
+	stdout, _ := captureWorkSessionCommandOutput(t, func() {
+		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
+	})
+
+	var got struct {
+		WorkSession struct {
+			Adjustments struct {
+				Scopes struct {
+					New []string `json:"new"`
+				} `json:"scopes"`
+			} `json:"adjustments"`
+			Recommendations []struct {
+				Severity string `json:"severity"`
+			} `json:"recommendations"`
+		} `json:"work_session"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.Equal(t, []string{"command"}, got.WorkSession.Adjustments.Scopes.New)
+	require.Len(t, got.WorkSession.Recommendations, 1)
+	assert.Equal(t, "high", got.WorkSession.Recommendations[0].Severity)
 }

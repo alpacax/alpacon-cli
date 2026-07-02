@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"fmt"
 	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -79,5 +80,12 @@ var workSessionDescribeCmd = &cobra.Command{
 		}
 
 		utils.PrintTable(rows)
+
+		if block := formatAdjustments(session.Adjustments); block != "" {
+			fmt.Printf("\nAdjustments:\n%s\n", block)
+		}
+		if block := formatRecommendations(session.Recommendations); block != "" {
+			fmt.Printf("\nRecommendations:\n%s\n", block)
+		}
 	},
 }
