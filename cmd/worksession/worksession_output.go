@@ -79,8 +79,7 @@ func printWorkSessionMutationJSON(output workSessionMutationOutput) {
 	}
 }
 
-// formatAdjustments renders the approver's scope/server diff as an indented
-// multi-line block, or "" when there was no adjustment.
+// formatAdjustments renders the approver's scope/server diff, or "" when there was no adjustment.
 func formatAdjustments(adj *wsapi.Adjustments) string {
 	if adj == nil {
 		return ""
@@ -97,8 +96,7 @@ func formatAdjustments(adj *wsapi.Adjustments) string {
 	return strings.Join(lines, "\n")
 }
 
-// formatRecommendations renders approver recommendations, one "[SEVERITY] text"
-// line each in server-provided order, or "" when there are none.
+// formatRecommendations renders one "[SEVERITY] text" line per recommendation, or "" when there are none.
 func formatRecommendations(recs []wsapi.Recommendation) string {
 	if len(recs) == 0 {
 		return ""
@@ -110,9 +108,7 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	return strings.Join(lines, "\n")
 }
 
-// printSessionAdvisories surfaces the approver's adjustments (as a warning,
-// since requested access may have been reduced) and recommendations. Text mode
-// only — JSON callers return before reaching this.
+// printSessionAdvisories prints adjustments/recommendations; text mode only, JSON callers return earlier.
 func printSessionAdvisories(session *wsapi.WorkSession) {
 	if block := formatAdjustments(session.Adjustments); block != "" {
 		utils.CliWarning("Approver adjusted your request:\n%s", block)

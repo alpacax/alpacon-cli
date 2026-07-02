@@ -28,8 +28,7 @@ type WorkSession struct {
 	Recommendations   []Recommendation      `json:"recommendations,omitempty"`
 }
 
-// Adjustments is the approver's diff applied at approval time. Each dimension
-// is present only when the approver changed it; a nil Adjustments means no change.
+// Adjustments is the approver's diff; each dimension is set only when changed, nil when unchanged.
 type Adjustments struct {
 	Scopes  *ScopeDiff  `json:"scopes,omitempty"`
 	Servers *ServerDiff `json:"servers,omitempty"`
