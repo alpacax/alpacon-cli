@@ -293,6 +293,29 @@ What each refusal code means and what to do next:
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
 | `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. For `exec`, re-run the command after approval (or pass `--wait` on the original command to block); for `work-session create` the session already exists—after approval attach it with `alpacon work-session use <id>` (or pass `--wait` on the original create to block). Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` on a `SUDO_APPROVAL_REQUIRED` sudo denial and by `work-session create` when the session lands pending |
 
+## AI agents
+
+This repository ships an [Agent Skills](https://agentskills.io) skill that
+teaches AI coding agents (Claude Code, Codex CLI, Cursor, Gemini CLI, ...) the
+CLI's conventions—work-session gating, exit codes, and the JSON error
+contract—without exploratory discovery. The skill lives at
+`skills/alpacon/SKILL.md`.
+
+```bash
+# GitHub CLI (v2.90.0+)—installs into the right directory per agent
+gh skill install alpacax/alpacon-cli alpacon
+
+# Vercel skills CLI—auto-detects installed agents
+npx skills add alpacax/alpacon-cli
+
+# Or print the copy embedded in the binary and redirect it anywhere
+mkdir -p ~/.claude/skills/alpacon && alpacon skill > ~/.claude/skills/alpacon/SKILL.md   # Claude Code
+mkdir -p ~/.agents/skills/alpacon && alpacon skill > ~/.agents/skills/alpacon/SKILL.md   # Codex CLI
+```
+
+`alpacon skill` stamps the running CLI version into the skill's metadata, so
+the printed copy always matches the binary that produced it.
+
 ## Contributing
 
 ```bash
