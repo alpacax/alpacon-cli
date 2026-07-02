@@ -300,7 +300,7 @@ func TestRunCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc", false)
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
 	require.NoError(t, err)
 
 	hadKey, ws, _ := capture.snapshot()
@@ -316,7 +316,7 @@ func TestRunCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 	require.NoError(t, err)
 
 	hadKey, _, _ := capture.snapshot()
@@ -331,7 +331,7 @@ func TestRunCommand_InfraStatusReturnsError(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 			require.Error(t, err)
 			assert.Empty(t, result)
 			assert.Contains(t, err.Error(), status)
@@ -345,7 +345,7 @@ func TestRunCommand_UnrecognisedTerminalStatusReturnsError(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+	_, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unrecognised status")
 	assert.Contains(t, err.Error(), "denied")
@@ -362,7 +362,7 @@ func TestRunCommand_SuccessFalseReturnsRemoteCommandError(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+	result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 	require.Error(t, err)
 
 	var remoteErr *RemoteCommandError
@@ -434,7 +434,7 @@ func TestRunCommand_PropagatesExitCode(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 			require.Error(t, err)
 
 			var remoteErr *RemoteCommandError
@@ -491,7 +491,7 @@ func TestRunCommand_StuckWithErrorPhase(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "", false)
+			result, err := RunCommand(ac, "server-x", "ls", "", "", nil, "")
 			require.Error(t, err)
 			assert.Empty(t, result)
 
@@ -559,7 +559,7 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "", false)
+	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "")
 	require.NoError(t, err)
 	assert.Equal(t, "job-abc-123", resp.ID)
 }
@@ -567,10 +567,11 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 func TestSubmitCommand_OversizedFlagOnWire(t *testing.T) {
 	tests := []struct {
 		name      string
+		command   string
 		oversized bool
 	}{
-		{"inline omits flag", false},
-		{"oversized sets flag", true},
+		{"inline omits flag", "echo hi", false},
+		{"oversized sets flag", strings.Repeat("a", 2049), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -581,7 +582,7 @@ func TestSubmitCommand_OversizedFlagOnWire(t *testing.T) {
 					w.Header().Set("Content-Type", "application/json")
 					_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
 						Count:   1,
-						Results: []map[string]any{{"id": "srv-1", "name": "server-x"}},
+						Results: []map[string]any{{"id": "srv-1", "name": "server-x", "platform": "debian"}},
 					})
 				case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/api/events/commands/"):
 					_ = json.NewDecoder(r.Body).Decode(&body)
@@ -594,18 +595,44 @@ func TestSubmitCommand_OversizedFlagOnWire(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := SubmitCommand(ac, "server-x", "echo hi", "", "", nil, "", tt.oversized)
+			_, err := SubmitCommand(ac, "server-x", tt.command, "", "", nil, "")
 			require.NoError(t, err)
 
 			// omitempty: the field is absent on the wire when false.
 			got, present := body["oversized"]
 			if tt.oversized {
-				assert.True(t, present && got == true, "oversized=true must be sent")
+				require.True(t, present, "oversized must be present on the wire")
+				assert.Equal(t, true, got)
 			} else {
 				assert.False(t, present, "oversized must be omitted when false")
 			}
 		})
 	}
+}
+
+func TestSubmitCommand_OversizedWindowsRejected(t *testing.T) {
+	var posted bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+				Count:   1,
+				Results: []map[string]any{{"id": "srv-1", "name": "server-x", "platform": "windows"}},
+			})
+		case r.Method == http.MethodPost:
+			posted = true
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := SubmitCommand(ac, "server-x", strings.Repeat("a", 2049), "", "", nil, "")
+	require.Error(t, err)
+	assert.False(t, posted, "command must not be submitted to a Windows server")
 }
 
 func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
@@ -677,7 +704,7 @@ func TestRunCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "id", "root", "", nil, "ses-abc", false)
+	_, err := RunCommand(ac, "server-x", "id", "root", "", nil, "ses-abc")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "denied by policy")
@@ -691,7 +718,7 @@ func TestRunCommand_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "", false)
+	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "")
 	require.Error(t, err)
 	var pending *PendingApprovalError
 	require.True(t, errors.As(err, &pending), "expected PendingApprovalError, got %T: %v", err, err)
@@ -704,7 +731,7 @@ func TestRunCommand_RejectedReturnsError(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "", false)
+	_, err := RunCommand(ac, "server-x", "sudo reboot", "", "", nil, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rejected")
 	var pending *PendingApprovalError

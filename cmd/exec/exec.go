@@ -109,17 +109,12 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		env := make(map[string]string)
 
-		// Oversized commands are sent with the same command-create call plus the
-		// oversized flag; the server stages them as a temp script and owns the
-		// path/wrapper/cleanup, auth, and platform gates.
-		oversized := ResolveOversized(alpaconClient, parsed.Server, parsed.Command)
-
 		if parsed.Detach {
-			runDetached(alpaconClient, parsed, env, workSessionID, authMethod, oversized)
+			runDetached(alpaconClient, parsed, env, workSessionID, authMethod)
 			return
 		}
 
-		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, oversized)
+		result, err := RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait)
 		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 		// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
 		// not --wait on emits a machine-readable pending signal and exits before the
