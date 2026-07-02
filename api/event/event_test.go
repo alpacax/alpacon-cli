@@ -139,6 +139,34 @@ func TestGetEventList_FlattensMultilineForTable(t *testing.T) {
 	assert.Equal(t, "loop 1 loop 2 loop 3", events[0].Result)
 }
 
+func TestPreviewForTable(t *testing.T) {
+	tests := []struct {
+		name  string
+		in    string
+		limit int
+		want  string
+	}{
+		{"flattens newlines", "a\r\nb\nc", 100, "a b c"},
+		{"tab becomes space", "a\tb", 100, "a b"},
+		{"strips ansi escape", "ok\x1b[31mred", 100, "ok[31mred"},
+		{"strips bel and backspace", "a\x07b\x08c", 100, "abc"},
+		{"truncates long input", strings.Repeat("x", 150), 100, strings.Repeat("x", 100) + "..."},
+		{"strips bidi override", "a\u202Ecb", 100, "acb"},
+		{"flattens unicode line separators", "a\u2028b\u2029c", 100, "a b c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, previewForTable(tt.in, tt.limit))
+		})
+	}
+}
+
+func TestPreviewForTable_BoundsHugeInput(t *testing.T) {
+	// A 1 MiB result must not be fully flattened to render a 100-char cell.
+	huge := strings.Repeat("x", 1<<20)
+	assert.Equal(t, strings.Repeat("x", 100)+"...", previewForTable(huge, 100))
+}
+
 func TestPollCommandExecution(t *testing.T) {
 	tests := []struct {
 		name           string

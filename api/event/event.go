@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -21,6 +23,33 @@ const (
 
 // newlineFlattener keeps multiline commands/results on one table row.
 var newlineFlattener = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+// previewForTable renders remote-controlled text as one bounded table cell: it
+// caps work on huge inputs before allocating, flattens newlines, and strips
+// remaining control and format runes (e.g. ANSI escapes, bidi overrides) so
+// output cannot spoof rows.
+// The 4*(limit+1) pre-cut keeps at least limit+1 runes for any UTF-8 layout,
+// so TruncateString still appends "..." to over-limit input.
+func previewForTable(s string, limit int) string {
+	if maxBytes := 4 * (limit + 1); len(s) > maxBytes {
+		cut := maxBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
+	}
+	s = newlineFlattener.Replace(s)
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t' || r == '\u2028' || r == '\u2029':
+			return ' '
+		case unicode.IsControl(r) || unicode.Is(unicode.Cf, r):
+			return -1
+		}
+		return r
+	}, s)
+	return utils.TruncateString(s, limit)
+}
 
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
@@ -63,8 +92,8 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,
-			Command:     utils.TruncateString(newlineFlattener.Replace(event.Line), 100),
-			Result:      utils.TruncateString(newlineFlattener.Replace(event.Result), 70),
+			Command:     previewForTable(event.Line, 100),
+			Result:      previewForTable(event.Result, 70),
 			Status:      utils.BoolPointerToString(event.Success),
 			Operator:    event.RequestedBy.Name,
 			RequestedAt: utils.TimeUtils(event.AddedAt),
