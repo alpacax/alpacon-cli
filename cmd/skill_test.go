@@ -15,16 +15,11 @@ import (
 var (
 	subcommandToken = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
-	// inlineAlpaconSpan matches inline single-backtick `alpacon ...` references
-	// in prose (as opposed to fenced-block invocations).
+	// inlineAlpaconSpan matches inline single-backtick `alpacon ...` spans; fenced blocks are handled separately.
 	inlineAlpaconSpan = regexp.MustCompile("`(alpacon [^`]+)`")
 )
 
-// skillInvocations extracts `alpacon ...` command references from the skill
-// doc—both fenced-block lines and inline single-backtick spans—returning the
-// tokens after "alpacon" for each invocation. Backslash-continued lines inside
-// a fenced block are joined so multi-line commands (e.g. work-session create)
-// are captured with all their flags.
+// skillInvocations returns the tokens after "alpacon" for each command reference in the skill doc, joining backslash-continued lines so multi-line commands keep all their flags.
 func skillInvocations(t *testing.T) [][]string {
 	t.Helper()
 	var invocations [][]string
@@ -69,8 +64,7 @@ func findSubcommand(parent *cobra.Command, name string) *cobra.Command {
 	return nil
 }
 
-// skillFlagDefined reports whether the flag token (--long or -short) is defined
-// on cmd or any ancestor, covering inherited persistent flags such as --output.
+// skillFlagDefined reports whether the flag token is defined on cmd or any ancestor, covering inherited persistent flags like --output.
 func skillFlagDefined(cmd *cobra.Command, token string) bool {
 	name := strings.TrimLeft(strings.SplitN(token, "=", 2)[0], "-")
 	long := strings.HasPrefix(token, "--")
@@ -96,8 +90,7 @@ func TestSkillSubcommandsExist(t *testing.T) {
 			}
 			next := findSubcommand(cur, tok)
 			if next == nil {
-				// A group command must be followed by a real subcommand;
-				// a leaf command's trailing tokens are positional args.
+				// A group command needs a real subcommand next; a leaf's trailing tokens are positional args.
 				if cur == RootCmd || len(cur.Commands()) > 0 {
 					t.Errorf("skill references unknown command %q after %q", tok, path)
 				}
@@ -118,9 +111,7 @@ func TestSkillFlagsExist(t *testing.T) {
 			case tok == "--": // exec's remote-command separator, not a flag
 			case strings.HasPrefix(tok, "-"):
 				flagsStarted = true
-				// Commands with DisableFlagParsing hand-roll their own parsing
-				// (e.g. exec), so their flags are not in cobra's FlagSet and are
-				// covered by that command's own parser tests.
+				// DisableFlagParsing commands (e.g. exec) hand-roll flags, so they're not in cobra's FlagSet; their own parser tests cover them.
 				if cmd.DisableFlagParsing {
 					continue
 				}
@@ -134,8 +125,7 @@ func TestSkillFlagsExist(t *testing.T) {
 		}
 	}
 
-	// --wait and --sudo are referenced only in prose, not inside an
-	// `alpacon ...` invocation, so the loop above cannot reach them.
+	// --wait and --sudo appear only in prose, not in an `alpacon ...` invocation, so the loop cannot reach them.
 	create := findSubcommand(findSubcommand(RootCmd, "work-session"), "create")
 	require.NotNil(t, create)
 	for _, name := range []string{"sudo", "wait"} {
