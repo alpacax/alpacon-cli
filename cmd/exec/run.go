@@ -362,7 +362,7 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
-// runDetached submits the command without waiting and prints the job id, with MFA/username/token-refresh retry like the inline path.
+// runDetached submits without waiting and prints the job id; retry handling mirrors the inline path.
 func runDetached(ac *client.AlpaconClient, parsed RemoteExecArgs, env map[string]string, workSessionID, authMethod string) {
 	resp, err := event.SubmitCommand(ac, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
 	if err != nil {

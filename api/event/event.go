@@ -24,13 +24,9 @@ const (
 // newlineFlattener keeps multiline commands/results on one table row.
 var newlineFlattener = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 
-// previewForTable renders remote-controlled text as one bounded table cell: it
-// caps work on huge inputs before allocating, flattens newlines, and strips
-// remaining control and format runes (e.g. ANSI escapes, bidi overrides) so
-// output cannot spoof rows.
-// The 4*(limit+1) pre-cut keeps at least limit+1 runes for any UTF-8 layout,
-// so TruncateString still appends "..." to over-limit input.
+// previewForTable bounds and sanitizes remote-controlled text (control/format runes, bidi overrides) so it cannot spoof table rows.
 func previewForTable(s string, limit int) string {
+	// 4*(limit+1) bytes keeps at least limit+1 runes, so TruncateString still appends "..." to over-limit input.
 	if maxBytes := 4 * (limit + 1); len(s) > maxBytes {
 		cut := maxBytes
 		for cut > 0 && !utf8.RuneStart(s[cut]) {

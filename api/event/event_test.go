@@ -107,8 +107,7 @@ func TestGetEventList_FiltersAreQueryParams(t *testing.T) {
 	_, err := GetEventList(ac, 5, "server-x", "admin")
 	require.NoError(t, err)
 
-	// IDs must travel as query params; a path segment would hit the
-	// detail endpoint and 404 with "No Command matches the given query."
+	// IDs must travel as query params; a path segment hits the detail endpoint and 404s.
 	assert.Equal(t, "/api/events/commands/", listPath)
 	assert.Equal(t, "srv-1", listQuery.Get("server"))
 	assert.Equal(t, "usr-1", listQuery.Get("requested_by"))
@@ -134,7 +133,6 @@ func TestGetEventList_FlattensMultilineForTable(t *testing.T) {
 	events, err := GetEventList(ac, 1, "", "")
 	require.NoError(t, err)
 	require.Len(t, events, 1)
-	// Newlines inside the first truncation window break the table layout.
 	assert.Equal(t, "# padding # padding uname -a", events[0].Command)
 	assert.Equal(t, "loop 1 loop 2 loop 3", events[0].Result)
 }
@@ -626,7 +624,6 @@ func TestSubmitCommand_OversizedFlagOnWire(t *testing.T) {
 			_, err := SubmitCommand(ac, "server-x", tt.command, "", "", nil, "")
 			require.NoError(t, err)
 
-			// omitempty: the field is absent on the wire when false.
 			got, present := body["oversized"]
 			if tt.oversized {
 				require.True(t, present, "oversized must be present on the wire")
