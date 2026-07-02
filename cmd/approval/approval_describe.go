@@ -15,7 +15,7 @@ type describeRow struct {
 var approvalDescribeCmd = &cobra.Command{
 	Use:     "describe REQUEST_ID",
 	Aliases: []string{"desc"},
-	Short: "Show details of an approval request",
+	Short:   "Show details of an approval request",
 	Long: `Show all fields of an approval request.
 
 Use --output json to see the full raw response including nested

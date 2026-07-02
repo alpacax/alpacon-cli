@@ -17,3 +17,11 @@ linters:
   exclusions:
     paths:
       - docs
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - docs

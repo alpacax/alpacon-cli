@@ -92,4 +92,4 @@ func validateEnumFlag(flag, value string, valid []string) error {
 }
 
 func validateStatusFilter(s string) error { return validateEnumFlag("status", s, validStatuses) }
-func validateTypeFilter(s string) error    { return validateEnumFlag("type", s, validTypes) }
+func validateTypeFilter(s string) error   { return validateEnumFlag("type", s, validTypes) }
