@@ -43,6 +43,12 @@ Run the command again later to check for completion.`,
 			return
 		}
 
+		// Output is stored as chunks (Result is empty under the streaming
+		// contract); reconstruct it, falling back to Result for legacy commands.
+		if output, oerr := event.GetCommandOutput(alpaconClient, jobID); oerr == nil && output != "" {
+			details.Result = output
+		}
+
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)

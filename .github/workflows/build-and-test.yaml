@@ -31,6 +31,11 @@ jobs:
       - name: Allow Go toolchain auto-download
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
+      - name: Verify go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Build
         run: go build -v .
 

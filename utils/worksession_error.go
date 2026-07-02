@@ -18,7 +18,7 @@ type workSessionErrorCtx struct {
 var workSessionReasonMap = map[string]string{
 	WorkSessionRequired:         "no WorkSession selected for this shell",
 	WorkSessionNotUsable:        "session is no longer usable",
-	WorkSessionNotActive:        "selected session is not yet active",
+	WorkSessionNotActive:        "selected session is not active",
 	WorkSessionExpired:          "selected session has expired",
 	WorkSessionScopeNotAllowed:  "session does not include this scope",
 	WorkSessionServerNotAllowed: "target server is not in this session",
@@ -112,28 +112,39 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
 		operation, serverArg,
 	)
-	// createOrReuse leads with create-and-attach, then the reuse path.
+	agentCreateCmd := fmt.Sprintf(
+		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
+		operation, serverArg,
+	)
+	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
+	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
 	createOrReuse := []string{
-		createCmd + "  # create a new session and attach it",
-		"alpacon work-session ls --status active  # or reuse an existing active session",
-		"alpacon work-session use <ID>",
+		"alpacon work-session ls --status active  # find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>",
+		"alpacon work-session use <ID>  # human: attach an existing session (rejects agent sessions)",
+		createCmd + "  # none active? create a new one (human)",
+		agentCreateCmd + "  # none active? create a new one (AI agent; prefix the gated command with --work-session <ID>)",
 	}
 	switch code {
 	case WorkSessionRequired:
 		return createOrReuse
 	case WorkSessionNotActive:
-		return []string{"alpacon work-session current"}
+		// Activation is approval/server-driven, not user-run; guide toward an active session.
+		return append([]string{
+			"alpacon work-session current  # pending/approved: wait until active; completed/revoked: create or reuse below",
+		}, createOrReuse...)
 	case WorkSessionExpired:
 		extendCmd := "alpacon work-session extend <ID>"
 		if activeWS != "" {
 			extendCmd = fmt.Sprintf("alpacon work-session extend %s", activeWS)
 		}
-		return []string{extendCmd, createCmd}
+		return []string{extendCmd, createCmd, agentCreateCmd}
 	case WorkSessionAssigneeMismatch:
-		return []string{"alpacon work-session use <ID>"}
+		// Session belongs to another principal; reuse/create one owned by this caller.
+		// Agents can't `use`, so route through the agent-aware reuse+create path.
+		return createOrReuse
 	case WorkSessionNotUsable:
 		return createOrReuse
 	default: // scope_not_allowed, server_not_allowed
-		return []string{createCmd}
+		return []string{createCmd, agentCreateCmd}
 	}
 }

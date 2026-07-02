@@ -131,27 +131,27 @@ func TestIsApprovalDenial(t *testing.T) {
 	const denialLine = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
 
 	t.Run("true when the denial line accompanies a non-zero exit", func(t *testing.T) {
-		assert.True(t, isApprovalDenial(denialLine, &event.RemoteCommandError{ExitCode: 1, Output: denialLine}))
+		assert.True(t, isApprovalDenial(&event.RemoteCommandError{ExitCode: 1, Output: denialLine}))
 	})
 
 	t.Run("true through a wrapped RemoteCommandError", func(t *testing.T) {
-		wrapped := fmt.Errorf("failed to execute command: %w", &event.RemoteCommandError{ExitCode: 1})
-		assert.True(t, isApprovalDenial(denialLine, wrapped))
+		wrapped := fmt.Errorf("failed to execute command: %w", &event.RemoteCommandError{ExitCode: 1, Output: denialLine})
+		assert.True(t, isApprovalDenial(wrapped))
 	})
 
 	t.Run("false when the command printed the line but succeeded", func(t *testing.T) {
 		// err == nil means the command did not actually get denied; a command that
 		// merely echoes the denial line must not be treated as pending.
-		assert.False(t, isApprovalDenial(denialLine, nil))
+		assert.False(t, isApprovalDenial(nil))
 	})
 
 	t.Run("false for a non-approval denial", func(t *testing.T) {
 		out := "Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"
-		assert.False(t, isApprovalDenial(out, &event.RemoteCommandError{ExitCode: 1, Output: out}))
+		assert.False(t, isApprovalDenial(&event.RemoteCommandError{ExitCode: 1, Output: out}))
 	})
 
 	t.Run("false for a plain error without the denial line", func(t *testing.T) {
-		assert.False(t, isApprovalDenial("boom\n", errors.New("nope")))
+		assert.False(t, isApprovalDenial(errors.New("nope")))
 	})
 }
 
