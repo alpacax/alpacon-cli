@@ -86,6 +86,24 @@ func sudoDenialHint(output string) string {
 	return ""
 }
 
+// powershellValueFlags are PowerShell CLI options that consume the next token as
+// their value (e.g. -ExecutionPolicy Bypass), so that token must be skipped when
+// scanning—otherwise it reads as the script path and cuts the scan short before
+// a trailing -Command. Switch flags (-NoProfile, -NonInteractive) are absent by
+// design: they take no value. Names are lowercase for case-insensitive lookup.
+var powershellValueFlags = map[string]bool{
+	"-version": true, "-v": true,
+	"-configurationname": true,
+	"-custompipename":    true,
+	"-executionpolicy":   true, "-ex": true, "-ep": true,
+	"-inputformat": true, "-inp": true, "-if": true,
+	"-outputformat": true, "-of": true,
+	"-settingsfile": true,
+	"-windowstyle":  true, "-w": true,
+	"-workingdirectory": true, "-wd": true,
+	"-psconsolefile": true,
+}
+
 // commandNestsPowershell reports whether command re-invokes PowerShell with an
 // inline script (-Command/-c)—a cheap, OS-independent pre-check callers use to
 // skip the server OS lookup on the common non-nested path.
@@ -101,12 +119,16 @@ func commandNestsPowershell(command string) bool {
 		return false
 	}
 
-	for _, f := range fields[1:] {
-		if !strings.HasPrefix(f, "-") {
-			break
-		}
-		if lf := strings.ToLower(f); lf == "-command" || lf == "-c" {
+	for i := 1; i < len(fields); i++ {
+		lf := strings.ToLower(fields[i])
+		if lf == "-command" || lf == "-c" {
 			return true
+		}
+		if !strings.HasPrefix(lf, "-") {
+			break // script-path positional; the rest are its own arguments
+		}
+		if powershellValueFlags[lf] {
+			i++ // skip the flag's value so it isn't read as the script path
 		}
 	}
 	return false

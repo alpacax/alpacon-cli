@@ -86,6 +86,12 @@ func TestPowershellNestingWarning(t *testing.T) {
 			command:  `powershell script.ps1 -c foo`,
 			wantWarn: false,
 		},
+		{
+			name:     "value-taking flag before -Command warns",
+			osName:   "Windows",
+			command:  `powershell -ExecutionPolicy Bypass -Command 'Get-Service'`,
+			wantWarn: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -116,6 +122,8 @@ func TestCommandNestsPowershell(t *testing.T) {
 		{"empty command", ``, false},
 		{"powershell substring in path", `Get-Item C:\powershell\notes.txt`, false},
 		{"-c as script argument after script path", `powershell script.ps1 -c foo`, false},
+		{"value-taking flag before -Command", `powershell -ExecutionPolicy Bypass -Command 'x'`, true},
+		{"switch flag before script path", `powershell -NoProfile script.ps1 -c foo`, false},
 	}
 
 	for _, tt := range tests {
