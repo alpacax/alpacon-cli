@@ -11,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -112,6 +113,13 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 			return
+		}
+
+		// Best-effort hint; skips silently on lookup failure and never blocks execution.
+		if osName, osErr := server.GetServerOSByName(alpaconClient, parsed.Server); osErr == nil {
+			if warning := powershellNestingWarning(osName, parsed.Command); warning != "" {
+				utils.CliWarning("%s", warning)
+			}
 		}
 
 		env := make(map[string]string)

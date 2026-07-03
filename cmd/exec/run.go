@@ -86,6 +86,34 @@ func sudoDenialHint(output string) string {
 	return ""
 }
 
+// powershellNestingWarning flags redundant `powershell -Command` nesting on Windows (drops embedded quotes on WinPS 5.1); returns "" when inapplicable.
+func powershellNestingWarning(osName, command string) string {
+	if !strings.Contains(strings.ToLower(osName), "windows") {
+		return ""
+	}
+
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	switch strings.ToLower(fields[0]) {
+	case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+	default:
+		return ""
+	}
+
+	for _, f := range fields[1:] {
+		if lf := strings.ToLower(f); lf == "-command" || lf == "-c" {
+			return "the remote shell is already PowerShell. Nesting 'powershell -Command' can drop " +
+				"embedded double quotes on Windows PowerShell 5.1. Pass the whole script as a single " +
+				"quoted argument instead:\n" +
+				`  alpacon exec <server> -- 'Get-Service | Where-Object DisplayName -match "azure|batch"'`
+		}
+	}
+	return ""
+}
+
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
 // presence denial (SUDO_PRESENCE_REQUIRED), the only denial the CLI can resolve
 // in-flow via an MFA step-up.
