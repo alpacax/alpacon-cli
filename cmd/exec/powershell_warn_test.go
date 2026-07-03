@@ -94,3 +94,26 @@ func TestPowershellNestingWarning(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandNestsPowershell(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{"powershell -Command", `powershell -Command 'Get-Service'`, true},
+		{"powershell.exe -NoProfile -Command", `powershell.exe -NoProfile -Command 'x'`, true},
+		{"pwsh -c", `pwsh -c 'x'`, true},
+		{"case-insensitive", `POWERSHELL -COMMAND 'x'`, true},
+		{"no powershell prefix", `Get-Service | Where-Object Name -match "a|b"`, false},
+		{"powershell without -Command", `powershell script.ps1`, false},
+		{"empty command", ``, false},
+		{"powershell substring in path", `Get-Item C:\powershell\notes.txt`, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, commandNestsPowershell(tt.command))
+		})
+	}
+}

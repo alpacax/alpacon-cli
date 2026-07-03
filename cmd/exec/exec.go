@@ -115,10 +115,14 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		// Best-effort hint; skips silently on lookup failure and never blocks execution.
-		if osName, osErr := server.GetServerOSByName(alpaconClient, parsed.Server); osErr == nil {
-			if warning := powershellNestingWarning(osName, parsed.Command); warning != "" {
-				utils.CliWarning("%s", warning)
+		// Best-effort hint; the OS lookup runs only when the command actually re-nests
+		// PowerShell, so the common path skips the extra API call. Skips silently on
+		// lookup failure and never blocks execution.
+		if commandNestsPowershell(parsed.Command) {
+			if osName, osErr := server.GetServerOSByName(alpaconClient, parsed.Server); osErr == nil {
+				if warning := powershellNestingWarning(osName, parsed.Command); warning != "" {
+					utils.CliWarning("%s", warning)
+				}
 			}
 		}
 

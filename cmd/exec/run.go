@@ -86,32 +86,41 @@ func sudoDenialHint(output string) string {
 	return ""
 }
 
-// powershellNestingWarning flags redundant `powershell -Command` nesting on Windows (drops embedded quotes on WinPS 5.1); returns "" when inapplicable.
-func powershellNestingWarning(osName, command string) string {
-	if !strings.Contains(strings.ToLower(osName), "windows") {
-		return ""
-	}
-
+// commandNestsPowershell reports whether command re-invokes PowerShell with an
+// inline script (-Command/-c) — a cheap, OS-independent pre-check callers use to
+// skip the server OS lookup on the common non-nested path.
+func commandNestsPowershell(command string) bool {
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
-		return ""
+		return false
 	}
 
 	switch strings.ToLower(fields[0]) {
 	case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
 	default:
-		return ""
+		return false
 	}
 
 	for _, f := range fields[1:] {
 		if lf := strings.ToLower(f); lf == "-command" || lf == "-c" {
-			return "the remote shell is already PowerShell. Nesting 'powershell -Command' can drop " +
-				"embedded double quotes on Windows PowerShell 5.1. Pass the whole script as a single " +
-				"quoted argument instead:\n" +
-				`  alpacon exec <server> -- 'Get-Service | Where-Object DisplayName -match "azure|batch"'`
+			return true
 		}
 	}
-	return ""
+	return false
+}
+
+// powershellNestingWarning flags redundant `powershell -Command` nesting on Windows (drops embedded quotes on WinPS 5.1); returns "" when inapplicable.
+func powershellNestingWarning(osName, command string) string {
+	if !strings.Contains(strings.ToLower(osName), "windows") {
+		return ""
+	}
+	if !commandNestsPowershell(command) {
+		return ""
+	}
+	return "the remote shell is already PowerShell. Nesting 'powershell -Command' can drop " +
+		"embedded double quotes on Windows PowerShell 5.1. Pass the whole script as a single " +
+		"quoted argument instead:\n" +
+		`  alpacon exec <server> -- 'Get-Service | Where-Object DisplayName -match "azure|batch"'`
 }
 
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
