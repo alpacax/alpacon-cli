@@ -94,7 +94,7 @@ func getServerByName(ac *client.AlpaconClient, serverName string) (ServerDetails
 		return ServerDetails{}, err
 	}
 
-	if response.Count == 0 {
+	if len(response.Results) == 0 {
 		return ServerDetails{}, errors.New("no server found with the given name")
 	}
 
