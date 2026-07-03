@@ -137,6 +137,52 @@ func TestGetServerIDByName(t *testing.T) {
 	}
 }
 
+func TestGetServerOSByName(t *testing.T) {
+	tests := []struct {
+		name       string
+		serverName string
+		count      int
+		osName     string
+		wantOS     string
+		wantErr    bool
+	}{
+		{"windows", "win-server", 1, "Windows", "Windows", false},
+		{"linux", "lin-server", 1, "Ubuntu", "Ubuntu", false},
+		{"not found", "ghost", 0, "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var results []ServerDetails
+				if tt.count > 0 {
+					results = append(results, ServerDetails{ID: "id", Name: tt.serverName, OSName: tt.osName})
+				}
+				resp := api.ListResponse[ServerDetails]{Count: tt.count, Results: results}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			os, err := GetServerOSByName(ac, tt.serverName)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if os != tt.wantOS {
+					t.Errorf("expected os %q, got %q", tt.wantOS, os)
+				}
+			}
+		})
+	}
+}
+
 func TestCreateRegistrationToken(t *testing.T) {
 	want := RegistrationTokenCreatedResponse{
 		ID:   "token-uuid-abc",
