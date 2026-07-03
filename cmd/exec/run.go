@@ -87,7 +87,7 @@ func sudoDenialHint(output string) string {
 }
 
 // commandNestsPowershell reports whether command re-invokes PowerShell with an
-// inline script (-Command/-c) — a cheap, OS-independent pre-check callers use to
+// inline script (-Command/-c)—a cheap, OS-independent pre-check callers use to
 // skip the server OS lookup on the common non-nested path.
 func commandNestsPowershell(command string) bool {
 	fields := strings.Fields(command)
@@ -117,7 +117,7 @@ func powershellNestingWarning(osName, command string) string {
 	if !commandNestsPowershell(command) {
 		return ""
 	}
-	return "the remote shell is already PowerShell. Nesting 'powershell -Command' can drop " +
+	return "The remote shell is already PowerShell. Nesting 'powershell -Command' can drop " +
 		"embedded double quotes on Windows PowerShell 5.1. Pass the whole script as a single " +
 		"quoted argument instead:\n" +
 		`  alpacon exec <server> -- 'Get-Service | Where-Object DisplayName -match "azure|batch"'`
