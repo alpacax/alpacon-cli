@@ -101,7 +101,12 @@ func commandNestsPowershell(command string) bool {
 		return false
 	}
 
+	// Scan only the leading flags; stop at the first positional (typically a
+	// script path), so a `-c` passed as that script's own argument isn't misread.
 	for _, f := range fields[1:] {
+		if !strings.HasPrefix(f, "-") {
+			break
+		}
 		if lf := strings.ToLower(f); lf == "-command" || lf == "-c" {
 			return true
 		}

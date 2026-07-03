@@ -80,6 +80,12 @@ func TestPowershellNestingWarning(t *testing.T) {
 			command:  `Get-Item C:\powershell\notes.txt`,
 			wantWarn: false,
 		},
+		{
+			name:     "-c as script argument does not warn",
+			osName:   "Windows",
+			command:  `powershell script.ps1 -c foo`,
+			wantWarn: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -109,6 +115,7 @@ func TestCommandNestsPowershell(t *testing.T) {
 		{"powershell without -Command", `powershell script.ps1`, false},
 		{"empty command", ``, false},
 		{"powershell substring in path", `Get-Item C:\powershell\notes.txt`, false},
+		{"-c as script argument after script path", `powershell script.ps1 -c foo`, false},
 	}
 
 	for _, tt := range tests {
