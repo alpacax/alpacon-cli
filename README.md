@@ -174,6 +174,7 @@ $ alpacon work-session use --unset
 $ alpacon work-session approve <session-id>      # superuser
 $ alpacon work-session reject <session-id>       # superuser
 $ alpacon work-session revoke <session-id>       # superuser
+$ alpacon work-session cancel <session-id>       # requester withdraws own pending request
 ```
 
 Override the active session per command with `--work-session <id>` or `ALPACON_WORK_SESSION=<id>`. Resolution order: `--work-session` flag > env var > active session.
