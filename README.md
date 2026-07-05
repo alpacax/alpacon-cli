@@ -171,9 +171,8 @@ $ alpacon work-session ls --user all --status all  # all sessions
 $ alpacon work-session current
 $ alpacon work-session use <session-id>          # set active session
 $ alpacon work-session use --unset
-$ alpacon work-session approve <session-id>      # superuser
-$ alpacon work-session reject <session-id>       # superuser
 $ alpacon work-session revoke <session-id>       # superuser
+# Approving/rejecting a session happens in the Alpacon console (web), not the CLI.
 ```
 
 Override the active session per command with `--work-session <id>` or `ALPACON_WORK_SESSION=<id>`. Resolution order: `--work-session` flag > env var > active session.
@@ -184,8 +183,8 @@ $ alpacon user ls
 $ alpacon user describe <username>
 $ alpacon user create / update / rm
 $ alpacon group ls
-$ alpacon group member add --group <group> --member <user> --role <role>
-$ alpacon group member rm --group <group> --member <user>
+$ alpacon group member add --group <group> -u <user> --role <role>
+$ alpacon group member rm --group <group> -u <user>
 ```
 
 ### API tokens
