@@ -14,10 +14,6 @@ import (
 )
 
 func TestPollForApprovalCancelled(t *testing.T) {
-	orig := pollInterval
-	pollInterval = 0
-	t.Cleanup(func() { pollInterval = orig })
-
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ses-c","status":"cancelled"}`))
@@ -25,7 +21,7 @@ func TestPollForApprovalCancelled(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ses-c", false)
+	_, err := pollForApproval(ac, "ses-c", false, 0)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cancelled")
 }

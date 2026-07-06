@@ -19,6 +19,7 @@ import (
 
 const (
 	pollMaxAttempts   = 30
+	pollInterval      = 10 * time.Second
 	waitMsgApproval   = "Waiting for approval..."
 	waitMsgActivation = "Waiting for activation..."
 )
@@ -33,9 +34,6 @@ const (
 )
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
-
-// pollInterval is a var (not const) so tests can shrink it.
-var pollInterval = 10 * time.Second
 
 var (
 	purpose          string
@@ -250,7 +248,7 @@ so it is recorded and scoped accordingly.`,
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate)
+		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
@@ -378,10 +376,10 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	return policies
 }
 
-// pollForApproval polls every 10 seconds until the session reaches a terminal state.
+// pollForApproval polls at interval until the session reaches a terminal state.
 // untilActive=false returns on approved or active; untilActive=true returns only on
 // active (continues polling on approved until the server auto-activates).
-func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*wsapi.WorkSession, error) {
+func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval time.Duration) (*wsapi.WorkSession, error) {
 	for attempt := 1; attempt <= pollMaxAttempts; attempt++ {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
@@ -411,7 +409,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*ws
 		}
 		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, pollMaxAttempts)
 		if attempt < pollMaxAttempts {
-			time.Sleep(pollInterval)
+			time.Sleep(interval)
 		}
 	}
 	return nil, fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
