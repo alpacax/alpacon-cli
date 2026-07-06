@@ -23,6 +23,11 @@ var workSessionCancelCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opCancel, err, "Failed to cancel work session: %s.", err)
 		}
 
-		utils.CliSuccess("Work session %s cancelled.", args[0])
+		output := newWorkSessionCancelOutput(args[0])
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			printWorkSessionMutationJSON(output)
+			return
+		}
+		utils.CliSuccess("%s", output.Message)
 	},
 }
