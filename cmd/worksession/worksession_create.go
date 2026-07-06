@@ -23,9 +23,6 @@ const (
 	waitMsgActivation = "Waiting for activation..."
 )
 
-// pollInterval is a var (not const) so tests can shrink it.
-var pollInterval = 10 * time.Second
-
 type useDecision int
 
 const (
@@ -36,6 +33,9 @@ const (
 )
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
+
+// pollInterval is a var (not const) so tests can shrink it.
+var pollInterval = 10 * time.Second
 
 var (
 	purpose          string
