@@ -97,7 +97,7 @@ var workSessionListCmd = &cobra.Command{
 }
 
 func init() {
-	workSessionListCmd.Flags().StringVar(&statusFilter, "status", "active", "Filter by status (pending, approved, active, completed, rejected, expired, revoked); use \"all\" for any status")
+	workSessionListCmd.Flags().StringVar(&statusFilter, "status", "active", "Filter by status (pending, approved, active, completed, rejected, expired, revoked, cancelled); use \"all\" for any status")
 	workSessionListCmd.Flags().StringVar(&requesterFilter, "requester-type", "", "Filter by requester type (user, agent)")
 	workSessionListCmd.Flags().StringVar(&userFilter, "user", "", "Filter by assigned user: default is self, \"all\" for everyone, or a user uuid")
 }

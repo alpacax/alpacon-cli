@@ -8,9 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPollForApprovalCancelled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-c","status":"cancelled"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollForApproval(ac, "ses-c", false, 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cancelled")
+}
 
 func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
 	before := time.Now()

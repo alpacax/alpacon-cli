@@ -77,6 +77,21 @@ func TestWorkSessionExtendOutput(t *testing.T) {
 	}`, string(body))
 }
 
+func TestWorkSessionCancelOutput(t *testing.T) {
+	output := newWorkSessionCancelOutput("ses-abc")
+	body, err := json.Marshal(output)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"ok": true,
+		"operation": "cancel",
+		"message": "Work session ses-abc cancelled.",
+		"work_session_id": "ses-abc",
+		"status": "cancelled",
+		"active_worksession": null
+	}`, string(body))
+}
+
 func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -247,6 +262,43 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "extend", got.Operation)
 	assert.Equal(t, "ses-active", got.WorkSessionID)
 	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
+}
+
+func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
+	var sawCancel bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/work-sessions/sessions/ses-pending/cancel/" {
+			http.NotFound(w, r)
+			return
+		}
+		sawCancel = true
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	setupWorkSessionCommandConfig(t, ts.URL)
+	withWorkSessionCommandJSONMode(t)
+
+	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+		workSessionCancelCmd.Run(workSessionCancelCmd, []string{"ses-pending"})
+	})
+
+	assert.True(t, sawCancel)
+	assert.Empty(t, stderr)
+	assert.NotContains(t, stdout, "Success:")
+
+	var got struct {
+		OK            bool   `json:"ok"`
+		Operation     string `json:"operation"`
+		WorkSessionID string `json:"work_session_id"`
+		Status        string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.True(t, got.OK)
+	assert.Equal(t, "cancel", got.Operation)
+	assert.Equal(t, "ses-pending", got.WorkSessionID)
+	assert.Equal(t, "cancelled", got.Status)
 }
 
 func TestFormatAdjustments(t *testing.T) {

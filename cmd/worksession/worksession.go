@@ -9,6 +9,7 @@ import (
 // Operation identifiers carried in JSON outputs: success "operation" and error context.operation.
 const (
 	opActivate  = "activate"
+	opCancel    = "cancel"
 	opComplete  = "complete"
 	opCreate    = "create"
 	opCurrent   = "current"
@@ -46,11 +47,11 @@ Gated operations (require an active WorkSession under interactive auth):
 
 Bypass: Token auth (API token or Service token) skips the requirement.
 
-Lifecycle:  pending → approved → active → complete | expired | revoked
+Lifecycle:  pending → approved → active → complete | expired | revoked  (pending only → rejected | cancelled)
 
 Error codes returned when a session check fails:
   work_session_required           no session selected for this shell
-  work_session_not_active         session not active (pending, approved, completed, or revoked)
+  work_session_not_active         session not active (pending, approved, completed, revoked, or cancelled)
   work_session_expired            session has expired
   work_session_scope_not_allowed  operation not in session scopes
   work_session_server_not_allowed target server not in session
@@ -62,7 +63,7 @@ Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
 		if err := cmd.Help(); err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon work-session ls', 'alpacon work-session create', 'alpacon work-session describe', 'alpacon work-session use', 'alpacon work-session current', 'alpacon work-session activate', 'alpacon work-session complete', 'alpacon work-session extend', 'alpacon work-session update', 'alpacon work-session approve', 'alpacon work-session reject', 'alpacon work-session revoke', 'alpacon work-session timeline', or 'alpacon work-session recording'. Run 'alpacon work-session --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon work-session ls', 'alpacon work-session create', 'alpacon work-session describe', 'alpacon work-session use', 'alpacon work-session current', 'alpacon work-session activate', 'alpacon work-session complete', 'alpacon work-session extend', 'alpacon work-session update', 'alpacon work-session approve', 'alpacon work-session reject', 'alpacon work-session revoke', 'alpacon work-session cancel', 'alpacon work-session timeline', or 'alpacon work-session recording'. Run 'alpacon work-session --help' for more information")
 	},
 }
 
@@ -81,4 +82,5 @@ func init() {
 	WorkSessionCmd.AddCommand(workSessionApproveCmd)
 	WorkSessionCmd.AddCommand(workSessionRejectCmd)
 	WorkSessionCmd.AddCommand(workSessionRevokeCmd)
+	WorkSessionCmd.AddCommand(workSessionCancelCmd)
 }

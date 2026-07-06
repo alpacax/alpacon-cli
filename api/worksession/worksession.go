@@ -124,6 +124,12 @@ func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
+// CancelWorkSession withdraws the requester's own pending session; the server restricts it to the creator/superuser and rejects non-pending sessions (unlike superuser-only RevokeWorkSession).
+func CancelWorkSession(ac *client.AlpaconClient, id string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "cancel"), nil), struct{}{})
+	return err
+}
+
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }
