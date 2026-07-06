@@ -47,7 +47,7 @@ Gated operations (require an active WorkSession under interactive auth):
 
 Bypass: Token auth (API token or Service token) skips the requirement.
 
-Lifecycle:  pending → approved → active → complete | expired | revoked
+Lifecycle:  pending → approved → active → complete | expired | revoked | cancelled
 
 Error codes returned when a session check fails:
   work_session_required           no session selected for this shell
