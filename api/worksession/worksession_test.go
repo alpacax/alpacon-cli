@@ -219,6 +219,19 @@ func TestRevokeWorkSession(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestCancelWorkSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/cancel/"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "cancelled"})
+	}))
+	defer ts.Close()
+
+	err := CancelWorkSession(newTestClient(ts), "ses-abc")
+	assert.NoError(t, err)
+}
+
 func TestApproveWorkSession_NoAdjustments(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)

@@ -50,6 +50,16 @@ func newWorkSessionExtendOutput(id, expiresAt string) workSessionMutationOutput 
 	}
 }
 
+func newWorkSessionCancelOutput(id string) workSessionMutationOutput {
+	return workSessionMutationOutput{
+		OK:            true,
+		Operation:     opCancel,
+		Message:       fmt.Sprintf("Work session %s cancelled.", id),
+		WorkSessionID: id,
+		Status:        cancelledWorkSessionStatus,
+	}
+}
+
 func formatMutationExpiresAt(expiresAt time.Time) string {
 	if expiresAt.IsZero() {
 		return ""
