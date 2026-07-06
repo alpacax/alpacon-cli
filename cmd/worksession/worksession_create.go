@@ -19,10 +19,12 @@ import (
 
 const (
 	pollMaxAttempts   = 30
-	pollInterval      = 10 * time.Second
 	waitMsgApproval   = "Waiting for approval..."
 	waitMsgActivation = "Waiting for activation..."
 )
+
+// pollInterval is a var (not const) so tests can shrink it.
+var pollInterval = 10 * time.Second
 
 type useDecision int
 
@@ -398,6 +400,8 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool) (*ws
 			return nil, errors.New("work session expired while waiting for approval")
 		case revokedWorkSessionStatus:
 			return nil, errors.New("work session was revoked")
+		case cancelledWorkSessionStatus:
+			return nil, errors.New("work session was cancelled")
 		case completedWorkSessionStatus:
 			return nil, errors.New("work session was completed unexpectedly")
 		}

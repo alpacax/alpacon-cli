@@ -16,6 +16,7 @@ const (
 	rejectedWorkSessionStatus  = "rejected"
 	expiredWorkSessionStatus   = "expired"
 	revokedWorkSessionStatus   = "revoked"
+	cancelledWorkSessionStatus = "cancelled"
 	completedWorkSessionStatus = "completed"
 )
 
