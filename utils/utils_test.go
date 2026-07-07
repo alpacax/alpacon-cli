@@ -350,7 +350,10 @@ func TestStripANSIEscapes(t *testing.T) {
 		want  string
 	}{
 		{"CSI color codes", "\x1b[31mfoo\x1b[0m", "foo"},
+		{"CSI erase line", "abc\x1b[2Kdef", "abcdef"},
 		{"OSC BEL-terminated window title", "\x1b]0;title\x07bar", "bar"},
+		{"OSC ST-terminated window title", "\x1b]0;title\x1b\\baz", "baz"},
+		{"DCS string terminated by ST", "\x1bPq123\x1b\\qux", "qux"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
