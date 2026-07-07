@@ -10,10 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	ansiEscapeRE    = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
-	whitespaceRunRE = regexp.MustCompile(`\s+`)
-)
+var whitespaceRunRE = regexp.MustCompile(`\s+`)
 
 var webshRecordsCmd = &cobra.Command{
 	Use:     "records SESSION_ID",
@@ -64,8 +61,9 @@ Use --query to search records by command text (fuzzy match).`,
 }
 
 func sanitizeRecord(s string, width int) string {
-	s = ansiEscapeRE.ReplaceAllString(s, "")
+	s = utils.StripANSIEscapes(s)
 	s = whitespaceRunRE.ReplaceAllString(s, " ")
+	s = utils.StripControlChars(s)
 	s = strings.TrimSpace(s)
 	return utils.TruncateString(s, width)
 }

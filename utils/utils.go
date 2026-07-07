@@ -466,8 +466,26 @@ var uuidRegex = regexp.MustCompile(
 		`|^[0-9a-fA-F]{32}$`,
 )
 
+// ansiEscapeRE matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/SOS/PM/APC string controls (ST), and Fe/Fs/nF sequences.
+var ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
+
 func IsUUID(str string) bool {
 	return uuidRegex.MatchString(str)
+}
+
+// StripANSIEscapes removes ANSI/VT escape sequences from s.
+func StripANSIEscapes(s string) string {
+	return ansiEscapeRE.ReplaceAllString(s, "")
+}
+
+// StripControlChars removes non-printable control characters from s.
+func StripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // ProcessEditedData facilitates user modifications to original data,

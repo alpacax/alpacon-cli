@@ -342,3 +342,23 @@ func TestSplitAndTrim(t *testing.T) {
 		})
 	}
 }
+
+func TestStripANSIEscapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"CSI color codes", "\x1b[31mfoo\x1b[0m", "foo"},
+		{"OSC BEL-terminated window title", "\x1b]0;title\x07bar", "bar"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, StripANSIEscapes(tt.input))
+		})
+	}
+}
+
+func TestStripControlChars(t *testing.T) {
+	assert.Equal(t, "abc", StripControlChars("a\x00b\x7fc"))
+}

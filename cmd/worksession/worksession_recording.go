@@ -2,16 +2,12 @@ package worksession
 
 import (
 	"fmt"
-	"regexp"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-// ansiEscape matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/SOS/PM/APC string controls (ST), and Fe/Fs/nF sequences.
-var ansiEscape = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 
 var recordingIndex int
 
@@ -79,7 +75,7 @@ func printRecordingHeader(target *wsapi.TimelineItem, idx int, total int) {
 }
 
 func printRecordingContent(raw string) {
-	content := ansiEscape.ReplaceAllString(raw, "")
+	content := utils.StripANSIEscapes(raw)
 	fmt.Print(content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		fmt.Println()

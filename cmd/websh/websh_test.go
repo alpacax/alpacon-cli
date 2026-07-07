@@ -364,4 +364,7 @@ func TestSanitizeRecord(t *testing.T) {
 
 	// Truncation applies after cleaning.
 	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
+
+	// OSC window-title sequences are stripped, not leaked into output.
+	assert.Equal(t, "bar", sanitizeRecord("\x1b]0;t\x07bar", 100))
 }
