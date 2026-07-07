@@ -10,10 +10,10 @@ import (
 )
 
 var webshRecordsCmd = &cobra.Command{
-	Use:     "records SESSION_ID",
+	Use:     "records [flags] SESSION_ID",
 	Aliases: []string{"rec"},
-	Short:   "Retrieve or search records within a websh session",
-	Long: `Retrieve masked terminal records for a websh session, optionally
+	Short:   "Retrieve or search records within a Websh session",
+	Long: `Retrieve masked terminal records for a Websh session, optionally
 filtering by command text. Available on paid plans only.
 
 Use --query to search records by command text (fuzzy match).`,
@@ -36,7 +36,7 @@ Use --query to search records by command text (fuzzy match).`,
 
 		records, err := websh.GetSessionRecords(alpaconClient, sessionID, query, limit)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve websh session records: %s.", err)
+			utils.CliErrorWithExit("Failed to retrieve Websh session records: %s.", err)
 		}
 
 		// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
