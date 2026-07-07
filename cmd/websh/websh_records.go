@@ -56,17 +56,17 @@ Use --query to search records by command text (fuzzy match).`,
 	},
 }
 
-func sanitizeRecord(s string, width int) string {
-	s = utils.StripANSIEscapes(s)
+func sanitizeRecord(record string, width int) string {
+	record = utils.StripANSIEscapes(record)
 	// Map control chars to spaces so they separate tokens instead of merging them.
-	s = strings.Map(func(r rune) rune {
+	record = strings.Map(func(r rune) rune {
 		if utils.IsControlRune(r) {
 			return ' '
 		}
 		return r
-	}, s)
-	s = strings.Join(strings.Fields(s), " ")
-	return utils.TruncateString(s, width)
+	}, record)
+	record = strings.Join(strings.Fields(record), " ")
+	return utils.TruncateString(record, width)
 }
 
 func init() {
