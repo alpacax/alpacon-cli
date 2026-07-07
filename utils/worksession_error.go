@@ -130,7 +130,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []stri
 	case WorkSessionNotActive:
 		// Activation is approval/server-driven, not user-run; guide toward an active session.
 		return append([]string{
-			"alpacon work-session current  # pending/approved: wait until active; completed/revoked: create or reuse below",
+			"alpacon work-session current  # pending/approved: wait until active; completed/revoked/cancelled: create or reuse below",
 		}, createOrReuse...)
 	case WorkSessionExpired:
 		extendCmd := "alpacon work-session extend <ID>"
