@@ -356,3 +356,12 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	assert.Equal(t, "", got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
 }
+
+func TestSanitizeRecord(t *testing.T) {
+	// ANSI color codes stripped, newlines collapsed to single spaces.
+	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
+	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
+
+	// Truncation applies after cleaning.
+	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
+}
