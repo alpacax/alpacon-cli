@@ -367,4 +367,10 @@ func TestSanitizeRecord(t *testing.T) {
 
 	// OSC window-title sequences are stripped, not leaked into output.
 	assert.Equal(t, "bar", sanitizeRecord("\x1b]0;t\x07bar", 100))
+
+	// A control char removed from between two spaces leaves no double space.
+	assert.Equal(t, "foo bar", sanitizeRecord("foo \x07 bar", 100))
+
+	// C1 control (U+0085) separates tokens rather than leaking to the terminal.
+	assert.Equal(t, "foo bar", sanitizeRecord("foo"+string(rune(0x85))+"bar", 100))
 }

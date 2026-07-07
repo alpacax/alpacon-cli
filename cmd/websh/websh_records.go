@@ -1,7 +1,6 @@
 package websh
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -9,8 +8,6 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
-
-var whitespaceRunRE = regexp.MustCompile(`\s+`)
 
 var webshRecordsCmd = &cobra.Command{
 	Use:     "records SESSION_ID",
@@ -42,8 +39,7 @@ Use --query to search records by command text (fuzzy match).`,
 			utils.CliErrorWithExit("Failed to retrieve websh session records: %s.", err)
 		}
 
-		// JSON output keeps records verbatim; table output sanitizes the
-		// terminal recording so control chars don't break the layout.
+		// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			utils.PrintTable(records)
 			return
@@ -62,9 +58,14 @@ Use --query to search records by command text (fuzzy match).`,
 
 func sanitizeRecord(s string, width int) string {
 	s = utils.StripANSIEscapes(s)
-	s = whitespaceRunRE.ReplaceAllString(s, " ")
-	s = utils.StripControlChars(s)
-	s = strings.TrimSpace(s)
+	// Map control chars to spaces so they separate tokens instead of merging them.
+	s = strings.Map(func(r rune) rune {
+		if utils.IsControlRune(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
 	return utils.TruncateString(s, width)
 }
 

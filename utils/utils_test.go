@@ -360,5 +360,8 @@ func TestStripANSIEscapes(t *testing.T) {
 }
 
 func TestStripControlChars(t *testing.T) {
+	// C0, DEL, and C1 (rune 0x85 = NEL) are removed; printable Unicode (é = 0xE9) is kept.
 	assert.Equal(t, "abc", StripControlChars("a\x00b\x7fc"))
+	assert.Equal(t, "ab", StripControlChars("a\u0085b"))
+	assert.Equal(t, "abé", StripControlChars("a\u0085bé"))
 }

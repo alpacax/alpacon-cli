@@ -473,15 +473,18 @@ func IsUUID(str string) bool {
 	return uuidRegex.MatchString(str)
 }
 
-// StripANSIEscapes removes ANSI/VT escape sequences from s.
 func StripANSIEscapes(s string) string {
 	return ansiEscapeRE.ReplaceAllString(s, "")
 }
 
-// StripControlChars removes non-printable control characters from s.
+// IsControlRune reports whether r is a C0, DEL, or C1 control character (the last can introduce CSI/OSC on 8-bit terminals).
+func IsControlRune(r rune) bool {
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
+}
+
 func StripControlChars(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if IsControlRune(r) {
 			return -1
 		}
 		return r
