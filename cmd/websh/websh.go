@@ -287,9 +287,6 @@ func init() {
 	WebshCmd.AddCommand(webshInviteCmd)
 	WebshCmd.AddCommand(webshWatchCmd)
 	WebshCmd.AddCommand(webshRecordsCmd)
-
-	webshRecordsCmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")
-	webshRecordsCmd.Flags().IntP("limit", "n", 100, "Maximum number of records to fetch")
 }
 
 func extractValue(args []string, i int) (string, int) {

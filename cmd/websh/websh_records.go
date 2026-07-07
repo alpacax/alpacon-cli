@@ -67,3 +67,8 @@ func sanitizeRecord(s string, width int) string {
 	s = strings.TrimSpace(s)
 	return utils.TruncateString(s, width)
 }
+
+func init() {
+	webshRecordsCmd.Flags().StringP("query", "q", "", "Search records by command text (fuzzy match)")
+	webshRecordsCmd.Flags().IntP("limit", "n", 100, "Maximum number of records to fetch")
+}

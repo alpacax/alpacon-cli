@@ -266,6 +266,39 @@ func TestGetSessionRecords_LimitCaps(t *testing.T) {
 	assert.Len(t, records, 2)
 }
 
+func TestGetSessionRecords_PageSize(t *testing.T) {
+	tests := []struct {
+		name         string
+		limit        int
+		wantPageSize string
+	}{
+		{"limit above page cap", 250, "100"},
+		{"limit below page cap", 3, "3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPageSize string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if gotPageSize == "" {
+					gotPageSize = r.URL.Query().Get("page_size")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(recordCursorPage{
+					Next:    "",
+					Results: []SessionRecord{{Record: "a"}, {Record: "b"}, {Record: "c"}},
+				})
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := GetSessionRecords(ac, "sess-1", "", tt.limit)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPageSize, gotPageSize)
+		})
+	}
+}
+
 func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	var gotQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
