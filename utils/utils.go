@@ -21,6 +21,16 @@ import (
 	"golang.org/x/term"
 )
 
+var (
+	uuidRegex = regexp.MustCompile(
+		`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$` +
+			`|^[0-9a-fA-F]{32}$`,
+	)
+
+	// ansiEscapeRE matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/SOS/PM/APC string controls (ST), and Fe/Fs/nF sequences.
+	ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
+)
+
 // ShowLogo renders the Pacabot mascot with up to 3 lines of text. When the
 // terminal is wide enough the text sits to the right of the art (lines 1-3
 // align with art rows 1-3); otherwise it falls back to rendering text below
@@ -460,14 +470,6 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	u.RawQuery = q.Encode()
 	return u.String()
 }
-
-var uuidRegex = regexp.MustCompile(
-	`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$` +
-		`|^[0-9a-fA-F]{32}$`,
-)
-
-// ansiEscapeRE matches ANSI/VT escape sequences: CSI, OSC (BEL or ST), DCS/SOS/PM/APC string controls (ST), and Fe/Fs/nF sequences.
-var ansiEscapeRE = regexp.MustCompile(`\x1b(?:\][^\x07\x1b]*(?:\x07|\x1b\\)|[PX^_][^\x1b]*\x1b\\|\[[\x30-\x3f]*[\x20-\x2f]*[@-~]|[\x20-\x2f]*[\x40-\x7e])`)
 
 func IsUUID(str string) bool {
 	return uuidRegex.MatchString(str)
