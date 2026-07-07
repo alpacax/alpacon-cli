@@ -3,6 +3,8 @@ package exec
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
@@ -10,6 +12,24 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
+
+// logsStatusRunning/logsStatusSucceeded/logsStatusFailed/logsStatusUnknown are
+// the remaining `status` values of the stable `exec logs --output json`
+// contract that have no shared constant elsewhere. pending_approval and
+// rejected reuse utils.PendingApprovalStatus/utils.RejectedStatus so the same
+// string is never spelled two different ways.
+const (
+	logsStatusRunning   = "running"
+	logsStatusSucceeded = "succeeded"
+	logsStatusFailed    = "failed"
+	logsStatusUnknown   = "unknown"
+)
+
+// ansiSGR matches ANSI SGR (Select Graphic Rendition) escape sequences—the only
+// escape codes utils.Red/Yellow/Bold ever emit—so the JSON envelope's message
+// field is clean regardless of whether the process happened to detect a
+// terminal on stderr.
+var ansiSGR = regexp.MustCompile("\x1b\\[[0-9;]*m")
 
 var logsCmd = &cobra.Command{
 	Use:   "logs JOB_ID",
@@ -50,6 +70,19 @@ Run the command again later to check for completion.`,
 		}
 
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			envelope := buildLogsJSON(details, stdoutLine, stderrLine, exitCode)
+			if err := utils.PrintJSONValue(os.Stdout, envelope); err != nil {
+				utils.CliErrorWithExit("failed to marshal JSON: %s", err)
+				return
+			}
+			if exitCode != 0 {
+				os.Exit(exitCode)
+			}
+			return
+		}
+
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
 		}
@@ -60,6 +93,24 @@ Run the command again later to check for completion.`,
 			os.Exit(exitCode)
 		}
 	},
+}
+
+// logsJSONEnvelope is the JSON schema for `exec logs --output json`, documented
+// in docs/superpowers/specs/253-unify-exit-code-contract.md section 3.4. Status
+// is the stable public contract; ServerStatus is the raw server value, kept
+// separate so the server adding new internal states doesn't change what a
+// machine consumer branches on.
+type logsJSONEnvelope struct {
+	OK           bool     `json:"ok"`
+	Status       string   `json:"status"`
+	ServerStatus string   `json:"server_status"`
+	ExitCode     int      `json:"exit_code"`
+	ErrorCode    string   `json:"error_code,omitempty"`
+	ErrorPhase   string   `json:"error_phase,omitempty"`
+	Message      string   `json:"message"`
+	Result       string   `json:"result,omitempty"`
+	JobID        string   `json:"job_id"`
+	NextActions  []string `json:"next_actions,omitempty"`
 }
 
 func init() {
@@ -88,9 +139,10 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 	}
 
 	if details.Status == "rejected" {
-		stderrLine = fmt.Sprintf("%s: command was rejected by a reviewer (status: %s)\n",
+		stderrLine = fmt.Sprintf(
+			"%s: command was rejected by a reviewer (status: %s); do not retry, submit a new command if still needed\n",
 			utils.Red("Error"), details.Status)
-		return "", stderrLine, 1
+		return "", stderrLine, utils.ExitCodeCommandRejected
 	}
 
 	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
@@ -128,4 +180,74 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 	stderrLine = fmt.Sprintf("%s: command ended with unrecognised status: %s\n",
 		utils.Red("Error"), details.Status)
 	return details.Result, stderrLine, 1
+}
+
+// classifyLogsStatus maps a raw server status (plus success/exit info) to the
+// stable `status` value of the logs JSON contract (section 3.4.1 of the spec).
+// The branch order mirrors logsCommandOutcome so the two never disagree on
+// which group a status falls into.
+func classifyLogsStatus(details event.EventDetails) string {
+	switch {
+	case event.IsRunningStatus(details.Status):
+		return logsStatusRunning
+	case event.IsAwaitingApprovalStatus(details.Status):
+		return utils.PendingApprovalStatus
+	case details.Status == "rejected":
+		return utils.RejectedStatus
+	case details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled":
+		return logsStatusFailed
+	case details.Success != nil && !*details.Success:
+		return logsStatusFailed
+	case details.Success != nil:
+		return logsStatusSucceeded
+	case details.Status == "completed" || details.Status == "success":
+		return logsStatusSucceeded
+	default:
+		return logsStatusUnknown
+	}
+}
+
+// logsNextActions lists the actionable follow-up for a machine consumer polling
+// `exec logs`. Only the two non-terminal statuses get one—there is nothing
+// useful to suggest once a command has reached a terminal state.
+func logsNextActions(status, jobID string) []string {
+	switch status {
+	case logsStatusRunning, utils.PendingApprovalStatus:
+		return []string{fmt.Sprintf("Run `alpacon exec logs %s` again to check later.", jobID)}
+	default:
+		return nil
+	}
+}
+
+// buildLogsJSON assembles the `exec logs --output json` envelope from the same
+// (stdoutLine, stderrLine, exitCode) trio the plain-text path renders, so the
+// two can never drift on exit code. ok is always true: this is a query command,
+// and the query itself succeeded—status carries the underlying command's
+// outcome (see spec section 3.4.2 for why this differs from exec's own
+// pending-approval envelope, which uses ok:false).
+func buildLogsJSON(details event.EventDetails, stdoutLine, stderrLine string, exitCode int) logsJSONEnvelope {
+	status := classifyLogsStatus(details)
+
+	envelope := logsJSONEnvelope{
+		OK:           true,
+		Status:       status,
+		ServerStatus: details.Status,
+		ExitCode:     exitCode,
+		Message:      stripAnsi(strings.TrimRight(stderrLine, "\n")),
+		Result:       stdoutLine,
+		JobID:        details.ID,
+		NextActions:  logsNextActions(status, details.ID),
+	}
+	if status == utils.RejectedStatus {
+		envelope.ErrorCode = utils.RejectedErrorCode
+	}
+	if details.ErrorPhase != nil && *details.ErrorPhase != "" {
+		envelope.ErrorPhase = *details.ErrorPhase
+	}
+	return envelope
+}
+
+// stripAnsi removes ANSI SGR escape codes from s.
+func stripAnsi(s string) string {
+	return ansiSGR.ReplaceAllString(s, "")
 }

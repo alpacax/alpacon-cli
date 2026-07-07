@@ -69,6 +69,78 @@ func newAwaitingApprovalServer() *httptest.Server {
 	}))
 }
 
+// newRejectedServer returns a test server whose exec command lands in the
+// terminal "rejected" status (a reviewer denied it out of band in the Alpacon
+// console), so the command never ran and must not be retried.
+func newRejectedServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     "cmd-1",
+				"status": "rejected",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// TestExecRejectedExits5WithJSONSignal drives a reviewer-rejected command
+// through the real exec command and asserts it converges on the rejected
+// contract: exit 5 and a {"status":"rejected", ...} envelope.
+func TestExecRejectedExits5WithJSONSignal(t *testing.T) {
+	ts := newRejectedServer()
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+
+	helper := osexec.Command(
+		os.Args[0],
+		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
+		"--",
+		"exec-worksession-helper",
+		"--output",
+		"json",
+		"prod",
+		"--",
+		"sudo",
+		"reboot",
+	)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var stdout, stderr bytes.Buffer
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	assert.Equal(t, utils.ExitCodeCommandRejected, exitErr.ExitCode(), "rejected command must exit 5")
+
+	var got struct {
+		OK        bool   `json:"ok"`
+		Status    string `json:"status"`
+		ExitCode  int    `json:"exit_code"`
+		ErrorCode string `json:"error_code"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
+	assert.False(t, got.OK)
+	assert.Equal(t, utils.RejectedStatus, got.Status)
+	assert.Equal(t, utils.ExitCodeCommandRejected, got.ExitCode)
+	assert.Equal(t, "command_rejected", got.ErrorCode)
+}
+
 // TestExecStatusAwaitingApprovalExits4WithJSONSignal drives the status-level HITL
 // hold (server status "awaiting_approval", no denial line) through the real exec
 // command and asserts it converges on the same pending-approval contract as the

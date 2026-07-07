@@ -356,7 +356,7 @@ func errorFromDetails(d EventDetails) error {
 	case "awaiting_approval":
 		return &PendingApprovalError{CommandID: d.ID}
 	case "rejected":
-		return fmt.Errorf("command was rejected by a reviewer")
+		return &RejectedError{CommandID: d.ID}
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
 	}

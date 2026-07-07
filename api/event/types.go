@@ -38,6 +38,14 @@ type PendingApprovalError struct {
 	CommandID string
 }
 
+// RejectedError is returned when a reviewer rejected a command out of band in
+// the Alpacon console. Unlike PendingApprovalError, this status is terminal:
+// the command will not run, and re-submitting it will not change the outcome.
+// CommandID identifies the rejected job.
+type RejectedError struct {
+	CommandID string
+}
+
 type EventAttributes struct {
 	Server      string `json:"server"`
 	Shell       string `json:"shell"`
@@ -105,6 +113,10 @@ func (*ClientTimeoutError) Error() string {
 
 func (*PendingApprovalError) Error() string {
 	return "command is awaiting human approval"
+}
+
+func (*RejectedError) Error() string {
+	return "command was rejected by a reviewer"
 }
 
 // DescribePhase returns the human-readable description for an error_phase,

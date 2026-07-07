@@ -31,9 +31,25 @@ const (
 	// rather than treat it as a hard failure.
 	ExitCodePendingApproval = 4
 
+	// ExitCodeCommandRejected is the process exit code for a command a reviewer
+	// rejected out of band in the Alpacon console. It is distinct from
+	// ExitCodePendingApproval (4): the command is no longer awaiting a decision,
+	// it has been denied and running it again will not change the outcome.
+	// Scripts and AI agents branch on it to stop retrying rather than treat it
+	// as a transient failure.
+	ExitCodeCommandRejected = 5
+
 	// PendingApprovalStatus is the stable machine-readable status string emitted
 	// under --output json when an action is pending human approval.
 	PendingApprovalStatus = "pending_approval"
+
+	// RejectedStatus is the stable machine-readable status string emitted under
+	// --output json when a command was rejected by a reviewer.
+	RejectedStatus = "rejected"
+
+	// RejectedErrorCode is the stable machine-readable error_code emitted under
+	// --output json when a command was rejected by a reviewer.
+	RejectedErrorCode = "command_rejected"
 )
 
 type ErrorResponse struct {

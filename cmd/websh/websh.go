@@ -1,8 +1,10 @@
 package websh
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -225,8 +227,33 @@ Note: All flags must be placed before the server name.
 
 		if len(commandArgs) > 0 {
 			command := execCmd.ShellJoin(commandArgs)
-			err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, os.Stdout)
+
+			// JSON mode buffers output to keep stdout clean for a pending-approval
+			// signal; it is flushed below once we know the command did not land
+			// pending. Table mode streams live. Mirrors cmd/exec/exec.go's
+			// non-detach path, since a sudo denial line can otherwise reach out
+			// before HandlePendingApproval has a chance to print the envelope.
+			var out io.Writer = os.Stdout
+			var buf *bytes.Buffer
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				buf = &bytes.Buffer{}
+				out = buf
+			}
+
+			err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, out)
 			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
+			// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that
+			// landed via websh's non-interactive path emits the same exit 4 + JSON
+			// envelope contract as exec, via the shared HandlePendingApproval.
+			hintArgs := parsed
+			hintArgs.Username = username
+			hintArgs.ServerName = serverName
+			if execCmd.HandlePendingApproval(err, webshReRunHint(hintArgs, command)) {
+				return
+			}
+			if buf != nil {
+				_, _ = os.Stdout.Write(buf.Bytes())
+			}
 			execCmd.HandleCommandResult(err)
 		} else {
 			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
@@ -286,6 +313,26 @@ func init() {
 	WebshCmd.AddCommand(webshForceCloseCmd)
 	WebshCmd.AddCommand(webshInviteCmd)
 	WebshCmd.AddCommand(webshWatchCmd)
+}
+
+// webshReRunHint reconstructs the websh invocation (server, optional user/group,
+// and command) so the pending-approval message can tell a human exactly what to
+// re-run once the request is approved. Unlike exec's reRunHint, no -- separator
+// is used: websh only parses flags before the server name, so anything after it
+// is already treated as the remote command.
+func webshReRunHint(parsed WebshArgs, command string) string {
+	parts := []string{"alpacon websh"}
+	if parsed.Username != "" {
+		parts = append(parts, "-u "+parsed.Username)
+	}
+	if parsed.Groupname != "" {
+		parts = append(parts, "-g "+parsed.Groupname)
+	}
+	if parsed.WorkSessionID != "" {
+		parts = append(parts, "--work-session "+parsed.WorkSessionID)
+	}
+	parts = append(parts, parsed.ServerName, command)
+	return strings.Join(parts, " ")
 }
 
 func extractValue(args []string, i int) (string, int) {

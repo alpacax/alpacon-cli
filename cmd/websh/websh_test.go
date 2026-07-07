@@ -1,10 +1,18 @@
 package websh
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -349,10 +357,241 @@ func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
 	assert.Equal(t, "my-server", got.ServerName)
 }
 
+func TestWebshReRunHint(t *testing.T) {
+	t.Run("minimal: server and command only", func(t *testing.T) {
+		got := webshReRunHint(WebshArgs{ServerName: "web-01"}, "sudo reboot")
+		assert.Equal(t, "alpacon websh web-01 sudo reboot", got)
+	})
+
+	t.Run("username only", func(t *testing.T) {
+		got := webshReRunHint(WebshArgs{Username: "admin", ServerName: "web-01"}, "uptime")
+		assert.Equal(t, "alpacon websh -u admin web-01 uptime", got)
+	})
+
+	t.Run("groupname only", func(t *testing.T) {
+		got := webshReRunHint(WebshArgs{Groupname: "sysadmin", ServerName: "web-01"}, "uptime")
+		assert.Equal(t, "alpacon websh -g sysadmin web-01 uptime", got)
+	})
+
+	t.Run("includes user, group, and work-session", func(t *testing.T) {
+		got := webshReRunHint(WebshArgs{
+			Username:      "root",
+			Groupname:     "docker",
+			WorkSessionID: "ses-1",
+			ServerName:    "web-01",
+		}, "sudo reboot")
+		assert.Equal(t, "alpacon websh -u root -g docker --work-session ses-1 web-01 sudo reboot", got)
+	})
+}
+
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)
 	assert.Equal(t, "my-server", got.ServerName)
 	assert.Equal(t, "", got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
+}
+
+// newWebshApprovalDenialServer returns a test server that resolves one server
+// and always answers a command with a SUDO_APPROVAL_REQUIRED denial (success:
+// false + the plugin denial line), so the command stays pending. Mirrors
+// cmd/exec/pending_approval_test.go's newApprovalDenialServer: websh's
+// non-interactive command path shares RunCommandWithRetry with exec, so it
+// exercises the same submit/poll endpoints.
+func newWebshApprovalDenialServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			resp := map[string]any{
+				"id":          "cmd-1",
+				"status":      "completed",
+				"success":     false,
+				"exit_code":   1,
+				"result":      "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n",
+				"error_phase": nil,
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// newWebshAwaitingApprovalServer returns a test server whose command parks at
+// the server-side "awaiting_approval" status (HITL hold), so the command is
+// pending human approval without ever producing a denial line.
+func newWebshAwaitingApprovalServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":     "cmd-1",
+				"status": "awaiting_approval",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// writeWebshCommandTestConfig mirrors cmd/exec/worksession_command_test.go's
+// writeExecCommandTestConfig; each package owns its own copy since the helper
+// is unexported there.
+func writeWebshCommandTestConfig(t *testing.T, home, workspaceURL string) {
+	t.Helper()
+	cfgDir := filepath.Join(home, ".alpacon")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+
+	cfg := map[string]any{
+		"workspace_url":           workspaceURL,
+		"workspace_name":          "test",
+		"access_token":            "access-token",
+		"refresh_token":           "refresh-token",
+		"access_token_expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		"active_work_sessions":    map[string]string{},
+		"insecure":                false,
+	}
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0600))
+}
+
+// webshHelperArgs finds the "websh-command-helper" marker in os.Args and
+// returns everything after it, mirroring execWorkSessionHelperArgs.
+func webshHelperArgs(args []string) ([]string, bool) {
+	for i := range args {
+		if args[i] == "websh-command-helper" {
+			return args[i+1:], true
+		}
+	}
+	return nil, false
+}
+
+// TestWebshCommandHelperProcess is re-invoked as a subprocess (via os.Args[0])
+// by the tests below; it is a no-op under a normal `go test` run.
+func TestWebshCommandHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_WEBSH_HELPER") != "1" {
+		return
+	}
+
+	args, ok := webshHelperArgs(os.Args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "missing websh-command-helper marker")
+		os.Exit(2)
+	}
+	WebshCmd.Run(WebshCmd, args)
+}
+
+// TestWebshCommandPendingApprovalExits4WithJSONSignal drives a sudo command
+// denied SUDO_APPROVAL_REQUIRED through the real websh non-interactive command
+// path and asserts it converges on the same pending-approval contract as exec:
+// exit 4 and a {"status":"pending_approval", ...} envelope, with a websh-shaped
+// re-run hint rather than exec's (AC4).
+func TestWebshCommandPendingApprovalExits4WithJSONSignal(t *testing.T) {
+	ts := newWebshApprovalDenialServer()
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeWebshCommandTestConfig(t, home, ts.URL)
+
+	helper := osexec.Command(
+		os.Args[0],
+		"-test.run=^TestWebshCommandHelperProcess$",
+		"--",
+		"websh-command-helper",
+		"--output",
+		"json",
+		"prod",
+		"sudo",
+		"reboot",
+	)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_WEBSH_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var stdout, stderr bytes.Buffer
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
+
+	var got struct {
+		OK          bool     `json:"ok"`
+		Status      string   `json:"status"`
+		ExitCode    int      `json:"exit_code"`
+		NextActions []string `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
+	assert.False(t, got.OK)
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
+	require.NotEmpty(t, got.NextActions)
+	assert.Equal(t, "alpacon websh prod sudo reboot", got.NextActions[0], "re-run hint should reconstruct the websh invocation, not exec's")
+}
+
+// TestWebshCommandStatusAwaitingApprovalExits4WithJSONSignal drives the
+// status-level HITL hold (server status "awaiting_approval", no denial line)
+// through the real websh command and asserts it converges on the same
+// pending-approval contract, with next_actions pointing at exec logs—lookup is
+// job-ID based, so it has no websh-specific form (AC5).
+func TestWebshCommandStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
+	ts := newWebshAwaitingApprovalServer()
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeWebshCommandTestConfig(t, home, ts.URL)
+
+	helper := osexec.Command(
+		os.Args[0],
+		"-test.run=^TestWebshCommandHelperProcess$",
+		"--",
+		"websh-command-helper",
+		"--output",
+		"json",
+		"prod",
+		"sudo",
+		"reboot",
+	)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_WEBSH_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var stdout, stderr bytes.Buffer
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
+
+	var got struct {
+		OK          bool     `json:"ok"`
+		Status      string   `json:"status"`
+		ExitCode    int      `json:"exit_code"`
+		NextActions []string `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
+	assert.False(t, got.OK)
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
+	require.NotEmpty(t, got.NextActions)
+	assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0], "status-hold hint should point at exec logs regardless of caller")
 }

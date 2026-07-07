@@ -321,10 +321,11 @@ func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing
 	assert.Equal(t, "cmd-9", pending.CommandID)
 }
 
-func TestErrorFromDetails_RejectedReturnsError(t *testing.T) {
+func TestErrorFromDetails_RejectedReturnsRejectedError(t *testing.T) {
 	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rejected by a reviewer")
+	var rejected *RejectedError
+	require.True(t, errors.As(err, &rejected), "err must be *RejectedError")
+	assert.Equal(t, "cmd-9", rejected.CommandID)
 }
 
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {

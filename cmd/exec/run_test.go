@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClientTimeoutLine(t *testing.T) {
@@ -41,6 +42,15 @@ func TestAsPhasedError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPropagateCommandError_RejectedErrorPassesThrough(t *testing.T) {
+	rejected := &event.RejectedError{CommandID: "cmd-1"}
+	got, ok := propagateCommandError(rejected)
+	require.True(t, ok, "propagateCommandError must claim *event.RejectedError")
+	var rejectedErr *event.RejectedError
+	require.True(t, errors.As(got, &rejectedErr), "returned error must still be *event.RejectedError")
+	assert.Equal(t, "cmd-1", rejectedErr.CommandID)
 }
 
 func TestRemoteCommandOutcome(t *testing.T) {

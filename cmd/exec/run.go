@@ -314,12 +314,18 @@ func HandleCommandResult(err error) {
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
 			os.Exit(1)
 		}
+		var rejectedErr *event.RejectedError
+		if errors.As(err, &rejectedErr) {
+			utils.PrintRejected("command was rejected by a reviewer in the Alpacon console; do not retry.")
+			os.Exit(utils.ExitCodeCommandRejected)
+		}
 		utils.CliErrorWithExit("%s", err)
 	}
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged
-// (never MFA-retried or wrapped): phased errors and a status-hold PendingApprovalError.
+// (never MFA-retried or wrapped): phased errors, a status-hold
+// PendingApprovalError, and a terminal RejectedError.
 func propagateCommandError(err error) (error, bool) {
 	if phased, ok := asPhasedError(err); ok {
 		return phased, true
@@ -327,6 +333,10 @@ func propagateCommandError(err error) (error, bool) {
 	var pending *event.PendingApprovalError
 	if errors.As(err, &pending) {
 		return pending, true
+	}
+	var rejected *event.RejectedError
+	if errors.As(err, &rejected) {
+		return rejected, true
 	}
 	return nil, false
 }
