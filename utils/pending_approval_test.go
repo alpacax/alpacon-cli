@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +13,7 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
 		out = captureStdout(t, func() {
-			PrintPendingApproval("needs approval", "apr-123", "alpacon exec srv -- sudo reboot")
+			PrintPendingApproval("needs approval", "apr-123", NextAction{Command: "alpacon exec srv -- sudo reboot"})
 		})
 	})
 
@@ -25,7 +26,7 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 		Context   struct {
 			RequestID string `json:"request_id"`
 		} `json:"context"`
-		NextActions []string `json:"next_actions"`
+		NextActions []NextAction `json:"next_actions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "output: %s", out)
 
@@ -36,14 +37,32 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 	assert.Equal(t, "apr-123", got.Context.RequestID)
 	assert.Equal(t, "needs approval", got.Message)
 	require.NotEmpty(t, got.NextActions)
-	assert.Equal(t, "alpacon exec srv -- sudo reboot", got.NextActions[0], "the re-run hint leads the next actions")
+	// The re-run hint leads the next actions as a pure, executable command.
+	assert.Equal(t, "alpacon exec srv -- sudo reboot", got.NextActions[0].Command)
+	// The console-approval pointer is guidance only—no runnable command.
+	last := got.NextActions[len(got.NextActions)-1]
+	assert.Empty(t, last.Command, "the console-approval pointer carries no command")
+	assert.Contains(t, last.Description, "Alpacon console")
+}
+
+func TestPrintPendingApproval_JSONOutput_OmitsEmptyCommand(t *testing.T) {
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = captureStdout(t, func() {
+			PrintPendingApproval("needs approval", "apr-123", NextAction{Command: "alpacon exec srv -- sudo reboot"})
+		})
+	})
+
+	// command has omitempty, so the description-only console pointer must not
+	// serialize an empty "command" field. Only the leading re-run hint carries one.
+	assert.Equal(t, 1, strings.Count(out, `"command"`), "empty command must be omitted, not serialized as \"\"\noutput: %s", out)
 }
 
 func TestPrintPendingApproval_JSONOutput_OmitsEmptyRequestID(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
 		out = captureStdout(t, func() {
-			PrintPendingApproval("needs approval", "", "")
+			PrintPendingApproval("needs approval", "", NextAction{})
 		})
 	})
 
@@ -51,4 +70,23 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyRequestID(t *testing.T) {
 	assert.NotContains(t, out, `"request_id"`, "empty request_id must be omitted, not serialized as \"\"")
 	// status stays present and stable even without a request id.
 	assert.Contains(t, out, `"status": "`+PendingApprovalStatus+`"`)
+}
+
+func TestPrintPendingApproval_JSONOutput_OmitsEmptyRetry(t *testing.T) {
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = captureStdout(t, func() {
+			PrintPendingApproval("needs approval", "", NextAction{})
+		})
+	})
+
+	var got struct {
+		NextActions []NextAction `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "output: %s", out)
+	// An empty retry hint must not add a blank leading action; only the console
+	// pointer remains.
+	require.Len(t, got.NextActions, 1)
+	assert.Empty(t, got.NextActions[0].Command)
+	assert.Contains(t, got.NextActions[0].Description, "Alpacon console")
 }

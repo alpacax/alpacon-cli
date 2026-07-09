@@ -23,28 +23,32 @@ type pendingApprovalJSON struct {
 	Message     string             `json:"message"`
 	RequestID   string             `json:"request_id,omitempty"`
 	Context     pendingApprovalCtx `json:"context"`
-	NextActions []string           `json:"next_actions,omitempty"`
+	NextActions []NextAction       `json:"next_actions,omitempty"`
 }
 
-// pendingApprovalNextActions lists the actionable follow-ups for a human reading
-// the message. reRunHint is the surface-specific way to retry (re-run the
+// pendingApprovalNextActions lists the actionable follow-ups for a consumer
+// reading the message. retry is the surface-specific way to retry (re-run the
 // command, or attach the session); it leads, then the generic console pointer.
-func pendingApprovalNextActions(reRunHint string) []string {
-	actions := make([]string, 0, 2)
-	if reRunHint != "" {
-		actions = append(actions, reRunHint)
+// A zero-value retry is skipped.
+func pendingApprovalNextActions(retry NextAction) []NextAction {
+	actions := make([]NextAction, 0, 2)
+	if retry != (NextAction{}) {
+		actions = append(actions, retry)
 	}
-	return append(actions, "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait on the original command to block until approval.")
+	return append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait on the original command to block until approval."})
 }
 
 // PrintPendingApproval emits the structured "pending approval" feedback for an
 // action that requires out-of-band human approval and was not waited on. Under
 // --output json it writes a {"status":"pending_approval", ...} envelope to
 // stdout; otherwise it writes an actionable message to stderr. requestID may be
-// empty when the surface cannot supply one. reRunHint is a surface-specific
-// retry instruction (e.g. the exact command to re-run). It never exits — the
-// caller owns process exit so the exit-code contract stays in one place.
-func PrintPendingApproval(message, requestID, reRunHint string) {
+// empty when the surface cannot supply one. retry is a surface-specific retry
+// action (e.g. the exact command to re-run); its Command stays a pure,
+// executable string so a machine consumer can run it directly, with any hint in
+// Description.
+// It never exits — the caller owns process exit so the exit-code contract stays
+// in one place.
+func PrintPendingApproval(message, requestID string, retry NextAction) {
 	if OutputFormat == OutputFormatJSON {
 		envelope := pendingApprovalJSON{
 			OK:          false,
@@ -53,7 +57,7 @@ func PrintPendingApproval(message, requestID, reRunHint string) {
 			Message:     message,
 			RequestID:   requestID,
 			Context:     pendingApprovalCtx{RequestID: requestID},
-			NextActions: pendingApprovalNextActions(reRunHint),
+			NextActions: pendingApprovalNextActions(retry),
 		}
 		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
 			// Fall back to a minimal, still-parseable object so a machine consumer
@@ -64,7 +68,7 @@ func PrintPendingApproval(message, requestID, reRunHint string) {
 	}
 
 	CliWarning("%s", message)
-	for _, action := range pendingApprovalNextActions(reRunHint) {
-		fmt.Fprintf(os.Stderr, "  %s\n", action)
+	for _, action := range pendingApprovalNextActions(retry) {
+		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
 	}
 }

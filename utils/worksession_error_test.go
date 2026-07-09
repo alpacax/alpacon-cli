@@ -2,7 +2,6 @@ package utils
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -108,17 +107,25 @@ func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
 	assert.Equal(t, "abc-123-uuid", *envelope.Context.CurrentWorksession)
 	// Expired case: <ID> placeholder must be substituted with the known active UUID.
-	assert.Contains(t, envelope.NextActions, "alpacon work-session extend abc-123-uuid")
+	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend abc-123-uuid")
 	for _, action := range envelope.NextActions {
-		assert.NotContains(t, action, "<ID>")
+		assert.NotContains(t, action.Command, "<ID>")
 	}
+}
+
+func nextActionCommands(actions []NextAction) []string {
+	cmds := make([]string, len(actions))
+	for i, a := range actions {
+		cmds[i] = a.Command
+	}
+	return cmds
 }
 
 func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	// When activeWS is unknown, the placeholder must remain.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
 
-	assert.Contains(t, envelope.NextActions, "alpacon work-session extend <ID>")
+	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend <ID>")
 }
 
 func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
@@ -126,8 +133,7 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 	// so the placeholder must NOT be substituted even when activeWS is known.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
 
-	// The use action carries an inline comment, so match as a substring.
-	assert.Contains(t, strings.Join(envelope.NextActions, "\n"), "alpacon work-session use <ID>")
+	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session use <ID>")
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {

@@ -108,17 +108,17 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
 
 	var got struct {
-		OK          bool     `json:"ok"`
-		Status      string   `json:"status"`
-		ExitCode    int      `json:"exit_code"`
-		NextActions []string `json:"next_actions"`
+		OK          bool               `json:"ok"`
+		Status      string             `json:"status"`
+		ExitCode    int                `json:"exit_code"`
+		NextActions []utils.NextAction `json:"next_actions"`
 	}
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
 	assert.False(t, got.OK)
 	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
 	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
 	require.NotEmpty(t, got.NextActions)
-	assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0], "hint should point at exec logs for the held job")
+	assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0].Command, "hint should point at exec logs for the held job")
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
@@ -156,15 +156,15 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
 
 	var got struct {
-		OK          bool     `json:"ok"`
-		Status      string   `json:"status"`
-		ExitCode    int      `json:"exit_code"`
-		NextActions []string `json:"next_actions"`
+		OK          bool               `json:"ok"`
+		Status      string             `json:"status"`
+		ExitCode    int                `json:"exit_code"`
+		NextActions []utils.NextAction `json:"next_actions"`
 	}
 	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
 	assert.False(t, got.OK)
 	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
 	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
 	require.NotEmpty(t, got.NextActions)
-	assert.Equal(t, "alpacon exec prod -- sudo reboot", got.NextActions[0], "re-run hint should reconstruct the invocation")
+	assert.Equal(t, "alpacon exec prod -- sudo reboot", got.NextActions[0].Command, "re-run hint should reconstruct the invocation")
 }

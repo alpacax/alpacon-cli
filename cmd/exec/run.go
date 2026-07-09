@@ -239,7 +239,7 @@ func HandlePendingApproval(err error, reRunHint string) bool {
 			"Approval required—this command is held for human approval in the Alpacon console (web). "+
 				"It runs automatically once approved; pass --wait to block until then.",
 			"", // the command detail carries no approval request id
-			fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID),
+			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
 		)
 		os.Exit(utils.ExitCodePendingApproval)
 		return true
@@ -251,7 +251,7 @@ func HandlePendingApproval(err error, reRunHint string) bool {
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait to block until it is approved.",
 		"", // the exec sudo denial line carries no approval request id
-		reRunHint,
+		utils.NextAction{Command: reRunHint},
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true

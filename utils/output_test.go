@@ -130,7 +130,7 @@ func TestPrintJSONError(t *testing.T) {
 		Context: map[string]string{
 			"required_scope": "command",
 		},
-		NextActions: []string{"alpacon work-session use <ID>"},
+		NextActions: []NextAction{{Command: "alpacon work-session use <ID>"}},
 	})
 
 	assert.JSONEq(t, `{
@@ -139,6 +139,6 @@ func TestPrintJSONError(t *testing.T) {
 		"error_code": "work_session_required",
 		"message": "command requires a work session",
 		"context": {"required_scope": "command"},
-		"next_actions": ["alpacon work-session use <ID>"]
+		"next_actions": [{"command": "alpacon work-session use <ID>"}]
 	}`, buf.String())
 }
