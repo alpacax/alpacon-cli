@@ -286,6 +286,7 @@ func init() {
 	WebshCmd.AddCommand(webshForceCloseCmd)
 	WebshCmd.AddCommand(webshInviteCmd)
 	WebshCmd.AddCommand(webshWatchCmd)
+	WebshCmd.AddCommand(webshRecordsCmd)
 }
 
 func extractValue(args []string, i int) (string, int) {

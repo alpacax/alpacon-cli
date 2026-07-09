@@ -342,3 +342,29 @@ func TestSplitAndTrim(t *testing.T) {
 		})
 	}
 }
+
+func TestStripANSIEscapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"CSI color codes", "\x1b[31mfoo\x1b[0m", "foo"},
+		{"CSI erase line", "abc\x1b[2Kdef", "abcdef"},
+		{"OSC BEL-terminated window title", "\x1b]0;title\x07bar", "bar"},
+		{"OSC ST-terminated window title", "\x1b]0;title\x1b\\baz", "baz"},
+		{"DCS string terminated by ST", "\x1bPq123\x1b\\qux", "qux"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, StripANSIEscapes(tt.input))
+		})
+	}
+}
+
+func TestStripControlChars(t *testing.T) {
+	// C0, DEL, and C1 (rune 0x85 = NEL) are removed; printable Unicode (é = 0xE9) is kept.
+	assert.Equal(t, "abc", StripControlChars("a\x00b\x7fc"))
+	assert.Equal(t, "ab", StripControlChars("a\u0085b"))
+	assert.Equal(t, "abé", StripControlChars("a\u0085bé"))
+}

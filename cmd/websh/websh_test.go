@@ -356,3 +356,21 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	assert.Equal(t, "", got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
 }
+
+func TestSanitizeRecord(t *testing.T) {
+	// ANSI color codes stripped, newlines collapsed to single spaces.
+	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
+	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
+
+	// Truncation applies after cleaning.
+	assert.Equal(t, "docke...", sanitizeRecord("docker ps", 5))
+
+	// OSC window-title sequences are stripped, not leaked into output.
+	assert.Equal(t, "bar", sanitizeRecord("\x1b]0;t\x07bar", 100))
+
+	// A control char removed from between two spaces leaves no double space.
+	assert.Equal(t, "foo bar", sanitizeRecord("foo \x07 bar", 100))
+
+	// C1 control (U+0085) separates tokens rather than leaking to the terminal.
+	assert.Equal(t, "foo bar", sanitizeRecord("foo"+string(rune(0x85))+"bar", 100))
+}
