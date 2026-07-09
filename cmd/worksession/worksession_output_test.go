@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -72,6 +73,21 @@ func TestWorkSessionExtendOutput(t *testing.T) {
 		"message": "Work session ses-abc extended to 2026-06-01T12:00:00Z.",
 		"work_session_id": "ses-abc",
 		"expires_at": "2026-06-01T12:00:00Z",
+		"active_worksession": null
+	}`, string(body))
+}
+
+func TestWorkSessionCancelOutput(t *testing.T) {
+	output := newWorkSessionCancelOutput("ses-abc")
+	body, err := json.Marshal(output)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"ok": true,
+		"operation": "cancel",
+		"message": "Work session ses-abc cancelled.",
+		"work_session_id": "ses-abc",
+		"status": "cancelled",
 		"active_worksession": null
 	}`, string(body))
 }
@@ -246,6 +262,91 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "extend", got.Operation)
 	assert.Equal(t, "ses-active", got.WorkSessionID)
 	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
+}
+
+func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
+	var sawCancel bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost || r.URL.Path != "/api/work-sessions/sessions/ses-pending/cancel/" {
+			http.NotFound(w, r)
+			return
+		}
+		sawCancel = true
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	setupWorkSessionCommandConfig(t, ts.URL)
+	withWorkSessionCommandJSONMode(t)
+
+	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+		workSessionCancelCmd.Run(workSessionCancelCmd, []string{"ses-pending"})
+	})
+
+	assert.True(t, sawCancel)
+	assert.Empty(t, stderr)
+	assert.NotContains(t, stdout, "Success:")
+
+	var got struct {
+		OK            bool   `json:"ok"`
+		Operation     string `json:"operation"`
+		WorkSessionID string `json:"work_session_id"`
+		Status        string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got))
+	assert.True(t, got.OK)
+	assert.Equal(t, "cancel", got.Operation)
+	assert.Equal(t, "ses-pending", got.WorkSessionID)
+	assert.Equal(t, "cancelled", got.Status)
+}
+
+func TestFormatAdjustments(t *testing.T) {
+	tests := []struct {
+		name string
+		adj  *wsapi.Adjustments
+		want string
+	}{
+		{"nil", nil, ""},
+		{
+			"scopes only",
+			&wsapi.Adjustments{Scopes: &wsapi.ScopeDiff{Old: []string{"command", "websh"}, New: []string{"command"}}},
+			"  scopes:  command, websh → command",
+		},
+		{
+			"servers only",
+			&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+				Old: []types.ServerSummary{{Name: "web-01"}, {Name: "db-01"}},
+				New: []types.ServerSummary{{Name: "web-01"}},
+			}},
+			"  servers: web-01, db-01 → web-01",
+		},
+		{
+			"both",
+			&wsapi.Adjustments{
+				Scopes:  &wsapi.ScopeDiff{Old: []string{"command"}, New: []string{}},
+				Servers: &wsapi.ServerDiff{Old: []types.ServerSummary{{Name: "web-01"}}, New: []types.ServerSummary{{Name: "web-01"}}},
+			},
+			"  scopes:  command → none\n  servers: web-01 → web-01",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, formatAdjustments(tt.adj))
+		})
+	}
+}
+
+func TestFormatRecommendations(t *testing.T) {
+	assert.Equal(t, "", formatRecommendations(nil))
+	assert.Equal(t, "", formatRecommendations([]wsapi.Recommendation{}))
+
+	got := formatRecommendations([]wsapi.Recommendation{
+		{Severity: "high", Text: "Rotate the key"},
+		{Severity: "low", Text: "Prefer reload"},
+		{Severity: "", Text: "No severity set"},
+	})
+	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set", got)
 }
 
 func setupWorkSessionCommandConfig(t *testing.T, workspaceURL string) {
