@@ -747,6 +747,12 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 	}
 }
 
+func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--env=\"=hunter2\"", "server", "ls"})
+	assert.NotEmpty(t, result.Err)
+	assert.NotContains(t, result.Err, "hunter2", "malformed --env error must not echo the value")
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string

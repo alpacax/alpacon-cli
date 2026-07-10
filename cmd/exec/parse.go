@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -149,9 +148,8 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	}
 }
 
-// ParseEnvArg parses a --env=KEY or --env=KEY=VALUE token into env, returning an
-// error message on malformed input. A bare KEY reads the shell's value, warning
-// and skipping if it is unset.
+// ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,
+// warning and skipping if unset; malformed input returns an error message.
 func ParseEnvArg(arg string, env map[string]string) string {
 	body, ok := strings.CutPrefix(arg, "--env=")
 	var key, value string
@@ -160,7 +158,8 @@ func ParseEnvArg(arg string, env map[string]string) string {
 		key, value, hasValue = strings.Cut(strings.Trim(body, "\""), "=")
 	}
 	if !ok || key == "" {
-		return fmt.Sprintf("invalid --env argument %q: use --env=KEY or --env=KEY=VALUE", arg)
+		// Never echo arg: a malformed token like --env="=secret" would leak the value.
+		return "invalid --env argument: use --env=KEY or --env=KEY=VALUE"
 	}
 	if hasValue {
 		env[key] = value
