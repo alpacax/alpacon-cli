@@ -53,7 +53,9 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "--env"):
-			i = extractEnvValue(args, i, res.Env)
+			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
+				utils.CliErrorWithExit("%s", errMsg)
+			}
 		case strings.HasPrefix(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
@@ -333,27 +335,6 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	}
 
 	return listener
-}
-
-func extractEnvValue(args []string, i int, env map[string]string) int {
-	envString := strings.TrimPrefix(args[i], "--env=")
-	envString = strings.Trim(envString, "\"")
-
-	parts := strings.SplitN(envString, "=", 2)
-	if len(parts) == 2 {
-		env[parts[0]] = parts[1]
-	} else if len(parts) == 1 {
-		value, exists := os.LookupEnv(parts[0])
-		if !exists {
-			utils.CliWarning("No environment variable found for key '%s'\n", parts[0])
-		} else {
-			env[parts[0]] = value
-		}
-	} else {
-		utils.CliErrorWithExit("Invalid format for --env flag. Expected '--env=KEY=VALUE', but got '%s'. Please use the format: --env=MY_VAR=my_value", args[i])
-	}
-
-	return i
 }
 
 // isNotFoundError checks if an error message indicates a 404/not-found response.

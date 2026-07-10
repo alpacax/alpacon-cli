@@ -1,6 +1,8 @@
 package exec
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -14,6 +16,7 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
+	Env           map[string]string
 	Detach        bool
 	Wait          bool
 	ShowHelp      bool
@@ -40,6 +43,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		detach                                                   bool
 		wait                                                     bool
 	)
+	env := map[string]string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -98,6 +102,10 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if outputFormat == "" {
 				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
 			}
+		case strings.HasPrefix(arg, "--env"):
+			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -135,9 +143,36 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		OutputFormat:  outputFormat,
 		Server:        server,
 		Command:       ShellJoin(commandParts),
+		Env:           env,
 		Detach:        detach,
 		Wait:          wait,
 	}
+}
+
+// ParseEnvArg parses a --env=KEY or --env=KEY=VALUE token into env, returning an
+// error message on malformed input. A bare KEY reads the shell's value, warning
+// and skipping if it is unset.
+func ParseEnvArg(arg string, env map[string]string) string {
+	body, ok := strings.CutPrefix(arg, "--env=")
+	var key, value string
+	var hasValue bool
+	if ok {
+		key, value, hasValue = strings.Cut(strings.Trim(body, "\""), "=")
+	}
+	if !ok || key == "" {
+		return fmt.Sprintf("invalid --env argument %q: use --env=KEY or --env=KEY=VALUE", arg)
+	}
+	if hasValue {
+		env[key] = value
+		return ""
+	}
+	v, exists := os.LookupEnv(key)
+	if !exists {
+		utils.CliWarning("no environment variable found for key '%s'", key)
+		return ""
+	}
+	env[key] = v
+	return ""
 }
 
 // ShellJoin reassembles tokenized command parts into a single string.

@@ -114,7 +114,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		env := make(map[string]string)
+		env := parsed.Env
 
 		if parsed.Detach {
 			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
