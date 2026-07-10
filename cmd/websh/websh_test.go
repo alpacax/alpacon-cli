@@ -355,6 +355,14 @@ func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
 
+func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
+	// --env-file must not be swallowed by --env matching; websh has no
+	// unknown-flag rejection, so it falls through to the server-name slot.
+	got, err := ParseWebshArgs([]string{"--env-file=secrets", "ls"})
+	require.NoError(t, err)
+	assert.Equal(t, "--env-file=secrets", got.ServerName)
+}
+
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)

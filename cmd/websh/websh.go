@@ -51,7 +51,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			res.Username, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			res.Groupname, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "--env"):
+		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
 			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
 				return res, errors.New(errMsg)
 			}

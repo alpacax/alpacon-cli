@@ -723,6 +723,11 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 			args:    []string{"--env=", "server", "ls"},
 			wantErr: true,
 		},
+		{
+			name:    "--env-file is an unknown flag, not a malformed --env",
+			args:    []string{"--env-file=secrets", "server", "ls"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -751,6 +756,12 @@ func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
 	result := ParseRemoteExecArgs([]string{"--env=\"=hunter2\"", "server", "ls"})
 	assert.NotEmpty(t, result.Err)
 	assert.NotContains(t, result.Err, "hunter2", "malformed --env error must not echo the value")
+}
+
+func TestParseRemoteExecArgs_EnvPrefixIsExact(t *testing.T) {
+	// --env-file must not be swallowed by --env matching; it is an unknown flag.
+	result := ParseRemoteExecArgs([]string{"--env-file=secrets", "server", "ls"})
+	assert.Contains(t, result.Err, "unknown flag")
 }
 
 func TestParseRemoteExecArgs_Errors(t *testing.T) {

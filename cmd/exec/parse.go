@@ -101,7 +101,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if outputFormat == "" {
 				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
 			}
-		case strings.HasPrefix(arg, "--env"):
+		case arg == "--env" || strings.HasPrefix(arg, "--env="):
 			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
