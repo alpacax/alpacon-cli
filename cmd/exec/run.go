@@ -108,8 +108,8 @@ func hasSudoApprovalDenial(output string) bool {
 // terminal, offers an MFA step-up and retries once. Non-interactive callers
 // (scripts, CI, AI agents) fall through unchanged so HandleCommandResult prints
 // the static denial hint; non-interactive humans additionally get the
-// verification link they can complete out of band. Only exec uses this; websh
-// keeps its own sudo MFA flow.
+// verification link they can complete out of band. Reached via RunRemoteExec by
+// exec and websh command mode; interactive websh keeps its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
 	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
@@ -258,7 +258,7 @@ func HandlePendingApproval(err error, reRunHint string) bool {
 }
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
-// handling and retry logic, streaming output to out. Used by exec and websh.
+// handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
 	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
