@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -214,6 +215,16 @@ func reRunHint(parsed RemoteExecArgs) string {
 	}
 	if parsed.WorkSessionID != "" {
 		parts = append(parts, "--work-session "+parsed.WorkSessionID)
+	}
+	// Emit env keys only (never values): the rerun re-reads each value from the
+	// shell, so the secret stays off this hint on stderr and out of the logs.
+	keys := make([]string, 0, len(parsed.Env))
+	for k := range parsed.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, "--env="+k)
 	}
 	parts = append(parts, parsed.Server, "--", parsed.Command)
 	return strings.Join(parts, " ")

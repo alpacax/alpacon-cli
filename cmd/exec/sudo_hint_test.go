@@ -171,4 +171,15 @@ func TestReRunHint(t *testing.T) {
 		})
 		assert.Equal(t, "alpacon exec -u root -g docker --work-session ses-1 web-01 -- sudo reboot", got)
 	})
+
+	t.Run("emits env keys sorted, never values", func(t *testing.T) {
+		got := reRunHint(RemoteExecArgs{
+			Server:  "web-01",
+			Command: "sudo reboot",
+			Env:     map[string]string{"PGPASSWORD": "hunter2", "API_TOKEN": "sk-secret"},
+		})
+		assert.Equal(t, "alpacon exec --env=API_TOKEN --env=PGPASSWORD web-01 -- sudo reboot", got)
+		assert.NotContains(t, got, "hunter2")
+		assert.NotContains(t, got, "sk-secret")
+	})
 }
