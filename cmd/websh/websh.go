@@ -120,7 +120,9 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon websh server 'echo hello;world'
 
-Executing a command (SERVER followed by COMMAND) behaves exactly like 'alpacon exec'.
+Executing a command (SERVER followed by COMMAND) runs through the same executor
+as 'alpacon exec'—identical output, exit codes, and sudo-approval handling.
+Command execution does not accept exec-only flags such as --detach or --wait.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
@@ -220,9 +222,9 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
-		// Command mode is an alias for exec: delegate to its shared runner so
-		// behavior (approval wait, pending-approval exit code, JSON buffering)
-		// stays identical across the two commands.
+		// Command mode is an alias for exec: delegate to the shared runner so the
+		// pending-approval exit code, sudo-denial hints, and JSON buffering match
+		// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
 		if len(commandArgs) > 0 {
 			execCmd.RunRemoteExec(execCmd.RemoteExecArgs{
 				Username:      username,

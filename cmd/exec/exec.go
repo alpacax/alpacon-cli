@@ -114,8 +114,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 	},
 }
 
-// RunRemoteExec executes a parsed remote command—the shared post-parse path for
-// exec and websh command mode. Requires Server and Command to be non-empty.
+// RunRemoteExec is the shared post-parse execution path for exec and websh
+// command mode. Requires Server and Command to be non-empty.
 func RunRemoteExec(parsed RemoteExecArgs) {
 	if parsed.OutputFormat != "" {
 		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
