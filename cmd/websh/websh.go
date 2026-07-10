@@ -3,7 +3,6 @@ package websh
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -121,8 +120,12 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon websh server 'echo hello;world'
 
+Executing a command (SERVER followed by COMMAND) behaves exactly like 'alpacon exec'.
+
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
+Exit code 4 indicates the sudo command is pending human approval; approve it in
+the Alpacon console (web), then re-run—or use 'alpacon exec --wait' to block.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
@@ -217,6 +220,22 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
+		// Command mode is an alias for exec: delegate to its shared runner so
+		// behavior (approval wait, pending-approval exit code, JSON buffering)
+		// stays identical across the two commands.
+		if len(commandArgs) > 0 {
+			execCmd.RunRemoteExec(execCmd.RemoteExecArgs{
+				Username:      username,
+				Groupname:     groupname,
+				WorkSessionID: parsed.WorkSessionID,
+				OutputFormat:  parsed.OutputFormat,
+				Server:        serverName,
+				Command:       execCmd.ShellJoin(commandArgs),
+				Env:           env,
+			})
+			return
+		}
+
 		if parsed.OutputFormat != "" {
 			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
 				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
@@ -233,58 +252,51 @@ Note: All flags must be placed before the server name.
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if len(commandArgs) > 0 {
-			command := execCmd.ShellJoin(commandArgs)
-			err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, os.Stdout)
-			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
-			execCmd.HandleCommandResult(err)
-		} else {
-			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+
+		if err != nil {
+			err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+				OnMFARequired: func(srv string) error {
+					return mfa.HandleMFAError(alpaconClient, srv)
+				},
+				OnUsernameRequired: func() error {
+					_, err := iam.HandleUsernameRequired()
+					return err
+				},
+				CheckMFACompleted: func() (bool, error) {
+					return mfa.CheckMFACompletion(alpaconClient)
+				},
+				RefreshToken: alpaconClient.RefreshToken,
+				RetryOperation: func() error {
+					session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+					return err
+				},
+			})
 
 			if err != nil {
-				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
-						return err
-					},
-				})
-
-				if err != nil {
-					utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
-					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
-				}
+				utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
+				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 			}
-			// Set up sudo MFA listener in background so it doesn't delay
-			// terminal open. If the user types sudo before the listener is
-			// ready, the approval request will expire and they can retry.
-			listenerDone := make(chan *event.SudoListener, 1)
-			go func() {
-				listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
-			}()
-			defer func() {
-				select {
-				case sl := <-listenerDone:
-					if sl != nil {
-						sl.Stop()
-					}
-				case <-time.After(3 * time.Second):
-					// Don't block exit if listener setup is stuck
-				}
-			}()
-
-			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
+		// Set up sudo MFA listener in background so it doesn't delay
+		// terminal open. If the user types sudo before the listener is
+		// ready, the approval request will expire and they can retry.
+		listenerDone := make(chan *event.SudoListener, 1)
+		go func() {
+			listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
+		}()
+		defer func() {
+			select {
+			case sl := <-listenerDone:
+				if sl != nil {
+					sl.Stop()
+				}
+			case <-time.After(3 * time.Second):
+				// Don't block exit if listener setup is stuck
+			}
+		}()
+
+		_ = websh.OpenNewTerminal(alpaconClient, session)
 	},
 }
 
