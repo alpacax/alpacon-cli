@@ -138,8 +138,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh my-server "ls -la /var/log"
   alpacon websh root@my-server "systemctl status nginx"
 
-  # Set environment variables
-  alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
+  # Pass a secret via the shell env; the value stays off every command line and
+  # out of the session recording. psql reads PGPASSWORD directly from the env.
+  export PGPASSWORD=hunter2
+  alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
   # Share terminal session
   alpacon websh --share my-server
@@ -159,8 +161,14 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
   -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
-  --env="KEY=VALUE"                  Set environment variable 'KEY' to 'VALUE'.
-  --env="KEY"                        Use the current shell's value for 'KEY'.
+  --env="KEY"                        Pass an environment variable, reading its value
+                                     from the current shell. This keeps the value off
+                                     the command line and out of the audit log—use it
+                                     for secrets such as passwords or tokens.
+  --env="KEY=VALUE"                  Set 'KEY' to a literal value. Discouraged: the
+                                     value is written on the command line and recorded
+                                     verbatim in the audit log. Never pass credentials
+                                     this way.
   -s, --share                        Share the terminal via a temporary link.
   --read-only=[true|false]           Set shared session to read-only (default: false).
   --work-session [UUID]              Attach this session to a work-session.

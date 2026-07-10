@@ -38,6 +38,13 @@ To send a literal metacharacter, wrap the argument in quotes:
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
+  --env="KEY"                   Pass an environment variable to the remote command,
+                                reading its value from the current shell. This keeps
+                                the value off the command line and out of the audit
+                                log—use it for secrets such as passwords or tokens.
+  --env="KEY=VALUE"             Set 'KEY' to a literal value. Discouraged: the value
+                                is written on the command line and recorded verbatim
+                                in the audit log. Never pass credentials this way.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -65,6 +72,12 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # Specify user and group with flags
   alpacon exec -u root prod-docker systemctl status nginx
   alpacon exec -g docker user@server docker images
+
+  # Pass a secret via the shell env; the value stays off every command line.
+  # psql reads PGPASSWORD from the environment, so it never lands in the remote
+  # process's argv either.
+  export PGPASSWORD=hunter2
+  alpacon exec --env="PGPASSWORD" db-server -- psql -h localhost -U app -c 'SELECT 1'
 
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
