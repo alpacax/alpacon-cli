@@ -201,10 +201,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	HandleCommandResult(err)
 }
 
-// reRunHint reconstructs the exec invocation (server, optional user/group, and
-// command) so the pending-approval message can tell a human exactly what to
-// re-run once the request is approved. It uses -- before the command so remote
-// flags are never re-parsed as alpacon flags.
+// reRunHint reconstructs the exec invocation (server, command, and any
+// user/group, work-session, or --env keys) so the pending-approval message can
+// tell a human exactly what to re-run once the request is approved. It uses --
+// before the command so remote flags are never re-parsed as alpacon flags.
 func reRunHint(parsed RemoteExecArgs) string {
 	parts := []string{"alpacon exec"}
 	if parsed.Username != "" {
