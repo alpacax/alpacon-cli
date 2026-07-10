@@ -349,6 +349,12 @@ func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
 	assert.Equal(t, "my-server", got.ServerName)
 }
 
+func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
+	_, err := ParseWebshArgs([]string{"--env=\"=hunter2\"", "my-server", "ls"})
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
+}
+
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)

@@ -54,7 +54,7 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			res.Groupname, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "--env"):
 			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
-				utils.CliErrorWithExit("%s", errMsg)
+				return res, errors.New(errMsg)
 			}
 		case strings.HasPrefix(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
