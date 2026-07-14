@@ -205,7 +205,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // user/group, work-session, or --env keys) so the pending-approval message can
 // tell a human exactly what to re-run once the request is approved. It uses --
 // before the command so remote flags are never re-parsed as alpacon flags.
-func reRunHint(parsed RemoteExecArgs) string {
+// The Command stays a pure, executable string; when --env keys are present the
+// caveat rides in Description, since the rerun re-reads each value from the
+// shell and a machine consumer replaying Command verbatim would otherwise
+// submit without those keys.
+func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{"alpacon exec"}
 	if parsed.Username != "" {
 		parts = append(parts, "-u "+parsed.Username)
@@ -227,5 +231,10 @@ func reRunHint(parsed RemoteExecArgs) string {
 		parts = append(parts, "--env="+k)
 	}
 	parts = append(parts, parsed.Server, "--", parsed.Command)
-	return strings.Join(parts, " ")
+
+	action := utils.NextAction{Command: strings.Join(parts, " ")}
+	if len(keys) > 0 {
+		action.Description = "--env values are re-read from your shell; export them before re-running"
+	}
+	return action
 }

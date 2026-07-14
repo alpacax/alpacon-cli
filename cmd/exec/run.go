@@ -229,9 +229,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // then exits with ExitCodePendingApproval. It reports true when it handled the
 // err; the caller skips its normal result handling on true. The exec denial line
 // carries no approval request id, so the machine signal omits it. reRunHint is
-// the exact command the caller invoked, so a human can copy-paste it once the
-// request is approved.
-func HandlePendingApproval(err error, reRunHint string) bool {
+// the exact command the caller invoked (with any --env caveat in its
+// Description), so a human can copy-paste it once the request is approved.
+func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
@@ -251,7 +251,7 @@ func HandlePendingApproval(err error, reRunHint string) bool {
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait to block until it is approved.",
 		"", // the exec sudo denial line carries no approval request id
-		utils.NextAction{Command: reRunHint},
+		reRunHint,
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true
