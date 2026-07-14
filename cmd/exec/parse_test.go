@@ -686,6 +686,21 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 			wantCommand: "ls",
 		},
 		{
+			name:        "value ending in a quote is not corrupted",
+			args:        []string{"--env=PW=trailing\"", "server", "ls"},
+			wantEnv:     map[string]string{"PW": "trailing\""},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			// Quotes wrap only the value, not the whole token—no matched pair to strip.
+			name:        "inner-quoted value passes through verbatim",
+			args:        []string{"--env=KEY=\"VAL\"", "server", "ls"},
+			wantEnv:     map[string]string{"KEY": "\"VAL\""},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
 			name:        "--env=KEY for an unset variable warns and skips",
 			args:        []string{"--env=DEFINITELY_UNSET", "server", "ls"},
 			absentEnv:   []string{"DEFINITELY_UNSET"},

@@ -155,7 +155,7 @@ func ParseEnvArg(arg string, env map[string]string) string {
 	var key, value string
 	var hasValue bool
 	if ok {
-		key, value, hasValue = strings.Cut(strings.Trim(body, "\""), "=")
+		key, value, hasValue = strings.Cut(trimMatchedQuotes(body), "=")
 	}
 	if !ok || key == "" {
 		// Never echo arg: a malformed token like --env="=secret" would leak the value.
@@ -187,6 +187,16 @@ func ShellJoin(parts []string) string {
 		out[i] = shellQuote(p)
 	}
 	return strings.Join(out, " ")
+}
+
+// trimMatchedQuotes strips one matched leading+trailing double-quote pair only.
+// A real shell already strips wrappers, so leaving unbalanced quotes intact
+// avoids silently corrupting a value that legitimately ends in ".
+func trimMatchedQuotes(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // shellQuote wraps s in single quotes if it contains whitespace or a single quote.
