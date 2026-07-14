@@ -651,6 +651,134 @@ func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
 	}
 }
 
+func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
+	t.Setenv("DB_PASS", "hunter2")
+
+	tests := []struct {
+		name        string
+		args        []string
+		wantErr     bool
+		wantEnv     map[string]string
+		absentEnv   []string
+		wantServer  string
+		wantCommand string
+	}{
+		{
+			name:        "--env=KEY=VALUE literal form",
+			args:        []string{"--env=DB_PASS=literal", "server", "ls"},
+			wantEnv:     map[string]string{"DB_PASS": "literal"},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			// Exact command match proves the value never lands on the command line.
+			name:        "--env=KEY reads shell value and keeps it off the command",
+			args:        []string{"--env=DB_PASS", "server", "echo", "hi"},
+			wantEnv:     map[string]string{"DB_PASS": "hunter2"},
+			wantServer:  "server",
+			wantCommand: "echo hi",
+		},
+		{
+			name:        "quoted --env value is unwrapped",
+			args:        []string{"--env=\"DB_PASS=quoted\"", "server", "ls"},
+			wantEnv:     map[string]string{"DB_PASS": "quoted"},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "value ending in a quote is not corrupted",
+			args:        []string{"--env=PW=trailing\"", "server", "ls"},
+			wantEnv:     map[string]string{"PW": "trailing\""},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			// Quotes wrap only the value, not the whole token—no matched pair to strip.
+			name:        "inner-quoted value passes through verbatim",
+			args:        []string{"--env=KEY=\"VAL\"", "server", "ls"},
+			wantEnv:     map[string]string{"KEY": "\"VAL\""},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "--env=KEY for an unset variable warns and skips",
+			args:        []string{"--env=DEFINITELY_UNSET", "server", "ls"},
+			absentEnv:   []string{"DEFINITELY_UNSET"},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "multiple --env flags accumulate",
+			args:        []string{"--env=A=1", "--env=B=2", "server", "ls"},
+			wantEnv:     map[string]string{"A": "1", "B": "2"},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "--env=KEY= sets an empty value",
+			args:        []string{"--env=EMPTY=", "server", "ls"},
+			wantEnv:     map[string]string{"EMPTY": ""},
+			wantServer:  "server",
+			wantCommand: "ls",
+		},
+		{
+			name:        "--env after server is a command arg, not a flag",
+			args:        []string{"server", "--env=X=1"},
+			absentEnv:   []string{"X"},
+			wantServer:  "server",
+			wantCommand: "--env=X=1",
+		},
+		{
+			name:    "bare --env with no value is an error",
+			args:    []string{"--env", "server", "ls"},
+			wantErr: true,
+		},
+		{
+			name:    "--env= with empty key is an error",
+			args:    []string{"--env=", "server", "ls"},
+			wantErr: true,
+		},
+		{
+			name:    "--env-file is an unknown flag, not a malformed --env",
+			args:    []string{"--env-file=secrets", "server", "ls"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseRemoteExecArgs(tt.args)
+			if tt.wantErr {
+				assert.NotEmpty(t, result.Err)
+				assert.Empty(t, result.Server)
+				return
+			}
+			assert.Empty(t, result.Err)
+			for k, v := range tt.wantEnv {
+				assert.Equal(t, v, result.Env[k], "Env[%s]", k)
+			}
+			for _, k := range tt.absentEnv {
+				_, ok := result.Env[k]
+				assert.False(t, ok, "Env[%s] should be absent", k)
+			}
+			assert.Equal(t, tt.wantServer, result.Server, "Server")
+			assert.Equal(t, tt.wantCommand, result.Command, "Command")
+		})
+	}
+}
+
+func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
+	result := ParseRemoteExecArgs([]string{"--env=\"=hunter2\"", "server", "ls"})
+	assert.NotEmpty(t, result.Err)
+	assert.NotContains(t, result.Err, "hunter2", "malformed --env error must not echo the value")
+}
+
+func TestParseRemoteExecArgs_EnvPrefixIsExact(t *testing.T) {
+	// --env-file must not be swallowed by --env matching; it is an unknown flag.
+	result := ParseRemoteExecArgs([]string{"--env-file=secrets", "server", "ls"})
+	assert.Contains(t, result.Err, "unknown flag")
+}
+
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	tests := []struct {
 		name        string

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"os"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -14,6 +15,7 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
+	Env           map[string]string
 	Detach        bool
 	Wait          bool
 	ShowHelp      bool
@@ -40,6 +42,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		detach                                                   bool
 		wait                                                     bool
 	)
+	env := map[string]string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -98,6 +101,10 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if outputFormat == "" {
 				return RemoteExecArgs{Err: "--output requires a value (table|json)"}
 			}
+		case arg == "--env" || strings.HasPrefix(arg, "--env="):
+			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -135,9 +142,36 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		OutputFormat:  outputFormat,
 		Server:        server,
 		Command:       ShellJoin(commandParts),
+		Env:           env,
 		Detach:        detach,
 		Wait:          wait,
 	}
+}
+
+// ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,
+// warning and skipping if unset; malformed input returns an error message.
+func ParseEnvArg(arg string, env map[string]string) string {
+	body, ok := strings.CutPrefix(arg, "--env=")
+	var key, value string
+	var hasValue bool
+	if ok {
+		key, value, hasValue = strings.Cut(trimMatchedQuotes(body), "=")
+	}
+	if !ok || key == "" {
+		// Never echo arg: a malformed token like --env="=secret" would leak the value.
+		return "invalid --env argument: use --env=KEY or --env=KEY=VALUE"
+	}
+	if hasValue {
+		env[key] = value
+		return ""
+	}
+	v, exists := os.LookupEnv(key)
+	if !exists {
+		utils.CliWarning("no environment variable found for key '%s'", key)
+		return ""
+	}
+	env[key] = v
+	return ""
 }
 
 // ShellJoin reassembles tokenized command parts into a single string.
@@ -153,6 +187,16 @@ func ShellJoin(parts []string) string {
 		out[i] = shellQuote(p)
 	}
 	return strings.Join(out, " ")
+}
+
+// trimMatchedQuotes strips one matched leading+trailing double-quote pair only.
+// A real shell already strips wrappers, so leaving unbalanced quotes intact
+// avoids silently corrupting a value that legitimately ends in ".
+func trimMatchedQuotes(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 // shellQuote wraps s in single quotes if it contains whitespace or a single quote.

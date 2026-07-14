@@ -3,7 +3,6 @@ package websh
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -52,8 +51,10 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			res.Username, i = extractValue(args, i)
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			res.Groupname, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "--env"):
-			i = extractEnvValue(args, i, res.Env)
+		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
+			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
+				return res, errors.New(errMsg)
+			}
 		case strings.HasPrefix(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
@@ -119,8 +120,14 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon websh server 'echo hello;world'
 
+Executing a command (SERVER followed by COMMAND) runs through the same executor
+as 'alpacon exec'—identical output, exit codes, and sudo-approval handling.
+Command execution does not accept exec-only flags such as --detach or --wait.
+
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
+Exit code 4 indicates the sudo command is pending human approval; approve it in
+the Alpacon console (web), then re-run—or use 'alpacon exec --wait' to block.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
@@ -136,8 +143,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh my-server "ls -la /var/log"
   alpacon websh root@my-server "systemctl status nginx"
 
-  # Set environment variables
-  alpacon websh --env="KEY1=VALUE1" --env="KEY2=VALUE2" my-server "echo $KEY1"
+  # Pass a secret via the shell env; the value stays off the alpacon command line
+  # and out of the session recording. psql reads PGPASSWORD directly from the env.
+  export PGPASSWORD=hunter2
+  alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
   # Share terminal session
   alpacon websh --share my-server
@@ -157,8 +166,14 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
   -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
-  --env="KEY=VALUE"                  Set environment variable 'KEY' to 'VALUE'.
-  --env="KEY"                        Use the current shell's value for 'KEY'.
+  --env="KEY"                        Pass an environment variable, reading its value
+                                     from the current shell. This keeps the value off
+                                     the alpacon command line and out of the audit
+                                     log—use it for secrets such as passwords or tokens.
+  --env="KEY=VALUE"                  Set 'KEY' to a literal value. Discouraged: the
+                                     value is written on the command line and recorded
+                                     verbatim in the audit log. Never pass credentials
+                                     this way.
   -s, --share                        Share the terminal via a temporary link.
   --read-only=[true|false]           Set shared session to read-only (default: false).
   --work-session [UUID]              Attach this session to a work-session.
@@ -207,6 +222,28 @@ Note: All flags must be placed before the server name.
 			serverName = sshTarget.Host
 		}
 
+		// Command mode is an alias for exec: delegate to the shared runner so the
+		// pending-approval exit code, sudo-denial hints, and JSON buffering match
+		// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
+		if len(commandArgs) > 0 {
+			execCmd.RunRemoteExec(execCmd.RemoteExecArgs{
+				Username:      username,
+				Groupname:     groupname,
+				WorkSessionID: parsed.WorkSessionID,
+				OutputFormat:  parsed.OutputFormat,
+				Server:        serverName,
+				Command:       execCmd.ShellJoin(commandArgs),
+				Env:           env,
+			})
+			return
+		}
+
+		// Interactive websh has no channel for env: CreateWebshSession takes none.
+		// Warn rather than silently drop, since the help frames --env as the secrets channel.
+		if len(env) > 0 {
+			utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
+		}
+
 		if parsed.OutputFormat != "" {
 			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
 				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
@@ -223,58 +260,51 @@ Note: All flags must be placed before the server name.
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if len(commandArgs) > 0 {
-			command := execCmd.ShellJoin(commandArgs)
-			err := execCmd.RunCommandWithRetry(alpaconClient, serverName, command, username, groupname, env, workSessionID, os.Stdout)
-			utils.HandleWorkSessionError(err, "command", serverName, authMethod, workSessionID)
-			execCmd.HandleCommandResult(err)
-		} else {
-			session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+
+		if err != nil {
+			err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+				OnMFARequired: func(srv string) error {
+					return mfa.HandleMFAError(alpaconClient, srv)
+				},
+				OnUsernameRequired: func() error {
+					_, err := iam.HandleUsernameRequired()
+					return err
+				},
+				CheckMFACompleted: func() (bool, error) {
+					return mfa.CheckMFACompletion(alpaconClient)
+				},
+				RefreshToken: alpaconClient.RefreshToken,
+				RetryOperation: func() error {
+					session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+					return err
+				},
+			})
 
 			if err != nil {
-				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
-						return err
-					},
-				})
-
-				if err != nil {
-					utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
-					utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
-				}
+				utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
+				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
 			}
-			// Set up sudo MFA listener in background so it doesn't delay
-			// terminal open. If the user types sudo before the listener is
-			// ready, the approval request will expire and they can retry.
-			listenerDone := make(chan *event.SudoListener, 1)
-			go func() {
-				listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
-			}()
-			defer func() {
-				select {
-				case sl := <-listenerDone:
-					if sl != nil {
-						sl.Stop()
-					}
-				case <-time.After(3 * time.Second):
-					// Don't block exit if listener setup is stuck
-				}
-			}()
-
-			_ = websh.OpenNewTerminal(alpaconClient, session)
 		}
+		// Set up sudo MFA listener in background so it doesn't delay
+		// terminal open. If the user types sudo before the listener is
+		// ready, the approval request will expire and they can retry.
+		listenerDone := make(chan *event.SudoListener, 1)
+		go func() {
+			listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
+		}()
+		defer func() {
+			select {
+			case sl := <-listenerDone:
+				if sl != nil {
+					sl.Stop()
+				}
+			case <-time.After(3 * time.Second):
+				// Don't block exit if listener setup is stuck
+			}
+		}()
+
+		_ = websh.OpenNewTerminal(alpaconClient, session)
 	},
 }
 
@@ -333,27 +363,6 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	}
 
 	return listener
-}
-
-func extractEnvValue(args []string, i int, env map[string]string) int {
-	envString := strings.TrimPrefix(args[i], "--env=")
-	envString = strings.Trim(envString, "\"")
-
-	parts := strings.SplitN(envString, "=", 2)
-	if len(parts) == 2 {
-		env[parts[0]] = parts[1]
-	} else if len(parts) == 1 {
-		value, exists := os.LookupEnv(parts[0])
-		if !exists {
-			utils.CliWarning("No environment variable found for key '%s'\n", parts[0])
-		} else {
-			env[parts[0]] = value
-		}
-	} else {
-		utils.CliErrorWithExit("Invalid format for --env flag. Expected '--env=KEY=VALUE', but got '%s'. Please use the format: --env=MY_VAR=my_value", args[i])
-	}
-
-	return i
 }
 
 // isNotFoundError checks if an error message indicates a 404/not-found response.

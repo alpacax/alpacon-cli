@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -38,6 +39,13 @@ To send a literal metacharacter, wrap the argument in quotes:
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
+  --env="KEY"                   Pass an environment variable to the remote command,
+                                reading its value from the current shell. This keeps
+                                the value off the alpacon command line and out of the
+                                audit log—use it for secrets such as passwords or tokens.
+  --env="KEY=VALUE"             Set 'KEY' to a literal value. Discouraged: the value
+                                is written on the command line and recorded verbatim
+                                in the audit log. Never pass credentials this way.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -65,6 +73,12 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # Specify user and group with flags
   alpacon exec -u root prod-docker systemctl status nginx
   alpacon exec -g docker user@server docker images
+
+  # Pass a secret via the shell env; the value stays off the alpacon command line
+  # and out of the audit log. psql reads PGPASSWORD from the environment, so it
+  # never lands in the remote process's argv either.
+  export PGPASSWORD=hunter2
+  alpacon exec --env="PGPASSWORD" db-server -- psql -h localhost -U app -c 'SELECT 1'
 
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
@@ -97,95 +111,105 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		if parsed.OutputFormat != "" {
-			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
-			}
-			utils.OutputFormat = parsed.OutputFormat
-		}
-
-		workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
-		authMethod := config.ResolveAuthMethod()
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-			return
-		}
-
-		env := make(map[string]string)
-
-		if parsed.Detach {
-			resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-			if err != nil {
-				err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
-						return err
-					},
-				})
-			}
-			if err != nil {
-				utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-				utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
-				return
-			}
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				data, err := json.Marshal(map[string]string{"job_id": resp.ID})
-				if err != nil {
-					utils.CliErrorWithExit("failed to marshal JSON: %s", err)
-					return
-				}
-				utils.PrintJson(data)
-			} else {
-				line1, line2 := detachResultLines(resp.ID)
-				fmt.Println(line1)
-				fmt.Fprintln(os.Stderr, line2)
-			}
-			return
-		}
-
-		// JSON mode buffers output to keep stdout clean for a pending-approval
-		// signal; it is flushed below on success or plain failure. Table mode streams live.
-		var out io.Writer = os.Stdout
-		var buf *bytes.Buffer
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			buf = &bytes.Buffer{}
-			out = buf
-		}
-
-		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, out)
-		utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-		// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
-		// not --wait on emits a machine-readable pending signal and exits before the
-		// normal result handling treats the denial as a plain failure.
-		if HandlePendingApproval(err, reRunHint(parsed)) {
-			return
-		}
-		if buf != nil {
-			_, _ = os.Stdout.Write(buf.Bytes())
-		}
-		HandleCommandResult(err)
+		RunRemoteExec(parsed)
 	},
 }
 
-// reRunHint reconstructs the exec invocation (server, optional user/group, and
-// command) so the pending-approval message can tell a human exactly what to
-// re-run once the request is approved. It uses -- before the command so remote
-// flags are never re-parsed as alpacon flags.
-func reRunHint(parsed RemoteExecArgs) string {
+// RunRemoteExec is the shared post-parse execution path for exec and websh
+// command mode. Requires Server and Command to be non-empty.
+func RunRemoteExec(parsed RemoteExecArgs) {
+	if parsed.OutputFormat != "" {
+		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
+			utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+		}
+		utils.OutputFormat = parsed.OutputFormat
+	}
+
+	workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
+
+	authMethod := config.ResolveAuthMethod()
+
+	alpaconClient, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return
+	}
+
+	env := parsed.Env
+
+	if parsed.Detach {
+		resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		if err != nil {
+			err = utils.HandleCommonErrors(err, parsed.Server, utils.ErrorHandlerCallbacks{
+				OnMFARequired: func(srv string) error {
+					return mfa.HandleMFAError(alpaconClient, srv)
+				},
+				OnUsernameRequired: func() error {
+					_, err := iam.HandleUsernameRequired()
+					return err
+				},
+				CheckMFACompleted: func() (bool, error) {
+					return mfa.CheckMFACompletion(alpaconClient)
+				},
+				RefreshToken: alpaconClient.RefreshToken,
+				RetryOperation: func() error {
+					resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+					return err
+				},
+			})
+		}
+		if err != nil {
+			utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+			utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
+			return
+		}
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			data, err := json.Marshal(map[string]string{"job_id": resp.ID})
+			if err != nil {
+				utils.CliErrorWithExit("failed to marshal JSON: %s", err)
+				return
+			}
+			utils.PrintJson(data)
+		} else {
+			line1, line2 := detachResultLines(resp.ID)
+			fmt.Println(line1)
+			fmt.Fprintln(os.Stderr, line2)
+		}
+		return
+	}
+
+	// JSON mode buffers output to keep stdout clean for a pending-approval
+	// signal; it is flushed below on success or plain failure. Table mode streams live.
+	var out io.Writer = os.Stdout
+	var buf *bytes.Buffer
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		buf = &bytes.Buffer{}
+		out = buf
+	}
+
+	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, out)
+	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+	// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
+	// not --wait on emits a machine-readable pending signal and exits before the
+	// normal result handling treats the denial as a plain failure.
+	if HandlePendingApproval(err, reRunHint(parsed)) {
+		return
+	}
+	if buf != nil {
+		_, _ = os.Stdout.Write(buf.Bytes())
+	}
+	HandleCommandResult(err)
+}
+
+// reRunHint reconstructs the exec invocation (server, command, and any
+// user/group, work-session, or --env keys) so the pending-approval message can
+// tell a human exactly what to re-run once the request is approved. It uses --
+// before the command so remote flags are never re-parsed as alpacon flags.
+// The Command stays a pure, executable string; when --env keys are present the
+// caveat rides in Description, since the rerun re-reads each value from the
+// shell and a machine consumer replaying Command verbatim would otherwise
+// submit without those keys.
+func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{"alpacon exec"}
 	if parsed.Username != "" {
 		parts = append(parts, "-u "+parsed.Username)
@@ -196,6 +220,21 @@ func reRunHint(parsed RemoteExecArgs) string {
 	if parsed.WorkSessionID != "" {
 		parts = append(parts, "--work-session "+parsed.WorkSessionID)
 	}
+	// Emit env keys only (never values): the rerun re-reads each value from the
+	// shell, so the secret stays off this hint on stderr and out of the logs.
+	keys := make([]string, 0, len(parsed.Env))
+	for k := range parsed.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, "--env="+k)
+	}
 	parts = append(parts, parsed.Server, "--", parsed.Command)
-	return strings.Join(parts, " ")
+
+	action := utils.NextAction{Command: strings.Join(parts, " ")}
+	if len(keys) > 0 {
+		action.Description = "--env values are re-read from your shell; export them before re-running"
+	}
+	return action
 }

@@ -158,7 +158,8 @@ func TestIsApprovalDenial(t *testing.T) {
 func TestReRunHint(t *testing.T) {
 	t.Run("minimal: server and command only", func(t *testing.T) {
 		got := reRunHint(RemoteExecArgs{Server: "web-01", Command: "sudo reboot"})
-		assert.Equal(t, "alpacon exec web-01 -- sudo reboot", got)
+		assert.Equal(t, "alpacon exec web-01 -- sudo reboot", got.Command)
+		assert.Empty(t, got.Description, "no --env keys means no caveat")
 	})
 
 	t.Run("includes user, group, and work-session", func(t *testing.T) {
@@ -169,6 +170,19 @@ func TestReRunHint(t *testing.T) {
 			Server:        "web-01",
 			Command:       "sudo reboot",
 		})
-		assert.Equal(t, "alpacon exec -u root -g docker --work-session ses-1 web-01 -- sudo reboot", got)
+		assert.Equal(t, "alpacon exec -u root -g docker --work-session ses-1 web-01 -- sudo reboot", got.Command)
+	})
+
+	t.Run("emits env keys sorted, never values, with a shell-reread caveat", func(t *testing.T) {
+		got := reRunHint(RemoteExecArgs{
+			Server:  "web-01",
+			Command: "sudo reboot",
+			Env:     map[string]string{"PGPASSWORD": "hunter2", "API_TOKEN": "sk-secret"},
+		})
+		assert.Equal(t, "alpacon exec --env=API_TOKEN --env=PGPASSWORD web-01 -- sudo reboot", got.Command)
+		assert.NotContains(t, got.Command, "hunter2")
+		assert.NotContains(t, got.Command, "sk-secret")
+		// Caveat rides in Description so a machine consumer replaying Command isn't misled.
+		assert.Contains(t, got.Description, "re-read from your shell")
 	})
 }

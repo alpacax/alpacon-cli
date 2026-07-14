@@ -108,8 +108,8 @@ func hasSudoApprovalDenial(output string) bool {
 // terminal, offers an MFA step-up and retries once. Non-interactive callers
 // (scripts, CI, AI agents) fall through unchanged so HandleCommandResult prints
 // the static denial hint; non-interactive humans additionally get the
-// verification link they can complete out of band. Only exec uses this; websh
-// keeps its own sudo MFA flow.
+// verification link they can complete out of band. Reached via RunRemoteExec by
+// exec and websh command mode; interactive websh keeps its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
 	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
@@ -229,9 +229,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // then exits with ExitCodePendingApproval. It reports true when it handled the
 // err; the caller skips its normal result handling on true. The exec denial line
 // carries no approval request id, so the machine signal omits it. reRunHint is
-// the exact command the caller invoked, so a human can copy-paste it once the
-// request is approved.
-func HandlePendingApproval(err error, reRunHint string) bool {
+// the exact command the caller invoked (with any --env caveat in its
+// Description), so a human can copy-paste it once the request is approved.
+func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
@@ -251,14 +251,14 @@ func HandlePendingApproval(err error, reRunHint string) bool {
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait to block until it is approved.",
 		"", // the exec sudo denial line carries no approval request id
-		utils.NextAction{Command: reRunHint},
+		reRunHint,
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true
 }
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
-// handling and retry logic, streaming output to out. Used by exec and websh.
+// handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
 	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
