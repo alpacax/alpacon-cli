@@ -238,6 +238,12 @@ Note: All flags must be placed before the server name.
 			return
 		}
 
+		// Interactive websh has no channel for env: CreateWebshSession takes none.
+		// Warn rather than silently drop, since the help frames --env as the secrets channel.
+		if len(env) > 0 {
+			utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
+		}
+
 		if parsed.OutputFormat != "" {
 			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
 				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
