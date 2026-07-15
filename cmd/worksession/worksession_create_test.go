@@ -21,7 +21,7 @@ func TestPollForApprovalCancelled(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ses-c", false, 0)
+	_, err := pollForApproval(ac, "ses-c", false, 0, 30)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cancelled")
 }
@@ -43,6 +43,48 @@ func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
 	result, err := parseExpiryFlag("", ts)
 	assert.NoError(t, err)
 	assert.Equal(t, ts, result)
+}
+
+func TestResolveWaitTimeout_BareWaitUsesDefault(t *testing.T) {
+	d, err := resolveWaitTimeout(true, "")
+	assert.NoError(t, err)
+	assert.Equal(t, 5*time.Minute, d)
+}
+
+func TestResolveWaitTimeout_NoWait(t *testing.T) {
+	d, err := resolveWaitTimeout(false, "")
+	assert.NoError(t, err)
+	assert.Equal(t, time.Duration(0), d)
+}
+
+func TestResolveWaitTimeout_CustomImpliesWait(t *testing.T) {
+	d, err := resolveWaitTimeout(false, "30m")
+	assert.NoError(t, err)
+	assert.Equal(t, 30*time.Minute, d)
+}
+
+func TestResolveWaitTimeout_CustomWinsOverBareWait(t *testing.T) {
+	d, err := resolveWaitTimeout(true, "30m")
+	assert.NoError(t, err)
+	assert.Equal(t, 30*time.Minute, d)
+}
+
+func TestResolveWaitTimeout_Invalid(t *testing.T) {
+	_, err := resolveWaitTimeout(true, "10minutes")
+	assert.Error(t, err)
+}
+
+func TestResolveWaitTimeout_NonPositive(t *testing.T) {
+	_, err := resolveWaitTimeout(true, "0s")
+	assert.Error(t, err)
+	_, err = resolveWaitTimeout(true, "-5m")
+	assert.Error(t, err)
+}
+
+func TestApprovalPollAttempts(t *testing.T) {
+	assert.Equal(t, 30, approvalPollAttempts(5*time.Minute, 10*time.Second)) // default unchanged
+	assert.Equal(t, 60, approvalPollAttempts(10*time.Minute, 10*time.Second))
+	assert.Equal(t, 1, approvalPollAttempts(5*time.Second, 10*time.Second)) // floor at one attempt
 }
 
 func TestParseExpiryFlag_BothProvided(t *testing.T) {
