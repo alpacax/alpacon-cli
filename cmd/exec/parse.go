@@ -1,8 +1,10 @@
 package exec
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -16,6 +18,7 @@ type RemoteExecArgs struct {
 	Server        string
 	Command       string
 	Env           map[string]string
+	WaitApproval  time.Duration
 	Detach        bool
 	Wait          bool
 	ShowHelp      bool
@@ -41,6 +44,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
+		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
 
@@ -113,6 +117,20 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			wait = true
 		case strings.HasPrefix(arg, "--wait="):
 			return RemoteExecArgs{Err: "--wait does not accept a value; use --wait alone"}
+		case arg == "--wait-approval" || strings.HasPrefix(arg, "--wait-approval="):
+			var raw, errMsg string
+			raw, i, errMsg = extractFlagValue(args, i, "--wait-approval")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			d, err := time.ParseDuration(raw)
+			if err != nil {
+				return RemoteExecArgs{Err: fmt.Sprintf("invalid --wait-approval value %q: %v", raw, err)}
+			}
+			if d <= 0 {
+				return RemoteExecArgs{Err: "--wait-approval must be a positive duration (e.g. 10m)"}
+			}
+			waitApproval = d
 		case strings.HasPrefix(arg, "-"):
 			return RemoteExecArgs{Err: "unknown flag: " + arg}
 		default:
@@ -123,6 +141,11 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	if detach && wait {
 		return RemoteExecArgs{
 			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
+		}
+	}
+	if detach && waitApproval > 0 {
+		return RemoteExecArgs{
+			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
 		}
 	}
 
@@ -143,6 +166,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		Server:        server,
 		Command:       ShellJoin(commandParts),
 		Env:           env,
+		WaitApproval:  waitApproval,
 		Detach:        detach,
 		Wait:          wait,
 	}
@@ -172,6 +196,18 @@ func ParseEnvArg(arg string, env map[string]string) string {
 	}
 	env[key] = v
 	return ""
+}
+
+// WaitTimeout returns the effective approval-wait timeout: --wait-approval
+// wins, bare --wait falls back to the default, otherwise 0 (no wait).
+func (a RemoteExecArgs) WaitTimeout() time.Duration {
+	if a.WaitApproval > 0 {
+		return a.WaitApproval
+	}
+	if a.Wait {
+		return approvalWaitTimeout
+	}
+	return 0
 }
 
 // ShellJoin reassembles tokenized command parts into a single string.
