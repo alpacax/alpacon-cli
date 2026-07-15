@@ -35,7 +35,7 @@ func pendingApprovalNextActions(retry NextAction) []NextAction {
 	if retry != (NextAction{}) {
 		actions = append(actions, retry)
 	}
-	return append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait on the original command to block until approval."})
+	return append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."})
 }
 
 // PrintPendingApproval emits the structured "pending approval" feedback for an
