@@ -59,10 +59,22 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 	return &env, nil
 }
 
+// resolveOrgName returns the Auth0 organization hint used in OAuth scopes.
+// It prefers the server-provided schema name—the frozen workspace identity
+// that equals the Auth0 organization name—so logins keep working after a
+// workspace URL label changes. Older servers omit the field; fall back to
+// the caller-derived label.
+func resolveOrgName(envInfo *AuthEnvResponse, fallback string) string {
+	if envInfo != nil && envInfo.Auth0.SchemaName != "" {
+		return envInfo.Auth0.SchemaName
+	}
+	return fallback
+}
+
 func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse) (*DeviceCodeResponse, error) {
 	data := map[string]string{
 		"client_id": envInfo.Auth0.ClientID,
-		"scope":     fmt.Sprintf("openid profile email offline_access cli org:%s", workspaceName),
+		"scope":     fmt.Sprintf("openid profile email offline_access cli org:%s", resolveOrgName(envInfo, workspaceName)),
 		"audience":  envInfo.Auth0.Audience,
 	}
 
@@ -141,16 +153,19 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 		return nil, err
 	}
 
-	subDomain, err := extractSubdomain(workspaceURL)
-	if err != nil {
-		return nil, err
+	orgName := resolveOrgName(envInfo, "")
+	if orgName == "" {
+		orgName, err = extractSubdomain(workspaceURL)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	data := map[string]string{
 		"grant_type":    "refresh_token",
 		"client_id":     envInfo.Auth0.ClientID,
 		"refresh_token": refreshToken,
-		"scope":         fmt.Sprintf("cli org:%s", subDomain),
+		"scope":         fmt.Sprintf("cli org:%s", orgName),
 	}
 
 	jsonData, err := json.Marshal(data)
