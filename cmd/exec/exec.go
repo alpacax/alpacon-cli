@@ -54,7 +54,9 @@ Flags:
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
   --wait                        When a sudo command needs human approval, block and
                                 re-attempt until a reviewer approves it in the Alpacon
-                                console (web), or the wait times out.
+                                console (web), or the wait times out (default 3m).
+  --wait-approval DURATION      Like --wait with a custom wait timeout (e.g. 30m).
+                                Implies --wait.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
@@ -82,7 +84,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
-  alpacon exec logs <JOB_ID>`,
+  alpacon exec logs <JOB_ID>
+
+  # Block up to 30 minutes for a reviewer to approve a sudo command
+  alpacon exec --wait-approval 30m root@prod-docker -- systemctl restart nginx`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.
@@ -187,7 +192,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		out = buf
 	}
 
-	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Wait, out)
+	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.WaitTimeout(), out)
 	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 	// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
 	// not --wait on emits a machine-readable pending signal and exits before the

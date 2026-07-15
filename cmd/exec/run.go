@@ -23,7 +23,8 @@ const (
 	// seconds-to-minutes timescale, not sub-second. The 3-minute ceiling mirrors
 	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent.
 	approvalWaitPollInterval = 5 * time.Second
-	approvalWaitTimeout      = 3 * time.Minute
+	// approvalWaitTimeout is the default for bare --wait; --wait-approval overrides it.
+	approvalWaitTimeout = 3 * time.Minute
 )
 
 // sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
@@ -154,12 +155,13 @@ func isApprovalDenial(err error) bool {
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
-// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and wait is set,
-// blocks and re-attempts the command on a fixed interval until a reviewer
-// approves it out of band (the re-run then succeeds or hits a different,
-// terminal denial), or the bounded timeout elapses. When wait is false, or the
-// denial is anything other than SUDO_APPROVAL_REQUIRED, it returns the first
-// err unchanged so the caller's pending/denial handling runs.
+// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and waitTimeout is
+// positive, blocks and re-attempts the command on a fixed interval until a
+// reviewer approves it out of band (the re-run then succeeds or hits a
+// different, terminal denial), or the bounded timeout elapses. When
+// waitTimeout is zero or negative, or the denial is anything other than
+// SUDO_APPROVAL_REQUIRED, it returns the first err unchanged so the caller's
+// pending/denial handling runs.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
@@ -169,7 +171,7 @@ func isApprovalDenial(err error) bool {
 // until a reviewer approves, at which point the command runs exactly once. The
 // poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
 // fixed-interval ticker, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool, out io.Writer) error {
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, waitTimeout time.Duration, out io.Writer) error {
 	err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
@@ -177,23 +179,23 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	// re-submitting; without --wait, surface it for HandlePendingApproval.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
-		if !wait {
+		if waitTimeout <= 0 {
 			return err
 		}
 		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console (output streams once approved)...")
 		spinner.Start()
 		defer spinner.Stop()
-		return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, approvalWaitTimeout)
+		return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, waitTimeout)
 	}
 
-	if !wait || !isApprovalDenial(err) {
+	if waitTimeout <= 0 || !isApprovalDenial(err) {
 		return err
 	}
 
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
 
-	timer := time.NewTimer(approvalWaitTimeout)
+	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(approvalWaitPollInterval)
 	defer ticker.Stop()
@@ -212,7 +214,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			// mid-wait; honor --wait by resuming the held job instead of exiting.
 			if errors.As(err, &pendingErr) {
 				spinner.Stop()
-				return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, approvalWaitTimeout)
+				return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, waitTimeout)
 			}
 			if isApprovalDenial(err) {
 				// Still pending—keep waiting.
