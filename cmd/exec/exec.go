@@ -61,7 +61,8 @@ Flags:
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
 Exit code 4 indicates the sudo command is pending human approval (approve it in
-the Alpacon console, then re-run, or pass --wait to block); --output json emits
+the Alpacon console, then re-run, or pass --wait to block—--wait-approval
+DURATION to block with a longer timeout); --output json emits
 {"status":"pending_approval", ...} on stdout.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
