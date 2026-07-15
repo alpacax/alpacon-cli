@@ -36,17 +36,17 @@ const (
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
-	purpose             string
-	createScopes        []string
-	createServers       []string
-	expiresIn           string
-	expiresAt           string
-	requesterType       string
-	waitApproval        bool
-	waitApprovalTimeout string
-	useAfterCreate      bool
-	createSudo          []string
-	createSudoReason    string
+	purpose          string
+	createScopes     []string
+	createServers    []string
+	expiresIn        string
+	expiresAt        string
+	requesterType    string
+	wait             bool
+	waitApproval     string
+	useAfterCreate   bool
+	createSudo       []string
+	createSudoReason string
 )
 
 var workSessionCreateCmd = &cobra.Command{
@@ -120,11 +120,11 @@ so it is recorded and scoped accordingly.`,
 			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
 
-		waitTimeout, werr := resolveWaitTimeout(waitApproval, waitApprovalTimeout)
+		waitTimeout, werr := resolveWaitTimeout(wait, waitApproval, cmd.Flags().Changed("wait-approval"))
 		if werr != nil {
 			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid wait timeout: %s.", werr)
 		}
-		waitApproval = waitTimeout > 0
+		shouldWait := waitTimeout > 0
 
 		// Pre-validate --use to avoid creating an orphan server-side session that we
 		// can't attach to the workspace.
@@ -217,7 +217,7 @@ so it is recorded and scoped accordingly.`,
 			printSessionAdvisories(activeSession)
 			return
 		case useDecisionSkipScheduled:
-			if !waitApproval {
+			if !shouldWait {
 				if utils.OutputFormat == utils.OutputFormatJSON {
 					printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 					return
@@ -227,12 +227,12 @@ so it is recorded and scoped accordingly.`,
 				return
 			}
 		case useDecisionErrorNeedsWait:
-			if !waitApproval {
+			if !shouldWait {
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
 			}
 		}
 
-		if !waitApproval {
+		if !shouldWait {
 			// A session that lands pending needs a human to approve it out of band
 			// (ADR 0015). Emit the structured pending-approval signal and exit with
 			// ExitCodePendingApproval so a machine consumer (AI agent, CI) can branch
@@ -301,12 +301,9 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 		return "", errors.New("one of --expires-in or --expires-at is required")
 	}
 	if expiresIn != "" {
-		d, err := time.ParseDuration(expiresIn)
+		d, err := utils.ParsePositiveDuration("--expires-in", expiresIn)
 		if err != nil {
-			return "", fmt.Errorf("invalid --expires-in value %q: %w", expiresIn, err)
-		}
-		if d <= 0 {
-			return "", fmt.Errorf("invalid --expires-in value %q: must be a positive duration", expiresIn)
+			return "", err
 		}
 		return time.Now().UTC().Add(d).Format(time.RFC3339), nil
 	}
@@ -316,24 +313,17 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 	return expiresAt, nil
 }
 
-// resolveWaitTimeout returns the effective approval-wait timeout: 0 when not
-// waiting, the parsed --wait-approval duration when set, else the default.
-func resolveWaitTimeout(wait bool, waitApprovalRaw string) (time.Duration, error) {
+// resolveWaitTimeout uses waitApprovalSet to separate an unset --wait-approval
+// from an explicitly empty value, which must be rejected rather than silently ignored.
+func resolveWaitTimeout(wait bool, waitApprovalRaw string, waitApprovalSet bool) (time.Duration, error) {
 	waitApprovalRaw = strings.TrimSpace(waitApprovalRaw)
-	if waitApprovalRaw == "" {
+	if waitApprovalRaw == "" && !waitApprovalSet {
 		if wait {
 			return defaultApprovalWaitTimeout, nil
 		}
 		return 0, nil
 	}
-	d, err := time.ParseDuration(waitApprovalRaw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid --wait-approval value %q: %w", waitApprovalRaw, err)
-	}
-	if d <= 0 {
-		return 0, fmt.Errorf("invalid --wait-approval value %q: must be positive", waitApprovalRaw)
-	}
-	return d, nil
+	return utils.ParsePositiveDuration("--wait-approval", waitApprovalRaw)
 }
 
 // validateScopeEnum rejects scopes not in validScopePresets and lists the
@@ -444,11 +434,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			waitMsg = waitMsgActivation
 		}
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
-		if remaining < interval {
-			time.Sleep(remaining)
-		} else {
-			time.Sleep(interval)
-		}
+		time.Sleep(min(remaining, interval))
 	}
 }
 
@@ -459,8 +445,8 @@ func init() {
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent' (set when an AI agent drives the session)")
-	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
-	workSessionCreateCmd.Flags().StringVar(&waitApprovalTimeout, "wait-approval", "", "Like --wait with a custom poll timeout (e.g. 30m; default 5m). Implies --wait")
+	workSessionCreateCmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
+	workSessionCreateCmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
 	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
