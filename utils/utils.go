@@ -596,7 +596,9 @@ func SplitAndTrim(s, sep string) []string {
 }
 
 // ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.
+// It trims surrounding whitespace so every duration flag normalizes input the same way.
 func ParsePositiveDuration(flagName, raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
 	d, err := time.ParseDuration(raw)
 	if err != nil {
 		return 0, fmt.Errorf("invalid %s value %q: %w", flagName, raw, err)
