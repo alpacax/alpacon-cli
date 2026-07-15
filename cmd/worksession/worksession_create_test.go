@@ -21,9 +21,33 @@ func TestPollForApprovalCancelled(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ses-c", false, 0, 30)
+	_, err := pollForApproval(ac, "ses-c", false, 0, 30*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cancelled")
+}
+
+// TestPollForApproval_WaitsFullTimeout guards against a regression where the poll
+// loop was attempt-count based: a timeout under one interval (e.g. --wait-approval
+// 15s with a 10s interval) floored to a single instant attempt and returned
+// immediately instead of waiting. With interval=10ms and timeout=30ms, the old
+// attempt-count logic returns after ~20ms (two sleeps, no sleep after the final
+// attempt); the deadline-based loop must consume the full 30ms.
+func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-p","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	timeout := 30 * time.Millisecond
+	start := time.Now()
+	_, err := pollForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.GreaterOrEqual(t, elapsed, timeout)
 }
 
 func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
@@ -79,12 +103,6 @@ func TestResolveWaitTimeout_NonPositive(t *testing.T) {
 	assert.Error(t, err)
 	_, err = resolveWaitTimeout(true, "-5m")
 	assert.Error(t, err)
-}
-
-func TestApprovalPollAttempts(t *testing.T) {
-	assert.Equal(t, 30, approvalPollAttempts(5*time.Minute, 10*time.Second)) // default unchanged
-	assert.Equal(t, 60, approvalPollAttempts(10*time.Minute, 10*time.Second))
-	assert.Equal(t, 1, approvalPollAttempts(5*time.Second, 10*time.Second)) // floor at one attempt
 }
 
 func TestParseExpiryFlag_BothProvided(t *testing.T) {

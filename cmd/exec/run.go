@@ -20,8 +20,9 @@ const (
 	// SUDO_APPROVAL_REQUIRED denial. The interval is slower than the MFA step-up
 	// poll (api/mfa/mfa.go) because each tick re-submits and re-runs the remote
 	// command, and a human approving out of band in the console works on a
-	// seconds-to-minutes timescale, not sub-second. The 3-minute ceiling mirrors
-	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent.
+	// seconds-to-minutes timescale, not sub-second. The 3-minute value mirrors
+	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent
+	// (it's a default, not a ceiling—--wait-approval can exceed it uncapped).
 	approvalWaitPollInterval = 5 * time.Second
 	// approvalWaitTimeout is the default for bare --wait; --wait-approval overrides it.
 	approvalWaitTimeout = 3 * time.Minute

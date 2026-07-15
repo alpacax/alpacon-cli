@@ -256,7 +256,7 @@ so it is recorded and scoped accordingly.`,
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval, approvalPollAttempts(waitTimeout, pollInterval))
+		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval, waitTimeout)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
@@ -336,16 +336,6 @@ func resolveWaitTimeout(wait bool, waitApprovalRaw string) (time.Duration, error
 	return d, nil
 }
 
-// approvalPollAttempts converts a wait timeout into a poll attempt count,
-// never returning less than one attempt.
-func approvalPollAttempts(timeout, interval time.Duration) int {
-	attempts := int(timeout / interval)
-	if attempts < 1 {
-		return 1
-	}
-	return attempts
-}
-
 // validateScopeEnum rejects scopes not in validScopePresets and lists the
 // allowed values in the error message. The caller is expected to prefix the
 // error with the relevant flag name (e.g. "Invalid --scope: ...").
@@ -414,11 +404,14 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	return policies
 }
 
-// pollForApproval polls at interval until the session reaches a terminal state.
-// untilActive=false returns on approved or active; untilActive=true returns only on
-// active (continues polling on approved until the server auto-activates).
-func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval time.Duration, maxAttempts int) (*wsapi.WorkSession, error) {
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
+// pollForApproval polls at interval until the session reaches a terminal state or
+// timeout elapses. untilActive=false returns on approved or active; untilActive=true
+// returns only on active (continues polling on approved until the server
+// auto-activates). Deadline-based rather than attempt-count-based so a timeout
+// under one interval (e.g. --wait-approval 15s) still waits the full duration.
+func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
+	deadline := time.Now().Add(timeout)
+	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			return nil, fmt.Errorf("polling failed: %w", err)
@@ -441,16 +434,22 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		case completedWorkSessionStatus:
 			return nil, errors.New("work session was completed unexpectedly")
 		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, fmt.Errorf("timed out waiting for approval after %s", timeout)
+		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
-		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, maxAttempts)
-		if attempt < maxAttempts {
+		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
+		if remaining < interval {
+			time.Sleep(remaining)
+		} else {
 			time.Sleep(interval)
 		}
 	}
-	return nil, fmt.Errorf("timed out waiting for approval after %d attempts", maxAttempts)
 }
 
 func init() {
