@@ -16,16 +16,15 @@ import (
 )
 
 const (
-	// approvalWaitPollInterval and approvalWaitTimeout bound the --wait poll for a
-	// SUDO_APPROVAL_REQUIRED denial. The interval is slower than the MFA step-up
-	// poll (api/mfa/mfa.go) because each tick re-submits and re-runs the remote
-	// command, and a human approving out of band in the console works on a
-	// seconds-to-minutes timescale, not sub-second. The 3-minute value mirrors
-	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent
-	// (it's a default, not a ceiling—--wait-approval can exceed it uncapped).
-	approvalWaitPollInterval = 5 * time.Second
-	// approvalWaitTimeout is the default for bare --wait; --wait-approval overrides it.
-	approvalWaitTimeout = 3 * time.Minute
+	// approvalWaitPollInterval and defaultApprovalWaitTimeout bound the --wait poll
+	// for a SUDO_APPROVAL_REQUIRED denial. The interval is slower than the MFA
+	// step-up poll (api/mfa/mfa.go) because each tick re-submits and re-runs the
+	// remote command, and a human approving out of band in the console works on a
+	// seconds-to-minutes timescale, not sub-second. The timeout matches
+	// work-session create's so both approval waits behave alike; it's a default,
+	// not a ceiling—--wait-approval can exceed it uncapped.
+	approvalWaitPollInterval   = 5 * time.Second
+	defaultApprovalWaitTimeout = 5 * time.Minute
 )
 
 // sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
@@ -196,6 +195,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
 
+	deadline := time.Now().Add(waitTimeout)
 	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(approvalWaitPollInterval)
@@ -215,7 +215,13 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			// mid-wait; honor --wait by resuming the held job instead of exiting.
 			if errors.As(err, &pendingErr) {
 				spinner.Stop()
-				return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, waitTimeout)
+				// Resume inside the original window: this loop already consumed part
+				// of it, so re-arming with the full timeout would double the wait.
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					return err
+				}
+				return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, remaining)
 			}
 			if isApprovalDenial(err) {
 				// Still pending—keep waiting.

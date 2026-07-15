@@ -594,3 +594,15 @@ func SplitAndTrim(s, sep string) []string {
 	}
 	return result
 }
+
+// ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.
+func ParsePositiveDuration(flagName, raw string) (time.Duration, error) {
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s value %q: %w", flagName, raw, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("invalid %s value %q: must be a positive duration", flagName, raw)
+	}
+	return d, nil
+}

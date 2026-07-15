@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -123,12 +122,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
-			d, err := time.ParseDuration(raw)
+			d, err := utils.ParsePositiveDuration("--wait-approval", raw)
 			if err != nil {
-				return RemoteExecArgs{Err: fmt.Sprintf("invalid --wait-approval value %q: %v", raw, err)}
-			}
-			if d <= 0 {
-				return RemoteExecArgs{Err: "--wait-approval must be a positive duration (e.g. 10m)"}
+				return RemoteExecArgs{Err: err.Error()}
 			}
 			waitApproval = d
 		case strings.HasPrefix(arg, "-"):
@@ -198,14 +194,13 @@ func ParseEnvArg(arg string, env map[string]string) string {
 	return ""
 }
 
-// WaitTimeout returns the effective approval-wait timeout: --wait-approval
-// wins, bare --wait falls back to the default, otherwise 0 (no wait).
+// WaitTimeout returns the effective approval-wait timeout, or 0 when not waiting.
 func (a RemoteExecArgs) WaitTimeout() time.Duration {
 	if a.WaitApproval > 0 {
 		return a.WaitApproval
 	}
 	if a.Wait {
-		return approvalWaitTimeout
+		return defaultApprovalWaitTimeout
 	}
 	return 0
 }

@@ -54,9 +54,9 @@ Flags:
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
   --wait                        When a sudo command needs human approval, block and
                                 re-attempt until a reviewer approves it in the Alpacon
-                                console (web), or the wait times out (default 3m).
-  --wait-approval DURATION      Like --wait with a custom wait timeout (e.g. 30m).
-                                Implies --wait.
+                                console (web), or the wait times out (default 5m).
+  --wait-approval DURATION      Like --wait with a custom wait timeout (e.g. 30m;
+                                default 5m). Implies --wait.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.

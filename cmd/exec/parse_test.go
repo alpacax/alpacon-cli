@@ -480,12 +480,12 @@ func TestParseRemoteExecArgs(t *testing.T) {
 		{
 			name:     "wait-approval zero duration",
 			args:     []string{"--wait-approval", "0s", "server", "ls"},
-			expected: RemoteExecArgs{Err: "--wait-approval must be a positive duration (e.g. 10m)"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "0s": must be a positive duration`},
 		},
 		{
 			name:     "wait-approval negative duration",
 			args:     []string{"--wait-approval=-5m", "server", "ls"},
-			expected: RemoteExecArgs{Err: "--wait-approval must be a positive duration (e.g. 10m)"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "-5m": must be a positive duration`},
 		},
 		{
 			name: "wait-approval with detach is an error",
@@ -513,7 +513,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 
 func TestWaitTimeout(t *testing.T) {
 	assert.Equal(t, time.Duration(0), RemoteExecArgs{}.WaitTimeout())
-	assert.Equal(t, approvalWaitTimeout, RemoteExecArgs{Wait: true}.WaitTimeout())
+	assert.Equal(t, 5*time.Minute, RemoteExecArgs{Wait: true}.WaitTimeout())
 	assert.Equal(t, 10*time.Minute, RemoteExecArgs{WaitApproval: 10 * time.Minute}.WaitTimeout())
 	// --wait-approval wins over bare --wait
 	assert.Equal(t, 10*time.Minute, RemoteExecArgs{Wait: true, WaitApproval: 10 * time.Minute}.WaitTimeout())
