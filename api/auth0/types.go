@@ -25,6 +25,11 @@ type Auth0Config struct {
 	ClientID string `json:"client_id,omitempty"`
 	Domain   string `json:"domain,omitempty"`
 	Audience string `json:"audience,omitempty"`
+	// SchemaName is the frozen workspace identity, which equals the Auth0
+	// organization name. Prefer it over the workspace URL label when building
+	// the org scope—the URL label can change while this never does. Empty on
+	// older servers that do not return the field.
+	SchemaName string `json:"schema_name,omitempty"`
 }
 
 type AuthEnvResponse struct {
