@@ -204,8 +204,10 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		select {
 		case <-timer.C:
 			spinner.Stop()
-			// Return the last pending denial so the caller emits the standard
-			// pending-approval signal and exit code.
+			// The caller's generic pending-approval message says "use --wait", which
+			// misleads here since the user already waited; name the timeout and the
+			// flag that extends it before returning the denial.
+			utils.CliWarning("Approval wait timed out after %s; the command is still pending. Pass --wait-approval <duration> to wait longer.", waitTimeout)
 			return err
 		case <-ticker.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if

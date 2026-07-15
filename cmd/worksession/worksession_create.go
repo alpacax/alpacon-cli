@@ -228,7 +228,7 @@ so it is recorded and scoped accordingly.`,
 			}
 		case useDecisionErrorNeedsWait:
 			if !shouldWait {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
 			}
 		}
 

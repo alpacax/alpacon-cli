@@ -471,6 +471,11 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			expected: RemoteExecArgs{Err: "flag needs an argument: --wait-approval"},
 		},
 		{
+			name:     "wait-approval explicit empty value",
+			args:     []string{"--wait-approval=", "server", "ls"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "": time: invalid duration ""`},
+		},
+		{
 			name: "wait-approval invalid duration",
 			args: []string{"--wait-approval", "10minutes", "server", "ls"},
 			expected: RemoteExecArgs{
