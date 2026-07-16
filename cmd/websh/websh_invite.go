@@ -12,9 +12,9 @@ var webshInviteCmd = &cobra.Command{
 	Short: "Invite users to a websh session by email",
 	Long: `Invite one or more users to join an existing websh session.
 An invitation email will be sent to each specified address.`,
-	Example: `  alpacon websh invite abc123 --email user@example.com
-  alpacon websh invite abc123 --email user1@example.com --email user2@example.com
-  alpacon websh invite abc123 --email user@example.com --read-only`,
+	Example: `  alpacon websh invite 550e8400-e29b-41d4-a716-446655440000 --email user@example.com
+  alpacon websh invite 550e8400-e29b-41d4-a716-446655440000 --email user1@example.com --email user2@example.com
+  alpacon websh invite 550e8400-e29b-41d4-a716-446655440000 --email user@example.com --read-only`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		sessionID := args[0]

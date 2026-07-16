@@ -16,9 +16,9 @@ var workSessionRecordingCmd = &cobra.Command{
 	Aliases: []string{"rec"},
 	Short:   "Show a Websh session recording",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session recording ses-abc123
-  alpacon work-session recording ses-abc123 --index 2
-  alpacon work-session rec ses-abc123`,
+	Example: `  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session recording 550e8400-e29b-41d4-a716-446655440000 --index 2
+  alpacon work-session rec 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

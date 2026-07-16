@@ -11,8 +11,8 @@ var webshDescribeCmd = &cobra.Command{
 	Use:     "describe SESSION_ID",
 	Aliases: []string{"desc"},
 	Short:   "Display detailed information about a websh session",
-	Example: `  alpacon websh describe abc123
-  alpacon websh desc abc123`,
+	Example: `  alpacon websh describe 550e8400-e29b-41d4-a716-446655440000
+  alpacon websh desc 550e8400-e29b-41d4-a716-446655440000`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		sessionID := args[0]

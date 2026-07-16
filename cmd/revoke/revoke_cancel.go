@@ -15,8 +15,8 @@ var revokeCancelCmd = &cobra.Command{
 	This action is irreversible.
 	`,
 	Example: `
-	alpacon revoke cancel REQUEST_ID
-	alpacon revoke cancel REQUEST_ID -y
+	alpacon revoke cancel 550e8400-e29b-41d4-a716-446655440000
+	alpacon revoke cancel 550e8400-e29b-41d4-a716-446655440000 -y
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

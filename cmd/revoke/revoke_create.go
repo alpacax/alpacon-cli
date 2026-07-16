@@ -23,7 +23,7 @@ var revokeCreateCmd = &cobra.Command{
 	`,
 	Example: `
 	alpacon revoke create
-	alpacon revoke create --certificate=CERT_ID --reason=1 --requested-reason="Key was compromised"
+	alpacon revoke create --certificate=550e8400-e29b-41d4-a716-446655440000 --reason=1 --requested-reason="Key was compromised"
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		certificate, _ := cmd.Flags().GetString("certificate")

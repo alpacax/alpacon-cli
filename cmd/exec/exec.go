@@ -82,7 +82,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # Submit a command asynchronously and retrieve the result later
   alpacon exec --detach web-server -- apt-get update
-  alpacon exec logs <JOB_ID>`,
+  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.

@@ -17,9 +17,9 @@ var webshRecordsCmd = &cobra.Command{
 filtering by command text. Available on paid plans only.
 
 Use --query to search records by command text (fuzzy match).`,
-	Example: `  alpacon websh records abc123
-  alpacon websh records abc123 --query docker
-  alpacon websh rec abc123 -q "sudo reboot" -n 50`,
+	Example: `  alpacon websh records 550e8400-e29b-41d4-a716-446655440000
+  alpacon websh records 550e8400-e29b-41d4-a716-446655440000 --query docker
+  alpacon websh rec 550e8400-e29b-41d4-a716-446655440000 -q "sudo reboot" -n 50`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		sessionID := args[0]

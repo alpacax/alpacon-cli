@@ -16,8 +16,8 @@ var workSessionExtendCmd = &cobra.Command{
 	Use:   "extend SESSION_ID",
 	Short: "Extend the expiry of an approved or active work session",
 	Args:  cobra.ExactArgs(1),
-	Example: `  alpacon work-session extend ses-abc123 --expires-in 2h
-  alpacon work-session extend ses-abc123 --expires-at 2026-05-09T10:00:00Z`,
+	Example: `  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-in 2h
+  alpacon work-session extend 550e8400-e29b-41d4-a716-446655440000 --expires-at 2026-05-09T10:00:00Z`,
 	Run: func(cmd *cobra.Command, args []string) {
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
 		if err != nil {

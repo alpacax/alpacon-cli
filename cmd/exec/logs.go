@@ -18,13 +18,13 @@ var logsCmd = &cobra.Command{
 
 If the command is still running, prints the current status and exits.
 Run the command again later to check for completion.`,
-	Example: `  alpacon exec logs a1b2c3d4-5678-abcd-ef01-234567890abc`,
+	Example: `  alpacon exec logs 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		jobID := args[0]
 
 		if !utils.IsUUID(jobID) {
-			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. 550e8400-e29b-41d4-a716-446655440000)", jobID)
 			return
 		}
 

@@ -28,7 +28,7 @@ var workSessionUseCmd = &cobra.Command{
 	Long: `Set the active work-session for the current workspace by passing its SESSION_ID.
 Subsequent exec/websh/cp/tunnel commands attach to this session unless overridden with --work-session.
 Pass --unset (with no SESSION_ID) to clear the active work-session.`,
-	Example: `  alpacon work-session use ses-abc123
+	Example: `  alpacon work-session use 550e8400-e29b-41d4-a716-446655440000
   alpacon work-session use --unset`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if unsetActiveWorkSession {

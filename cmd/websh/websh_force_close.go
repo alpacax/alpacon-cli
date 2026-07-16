@@ -10,7 +10,7 @@ import (
 var webshForceCloseCmd = &cobra.Command{
 	Use:     "force-close SESSION_ID",
 	Short:   "Force close a websh session (admin only)",
-	Example: `  alpacon websh force-close abc123`,
+	Example: `  alpacon websh force-close 550e8400-e29b-41d4-a716-446655440000`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		sessionID := args[0]

@@ -12,7 +12,7 @@ var workSessionRevokeCmd = &cobra.Command{
 	Short:   "Force-terminate an active or approved work session",
 	Long:    "Force-terminate an active or approved work session. Superuser only.",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session revoke ses-abc123`,
+	Example: `  alpacon work-session revoke 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

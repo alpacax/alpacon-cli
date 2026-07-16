@@ -67,7 +67,7 @@ var TunnelCmd = &cobra.Command{
 	alpacon tunnel my-server -l 9000 -r 8082 -u admin -g developers
 
 	# Attach the tunnel to a work-session
-	alpacon tunnel my-server -l 9000 -r 8082 --work-session 11111111-2222-3333-4444-555555555555
+	alpacon tunnel my-server -l 9000 -r 8082 --work-session 550e8400-e29b-41d4-a716-446655440000
 
 	# Run psql with attached tunnel session
 	alpacon tunnel prod-db -l 5432 -r 5432 -- psql -h 127.0.0.1 -p 5432 -U app appdb

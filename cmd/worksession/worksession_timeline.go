@@ -30,9 +30,9 @@ var workSessionTimelineCmd = &cobra.Command{
 	Aliases: []string{"tl"},
 	Short:   "Show the activity timeline for a work session",
 	Args:    cobra.ExactArgs(1),
-	Example: `  alpacon work-session timeline ses-abc123
-  alpacon work-session timeline ses-abc123 --no-records
-  alpacon work-session tl ses-abc123 --output json`,
+	Example: `  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000
+  alpacon work-session timeline 550e8400-e29b-41d4-a716-446655440000 --no-records
+  alpacon work-session tl 550e8400-e29b-41d4-a716-446655440000 --output json`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

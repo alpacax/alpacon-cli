@@ -46,11 +46,11 @@ If SESSION_ID is omitted, the effective work session is resolved from the
 ALPACON_WORK_SESSION environment variable, then the workspace's active session
 (set via 'alpacon work-session use').`,
 	Args: cobra.MaximumNArgs(1),
-	Example: `  alpacon work-session update ses-abc123 --title "deploy v2" --description "rollout"
-  alpacon work-session update ses-abc123 --server web-01,db-01
-  alpacon work-session update ses-abc123 --scope command,websh
-  alpacon work-session update ses-abc123 --starts-at 2027-01-15T10:00:00Z --expires-at 2027-01-15T12:00:00Z
-  alpacon work-session update ses-abc123 --sudo "systemctl restart nginx"
+	Example: `  alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --title "deploy v2" --description "rollout"
+  alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --server web-01,db-01
+  alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --scope command,websh
+  alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --starts-at 2027-01-15T10:00:00Z --expires-at 2027-01-15T12:00:00Z
+  alpacon work-session update 550e8400-e29b-41d4-a716-446655440000 --sudo "systemctl restart nginx"
   alpacon work-session update --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		var sessionID string

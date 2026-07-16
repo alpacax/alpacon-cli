@@ -157,11 +157,11 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # Session management
   alpacon websh ls                          # List active sessions
-  alpacon websh describe SESSION_ID         # Show session details
-  alpacon websh watch SESSION_ID            # Watch a session (read-only, staff/superuser only)
-  alpacon websh invite SESSION_ID --email user@example.com
-  alpacon websh close SESSION_ID            # Close a session
-  alpacon websh force-close SESSION_ID      # Force close (admin only)
+  alpacon websh describe 550e8400-e29b-41d4-a716-446655440000         # Show session details
+  alpacon websh watch 550e8400-e29b-41d4-a716-446655440000            # Watch a session (read-only, staff/superuser only)
+  alpacon websh invite 550e8400-e29b-41d4-a716-446655440000 --email user@example.com
+  alpacon websh close 550e8400-e29b-41d4-a716-446655440000            # Close a session
+  alpacon websh force-close 550e8400-e29b-41d4-a716-446655440000      # Force close (admin only)
 
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.

@@ -21,8 +21,8 @@ var approvalDescribeCmd = &cobra.Command{
 Use --output json to see the full raw response including nested
 work session details that are omitted from the table view.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon approval describe apr-abc123
-  alpacon approval desc apr-abc123`,
+	Example: `  alpacon approval describe 550e8400-e29b-41d4-a716-446655440000
+  alpacon approval desc 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {

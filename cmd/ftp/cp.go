@@ -52,7 +52,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon cp --no-overwrite /local/file.txt my-server:/remote/path/
 
   # Attach the transfer to a work-session
-  alpacon cp /local/file.txt my-server:/remote/path/ --work-session 11111111-2222-3333-4444-555555555555`,
+  alpacon cp /local/file.txt my-server:/remote/path/ --work-session 550e8400-e29b-41d4-a716-446655440000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		username, _ := cmd.Flags().GetString("username")
 		groupname, _ := cmd.Flags().GetString("groupname")
