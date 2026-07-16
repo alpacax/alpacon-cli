@@ -396,11 +396,21 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 			lastSeq+1, err)
 		return lastSeq
 	}
+	var missing []int
 	for _, c := range final {
-		if c.Seq > lastSeq {
-			_, _ = fmt.Fprint(out, c.Content)
-			lastSeq = c.Seq
+		if c.Seq <= lastSeq {
+			continue
 		}
+		// Any seqs between lastSeq and this chunk never persisted: deliver what
+		// is here but report the holes instead of silently jumping past them.
+		for s := lastSeq + 1; s < c.Seq; s++ {
+			missing = append(missing, s)
+		}
+		_, _ = fmt.Fprint(out, c.Content)
+		lastSeq = c.Seq
+	}
+	if len(missing) > 0 {
+		utils.CliWarning("chunk seq(s) %v never arrived; output may be incomplete", missing)
 	}
 	return lastSeq
 }

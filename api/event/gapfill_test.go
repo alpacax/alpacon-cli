@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -13,7 +15,25 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// captureStderr runs fn with os.Stderr redirected to a pipe and returns what
+// was written, so tests can assert on utils.CliWarning output.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	_ = w.Close()
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	_ = r.Close()
+	return buf.String()
+}
 
 // holeServer serves /chunks/?seq__gte=N returning every seq >= N except those
 // in `hole`. fetches counts the chunk requests. Used to simulate a seq that is
@@ -145,4 +165,38 @@ func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 
 	assert.Equal(t, 0, fetches, "no skipped seqs means no recovery fetch")
 	assert.Empty(t, out.String())
+}
+
+// A permanent gap that was never given up on mid-stream (command finished
+// before the backoff limit) must be surfaced by the terminal drain, not
+// silently jumped over.
+func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
+	var fetches int
+	ac := holeServer(t, 8, map[int]bool{5: true}, &fetches)
+
+	out := &bytes.Buffer{}
+	var lastSeq int
+	stderr := captureStderr(t, func() {
+		lastSeq = drainRemainingChunks(ac, "cmd", 4, out)
+	})
+
+	assert.Equal(t, 8, lastSeq)
+	assert.Equal(t, "c6\nc7\nc8\n", out.String(), "seq 5 missing, 6-8 still delivered")
+	assert.Contains(t, stderr, "chunk seq(s) [5] never arrived")
+}
+
+// A contiguous trailing drain must not emit a spurious gap warning.
+func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
+	var fetches int
+	ac := holeServer(t, 6, map[int]bool{}, &fetches)
+
+	out := &bytes.Buffer{}
+	var lastSeq int
+	stderr := captureStderr(t, func() {
+		lastSeq = drainRemainingChunks(ac, "cmd", 2, out)
+	})
+
+	assert.Equal(t, 6, lastSeq)
+	assert.Equal(t, "c3\nc4\nc5\nc6\n", out.String())
+	assert.NotContains(t, stderr, "never arrived")
 }
