@@ -119,3 +119,30 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	assert.Empty(t, g.skipped)
 	assert.Equal(t, "c1\nc2\nc3\n", out.String())
 }
+
+// Skipped seqs that got persisted late are recovered and printed at command
+// end (out of order); no output is written for seqs still missing.
+func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
+	var fetches int
+	// seq 1 now exists (arrived late); seq 4 is still a permanent hole.
+	ac := holeServer(t, "cmd", 10, map[int]bool{4: true}, &fetches)
+
+	g := &gapFillState{skipped: []int{1, 4}}
+	out := &bytes.Buffer{}
+	recoverSkippedChunks(ac, "cmd", g, out)
+
+	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
+}
+
+// No skipped seqs -> no fetch, no output.
+func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
+	var fetches int
+	ac := holeServer(t, "cmd", 10, map[int]bool{}, &fetches)
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	recoverSkippedChunks(ac, "cmd", g, out)
+
+	assert.Equal(t, 0, fetches, "no skipped seqs means no recovery fetch")
+	assert.Empty(t, out.String())
+}

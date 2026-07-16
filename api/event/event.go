@@ -294,6 +294,7 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
 		case details := <-pollResult:
 			lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
+			recoverSkippedChunks(ac, cmdID, gap, out)
 			listener.Stop()
 			// If nothing was ever streamed (no WS chunks, none persisted), fall back
 			// to the buffered Result so output is never silently dropped. On a normal
@@ -402,6 +403,39 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		}
 	}
 	return lastSeq
+}
+
+// recoverSkippedChunks makes a final attempt to fetch seqs that were skipped
+// mid-stream (giveUpGap). Late-persisted content is printed out of order; seqs
+// still absent are reported as permanently lost. g.skipped is ascending.
+func recoverSkippedChunks(ac *client.AlpaconClient, cmdID string, g *gapFillState, out io.Writer) {
+	if len(g.skipped) == 0 {
+		return
+	}
+	final, err := GetCommandChunks(ac, cmdID, g.skipped[0])
+	if err != nil {
+		utils.CliWarning("chunk seq(s) %v never arrived: %v; output may be incomplete", g.skipped, err)
+		return
+	}
+	bySeq := make(map[int]string, len(final))
+	for _, c := range final {
+		bySeq[c.Seq] = c.Content
+	}
+	var recovered, lost []int
+	for _, s := range g.skipped {
+		if content, ok := bySeq[s]; ok {
+			_, _ = fmt.Fprint(out, content)
+			recovered = append(recovered, s)
+		} else {
+			lost = append(lost, s)
+		}
+	}
+	if len(recovered) > 0 {
+		utils.CliWarning("late chunk seq(s) %v recovered at command end (printed out of order)", recovered)
+	}
+	if len(lost) > 0 {
+		utils.CliWarning("chunk seq(s) %v never arrived; output may be incomplete", lost)
+	}
 }
 
 // errorFromDetails maps a terminal command status to an error so unrecognized
