@@ -120,7 +120,7 @@ Use: "exec [USER@]SERVER COMMAND... [flags]"
 - `Short`: Concise, starts with a verb, under 50 chars
 - `Long`: Document SSH-like `user@host` syntax where supported
 - `Example`: Use realistic values (e.g., `my-server`, not `[SERVER_NAME]`)
-- `Example` IDs: for any server-side UUID (session, certificate, note, token, job, etc.), always use the single placeholder `550e8400-e29b-41d4-a716-446655440000`. It keeps the real UUID shape while being obviously a stand-in, and never invent prefixed forms like `ses-`/`apr-`—those IDs are plain UUIDs on the server. Name-like values (server, user) stay realistic per the rule above
+- `Example` IDs: for any server-side UUID (session, certificate, note, token, job, and a user referenced by UUID such as `work-session ls --user`), always use the single placeholder `550e8400-e29b-41d4-a716-446655440000`. It keeps the real UUID shape while being obviously a stand-in, and never invent prefixed forms like `ses-`/`apr-`—those IDs are plain UUIDs on the server. Name-like values stay realistic per the rule above: a server name (`my-server`), or a username in `user@host` syntax (`root@my-server`)
 
 ### Go declaration order
 
