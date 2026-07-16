@@ -18,10 +18,9 @@ import (
 )
 
 const (
-	pollInterval               = 10 * time.Second
-	defaultApprovalWaitTimeout = 5 * time.Minute // preserves the old 30 × 10s window
-	waitMsgApproval            = "Waiting for approval..."
-	waitMsgActivation          = "Waiting for activation..."
+	pollInterval      = 10 * time.Second
+	waitMsgApproval   = "Waiting for approval..."
+	waitMsgActivation = "Waiting for activation..."
 )
 
 type useDecision int
@@ -315,11 +314,11 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 
 // resolveWaitTimeout uses waitApprovalSet to separate an unset --wait-approval
 // from an explicitly empty value, which must be rejected rather than silently ignored.
-func resolveWaitTimeout(wait bool, waitApprovalRaw string, waitApprovalSet bool) (time.Duration, error) {
+func resolveWaitTimeout(waitFlag bool, waitApprovalRaw string, waitApprovalSet bool) (time.Duration, error) {
 	waitApprovalRaw = strings.TrimSpace(waitApprovalRaw)
 	if waitApprovalRaw == "" && !waitApprovalSet {
-		if wait {
-			return defaultApprovalWaitTimeout, nil
+		if waitFlag {
+			return utils.DefaultApprovalWaitTimeout, nil
 		}
 		return 0, nil
 	}
@@ -434,7 +433,12 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			waitMsg = waitMsgActivation
 		}
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
-		time.Sleep(min(remaining, interval))
+		// remaining > 0 here; fall back to it when interval is non-positive to avoid a busy-loop.
+		step := min(remaining, interval)
+		if step <= 0 {
+			step = remaining
+		}
+		time.Sleep(step)
 	}
 }
 

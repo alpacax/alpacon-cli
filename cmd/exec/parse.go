@@ -200,7 +200,7 @@ func (a RemoteExecArgs) WaitTimeout() time.Duration {
 		return a.WaitApproval
 	}
 	if a.Wait {
-		return defaultApprovalWaitTimeout
+		return utils.DefaultApprovalWaitTimeout
 	}
 	return 0
 }

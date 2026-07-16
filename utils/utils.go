@@ -21,6 +21,11 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	// DefaultApprovalWaitTimeout is the shared --wait default so exec and work-session create match; not a ceiling (--wait-approval exceeds it), preserving the old 30 × 10s window.
+	DefaultApprovalWaitTimeout = 5 * time.Minute
+)
+
 var (
 	uuidRegex = regexp.MustCompile(
 		`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$` +
