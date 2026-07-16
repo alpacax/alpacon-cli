@@ -370,7 +370,8 @@ func resetCreateCommandState(t *testing.T) {
 	expiresIn = ""
 	expiresAt = ""
 	requesterType = "user"
-	waitApproval = false
+	wait = false
+	waitApproval = ""
 	useAfterCreate = false
 	createSudo = nil
 	createSudoReason = ""
@@ -381,7 +382,8 @@ func resetCreateCommandState(t *testing.T) {
 		expiresIn = ""
 		expiresAt = ""
 		requesterType = "user"
-		waitApproval = false
+		wait = false
+		waitApproval = ""
 		useAfterCreate = false
 		createSudo = nil
 		createSudoReason = ""

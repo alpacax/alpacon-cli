@@ -15,17 +15,6 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-const (
-	// approvalWaitPollInterval and approvalWaitTimeout bound the --wait poll for a
-	// SUDO_APPROVAL_REQUIRED denial. The interval is slower than the MFA step-up
-	// poll (api/mfa/mfa.go) because each tick re-submits and re-runs the remote
-	// command, and a human approving out of band in the console works on a
-	// seconds-to-minutes timescale, not sub-second. The 3-minute ceiling mirrors
-	// maxRetryDuration in utils/error_handler.go so the two waits feel consistent.
-	approvalWaitPollInterval = 5 * time.Second
-	approvalWaitTimeout      = 3 * time.Minute
-)
-
 // sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
 // alpacon_approval.c via g_plugin_printf ("Alpacon denied this sudo command
 // (CODE)."). The other "Permission denied (CODE)" form is assigned to *errstr,
@@ -33,6 +22,15 @@ const (
 // matched. Anchoring on this full prefix (not a bare "(CODE)") stops a command
 // whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command"
+
+// approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
+var approvalWaitPollInterval = 5 * time.Second
+
+// Test seams so a unit test can drive the deadline/resume logic without real network I/O.
+var (
+	runPresenceStepUp     = RunExecWithPresenceStepUp
+	streamApprovedCommand = event.StreamApprovedCommand
+)
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
@@ -154,12 +152,13 @@ func isApprovalDenial(err error) bool {
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
-// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and wait is set,
-// blocks and re-attempts the command on a fixed interval until a reviewer
-// approves it out of band (the re-run then succeeds or hits a different,
-// terminal denial), or the bounded timeout elapses. When wait is false, or the
-// denial is anything other than SUDO_APPROVAL_REQUIRED, it returns the first
-// err unchanged so the caller's pending/denial handling runs.
+// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and waitTimeout is
+// positive, blocks and re-attempts the command on a fixed interval until a
+// reviewer approves it out of band (the re-run then succeeds or hits a
+// different, terminal denial), or the bounded timeout elapses. When
+// waitTimeout is zero or negative, or the denial is anything other than
+// SUDO_APPROVAL_REQUIRED, it returns the first err unchanged so the caller's
+// pending/denial handling runs.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
@@ -169,31 +168,32 @@ func isApprovalDenial(err error) bool {
 // until a reviewer approves, at which point the command runs exactly once. The
 // poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
 // fixed-interval ticker, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, wait bool, out io.Writer) error {
-	err := RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, waitTimeout time.Duration, out io.Writer) error {
+	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
 	// re-submitting; without --wait, surface it for HandlePendingApproval.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
-		if !wait {
+		if waitTimeout <= 0 {
 			return err
 		}
 		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console (output streams once approved)...")
 		spinner.Start()
 		defer spinner.Stop()
-		return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, approvalWaitTimeout)
+		return streamApprovedCommand(ac, pendingErr.CommandID, out, waitTimeout)
 	}
 
-	if !wait || !isApprovalDenial(err) {
+	if waitTimeout <= 0 || !isApprovalDenial(err) {
 		return err
 	}
 
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
 
-	timer := time.NewTimer(approvalWaitTimeout)
+	deadline := time.Now().Add(waitTimeout)
+	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(approvalWaitPollInterval)
 	defer ticker.Stop()
@@ -201,18 +201,24 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		select {
 		case <-timer.C:
 			spinner.Stop()
-			// Return the last pending denial so the caller emits the standard
-			// pending-approval signal and exit code.
+			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
+			utils.CliWarning("Approval wait timed out after %s; the command is still pending.", waitTimeout)
 			return err
 		case <-ticker.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
-			err = RunExecWithPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
 			// The server may switch this request from a denial-code to a status-hold
 			// mid-wait; honor --wait by resuming the held job instead of exiting.
 			if errors.As(err, &pendingErr) {
 				spinner.Stop()
-				return event.StreamApprovedCommand(ac, pendingErr.CommandID, out, approvalWaitTimeout)
+				// Resume inside the original window: this loop already consumed part
+				// of it, so re-arming with the full timeout would double the wait.
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					return err
+				}
+				return streamApprovedCommand(ac, pendingErr.CommandID, out, remaining)
 			}
 			if isApprovalDenial(err) {
 				// Still pending—keep waiting.
@@ -237,7 +243,7 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	if errors.As(err, &pendingErr) {
 		utils.PrintPendingApproval(
 			"Approval required—this command is held for human approval in the Alpacon console (web). "+
-				"It runs automatically once approved; pass --wait to block until then.",
+				"It runs automatically once approved; pass --wait (or --wait-approval DURATION for a longer wait) to block until then.",
 			"", // the command detail carries no approval request id
 			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
 		)
@@ -249,7 +255,7 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	}
 	utils.PrintPendingApproval(
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
-			"Re-run after approval, or use --wait to block until it is approved.",
+			"Re-run after approval, or use --wait (or --wait-approval DURATION for a longer wait) to block until it is approved.",
 		"", // the exec sudo denial line carries no approval request id
 		reRunHint,
 	)

@@ -122,7 +122,7 @@ To send a literal metacharacter, wrap the argument in quotes:
 
 Executing a command (SERVER followed by COMMAND) runs through the same executor
 as 'alpacon exec'—identical output, exit codes, and sudo-approval handling.
-Command execution does not accept exec-only flags such as --detach or --wait.
+Command execution does not accept exec-only flags such as --detach, --wait, or --wait-approval.
 
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.

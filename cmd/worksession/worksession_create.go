@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	pollMaxAttempts   = 30
 	pollInterval      = 10 * time.Second
 	waitMsgApproval   = "Waiting for approval..."
 	waitMsgActivation = "Waiting for activation..."
@@ -42,7 +41,8 @@ var (
 	expiresIn        string
 	expiresAt        string
 	requesterType    string
-	waitApproval     bool
+	wait             bool
+	waitApproval     string
 	useAfterCreate   bool
 	createSudo       []string
 	createSudoReason string
@@ -59,7 +59,7 @@ Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
 Pass --use to set the new session as the workspace's active session, so subsequent
 exec/websh/cp/tunnel commands attach to it without --work-session. When approval is
 required, combine --use with --wait. The session is attached once it reaches the
-active state.
+active state. Use --wait-approval DURATION to wait longer than the default 5 minutes.
 
 If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
 MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI agent
@@ -74,6 +74,7 @@ so it is recorded and scoped accordingly.`,
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait --use
+  alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "deploy" --wait-approval 30m --use
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent
   alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
@@ -117,6 +118,12 @@ so it is recorded and scoped accordingly.`,
 		if requesterType != "user" && requesterType != "agent" {
 			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
+
+		waitTimeout, werr := resolveWaitTimeout(wait, waitApproval, cmd.Flags().Changed("wait-approval"))
+		if werr != nil {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid wait timeout: %s.", werr)
+		}
+		shouldWait := waitTimeout > 0
 
 		// Pre-validate --use to avoid creating an orphan server-side session that we
 		// can't attach to the workspace.
@@ -209,7 +216,7 @@ so it is recorded and scoped accordingly.`,
 			printSessionAdvisories(activeSession)
 			return
 		case useDecisionSkipScheduled:
-			if !waitApproval {
+			if !shouldWait {
 				if utils.OutputFormat == utils.OutputFormatJSON {
 					printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
 					return
@@ -219,12 +226,12 @@ so it is recorded and scoped accordingly.`,
 				return
 			}
 		case useDecisionErrorNeedsWait:
-			if !waitApproval {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+			if !shouldWait {
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
 			}
 		}
 
-		if !waitApproval {
+		if !shouldWait {
 			// A session that lands pending needs a human to approve it out of band
 			// (ADR 0015). Emit the structured pending-approval signal and exit with
 			// ExitCodePendingApproval so a machine consumer (AI agent, CI) can branch
@@ -248,7 +255,7 @@ so it is recorded and scoped accordingly.`,
 		}
 
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
-		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval)
+		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval, waitTimeout)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
@@ -293,12 +300,9 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 		return "", errors.New("one of --expires-in or --expires-at is required")
 	}
 	if expiresIn != "" {
-		d, err := time.ParseDuration(expiresIn)
+		d, err := utils.ParsePositiveDuration("--expires-in", expiresIn)
 		if err != nil {
-			return "", fmt.Errorf("invalid --expires-in value %q: %w", expiresIn, err)
-		}
-		if d <= 0 {
-			return "", fmt.Errorf("invalid --expires-in value %q: must be a positive duration", expiresIn)
+			return "", err
 		}
 		return time.Now().UTC().Add(d).Format(time.RFC3339), nil
 	}
@@ -306,6 +310,19 @@ func parseExpiryFlag(expiresIn, expiresAt string) (string, error) {
 		return "", fmt.Errorf("invalid --expires-at value %q: must be RFC3339 format", expiresAt)
 	}
 	return expiresAt, nil
+}
+
+// resolveWaitTimeout uses waitApprovalSet to separate an unset --wait-approval
+// from an explicitly empty value, which must be rejected rather than silently ignored.
+func resolveWaitTimeout(waitFlag bool, waitApprovalRaw string, waitApprovalSet bool) (time.Duration, error) {
+	waitApprovalRaw = strings.TrimSpace(waitApprovalRaw)
+	if waitApprovalRaw == "" && !waitApprovalSet {
+		if waitFlag {
+			return utils.DefaultApprovalWaitTimeout, nil
+		}
+		return 0, nil
+	}
+	return utils.ParsePositiveDuration("--wait-approval", waitApprovalRaw)
 }
 
 // validateScopeEnum rejects scopes not in validScopePresets and lists the
@@ -376,11 +393,14 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	return policies
 }
 
-// pollForApproval polls at interval until the session reaches a terminal state.
-// untilActive=false returns on approved or active; untilActive=true returns only on
-// active (continues polling on approved until the server auto-activates).
-func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval time.Duration) (*wsapi.WorkSession, error) {
-	for attempt := 1; attempt <= pollMaxAttempts; attempt++ {
+// pollForApproval polls at interval until the session reaches a terminal state or
+// timeout elapses. untilActive=false returns on approved or active; untilActive=true
+// returns only on active (continues polling on approved until the server
+// auto-activates). Deadline-based rather than attempt-count-based so a timeout
+// under one interval (e.g. --wait-approval 15s) still waits the full duration.
+func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
+	deadline := time.Now().Add(timeout)
+	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			return nil, fmt.Errorf("polling failed: %w", err)
@@ -403,16 +423,23 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		case completedWorkSessionStatus:
 			return nil, errors.New("work session was completed unexpectedly")
 		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, fmt.Errorf("timed out waiting for approval after %s", timeout)
+		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
-		utils.CliInfo("%s (attempt %d/%d)", waitMsg, attempt, pollMaxAttempts)
-		if attempt < pollMaxAttempts {
-			time.Sleep(interval)
+		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
+		// remaining > 0 here; fall back to it when interval is non-positive to avoid a busy-loop.
+		step := min(remaining, interval)
+		if step <= 0 {
+			step = remaining
 		}
+		time.Sleep(step)
 	}
-	return nil, fmt.Errorf("timed out waiting for approval after %d attempts", pollMaxAttempts)
 }
 
 func init() {
@@ -422,7 +449,8 @@ func init() {
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
 	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent' (set when an AI agent drives the session)")
-	workSessionCreateCmd.Flags().BoolVar(&waitApproval, "wait", false, "Poll until the session is approved, then exit (does not set as active; combine with --use to attach automatically)")
+	workSessionCreateCmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
+	workSessionCreateCmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed)")
 	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")

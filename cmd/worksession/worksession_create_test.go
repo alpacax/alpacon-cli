@@ -21,9 +21,29 @@ func TestPollForApprovalCancelled(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ses-c", false, 0)
+	_, err := pollForApproval(ac, "ses-c", false, 0, 30*time.Second)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cancelled")
+}
+
+// Guards the attempt-count regression: at interval=10ms the old logic returned
+// after ~20ms (no sleep after the final attempt) instead of the full 30ms.
+func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-p","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	timeout := 30 * time.Millisecond
+	start := time.Now()
+	_, err := pollForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "timed out")
+	assert.GreaterOrEqual(t, elapsed, timeout)
 }
 
 func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
@@ -72,6 +92,41 @@ func TestParseExpiryFlag_NegativeDuration(t *testing.T) {
 	_, err := parseExpiryFlag("-1h", "")
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+}
+
+func TestResolveWaitTimeout(t *testing.T) {
+	tests := []struct {
+		name            string
+		wait            bool
+		waitApprovalRaw string
+		waitApprovalSet bool
+		want            time.Duration
+		wantErr         bool
+	}{
+		{name: "bare --wait uses the default", wait: true, want: 5 * time.Minute},
+		{name: "no wait flags", want: 0},
+		{name: "--wait-approval implies wait", waitApprovalRaw: "30m", waitApprovalSet: true, want: 30 * time.Minute},
+		{name: "--wait-approval wins over bare --wait", wait: true, waitApprovalRaw: "30m", waitApprovalSet: true, want: 30 * time.Minute},
+		{name: "invalid duration", wait: true, waitApprovalRaw: "10minutes", waitApprovalSet: true, wantErr: true},
+		{name: "zero duration", wait: true, waitApprovalRaw: "0s", waitApprovalSet: true, wantErr: true},
+		{name: "negative duration", wait: true, waitApprovalRaw: "-5m", waitApprovalSet: true, wantErr: true},
+		// --wait-approval= must fail like exec's parser, not silently fall back to
+		// bare --wait (or to no wait at all, which would drop the requested wait).
+		{name: "explicit empty value without --wait", waitApprovalSet: true, wantErr: true},
+		{name: "explicit empty value with --wait", wait: true, waitApprovalSet: true, wantErr: true},
+		{name: "explicit blank value with --wait", wait: true, waitApprovalRaw: "   ", waitApprovalSet: true, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, err := resolveWaitTimeout(tt.wait, tt.waitApprovalRaw, tt.waitApprovalSet)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, d)
+		})
+	}
 }
 
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
@@ -197,7 +252,7 @@ func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	createScopes = []string{"command", "websh"}
 	createServers = []string{"prod"}
 	expiresAt = "2026-06-01T12:00:00Z"
-	waitApproval = true
+	wait = true
 
 	_, stderr := captureWorkSessionCommandOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
@@ -270,7 +325,7 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	createScopes = []string{"command", "websh"}
 	createServers = []string{"prod"}
 	expiresAt = "2026-06-01T12:00:00Z"
-	waitApproval = true
+	wait = true
 
 	stdout, _ := captureWorkSessionCommandOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)

@@ -2,6 +2,7 @@ package exec
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -434,6 +435,70 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			args:     []string{"--"},
 			expected: RemoteExecArgs{},
 		},
+
+		// ── --wait-approval flag ────────────────────────────────────
+		{
+			name: "wait-approval with space value",
+			args: []string{"--wait-approval", "10m", "server", "ls"},
+			expected: RemoteExecArgs{
+				WaitApproval: 10 * time.Minute,
+				Server:       "server",
+				Command:      "ls",
+			},
+		},
+		{
+			name: "wait-approval with equals value",
+			args: []string{"--wait-approval=30m", "server", "ls"},
+			expected: RemoteExecArgs{
+				WaitApproval: 30 * time.Minute,
+				Server:       "server",
+				Command:      "ls",
+			},
+		},
+		{
+			name: "wait-approval combined with wait",
+			args: []string{"--wait", "--wait-approval", "10m", "server", "ls"},
+			expected: RemoteExecArgs{
+				Wait:         true,
+				WaitApproval: 10 * time.Minute,
+				Server:       "server",
+				Command:      "ls",
+			},
+		},
+		{
+			name:     "wait-approval missing value",
+			args:     []string{"--wait-approval"},
+			expected: RemoteExecArgs{Err: "flag needs an argument: --wait-approval"},
+		},
+		{
+			name:     "wait-approval explicit empty value",
+			args:     []string{"--wait-approval=", "server", "ls"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "": time: invalid duration ""`},
+		},
+		{
+			name: "wait-approval invalid duration",
+			args: []string{"--wait-approval", "10minutes", "server", "ls"},
+			expected: RemoteExecArgs{
+				Err: `invalid --wait-approval value "10minutes": time: unknown unit "minutes" in duration "10minutes"`,
+			},
+		},
+		{
+			name:     "wait-approval zero duration",
+			args:     []string{"--wait-approval", "0s", "server", "ls"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "0s": must be a positive duration`},
+		},
+		{
+			name:     "wait-approval negative duration",
+			args:     []string{"--wait-approval=-5m", "server", "ls"},
+			expected: RemoteExecArgs{Err: `invalid --wait-approval value "-5m": must be a positive duration`},
+		},
+		{
+			name: "wait-approval with detach is an error",
+			args: []string{"--detach", "--wait-approval", "10m", "server", "ls"},
+			expected: RemoteExecArgs{
+				Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -444,8 +509,19 @@ func TestParseRemoteExecArgs(t *testing.T) {
 			assert.Equal(t, tt.expected.Groupname, result.Groupname, "Groupname")
 			assert.Equal(t, tt.expected.Server, result.Server, "Server")
 			assert.Equal(t, tt.expected.Command, result.Command, "Command")
+			assert.Equal(t, tt.expected.Wait, result.Wait, "Wait")
+			assert.Equal(t, tt.expected.WaitApproval, result.WaitApproval, "WaitApproval")
+			assert.Equal(t, tt.expected.Err, result.Err, "Err")
 		})
 	}
+}
+
+func TestWaitTimeout(t *testing.T) {
+	assert.Equal(t, time.Duration(0), RemoteExecArgs{}.WaitTimeout())
+	assert.Equal(t, 5*time.Minute, RemoteExecArgs{Wait: true}.WaitTimeout())
+	assert.Equal(t, 10*time.Minute, RemoteExecArgs{WaitApproval: 10 * time.Minute}.WaitTimeout())
+	// --wait-approval wins over bare --wait
+	assert.Equal(t, 10*time.Minute, RemoteExecArgs{Wait: true, WaitApproval: 10 * time.Minute}.WaitTimeout())
 }
 
 func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
