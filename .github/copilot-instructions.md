@@ -34,6 +34,7 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - Cobra `Short` descriptions should be concise (under 50 chars) and start with a verb
 - Cobra `Long` descriptions should document SSH-like `user@host` syntax where supported
 - Cobra `Example` blocks should use realistic server names (e.g., `my-server`, not `[SERVER_NAME]`)
+- Cobra `Example` IDs: for any server-side UUID (session, certificate, note, token, job, and a user referenced by UUID such as `work-session ls --user`), use the single placeholder `550e8400-e29b-41d4-a716-446655440000`—never invent prefixed forms like `ses-`/`apr-`, those IDs are plain UUIDs. Name-like values stay realistic: a server name (`my-server`), or a username in `user@host` syntax (`root@my-server`)
 - List commands should project API responses into `*Attributes` structs for `utils.PrintTable()`
 - Comments must be written in English
 
