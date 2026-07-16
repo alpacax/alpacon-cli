@@ -18,7 +18,7 @@ import (
 // holeServer serves /chunks/?seq__gte=N returning every seq >= N except those
 // in `hole`. fetches counts the chunk requests. Used to simulate a seq that is
 // never persisted server-side.
-func holeServer(t *testing.T, cmdID string, maxSeq int, hole map[int]bool, fetches *int) *client.AlpaconClient {
+func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *int) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*fetches++
@@ -55,7 +55,7 @@ func swapGapFillVars(initial time.Duration, factor int, max time.Duration, maxNo
 // not each trigger a REST fetch.
 func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 	var fetches int
-	ac := holeServer(t, "cmd", 20, map[int]bool{1: true}, &fetches)
+	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
 
 	now := time.Unix(0, 0)
 	defer swapGapFillNow(func() time.Time { return now })()
@@ -78,7 +78,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 // advances so live streaming resumes.
 func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	var fetches int
-	ac := holeServer(t, "cmd", 20, map[int]bool{1: true}, &fetches)
+	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
 
 	defer swapGapFillVars(1*time.Millisecond, 2, 2*time.Millisecond, 3)()
 	now := time.Unix(0, 0)
@@ -103,7 +103,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	var fetches int
 	// No hole: the gap-fill fetch immediately returns the missing seq.
-	ac := holeServer(t, "cmd", 20, map[int]bool{}, &fetches)
+	ac := holeServer(t, 20, map[int]bool{}, &fetches)
 
 	now := time.Unix(0, 0)
 	defer swapGapFillNow(func() time.Time { return now })()
@@ -125,7 +125,7 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 	var fetches int
 	// seq 1 now exists (arrived late); seq 4 is still a permanent hole.
-	ac := holeServer(t, "cmd", 10, map[int]bool{4: true}, &fetches)
+	ac := holeServer(t, 10, map[int]bool{4: true}, &fetches)
 
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
@@ -137,7 +137,7 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 // No skipped seqs -> no fetch, no output.
 func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 	var fetches int
-	ac := holeServer(t, "cmd", 10, map[int]bool{}, &fetches)
+	ac := holeServer(t, 10, map[int]bool{}, &fetches)
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
