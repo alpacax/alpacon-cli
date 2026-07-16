@@ -3,9 +3,12 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -115,4 +118,61 @@ func TestDetachResultLines(t *testing.T) {
 	line1, line2 := detachResultLines("a1b2c3d4-1234-5678-abcd-000000000000")
 	assert.Equal(t, "Job submitted: a1b2c3d4-1234-5678-abcd-000000000000", line1)
 	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
+}
+
+// stubApprovalWaitSeams swaps the loop's seams/interval (restored on cleanup) and returns a denial carrying the plugin line the loop keys on.
+func stubApprovalWaitSeams(t *testing.T, interval time.Duration) *event.RemoteCommandError {
+	t.Helper()
+	origStepUp, origStream, origInterval := runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval
+	t.Cleanup(func() {
+		runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval = origStepUp, origStream, origInterval
+	})
+	approvalWaitPollInterval = interval
+	return &event.RemoteCommandError{Output: sudoDenialLinePrefix + " (SUDO_APPROVAL_REQUIRED).", ExitCode: 1}
+}
+
+func TestRunExecWithApprovalWait_ResumePassesRemainingNotFull(t *testing.T) {
+	const waitTimeout = 500 * time.Millisecond
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond)
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		// A later tick: server switched to a status-hold, so the loop resumes instead of re-running.
+		return &event.PendingApprovalError{CommandID: "cmd-1"}
+	}
+	var gotTimeout time.Duration
+	streamApprovedCommand = func(_ *client.AlpaconClient, _ string, _ io.Writer, timeout time.Duration) error {
+		gotTimeout = timeout
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", waitTimeout, io.Discard)
+
+	assert.NoError(t, err)
+	// Resume must use the remaining window, not a fresh full timeout—else the wait could reach 2× waitTimeout.
+	assert.Greater(t, gotTimeout, time.Duration(0), "resume should still have time left")
+	assert.Less(t, gotTimeout, waitTimeout, "resume must pass the remaining time, not the full timeout")
+}
+
+func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
+	const waitTimeout = 60 * time.Millisecond
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond)
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		return denial
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	start := time.Now()
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", waitTimeout, io.Discard)
+	elapsed := time.Since(start)
+
+	assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
+	assert.GreaterOrEqual(t, elapsed, waitTimeout, "loop must wait the full anchored window before timing out")
 }
