@@ -80,10 +80,15 @@ func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.W
 		}
 		lastSeq = s
 	}
-	if recorded == len(lost) {
+	switch {
+	case recorded == len(lost):
 		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping for now (will retry at command end)",
 			lost, gapFillMaxNoProgress)
-	} else {
+	case recorded > 0:
+		// Budget filled mid-gap: only the recorded prefix gets the command-end retry.
+		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping (recorded %d of %d for retry at command end, skip budget exhausted); output may be incomplete",
+			lost, gapFillMaxNoProgress, recorded, len(lost))
+	default:
 		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping (skip budget exhausted, no retry); output may be incomplete",
 			lost, gapFillMaxNoProgress)
 	}

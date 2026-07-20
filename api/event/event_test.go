@@ -1345,9 +1345,10 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	})
 
 	assert.Equal(t, maxGapWidth, len(g.skipped), "cumulative skipped capped at maxGapWidth")
-	// The first gap is fully recorded (retryable); once the cap fills, later gaps
-	// must not claim a retry they won't get.
+	// Gap 1 is fully recorded (retryable), gap 2 fills the cap mid-gap (partial
+	// retry), and later gaps must not claim a retry they won't get.
 	assert.Contains(t, stderr, "will retry at command end")
+	assert.Contains(t, stderr, "recorded 1 of 3 for retry at command end")
 	assert.Contains(t, stderr, "skip budget exhausted, no retry")
 }
 
