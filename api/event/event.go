@@ -390,25 +390,29 @@ func (g *gapFillState) giveUpGap(lastSeq int, chunk ChunkEvent, missing []Chunk,
 	}
 	bySeq := chunkContent(missing)
 	var lost []int
+	recorded := 0
 	for s := lastSeq + 1; s < chunk.Seq; s++ {
 		if content, ok := bySeq[s]; ok {
 			_, _ = fmt.Fprint(out, content)
 		} else {
 			lost = append(lost, s)
+			// g.skipped is retried once at command end; bound its total growth so
+			// a hostile server can't accumulate unbounded skips via many
+			// sub-maxGapWidth gaps over a long stream.
+			if len(g.skipped) < maxGapWidth {
+				g.skipped = append(g.skipped, s)
+				recorded++
+			}
 		}
 		lastSeq = s
 	}
-	// g.skipped is retried once at command end; bound its total growth so a
-	// hostile server can't accumulate unbounded skips via many sub-maxGapWidth
-	// gaps over a long stream.
-	for _, s := range lost {
-		if len(g.skipped) >= maxGapWidth {
-			break
-		}
-		g.skipped = append(g.skipped, s)
+	if recorded == len(lost) {
+		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping for now (will retry at command end)",
+			lost, gapFillMaxNoProgress)
+	} else {
+		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping (skip budget exhausted, no retry); output may be incomplete",
+			lost, gapFillMaxNoProgress)
 	}
-	utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping for now (will retry at command end)",
-		lost, gapFillMaxNoProgress)
 	g.noProgress = 0
 	g.lastAttempt = time.Time{}
 	return lastSeq
@@ -455,7 +459,7 @@ func recoverSkippedChunks(ac *client.AlpaconClient, cmdID string, g *gapFillStat
 	}
 	final, err := GetCommandChunks(ac, cmdID, g.skipped[0])
 	if err != nil {
-		utils.CliWarning("chunk seq(s) %v never arrived: %v; output may be incomplete", g.skipped, err)
+		utils.CliWarning("failed to fetch skipped chunks (seq %v): %v; output may be incomplete", g.skipped, err)
 		return
 	}
 	bySeq := chunkContent(final)

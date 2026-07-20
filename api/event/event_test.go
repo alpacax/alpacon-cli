@@ -1279,7 +1279,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	last := 0
-	_ = captureStderr(t, func() {
+	stderr := captureStderr(t, func() {
 		for i := 0; i < 4; i++ {
 			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
 			last = g.giveUpGap(last, ChunkEvent{Seq: next}, nil, out)
@@ -1287,6 +1287,10 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	})
 
 	assert.Equal(t, maxGapWidth, len(g.skipped), "cumulative skipped capped at maxGapWidth")
+	// The first gap is fully recorded (retryable); once the cap fills, later gaps
+	// must not claim a retry they won't get.
+	assert.Contains(t, stderr, "will retry at command end")
+	assert.Contains(t, stderr, "skip budget exhausted, no retry")
 }
 
 // The terminal drain must bound its missing accumulator cumulatively too, while
