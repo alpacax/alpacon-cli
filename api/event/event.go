@@ -82,15 +82,15 @@ func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.W
 	}
 	switch {
 	case recorded == len(lost):
-		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping for now (will retry at command end)",
-			lost, gapFillMaxNoProgress)
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping for now (will retry at command end)",
+			formatSeqs(lost), gapFillMaxNoProgress)
 	case recorded > 0:
 		// Budget filled mid-gap: only the recorded prefix gets the command-end retry.
-		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping (recorded %d of %d for retry at command end, skip budget exhausted); output may be incomplete",
-			lost, gapFillMaxNoProgress, recorded, len(lost))
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping (recorded %d of %d for retry at command end, skip budget exhausted); output may be incomplete",
+			formatSeqs(lost), gapFillMaxNoProgress, recorded, len(lost))
 	default:
-		utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping (skip budget exhausted, no retry); output may be incomplete",
-			lost, gapFillMaxNoProgress)
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping (skip budget exhausted, no retry); output may be incomplete",
+			formatSeqs(lost), gapFillMaxNoProgress)
 	}
 	g.noProgress = 0
 	return lastSeq
@@ -105,7 +105,7 @@ func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, ou
 	}
 	final, err := GetCommandChunks(ac, cmdID, g.skipped[0])
 	if err != nil {
-		utils.CliWarning("failed to fetch skipped chunks (seq %v): %v; output may be incomplete", g.skipped, err)
+		utils.CliWarning("failed to fetch skipped chunks (seq %s): %v; output may be incomplete", formatSeqs(g.skipped), err)
 		return
 	}
 	bySeq := chunkContent(final)
@@ -119,10 +119,10 @@ func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, ou
 		}
 	}
 	if len(recovered) > 0 {
-		utils.CliWarning("late chunk seq(s) %v recovered at command end (printed out of order)", recovered)
+		utils.CliWarning("late chunk seq(s) %s recovered at command end (printed out of order)", formatSeqs(recovered))
 	}
 	if len(lost) > 0 {
-		utils.CliWarning("chunk seq(s) %v never arrived; output may be incomplete", lost)
+		utils.CliWarning("chunk seq(s) %s never arrived; output may be incomplete", formatSeqs(lost))
 	}
 }
 
@@ -450,6 +450,15 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	return lastSeq
 }
 
+// formatSeqs lists seqs verbatim up to a small limit, then collapses to a
+// range summary so a near-maxGapWidth gap can't dump thousands of ints to stderr.
+func formatSeqs(seqs []int) string {
+	if len(seqs) <= 20 {
+		return fmt.Sprintf("%v", seqs)
+	}
+	return fmt.Sprintf("%d..%d (%d seqs)", seqs[0], seqs[len(seqs)-1], len(seqs))
+}
+
 func chunkContent(chunks []Chunk) map[int]string {
 	m := make(map[int]string, len(chunks))
 	for _, c := range chunks {
@@ -489,9 +498,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 	}
 	switch {
 	case len(missing) > 0 && truncated:
-		utils.CliWarning("chunk seq(s) %v and further gaps never arrived; output may be incomplete", missing)
+		utils.CliWarning("chunk seq(s) %s and further gaps never arrived; output may be incomplete", formatSeqs(missing))
 	case len(missing) > 0:
-		utils.CliWarning("chunk seq(s) %v never arrived; output may be incomplete", missing)
+		utils.CliWarning("chunk seq(s) %s never arrived; output may be incomplete", formatSeqs(missing))
 	case truncated:
 		utils.CliWarning("chunk seq(s) never arrived (gap too large to list); output may be incomplete")
 	}
