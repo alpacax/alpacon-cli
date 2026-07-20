@@ -1216,7 +1216,7 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
-	recoverSkippedChunks(ac, "cmd", g, out)
+	g.recoverSkipped(ac, "cmd", out)
 
 	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
 }
@@ -1227,7 +1227,7 @@ func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	recoverSkippedChunks(ac, "cmd", g, out)
+	g.recoverSkipped(ac, "cmd", out)
 
 	assert.Equal(t, 0, fetches, "no skipped seqs means no recovery fetch")
 	assert.Empty(t, out.String())
@@ -1253,20 +1253,22 @@ func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
 
 // A hostile/buggy server can set a chunk seq arbitrarily high; giveUpGap must
 // not enumerate the whole hole (which would spin the CLI and grow g.skipped
-// without bound), but resume past it and report the range.
+// without bound), yet still deliver the chunks it did fetch and resume past it.
 func TestGiveUpGap_BoundsHugeServerSeq(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	huge := ChunkEvent{Seq: 1 << 40} // would hang if enumerated seq-by-seq
+	nextSeq := 1 << 40 // would hang if enumerated seq-by-seq
+	fetched := []Chunk{{Seq: 100, Content: "kept\n"}}
 
 	var last int
 	stderr := captureStderr(t, func() {
-		last = g.giveUpGap(0, huge, nil, out)
+		last = g.giveUpGap(0, nextSeq, fetched, out)
 	})
 
-	assert.Equal(t, huge.Seq-1, last, "resumes just before the live chunk")
+	assert.Equal(t, nextSeq-1, last, "resumes just before the live chunk")
 	assert.Empty(t, g.skipped, "oversized gap is not enumerated into skipped")
-	assert.Contains(t, stderr, "gap too large to enumerate")
+	assert.Equal(t, "kept\n", out.String(), "persisted chunks in the gap are still delivered")
+	assert.Contains(t, stderr, "gap too large to recover")
 }
 
 // Many gaps each under maxGapWidth must not let g.skipped grow without bound
@@ -1282,7 +1284,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		for i := 0; i < 4; i++ {
 			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
-			last = g.giveUpGap(last, ChunkEvent{Seq: next}, nil, out)
+			last = g.giveUpGap(last, next, nil, out)
 		}
 	})
 
