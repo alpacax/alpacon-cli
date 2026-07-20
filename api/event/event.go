@@ -20,6 +20,123 @@ const (
 	getEventURL = "/api/events/commands/"
 )
 
+// maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
+// hostile server can't spin the CLI or grow the skipped/missing slices without bound.
+// var, not const, so tests can lower it.
+var maxGapWidth = 100_000
+
+// Gap-fill re-fetches back off exponentially while a seq stays missing, then give up
+// after gapFillMaxNoProgress no-progress attempts (~34s: 0.3+0.6+1.2+2.4+4.8+5*5).
+// var, not const, so tests can shorten them.
+var (
+	gapFillInitialInterval = 300 * time.Millisecond
+	gapFillBackoffFactor   = 2
+	gapFillMaxInterval     = 5 * time.Second
+	gapFillMaxNoProgress   = 11
+)
+
+// gapFillNow is a seam so tests drive backoff timing deterministically.
+var gapFillNow = time.Now
+
+// gapFillState throttles gap-fill re-fetches while lastSeq is not advancing and
+// records seqs given up on so they can be retried once at command end.
+type gapFillState struct {
+	lastAttempt time.Time
+	noProgress  int
+	skipped     []int
+}
+
+// giveUpGap advances past a never-filled hole, delivering the chunks it has and
+// recording the still-missing seqs for one retry at command end. nextSeq is the
+// live chunk that exposed the hole.
+func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.Writer) int {
+	if nextSeq-lastSeq-1 > maxGapWidth {
+		// Gap too wide to track per-seq (buggy/hostile server): skip recording, but
+		// still deliver fetched chunks (missing is response-bounded, the range isn't).
+		for _, c := range missing {
+			if c.Seq > lastSeq && c.Seq < nextSeq {
+				_, _ = fmt.Fprint(out, c.Content)
+			}
+		}
+		utils.CliWarning("chunk seq(s) %d..%d not arrived after %d attempts; skipping (gap too large to recover); output may be incomplete",
+			lastSeq+1, nextSeq-1, gapFillMaxNoProgress)
+		g.noProgress = 0
+		return nextSeq - 1
+	}
+	bySeq := chunkContent(missing)
+	var lost []int
+	recorded := 0
+	for s := lastSeq + 1; s < nextSeq; s++ {
+		if content, ok := bySeq[s]; ok {
+			_, _ = fmt.Fprint(out, content)
+		} else {
+			lost = append(lost, s)
+			// Bound g.skipped's total growth so a hostile server can't accumulate
+			// unbounded skips via many sub-maxGapWidth gaps over a long stream.
+			if len(g.skipped) < maxGapWidth {
+				g.skipped = append(g.skipped, s)
+				recorded++
+			}
+		}
+		lastSeq = s
+	}
+	switch {
+	case recorded == len(lost):
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping for now (will retry at command end)",
+			formatSeqs(lost), gapFillMaxNoProgress)
+	case recorded > 0:
+		// Budget filled mid-gap: only the recorded prefix gets the command-end retry.
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping (recorded %d of %d for retry at command end, skip budget exhausted); output may be incomplete",
+			formatSeqs(lost), gapFillMaxNoProgress, recorded, len(lost))
+	default:
+		utils.CliWarning("chunk seq(s) %s not arrived after %d attempts; skipping (skip budget exhausted, no retry); output may be incomplete",
+			formatSeqs(lost), gapFillMaxNoProgress)
+	}
+	g.noProgress = 0
+	return lastSeq
+}
+
+// recoverSkipped makes a final fetch for seqs skipped mid-stream (giveUpGap),
+// printing late content out of order and reporting still-absent seqs as lost.
+// g.skipped is ascending, so the fetch starts at its first seq.
+func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, out io.Writer) {
+	if len(g.skipped) == 0 {
+		return
+	}
+	final, err := GetCommandChunks(ac, cmdID, g.skipped[0])
+	if err != nil {
+		utils.CliWarning("failed to fetch skipped chunks (seq %s): %v; output may be incomplete", formatSeqs(g.skipped), err)
+		return
+	}
+	bySeq := chunkContent(final)
+	var recovered, lost []int
+	for _, s := range g.skipped {
+		if content, ok := bySeq[s]; ok {
+			_, _ = fmt.Fprint(out, content)
+			recovered = append(recovered, s)
+		} else {
+			lost = append(lost, s)
+		}
+	}
+	if len(recovered) > 0 {
+		utils.CliWarning("late chunk seq(s) %s recovered at command end (printed out of order)", formatSeqs(recovered))
+	}
+	if len(lost) > 0 {
+		utils.CliWarning("chunk seq(s) %s never arrived; output may be incomplete", formatSeqs(lost))
+	}
+}
+
+func gapFillInterval(noProgress int) time.Duration {
+	d := gapFillInitialInterval
+	for i := 1; i < noProgress; i++ {
+		d *= time.Duration(gapFillBackoffFactor)
+		if d >= gapFillMaxInterval {
+			return gapFillMaxInterval
+		}
+	}
+	return d
+}
+
 func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
 	var err error
@@ -240,6 +357,8 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 		}
 	}
 
+	gap := &gapFillState{}
+
 	pollResult := make(chan EventDetails, 1)
 	pollErr := make(chan error, 1)
 	go func() {
@@ -254,9 +373,10 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	for {
 		select {
 		case chunk := <-listener.Chunks():
-			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out)
+			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
 		case details := <-pollResult:
 			lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
+			gap.recoverSkipped(ac, cmdID, out)
 			listener.Stop()
 			// If nothing was ever streamed (no WS chunks, none persisted), fall back
 			// to the buffered Result so output is never silently dropped. On a normal
@@ -280,16 +400,27 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	}
 }
 
-// applyChunk skips duplicates, fills gaps via REST, and writes content in seq
-// order, returning the new lastSeq. When REST already returned the incoming
-// chunk's seq, the final clause is intentionally skipped to avoid reprinting it.
-func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer) int {
+// applyChunk skips duplicates, fills gaps via REST, and writes content in seq order,
+// returning the new lastSeq. While a gap stays open re-fetches back off; after
+// gapFillMaxNoProgress attempts the missing seq is skipped so streaming resumes.
+func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer, g *gapFillState) int {
 	if chunk.Seq <= lastSeq {
 		return lastSeq
 	}
 	if chunk.Seq > lastSeq+1 {
+		// Throttle: while lastSeq is stuck, re-fetch only after the backoff window.
+		if g.noProgress > 0 && gapFillNow().Sub(g.lastAttempt) < gapFillInterval(g.noProgress) {
+			return lastSeq
+		}
+		before := lastSeq
 		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
+		g.lastAttempt = gapFillNow()
 		if err != nil {
+			// Fetch failed: back off (noProgress++ keeps the throttle window
+			// growing) but don't give up. Skipping requires a successful fetch
+			// confirming the seq is absent, else a transient error would drop
+			// output and warn "not arrived" for seqs that may exist.
+			g.noProgress++
 			utils.CliWarning("failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete",
 				lastSeq+1, chunk.Seq-1, err)
 		} else {
@@ -302,6 +433,14 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 				_, _ = fmt.Fprint(out, c.Content)
 				lastSeq = c.Seq
 			}
+			if lastSeq > before {
+				g.noProgress = 0 // progress: a real gap-fill stays responsive
+			} else {
+				g.noProgress++
+				if g.noProgress >= gapFillMaxNoProgress {
+					lastSeq = g.giveUpGap(lastSeq, chunk.Seq, missing, out)
+				}
+			}
 		}
 	}
 	if chunk.Seq == lastSeq+1 {
@@ -311,6 +450,23 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	return lastSeq
 }
 
+// formatSeqs lists seqs verbatim up to a small limit, then collapses to a
+// range summary so a near-maxGapWidth gap can't dump thousands of ints to stderr.
+func formatSeqs(seqs []int) string {
+	if len(seqs) <= 20 {
+		return fmt.Sprintf("%v", seqs)
+	}
+	return fmt.Sprintf("%d..%d (%d seqs)", seqs[0], seqs[len(seqs)-1], len(seqs))
+}
+
+func chunkContent(chunks []Chunk) map[int]string {
+	m := make(map[int]string, len(chunks))
+	for _, c := range chunks {
+		m[c.Seq] = c.Content
+	}
+	return m
+}
+
 func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
 	final, err := GetCommandChunks(ac, cmdID, lastSeq+1)
 	if err != nil {
@@ -318,11 +474,35 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 			lastSeq+1, err)
 		return lastSeq
 	}
+	var missing []int
+	truncated := false
 	for _, c := range final {
-		if c.Seq > lastSeq {
-			_, _ = fmt.Fprint(out, c.Content)
-			lastSeq = c.Seq
+		if c.Seq <= lastSeq {
+			continue
 		}
+		// Report the hole before this chunk, but bound the total enumerated so a
+		// hostile server can't grow missing without limit; excess is summarized.
+		// Budget is compared by subtraction (len(missing) <= maxGapWidth, so no
+		// overflow) rather than adding to a server-controlled gap.
+		if gap := c.Seq - lastSeq - 1; gap > 0 {
+			if gap > maxGapWidth-len(missing) {
+				truncated = true
+			} else {
+				for s := lastSeq + 1; s < c.Seq; s++ {
+					missing = append(missing, s)
+				}
+			}
+		}
+		_, _ = fmt.Fprint(out, c.Content)
+		lastSeq = c.Seq
+	}
+	switch {
+	case len(missing) > 0 && truncated:
+		utils.CliWarning("chunk seq(s) %s and further gaps never arrived; output may be incomplete", formatSeqs(missing))
+	case len(missing) > 0:
+		utils.CliWarning("chunk seq(s) %s never arrived; output may be incomplete", formatSeqs(missing))
+	case truncated:
+		utils.CliWarning("chunk seq(s) never arrived (gap too large to list); output may be incomplete")
 	}
 	return lastSeq
 }
