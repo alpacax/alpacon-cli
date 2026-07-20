@@ -23,14 +23,14 @@ func GetWebFTPLogList(ac *client.AlpaconClient, pageSize int, serverName string,
 	if serverName != "" {
 		serverID, err := server.GetServerIDByName(ac, serverName)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("--server %q: %w", serverName, err)
 		}
 		params["server"] = serverID
 	}
 	if userName != "" {
 		userID, err := iam.GetUserIDByName(ac, userName)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("--user %q: %w", userName, err)
 		}
 		params["user"] = userID
 	}

@@ -80,6 +80,7 @@ func TestGetWebFTPLogList(t *testing.T) {
 					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
 				default:
 					t.Errorf("unexpected request path: %s", r.URL.Path)
+					http.Error(w, "unexpected request path", http.StatusNotFound)
 				}
 			}))
 			defer ts.Close()
