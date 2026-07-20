@@ -1233,6 +1233,38 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	assert.Equal(t, "c1\nc2\nc3\n", out.String())
 }
 
+// A persistently failing gap-fill fetch must back off but never give up: the
+// hole is only skipped once a successful fetch confirms it's absent, so a
+// transient error can't drop output or warn "not arrived" for seqs that exist.
+func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	defer swapGapFillVars(1*time.Millisecond, 2, 2*time.Millisecond, 3)()
+	now := time.Unix(0, 0)
+	defer swapGapFillNow(func() time.Time { return now })()
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	lastSeq := 0
+	stderr := captureStderr(t, func() {
+		for seq := 2; seq <= 8; seq++ {
+			now = now.Add(10 * time.Millisecond) // advance past the window each time
+			lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+		}
+	})
+
+	assert.Empty(t, g.skipped, "fetch errors never record a skip")
+	assert.Equal(t, 0, lastSeq, "lastSeq stays behind the unfetchable hole")
+	assert.Greater(t, g.noProgress, gapFillMaxNoProgress, "errors still back off past the give-up threshold")
+	assert.Empty(t, out.String(), "no chunk delivered while the fetch keeps failing")
+	assert.Contains(t, stderr, "failed to fetch missing chunks")
+	assert.NotContains(t, stderr, "not arrived after", "fetch errors must not emit the give-up warning")
+}
+
 // Skipped seqs that got persisted late are recovered and printed at command
 // end (out of order); no output is written for seqs still missing.
 func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {

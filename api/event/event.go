@@ -411,6 +411,11 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
 		g.lastAttempt = gapFillNow()
 		if err != nil {
+			// Fetch failed: back off (noProgress++ keeps the throttle window
+			// growing) but don't give up. Skipping requires a successful fetch
+			// confirming the seq is absent, else a transient error would drop
+			// output and warn "not arrived" for seqs that may exist.
+			g.noProgress++
 			utils.CliWarning("failed to fetch missing chunks (seq %d..%d): %v; output may be incomplete",
 				lastSeq+1, chunk.Seq-1, err)
 		} else {
@@ -423,13 +428,13 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 				_, _ = fmt.Fprint(out, c.Content)
 				lastSeq = c.Seq
 			}
-		}
-		if lastSeq > before {
-			g.noProgress = 0 // progress: a real gap-fill stays responsive
-		} else {
-			g.noProgress++
-			if g.noProgress >= gapFillMaxNoProgress {
-				lastSeq = g.giveUpGap(lastSeq, chunk.Seq, missing, out)
+			if lastSeq > before {
+				g.noProgress = 0 // progress: a real gap-fill stays responsive
+			} else {
+				g.noProgress++
+				if g.noProgress >= gapFillMaxNoProgress {
+					lastSeq = g.giveUpGap(lastSeq, chunk.Seq, missing, out)
+				}
 			}
 		}
 	}
