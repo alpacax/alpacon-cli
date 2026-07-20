@@ -1,9 +1,6 @@
 package webftp
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -13,11 +10,8 @@ const (
 	webftpLogURL = "/api/history/webftp-logs/"
 )
 
-func GetWebFTPLogList(ac *client.AlpaconClient, pageSize int, serverName string, userName string, action string) ([]WebFTPLogAttributes, error) {
+func GetWebFTPLogList(ac *client.AlpaconClient, tail int, serverName string, userName string, action string) ([]WebFTPLogAttributes, error) {
 	params := map[string]string{}
-	if pageSize > 0 {
-		params["page_size"] = fmt.Sprintf("%d", pageSize)
-	}
 	if serverName != "" {
 		params["server_name"] = serverName
 	}
@@ -28,18 +22,13 @@ func GetWebFTPLogList(ac *client.AlpaconClient, pageSize int, serverName string,
 		params["action"] = action
 	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(webftpLogURL, "", params))
+	entries, err := api.FetchCursorPages[WebFTPLogEntry](ac, webftpLogURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
 
-	var response api.ListResponse[WebFTPLogEntry]
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return nil, err
-	}
-
 	var logList []WebFTPLogAttributes
-	for _, entry := range response.Results {
+	for _, entry := range entries {
 		entryServerName := ""
 		if entry.Server != nil {
 			entryServerName = entry.Server.Name
