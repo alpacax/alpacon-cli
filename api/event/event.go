@@ -42,15 +42,13 @@ var (
 var gapFillNow = time.Now
 
 // gapFillState throttles gap-fill re-fetches while lastSeq is not advancing and
-// records seqs given up on so the terminal drain can retry them.
+// records seqs given up on so they can be retried once at command end.
 type gapFillState struct {
 	lastAttempt time.Time
 	noProgress  int
 	skipped     []int
 }
 
-// gapFillInterval is the minimum wait before the next gap-fill attempt, longer
-// after more consecutive no-progress attempts.
 func gapFillInterval(noProgress int) time.Duration {
 	d := gapFillInitialInterval
 	for i := 1; i < noProgress; i++ {
@@ -371,7 +369,6 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	return lastSeq
 }
 
-// chunkContent indexes chunks by seq for out-of-order content lookup.
 func chunkContent(chunks []Chunk) map[int]string {
 	m := make(map[int]string, len(chunks))
 	for _, c := range chunks {

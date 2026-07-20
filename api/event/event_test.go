@@ -1150,7 +1150,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	lastSeq := 0 // seq 0 already applied
+	lastSeq := 0
 	// Clock frozen: after the first (immediate) attempt, every further gapped
 	// chunk is inside the window and must be skipped without a fetch.
 	for seq := 2; seq <= 10; seq++ {
@@ -1199,7 +1199,6 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	lastSeq := 0
-	// seq 3 opens a gap over 1,2 which REST fills at once.
 	lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	assert.Equal(t, 3, lastSeq)
@@ -1222,7 +1221,6 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
 }
 
-// No skipped seqs -> no fetch, no output.
 func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 	var fetches int
 	ac := holeServer(t, 10, map[int]bool{}, &fetches)
@@ -1346,7 +1344,6 @@ func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	assert.Contains(t, stderr, "never arrived")
 }
 
-// A contiguous trailing drain must not emit a spurious gap warning.
 func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	var fetches int
 	ac := holeServer(t, 6, map[int]bool{}, &fetches)
