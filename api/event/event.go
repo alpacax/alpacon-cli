@@ -432,26 +432,33 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		return lastSeq
 	}
 	var missing []int
+	truncated := false
 	for _, c := range final {
 		if c.Seq <= lastSeq {
 			continue
 		}
-		// Any seqs between lastSeq and this chunk never persisted: deliver what
-		// is here but report the holes instead of silently jumping past them.
-		// Bound the enumeration both per-gap and cumulatively so a hostile server
-		// can't grow missing without limit via one huge or many summed gaps.
-		if c.Seq-lastSeq-1 > maxGapWidth || len(missing) >= maxGapWidth {
-			utils.CliWarning("chunk seq(s) %d..%d never arrived; output may be incomplete", lastSeq+1, c.Seq-1)
-		} else {
-			for s := lastSeq + 1; s < c.Seq; s++ {
-				missing = append(missing, s)
+		// Report the hole before this chunk instead of silently jumping past it,
+		// but bound the total enumerated so a hostile server can't grow missing
+		// without limit; gaps past the bound are summarized, not listed.
+		if gap := c.Seq - lastSeq - 1; gap > 0 {
+			if len(missing)+gap > maxGapWidth {
+				truncated = true
+			} else {
+				for s := lastSeq + 1; s < c.Seq; s++ {
+					missing = append(missing, s)
+				}
 			}
 		}
 		_, _ = fmt.Fprint(out, c.Content)
 		lastSeq = c.Seq
 	}
-	if len(missing) > 0 {
+	switch {
+	case len(missing) > 0 && truncated:
+		utils.CliWarning("chunk seq(s) %v and further gaps never arrived; output may be incomplete", missing)
+	case len(missing) > 0:
 		utils.CliWarning("chunk seq(s) %v never arrived; output may be incomplete", missing)
+	case truncated:
+		utils.CliWarning("chunk seq(s) never arrived (gap too large to list); output may be incomplete")
 	}
 	return lastSeq
 }

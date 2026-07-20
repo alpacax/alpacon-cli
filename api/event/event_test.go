@@ -1125,10 +1125,36 @@ func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *int) *clie
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 }
 
+// chunkServer serves an explicit chunk list (filtered by seq__gte), for tests
+// that need specific or out-of-range seqs holeServer's contiguous range can't
+// express.
+func chunkServer(t *testing.T, chunks []Chunk) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		var results []Chunk
+		for _, c := range chunks {
+			if c.Seq >= from {
+				results = append(results, c)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
 func swapGapFillNow(fn func() time.Time) func() {
 	old := gapFillNow
 	gapFillNow = fn
 	return func() { gapFillNow = old }
+}
+
+func swapMaxGapWidth(n int) func() {
+	old := maxGapWidth
+	maxGapWidth = n
+	return func() { maxGapWidth = old }
 }
 
 func swapGapFillVars(initial time.Duration, factor int, max time.Duration, maxNoProgress int) func() {
@@ -1274,9 +1300,7 @@ func TestGiveUpGap_BoundsHugeServerSeq(t *testing.T) {
 // Many gaps each under maxGapWidth must not let g.skipped grow without bound
 // across a long stream: cumulative recorded skips stay capped at maxGapWidth.
 func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
-	old := maxGapWidth
-	maxGapWidth = 4
-	defer func() { maxGapWidth = old }()
+	defer swapMaxGapWidth(4)()
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
@@ -1298,22 +1322,16 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 // The terminal drain must bound its missing accumulator cumulatively too, while
 // still delivering every chunk's content that the server did return.
 func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
-	old := maxGapWidth
-	maxGapWidth = 2
-	defer func() { maxGapWidth = old }()
+	defer swapMaxGapWidth(2)()
 
-	// Chunks at seq 3,6,9,12: each preceded by a 2-seq gap (== maxGapWidth), so
-	// missing accumulates until it hits the cap, then further gaps only warn.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		var results []Chunk
-		for _, s := range []int{3, 6, 9, 12} {
-			results = append(results, Chunk{Seq: s, Content: fmt.Sprintf("c%d\n", s)})
-		}
-		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
-	}))
-	t.Cleanup(ts.Close)
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	// Chunks at seq 3,6,9,12: the first 2-seq gap fills missing to the cap, then
+	// the later gaps are summarized as truncated rather than enumerated.
+	ac := chunkServer(t, []Chunk{
+		{Seq: 3, Content: "c3\n"},
+		{Seq: 6, Content: "c6\n"},
+		{Seq: 9, Content: "c9\n"},
+		{Seq: 12, Content: "c12\n"},
+	})
 
 	out := &bytes.Buffer{}
 	var last int
@@ -1329,15 +1347,7 @@ func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
 // enumerating every missing seq into the warning slice.
 func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	huge := 1 << 40
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{
-			Count:   1,
-			Results: []Chunk{{Seq: huge, Content: "x\n"}},
-		})
-	}))
-	t.Cleanup(ts.Close)
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ac := chunkServer(t, []Chunk{{Seq: huge, Content: "x\n"}})
 
 	out := &bytes.Buffer{}
 	var last int
