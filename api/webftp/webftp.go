@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -19,10 +21,18 @@ func GetWebFTPLogList(ac *client.AlpaconClient, pageSize int, serverName string,
 		params["page_size"] = fmt.Sprintf("%d", pageSize)
 	}
 	if serverName != "" {
-		params["server_name"] = serverName
+		serverID, err := server.GetServerIDByName(ac, serverName)
+		if err != nil {
+			return nil, err
+		}
+		params["server"] = serverID
 	}
 	if userName != "" {
-		params["user_name"] = userName
+		userID, err := iam.GetUserIDByName(ac, userName)
+		if err != nil {
+			return nil, err
+		}
+		params["user"] = userID
 	}
 	if action != "" {
 		params["action"] = action
