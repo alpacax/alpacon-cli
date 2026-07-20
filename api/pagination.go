@@ -41,3 +41,43 @@ func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[
 
 	return result, nil
 }
+
+// FetchCursorPages follows the Elasticsearch cursor contract, accumulating up to limit items.
+func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, error) {
+	if params == nil {
+		params = make(map[string]string)
+	}
+
+	// The server caps page_size at 100 (ESCursorPagination.max_page_size).
+	const maxPageSize = 100
+
+	var result []T
+	cursor := ""
+	for len(result) < limit {
+		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+
+		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
+		if err != nil {
+			return nil, err
+		}
+
+		var page CursorListResponse[T]
+		if err = json.Unmarshal(responseBody, &page); err != nil {
+			return nil, err
+		}
+
+		result = append(result, page.Results...)
+		if page.Next == "" || len(page.Results) == 0 {
+			break
+		}
+		cursor = page.Next
+	}
+
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
