@@ -1106,10 +1106,10 @@ func captureStderr(t *testing.T, fn func()) string {
 // holeServer serves /chunks/?seq__gte=N returning every seq >= N except those
 // in `hole`. fetches counts the chunk requests. Used to simulate a seq that is
 // never persisted server-side.
-func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *int) *client.AlpaconClient {
+func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int32) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*fetches++
+		fetches.Add(1)
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
 		var results []Chunk
 		for s := from; s <= maxSeq; s++ {
@@ -1168,7 +1168,7 @@ func swapGapFillVars(initial time.Duration, factor int, max time.Duration, maxNo
 // While lastSeq is stuck, gapped chunks arriving within the backoff window must
 // not each trigger a REST fetch.
 func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
 
 	now := time.Unix(0, 0)
@@ -1183,7 +1183,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
-	assert.Equal(t, 1, fetches, "only the first gapped chunk should fetch; rest throttled")
+	assert.Equal(t, int32(1), fetches.Load(), "only the first gapped chunk should fetch; rest throttled")
 	assert.Equal(t, 0, lastSeq, "lastSeq stays behind the permanent hole")
 }
 
@@ -1191,7 +1191,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 // present chunks are printed, the hole is recorded in skipped, and lastSeq
 // advances so live streaming resumes.
 func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	ac := holeServer(t, 20, map[int]bool{1: true}, &fetches)
 
 	defer swapGapFillVars(1*time.Millisecond, 2, 2*time.Millisecond, 3)()
@@ -1206,7 +1206,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
-	assert.LessOrEqual(t, fetches, 3, "fetches bounded by gapFillMaxNoProgress")
+	assert.LessOrEqual(t, fetches.Load(), int32(3), "fetches bounded by gapFillMaxNoProgress")
 	assert.Equal(t, []int{1}, g.skipped, "seq 1 recorded as skipped")
 	assert.Equal(t, 6, lastSeq, "streaming resumes past the skipped hole")
 	assert.Equal(t, "c2\nc3\nc4\nc5\nc6\n", out.String(), "c1 lost, everything else printed in order")
@@ -1215,7 +1215,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 // A gap that heals before the give-up limit resets the backoff and prints
 // everything, with no seq recorded as skipped.
 func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	// No hole: the gap-fill fetch immediately returns the missing seq.
 	ac := holeServer(t, 20, map[int]bool{}, &fetches)
 
@@ -1268,26 +1268,30 @@ func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
 // Skipped seqs that got persisted late are recovered and printed at command
 // end (out of order); no output is written for seqs still missing.
 func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	// seq 1 now exists (arrived late); seq 4 is still a permanent hole.
 	ac := holeServer(t, 10, map[int]bool{4: true}, &fetches)
 
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
-	g.recoverSkipped(ac, "cmd", out)
+	stderr := captureStderr(t, func() {
+		g.recoverSkipped(ac, "cmd", out)
+	})
 
 	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
+	assert.Contains(t, stderr, "late chunk seq(s) [1] recovered at command end")
+	assert.Contains(t, stderr, "chunk seq(s) [4] never arrived")
 }
 
 func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	ac := holeServer(t, 10, map[int]bool{}, &fetches)
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	g.recoverSkipped(ac, "cmd", out)
 
-	assert.Equal(t, 0, fetches, "no skipped seqs means no recovery fetch")
+	assert.Equal(t, int32(0), fetches.Load(), "no skipped seqs means no recovery fetch")
 	assert.Empty(t, out.String())
 }
 
@@ -1295,7 +1299,7 @@ func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 // before the backoff limit) must be surfaced by the terminal drain, not
 // silently jumped over.
 func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	ac := holeServer(t, 8, map[int]bool{5: true}, &fetches)
 
 	out := &bytes.Buffer{}
@@ -1393,8 +1397,20 @@ func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	assert.Contains(t, stderr, "never arrived")
 }
 
+// A sub-maxGapWidth gap can still hold thousands of seqs; warnings must
+// collapse them to a range instead of dumping the full slice.
+func TestFormatSeqs_CollapsesLargeLists(t *testing.T) {
+	assert.Equal(t, "[3 5 7]", formatSeqs([]int{3, 5, 7}))
+
+	seqs := make([]int, 1000)
+	for i := range seqs {
+		seqs[i] = i + 10
+	}
+	assert.Equal(t, "10..1009 (1000 seqs)", formatSeqs(seqs))
+}
+
 func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
-	var fetches int
+	var fetches atomic.Int32
 	ac := holeServer(t, 6, map[int]bool{}, &fetches)
 
 	out := &bytes.Buffer{}
