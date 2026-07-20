@@ -473,8 +473,10 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		}
 		// Report the hole before this chunk, but bound the total enumerated so a
 		// hostile server can't grow missing without limit; excess is summarized.
+		// Budget is compared by subtraction (len(missing) <= maxGapWidth, so no
+		// overflow) rather than adding to a server-controlled gap.
 		if gap := c.Seq - lastSeq - 1; gap > 0 {
-			if len(missing)+gap > maxGapWidth {
+			if gap > maxGapWidth-len(missing) {
 				truncated = true
 			} else {
 				for s := lastSeq + 1; s < c.Seq; s++ {
