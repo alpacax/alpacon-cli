@@ -1253,6 +1253,99 @@ func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
 	assert.Contains(t, stderr, "chunk seq(s) [5] never arrived")
 }
 
+// A hostile/buggy server can set a chunk seq arbitrarily high; giveUpGap must
+// not enumerate the whole hole (which would spin the CLI and grow g.skipped
+// without bound), but resume past it and report the range.
+func TestGiveUpGap_BoundsHugeServerSeq(t *testing.T) {
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	huge := ChunkEvent{Seq: 1 << 40} // would hang if enumerated seq-by-seq
+
+	var last int
+	stderr := captureStderr(t, func() {
+		last = g.giveUpGap(0, huge, nil, out)
+	})
+
+	assert.Equal(t, huge.Seq-1, last, "resumes just before the live chunk")
+	assert.Empty(t, g.skipped, "oversized gap is not enumerated into skipped")
+	assert.Contains(t, stderr, "gap too large to enumerate")
+}
+
+// Many gaps each under maxGapWidth must not let g.skipped grow without bound
+// across a long stream: cumulative recorded skips stay capped at maxGapWidth.
+func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
+	old := maxGapWidth
+	maxGapWidth = 4
+	defer func() { maxGapWidth = old }()
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	last := 0
+	_ = captureStderr(t, func() {
+		for i := 0; i < 4; i++ {
+			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
+			last = g.giveUpGap(last, ChunkEvent{Seq: next}, nil, out)
+		}
+	})
+
+	assert.Equal(t, maxGapWidth, len(g.skipped), "cumulative skipped capped at maxGapWidth")
+}
+
+// The terminal drain must bound its missing accumulator cumulatively too, while
+// still delivering every chunk's content that the server did return.
+func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
+	old := maxGapWidth
+	maxGapWidth = 2
+	defer func() { maxGapWidth = old }()
+
+	// Chunks at seq 3,6,9,12: each preceded by a 2-seq gap (== maxGapWidth), so
+	// missing accumulates until it hits the cap, then further gaps only warn.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var results []Chunk
+		for _, s := range []int{3, 6, 9, 12} {
+			results = append(results, Chunk{Seq: s, Content: fmt.Sprintf("c%d\n", s)})
+		}
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	out := &bytes.Buffer{}
+	var last int
+	_ = captureStderr(t, func() {
+		last = drainRemainingChunks(ac, "cmd", 0, out)
+	})
+
+	assert.Equal(t, 12, last)
+	assert.Equal(t, "c3\nc6\nc9\nc12\n", out.String(), "all delivered chunks still printed")
+}
+
+// The terminal drain must likewise bound a server-supplied huge seq instead of
+// enumerating every missing seq into the warning slice.
+func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
+	huge := 1 << 40
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{
+			Count:   1,
+			Results: []Chunk{{Seq: huge, Content: "x\n"}},
+		})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	out := &bytes.Buffer{}
+	var last int
+	stderr := captureStderr(t, func() {
+		last = drainRemainingChunks(ac, "cmd", 0, out)
+	})
+
+	assert.Equal(t, huge, last)
+	assert.Equal(t, "x\n", out.String(), "the delivered chunk is still printed")
+	assert.Contains(t, stderr, "never arrived")
+}
+
 // A contiguous trailing drain must not emit a spurious gap warning.
 func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	var fetches int

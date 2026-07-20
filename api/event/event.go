@@ -20,6 +20,13 @@ const (
 	getEventURL = "/api/events/commands/"
 )
 
+// maxGapWidth bounds how many missing seqs we enumerate, both per gap and
+// cumulatively. A command's chunk count is capped well below this server-side,
+// so exceeding it can only come from a buggy or hostile server; enumerating a
+// server-controlled seq delta would spin the CLI and grow the skipped/missing
+// slices without bound. var (not const) so tests can exercise the bound cheaply.
+var maxGapWidth = 100_000
+
 // Gap-fill backoff knobs. While a chunk seq stays missing, gap-fill re-fetches
 // back off exponentially instead of firing on every WS chunk; a run of
 // gapFillMaxNoProgress no-progress attempts (~34s: 0.3+0.6+1.2+2.4+4.8+5*5)
@@ -42,8 +49,8 @@ type gapFillState struct {
 	skipped     []int
 }
 
-// gapFillInterval is the minimum wait before the next gap-fill attempt after
-// noProgress consecutive no-progress attempts, doubling to a cap.
+// gapFillInterval is the minimum wait before the next gap-fill attempt, longer
+// after more consecutive no-progress attempts.
 func gapFillInterval(noProgress int) time.Duration {
 	d := gapFillInitialInterval
 	for i := 1; i < noProgress; i++ {
@@ -364,23 +371,44 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 	return lastSeq
 }
 
+// chunkContent indexes chunks by seq for out-of-order content lookup.
+func chunkContent(chunks []Chunk) map[int]string {
+	m := make(map[int]string, len(chunks))
+	for _, c := range chunks {
+		m[c.Seq] = c.Content
+	}
+	return m
+}
+
 // giveUpGap advances past a hole that never filled: it prints any persisted
 // chunks between lastSeq and chunk.Seq, records the still-missing seqs in
 // g.skipped for a final retry at command end, and resets the backoff.
 func (g *gapFillState) giveUpGap(lastSeq int, chunk ChunkEvent, missing []Chunk, out io.Writer) int {
-	bySeq := make(map[int]string, len(missing))
-	for _, c := range missing {
-		bySeq[c.Seq] = c.Content
+	if chunk.Seq-lastSeq-1 > maxGapWidth {
+		utils.CliWarning("chunk seq(s) %d..%d not arrived after %d attempts; skipping for now (gap too large to enumerate)",
+			lastSeq+1, chunk.Seq-1, gapFillMaxNoProgress)
+		g.noProgress = 0
+		g.lastAttempt = time.Time{}
+		return chunk.Seq - 1
 	}
+	bySeq := chunkContent(missing)
 	var lost []int
 	for s := lastSeq + 1; s < chunk.Seq; s++ {
 		if content, ok := bySeq[s]; ok {
 			_, _ = fmt.Fprint(out, content)
 		} else {
 			lost = append(lost, s)
-			g.skipped = append(g.skipped, s)
 		}
 		lastSeq = s
+	}
+	// g.skipped is retried once at command end; bound its total growth so a
+	// hostile server can't accumulate unbounded skips via many sub-maxGapWidth
+	// gaps over a long stream.
+	for _, s := range lost {
+		if len(g.skipped) >= maxGapWidth {
+			break
+		}
+		g.skipped = append(g.skipped, s)
 	}
 	utils.CliWarning("chunk seq(s) %v not arrived after %d attempts; skipping for now (will retry at command end)",
 		lost, gapFillMaxNoProgress)
@@ -403,8 +431,14 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		}
 		// Any seqs between lastSeq and this chunk never persisted: deliver what
 		// is here but report the holes instead of silently jumping past them.
-		for s := lastSeq + 1; s < c.Seq; s++ {
-			missing = append(missing, s)
+		// Bound the enumeration both per-gap and cumulatively so a hostile server
+		// can't grow missing without limit via one huge or many summed gaps.
+		if c.Seq-lastSeq-1 > maxGapWidth || len(missing) >= maxGapWidth {
+			utils.CliWarning("chunk seq(s) %d..%d never arrived; output may be incomplete", lastSeq+1, c.Seq-1)
+		} else {
+			for s := lastSeq + 1; s < c.Seq; s++ {
+				missing = append(missing, s)
+			}
 		}
 		_, _ = fmt.Fprint(out, c.Content)
 		lastSeq = c.Seq
@@ -427,10 +461,7 @@ func recoverSkippedChunks(ac *client.AlpaconClient, cmdID string, g *gapFillStat
 		utils.CliWarning("chunk seq(s) %v never arrived: %v; output may be incomplete", g.skipped, err)
 		return
 	}
-	bySeq := make(map[int]string, len(final))
-	for _, c := range final {
-		bySeq[c.Seq] = c.Content
-	}
+	bySeq := chunkContent(final)
 	var recovered, lost []int
 	for _, s := range g.skipped {
 		if content, ok := bySeq[s]; ok {
