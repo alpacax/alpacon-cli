@@ -20,17 +20,14 @@ const (
 	getEventURL = "/api/events/commands/"
 )
 
-// maxGapWidth bounds how many missing seqs we enumerate, both per gap and
-// cumulatively. A command's chunk count is capped well below this server-side,
-// so exceeding it can only come from a buggy or hostile server; enumerating a
-// server-controlled seq delta would spin the CLI and grow the skipped/missing
-// slices without bound. var (not const) so tests can exercise the bound cheaply.
+// maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
+// hostile server can't spin the CLI or grow the skipped/missing slices without bound.
+// var, not const, so tests can lower it.
 var maxGapWidth = 100_000
 
-// Gap-fill backoff knobs. While a chunk seq stays missing, gap-fill re-fetches
-// back off exponentially instead of firing on every WS chunk; a run of
-// gapFillMaxNoProgress no-progress attempts (~34s: 0.3+0.6+1.2+2.4+4.8+5*5)
-// gives up on the seq. var (not const) so tests can shorten them.
+// Gap-fill re-fetches back off exponentially while a seq stays missing, then give up
+// after gapFillMaxNoProgress no-progress attempts (~34s: 0.3+0.6+1.2+2.4+4.8+5*5).
+// var, not const, so tests can shorten them.
 var (
 	gapFillInitialInterval = 300 * time.Millisecond
 	gapFillBackoffFactor   = 2
@@ -323,10 +320,9 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	}
 }
 
-// applyChunk skips duplicates, fills gaps via REST, and writes content in seq
-// order, returning the new lastSeq. While a gap does not close, re-fetches back
-// off; after gapFillMaxNoProgress no-progress attempts the missing seq is
-// skipped (recorded in g.skipped) so live streaming resumes.
+// applyChunk skips duplicates, fills gaps via REST, and writes content in seq order,
+// returning the new lastSeq. While a gap stays open re-fetches back off; after
+// gapFillMaxNoProgress attempts the missing seq is skipped so streaming resumes.
 func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk ChunkEvent, out io.Writer, g *gapFillState) int {
 	if chunk.Seq <= lastSeq {
 		return lastSeq
@@ -377,14 +373,13 @@ func chunkContent(chunks []Chunk) map[int]string {
 	return m
 }
 
-// giveUpGap advances past a hole that never filled: it delivers the persisted
-// chunks it has and records the still-missing seqs in g.skipped for one retry
-// at command end. nextSeq is the seq of the live chunk that exposed the hole.
+// giveUpGap advances past a never-filled hole, delivering the chunks it has and
+// recording the still-missing seqs for one retry at command end. nextSeq is the
+// live chunk that exposed the hole.
 func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.Writer) int {
 	if nextSeq-lastSeq-1 > maxGapWidth {
-		// Gap too wide to track per-seq (buggy/hostile server): don't record the
-		// hole, but still deliver fetched chunks — missing is bounded by the
-		// response, unlike the [lastSeq+1, nextSeq) range.
+		// Gap too wide to track per-seq (buggy/hostile server): skip recording, but
+		// still deliver fetched chunks (missing is response-bounded, the range isn't).
 		for _, c := range missing {
 			if c.Seq > lastSeq && c.Seq < nextSeq {
 				_, _ = fmt.Fprint(out, c.Content)
@@ -403,9 +398,8 @@ func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.W
 			_, _ = fmt.Fprint(out, content)
 		} else {
 			lost = append(lost, s)
-			// g.skipped is retried once at command end; bound its total growth so
-			// a hostile server can't accumulate unbounded skips via many
-			// sub-maxGapWidth gaps over a long stream.
+			// Bound g.skipped's total growth so a hostile server can't accumulate
+			// unbounded skips via many sub-maxGapWidth gaps over a long stream.
 			if len(g.skipped) < maxGapWidth {
 				g.skipped = append(g.skipped, s)
 				recorded++
@@ -437,9 +431,8 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 		if c.Seq <= lastSeq {
 			continue
 		}
-		// Report the hole before this chunk instead of silently jumping past it,
-		// but bound the total enumerated so a hostile server can't grow missing
-		// without limit; gaps past the bound are summarized, not listed.
+		// Report the hole before this chunk, but bound the total enumerated so a
+		// hostile server can't grow missing without limit; excess is summarized.
 		if gap := c.Seq - lastSeq - 1; gap > 0 {
 			if len(missing)+gap > maxGapWidth {
 				truncated = true
@@ -463,9 +456,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 	return lastSeq
 }
 
-// recoverSkipped makes a final attempt to fetch seqs that were skipped
-// mid-stream (giveUpGap). Late-persisted content is printed out of order; seqs
-// still absent are reported as permanently lost. g.skipped is ascending.
+// recoverSkipped makes a final fetch for seqs skipped mid-stream (giveUpGap),
+// printing late content out of order and reporting still-absent seqs as lost.
+// g.skipped is ascending, so the fetch starts at its first seq.
 func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, out io.Writer) {
 	if len(g.skipped) == 0 {
 		return
