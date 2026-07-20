@@ -53,8 +53,9 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 				})
 			}
 
-			resp := api.ListResponse[LogEntry]{
-				Count:   200, // more items exist on server
+			// Cursor token present, but limit is reached: no follow-up request.
+			resp := api.CursorListResponse[LogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
 				Results: results,
 			}
 			_ = json.NewEncoder(w).Encode(resp)
