@@ -1315,7 +1315,7 @@ func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
 func TestGiveUpGap_BoundsHugeServerSeq(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	nextSeq := 1 << 40 // would hang if enumerated seq-by-seq
+	nextSeq := 1 << 30 // far above maxGapWidth; would hang if enumerated seq-by-seq (fits 32-bit int)
 	fetched := []Chunk{{Seq: 100, Content: "kept\n"}}
 
 	var last int
@@ -1378,7 +1378,7 @@ func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
 // The terminal drain must likewise bound a server-supplied huge seq instead of
 // enumerating every missing seq into the warning slice.
 func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
-	huge := 1 << 40
+	huge := 1 << 30 // far above maxGapWidth; fits 32-bit int so 386 builds compile
 	ac := chunkServer(t, []Chunk{{Seq: huge, Content: "x\n"}})
 
 	out := &bytes.Buffer{}
