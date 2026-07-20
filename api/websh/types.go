@@ -94,9 +94,3 @@ type SessionRecord struct {
 	AddedAt string `json:"added_at" table:"Added At"`
 	Record  string `json:"record"   table:"Record"`
 }
-
-// recordCursorPage decodes the cursor-pagination response; ListResponse[T] can't be reused (its Next is an int, not a cursor token).
-type recordCursorPage struct {
-	Next    string          `json:"next"`
-	Results []SessionRecord `json:"results"`
-}
