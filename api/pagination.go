@@ -57,6 +57,9 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
 		if cursor != "" {
 			params["cursor"] = cursor
+		} else {
+			// Drop any caller-supplied cursor so the first request starts from the first page.
+			delete(params, "cursor")
 		}
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))

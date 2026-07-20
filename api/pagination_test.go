@@ -115,3 +115,20 @@ func TestFetchCursorPages_StopsOnEmptyResults(t *testing.T) {
 	assert.Empty(t, items)
 	assert.Equal(t, 1, requests)
 }
+
+func TestFetchCursorPages_IgnoresStaleCursorParam(t *testing.T) {
+	var gotCursors []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCursors = append(gotCursors, r.URL.Query().Get("cursor"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Results: []cursorItem{{Name: "a"}}})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	// A caller-supplied cursor must not leak into the first request.
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", map[string]string{"cursor": "STALE"}, 10)
+	require.NoError(t, err)
+	assert.Len(t, items, 1)
+	assert.Equal(t, []string{""}, gotCursors)
+}
