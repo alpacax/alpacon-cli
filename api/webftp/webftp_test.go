@@ -114,7 +114,8 @@ func TestGetWebFTPLogList(t *testing.T) {
 				assert.Equal(t, want, captured.Get(key))
 			}
 			for _, key := range tt.absentParams {
-				assert.Empty(t, captured.Get(key))
+				_, ok := captured[key]
+				assert.False(t, ok)
 			}
 		})
 	}
