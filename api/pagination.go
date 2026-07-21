@@ -54,7 +54,7 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 	// The server caps page_size at 100 (ESCursorPagination.max_page_size).
 	const maxPageSize = 100
 
-	var result []T
+	result := make([]T, 0, min(limit, maxPageSize))
 	cursor := ""
 	for len(result) < limit {
 		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
