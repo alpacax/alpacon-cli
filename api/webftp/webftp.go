@@ -1,7 +1,11 @@
 package webftp
 
 import (
+	"fmt"
+
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -13,10 +17,18 @@ const (
 func GetWebFTPLogList(ac *client.AlpaconClient, tail int, serverName string, userName string, action string) ([]WebFTPLogAttributes, error) {
 	params := map[string]string{}
 	if serverName != "" {
-		params["server_name"] = serverName
+		serverID, err := server.GetServerIDByName(ac, serverName)
+		if err != nil {
+			return nil, fmt.Errorf("--server %q: %w", serverName, err)
+		}
+		params["server"] = serverID
 	}
 	if userName != "" {
-		params["user_name"] = userName
+		userID, err := iam.GetUserIDByName(ac, userName)
+		if err != nil {
+			return nil, fmt.Errorf("--user %q: %w", userName, err)
+		}
+		params["user"] = userID
 	}
 	if action != "" {
 		params["action"] = action
