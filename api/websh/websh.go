@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -63,44 +62,14 @@ func GetSessionDetail(ac *client.AlpaconClient, sessionID string) ([]byte, error
 
 func GetSessionRecords(ac *client.AlpaconClient, sessionID, query string, limit int) ([]SessionRecord, error) {
 	action := "records"
+	params := map[string]string{}
 	if query != "" {
 		action = "search"
+		params["q"] = query
 	}
 
-	var records []SessionRecord
-	cursor := ""
-	for len(records) < limit {
-		params := map[string]string{
-			"page_size": strconv.Itoa(min(100, limit-len(records))),
-		}
-		if query != "" {
-			params["q"] = query
-		}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-
-		body, err := ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, action), params))
-		if err != nil {
-			return nil, err
-		}
-
-		var page recordCursorPage
-		if err = json.Unmarshal(body, &page); err != nil {
-			return nil, err
-		}
-
-		records = append(records, page.Results...)
-		if page.Next == "" || len(page.Results) == 0 {
-			break
-		}
-		cursor = page.Next
-	}
-
-	if len(records) > limit {
-		records = records[:limit]
-	}
-	return records, nil
+	endpoint := path.Join(sessionsBaseURL, sessionID, action)
+	return api.FetchCursorPages[SessionRecord](ac, endpoint, params, limit)
 }
 
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {

@@ -1,11 +1,13 @@
 package webftp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -89,7 +91,7 @@ func TestGetWebFTPLogList(t *testing.T) {
 					}
 				case "/api/history/webftp-logs/":
 					captured = r.URL.Query()
-					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+					_, _ = w.Write([]byte(`{"next":"","results":[]}`))
 				default:
 					t.Errorf("unexpected request path: %s", r.URL.Path)
 					http.Error(w, "unexpected request path", http.StatusNotFound)
@@ -116,4 +118,28 @@ func TestGetWebFTPLogList(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Regression for #274: a cursor-token next crashed the old int-typed unmarshal.
+func TestGetWebFTPLogList_FollowsCursor(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[WebFTPLogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
+				Results: []WebFTPLogEntry{{FileName: "a.txt", Action: "upload"}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[WebFTPLogEntry]{
+			Results: []WebFTPLogEntry{{FileName: "b.txt", Action: "download"}},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetWebFTPLogList(ac, 5, "", "", "")
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
+	assert.Equal(t, "b.txt", logs[1].FileName)
 }

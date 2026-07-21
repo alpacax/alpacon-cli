@@ -42,9 +42,12 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 			if pageSize != "25" {
 				t.Errorf("expected page_size=25, got %s", pageSize)
 			}
+			if server := r.URL.Query().Get("server"); server != "srv-1" {
+				t.Errorf("expected server=srv-1, got %s", server)
+			}
 
 			var results []LogEntry
-			for i := 0; i < 25; i++ {
+			for i := range 25 {
 				results = append(results, LogEntry{
 					Program: "sshd",
 					Level:   20,
@@ -53,8 +56,9 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 				})
 			}
 
-			resp := api.ListResponse[LogEntry]{
-				Count:   200, // more items exist on server
+			// Cursor token present, but limit is reached: no follow-up request.
+			resp := api.CursorListResponse[LogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
 				Results: results,
 			}
 			_ = json.NewEncoder(w).Encode(resp)
