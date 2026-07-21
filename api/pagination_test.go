@@ -88,15 +88,53 @@ func TestFetchCursorPages_PageSize(t *testing.T) {
 }
 
 func TestFetchCursorPages_NonPositiveLimit(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		t.Run(strconv.Itoa(limit), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("no request expected for non-positive limit")
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, limit)
+			require.NoError(t, err)
+			assert.Empty(t, items)
+		})
+	}
+}
+
+func TestFetchCursorPages_SecondPageErrorDiscardsPartial(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("no request expected for non-positive limit")
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN2",
+				Results: []cursorItem{{Name: "a"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
 	}))
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 0)
-	require.NoError(t, err)
-	assert.Empty(t, items)
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+	require.Error(t, err)
+	assert.Nil(t, items)
+}
+
+func TestFetchCursorPages_MalformedJSON(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results": [`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+	require.Error(t, err)
+	assert.Nil(t, items)
 }
 
 func TestFetchCursorPages_StopsOnEmptyResults(t *testing.T) {

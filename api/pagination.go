@@ -44,6 +44,9 @@ func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[
 
 // FetchCursorPages follows the Elasticsearch cursor contract, accumulating up to limit items.
 func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 	if params == nil {
 		params = make(map[string]string)
 	}
