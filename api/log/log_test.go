@@ -42,9 +42,12 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 			if pageSize != "25" {
 				t.Errorf("expected page_size=25, got %s", pageSize)
 			}
+			if server := r.URL.Query().Get("server"); server != "srv-1" {
+				t.Errorf("expected server=srv-1, got %s", server)
+			}
 
 			var results []LogEntry
-			for i := 0; i < 25; i++ {
+			for i := range 25 {
 				results = append(results, LogEntry{
 					Program: "sshd",
 					Level:   20,

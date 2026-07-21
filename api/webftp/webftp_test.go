@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -34,4 +35,24 @@ func TestGetWebFTPLogList_FollowsCursor(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, logs, 2)
 	assert.Equal(t, "b.txt", logs[1].FileName)
+}
+
+func TestGetWebFTPLogList_Filters(t *testing.T) {
+	var gotQuery url.Values
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[WebFTPLogEntry]{
+			Results: []WebFTPLogEntry{{FileName: "a.txt"}},
+		})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetWebFTPLogList(ac, 5, "web-01", "alice", "upload")
+	require.NoError(t, err)
+	assert.Len(t, logs, 1)
+	assert.Equal(t, "web-01", gotQuery.Get("server_name"))
+	assert.Equal(t, "alice", gotQuery.Get("user_name"))
+	assert.Equal(t, "upload", gotQuery.Get("action"))
 }
