@@ -170,3 +170,25 @@ func TestFetchCursorPages_IgnoresStaleCursorParam(t *testing.T) {
 	assert.Len(t, items, 1)
 	assert.Equal(t, []string{""}, gotCursors)
 }
+
+func TestFetchCursorPages_DoesNotMutateCallerParams(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN2",
+				Results: []cursorItem{{Name: "a"}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Results: []cursorItem{{Name: "b"}}})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	params := map[string]string{"app": "cert"}
+	_, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", params, 10)
+	require.NoError(t, err)
+	// The helper must leave no page_size/cursor residue in the caller's map.
+	assert.Equal(t, map[string]string{"app": "cert"}, params)
+}

@@ -3,20 +3,26 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
+// copyParams returns a shallow copy so the pagination loop never mutates the caller's map.
+func copyParams(params map[string]string) map[string]string {
+	out := make(map[string]string, len(params)+2)
+	maps.Copy(out, params)
+	return out
+}
+
 func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string) ([]T, error) {
 	var result []T
 	page := 1
 	const pageSize = 100
 
-	if params == nil {
-		params = make(map[string]string)
-	}
+	params = copyParams(params)
 	params["page"] = strconv.Itoa(page)
 	params["page_size"] = strconv.Itoa(pageSize)
 
@@ -48,12 +54,13 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 	if limit <= 0 {
 		return nil, nil
 	}
-	if params == nil {
-		params = make(map[string]string)
-	}
 
 	// The server caps page_size at 100 (ESCursorPagination.max_page_size).
 	const maxPageSize = 100
+
+	params = copyParams(params)
+	// Drop any caller-supplied cursor so the first request starts from the first page.
+	delete(params, "cursor")
 
 	result := make([]T, 0, min(limit, maxPageSize))
 	cursor := ""
@@ -61,9 +68,6 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
 		if cursor != "" {
 			params["cursor"] = cursor
-		} else {
-			// Drop any caller-supplied cursor so the first request starts from the first page.
-			delete(params, "cursor")
 		}
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
