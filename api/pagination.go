@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -67,12 +68,12 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("fetching cursor page from %s: %w", endpoint, err)
 		}
 
 		var page CursorListResponse[T]
 		if err = json.Unmarshal(responseBody, &page); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decoding cursor page from %s: %w", endpoint, err)
 		}
 
 		result = append(result, page.Results...)
