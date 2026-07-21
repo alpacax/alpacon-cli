@@ -13,46 +13,58 @@ import (
 
 func TestGetWebFTPLogList(t *testing.T) {
 	tests := []struct {
-		name         string
-		serverName   string
-		userName     string
-		action       string
-		serverFound  bool
-		userFound    bool
-		wantErr      bool
-		wantParams   map[string]string
-		absentParams []string
+		name            string
+		serverName      string
+		userName        string
+		action          string
+		serverFound     bool
+		userFound       bool
+		wantErr         bool
+		wantErrContains string
+		wantParams      map[string]string
+		absentParams    []string
 	}{
 		{
 			name:         "resolves server name to id",
 			serverName:   "web-editor",
 			serverFound:  true,
-			wantParams:   map[string]string{"server": "srv-uuid"},
+			wantParams:   map[string]string{"server": "srv-uuid", "page_size": "25"},
 			absentParams: []string{"server_name"},
 		},
 		{
 			name:         "resolves user name to id",
 			userName:     "some-user",
 			userFound:    true,
-			wantParams:   map[string]string{"user": "usr-uuid"},
+			wantParams:   map[string]string{"user": "usr-uuid", "page_size": "25"},
 			absentParams: []string{"user_name"},
 		},
 		{
-			name:        "server not found returns error",
-			serverName:  "ghost",
-			serverFound: false,
-			wantErr:     true,
+			name:         "resolves server and user together",
+			serverName:   "web-editor",
+			userName:     "some-user",
+			serverFound:  true,
+			userFound:    true,
+			wantParams:   map[string]string{"server": "srv-uuid", "user": "usr-uuid", "page_size": "25"},
+			absentParams: []string{"server_name", "user_name"},
 		},
 		{
-			name:      "user not found returns error",
-			userName:  "ghost",
-			userFound: false,
-			wantErr:   true,
+			name:            "server not found returns error",
+			serverName:      "ghost",
+			serverFound:     false,
+			wantErr:         true,
+			wantErrContains: `--server "ghost"`,
+		},
+		{
+			name:            "user not found returns error",
+			userName:        "ghost",
+			userFound:       false,
+			wantErr:         true,
+			wantErrContains: `--user "ghost"`,
 		},
 		{
 			name:         "no name filter skips resolution",
 			action:       "upload",
-			wantParams:   map[string]string{"action": "upload"},
+			wantParams:   map[string]string{"action": "upload", "page_size": "25"},
 			absentParams: []string{"server", "user"},
 		},
 	}
@@ -89,7 +101,10 @@ func TestGetWebFTPLogList(t *testing.T) {
 
 			_, err := GetWebFTPLogList(ac, 25, tt.serverName, tt.userName, tt.action)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
+				if tt.wantErrContains != "" {
+					assert.ErrorContains(t, err, tt.wantErrContains)
+				}
 				return
 			}
 			require.NoError(t, err)
