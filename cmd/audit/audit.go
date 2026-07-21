@@ -38,6 +38,7 @@ func init() {
 
 func runAudit(cmd *cobra.Command, args []string) {
 	tail, _ := cmd.Flags().GetInt("tail")
+	utils.RequirePositiveInt("tail", tail)
 	userName, _ := cmd.Flags().GetString("user")
 	app, _ := cmd.Flags().GetString("app")
 	model, _ := cmd.Flags().GetString("model")

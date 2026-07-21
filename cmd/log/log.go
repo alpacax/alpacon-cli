@@ -25,6 +25,7 @@ var LogCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		serverName := args[0]
 		tail, _ := cmd.Flags().GetInt("tail")
+		utils.RequirePositiveInt("tail", tail)
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

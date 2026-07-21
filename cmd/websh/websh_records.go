@@ -25,9 +25,7 @@ Use --query to search records by command text (fuzzy match).`,
 		sessionID := args[0]
 		query, _ := cmd.Flags().GetString("query")
 		limit, _ := cmd.Flags().GetInt("limit")
-		if limit <= 0 {
-			utils.CliErrorWithExit("--limit must be a positive integer.")
-		}
+		utils.RequirePositiveInt("limit", limit)
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {

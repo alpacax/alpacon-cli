@@ -38,6 +38,7 @@ func init() {
 
 func runWebFTP(cmd *cobra.Command, args []string) {
 	tail, _ := cmd.Flags().GetInt("tail")
+	utils.RequirePositiveInt("tail", tail)
 	serverName, _ := cmd.Flags().GetString("server")
 	userName, _ := cmd.Flags().GetString("user")
 	action, _ := cmd.Flags().GetString("action")
