@@ -25,19 +25,19 @@ var AuditCmd = &cobra.Command{
 }
 
 func init() {
-	var pageSize int
+	var tail int
 	var userName string
 	var app string
 	var model string
 
-	AuditCmd.Flags().IntVarP(&pageSize, "tail", "t", 25, "Number of audit log entries to show from the end")
+	AuditCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of audit log entries to show from the end")
 	AuditCmd.Flags().StringVarP(&userName, "user", "u", "", "Filter by username")
 	AuditCmd.Flags().StringVarP(&app, "app", "a", "", "Filter by application")
 	AuditCmd.Flags().StringVarP(&model, "model", "m", "", "Filter by model")
 }
 
 func runAudit(cmd *cobra.Command, args []string) {
-	pageSize, _ := cmd.Flags().GetInt("tail")
+	tail, _ := cmd.Flags().GetInt("tail")
 	userName, _ := cmd.Flags().GetString("user")
 	app, _ := cmd.Flags().GetString("app")
 	model, _ := cmd.Flags().GetString("model")
@@ -47,7 +47,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
-	auditList, err := audit.GetAuditLogList(alpaconClient, pageSize, userName, app, model)
+	auditList, err := audit.GetAuditLogList(alpaconClient, tail, userName, app, model)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to get audit logs: %s.", err)
 	}
