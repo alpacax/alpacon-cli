@@ -600,6 +600,13 @@ func SplitAndTrim(s, sep string) []string {
 	return result
 }
 
+// RequirePositiveInt exits with a usage error when an integer flag is not positive.
+func RequirePositiveInt(flagName string, value int) {
+	if value <= 0 {
+		CliErrorWithExit("--%s must be a positive integer.", flagName)
+	}
+}
+
 // ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.
 // It trims surrounding whitespace so every duration flag normalizes input the same way.
 func ParsePositiveDuration(flagName, raw string) (time.Duration, error) {

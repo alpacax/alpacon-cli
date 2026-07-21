@@ -222,81 +222,34 @@ func TestBuildSessionRequest_IncludesWorkSession(t *testing.T) {
 }
 
 func TestGetSessionRecords_FollowsCursor(t *testing.T) {
-	var gotCursors []string
+	var gotCursors, gotPageSizes []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "/records/"))
 		gotCursors = append(gotCursors, r.URL.Query().Get("cursor"))
+		gotPageSizes = append(gotPageSizes, r.URL.Query().Get("page_size"))
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
-			_ = json.NewEncoder(w).Encode(recordCursorPage{
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
 				Next:    "TOKEN2",
 				Results: []SessionRecord{{AddedAt: "t1", Record: "docker ps"}},
 			})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(recordCursorPage{
-			Next:    "",
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
 			Results: []SessionRecord{{AddedAt: "t2", Record: "ls -la"}},
 		})
 	}))
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	records, err := GetSessionRecords(ac, "sess-1", "", 100)
+	records, err := GetSessionRecords(ac, "sess-1", "", 5)
 	require.NoError(t, err)
 
-	assert.Len(t, records, 2)
+	require.Len(t, records, 2)
 	assert.Equal(t, []string{"", "TOKEN2"}, gotCursors)
+	// page_size derives from limit and the remaining count, proving limit is wired through.
+	assert.Equal(t, []string{"5", "4"}, gotPageSizes)
 	assert.Equal(t, "ls -la", records[1].Record)
-}
-
-func TestGetSessionRecords_LimitCaps(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(recordCursorPage{
-			Next:    "MORE",
-			Results: []SessionRecord{{Record: "a"}, {Record: "b"}, {Record: "c"}},
-		})
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	records, err := GetSessionRecords(ac, "sess-1", "", 2)
-	require.NoError(t, err)
-	assert.Len(t, records, 2)
-}
-
-func TestGetSessionRecords_PageSize(t *testing.T) {
-	tests := []struct {
-		name         string
-		limit        int
-		wantPageSize string
-	}{
-		{"limit above page cap", 250, "100"},
-		{"limit below page cap", 3, "3"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var gotPageSize string
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if gotPageSize == "" {
-					gotPageSize = r.URL.Query().Get("page_size")
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(recordCursorPage{
-					Next:    "",
-					Results: []SessionRecord{{Record: "a"}, {Record: "b"}, {Record: "c"}},
-				})
-			}))
-			defer ts.Close()
-
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := GetSessionRecords(ac, "sess-1", "", tt.limit)
-			require.NoError(t, err)
-			assert.Equal(t, tt.wantPageSize, gotPageSize)
-		})
-	}
 }
 
 func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
@@ -305,8 +258,7 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "/search/"))
 		gotQuery = r.URL.Query().Get("q")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(recordCursorPage{
-			Next:    "",
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
 			Results: []SessionRecord{{Record: "docker ps -a"}},
 		})
 	}))

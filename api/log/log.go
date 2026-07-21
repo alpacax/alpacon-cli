@@ -1,7 +1,6 @@
 package log
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -14,7 +13,7 @@ const (
 	getSystemLogURL = "/api/history/logs/"
 )
 
-func GetSystemLogList(ac *client.AlpaconClient, serverName string, pageSize int) ([]LogAttributes, error) {
+func GetSystemLogList(ac *client.AlpaconClient, serverName string, tail int) ([]LogAttributes, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return nil, err
@@ -23,21 +22,14 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, pageSize int)
 	params := map[string]string{
 		"server": serverID,
 	}
-	if pageSize > 0 {
-		params["page_size"] = fmt.Sprintf("%d", pageSize)
-	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(getSystemLogURL, "", params))
+
+	entries, err := api.FetchCursorPages[LogEntry](ac, getSystemLogURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
 
-	var response api.ListResponse[LogEntry]
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return nil, err
-	}
-
 	var logList []LogAttributes
-	for _, log := range response.Results {
+	for _, log := range entries {
 		logList = append(logList, LogAttributes{
 			Program: log.Program,
 			Level:   getLogLevel(log.Level),
