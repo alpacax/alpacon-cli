@@ -8,8 +8,12 @@ import (
 )
 
 var serverRefreshCmd = &cobra.Command{
-	Use:     "refresh SERVER",
-	Short:   "Refresh a server's system information",
+	Use:   "refresh SERVER",
+	Short: "Refresh a server's system information",
+	Long: `
+	This command requests a refresh of a specified server's system information through its agent.
+	It is a non-disruptive action and does not require confirmation.
+	`,
 	Example: `alpacon server refresh my-server`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
