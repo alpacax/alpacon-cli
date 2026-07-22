@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +24,7 @@ var serverUpgradeCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		runDisruptiveServerAction(
 			args[0],
-			"upgrade_system",
+			server.ActionUpgradeSystem,
 			"Upgrade server '%s'?",
 			"System upgrade requested. Run 'alpacon events' to monitor progress.",
 			"Failed to upgrade the server",

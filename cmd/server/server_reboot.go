@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +24,7 @@ var serverRebootCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		runDisruptiveServerAction(
 			args[0],
-			"reboot_system",
+			server.ActionRebootSystem,
 			"Reboot server '%s'?",
 			"System reboot requested. Run 'alpacon events' to monitor progress.",
 			"Failed to reboot the server",

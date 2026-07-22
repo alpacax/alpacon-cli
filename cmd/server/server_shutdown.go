@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +24,7 @@ var serverShutdownCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		runDisruptiveServerAction(
 			args[0],
-			"shutdown_system",
+			server.ActionShutdownSystem,
 			"Shut down server '%s'?",
 			"System shutdown requested. Run 'alpacon events' to monitor progress.",
 			"Failed to shut down the server",

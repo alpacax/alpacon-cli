@@ -24,7 +24,7 @@ var serverRefreshCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		err = server.RequestServerAction(alpaconClient, serverName, "update_information", false)
+		err = server.RequestServerAction(alpaconClient, serverName, server.ActionUpdateInformation, false)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to refresh the server information: %s.", err)
 		}

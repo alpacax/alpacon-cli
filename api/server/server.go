@@ -21,6 +21,14 @@ const (
 	iamGroupURL = "/api/iam/groups/"
 )
 
+// Server action identifiers accepted by the actions endpoint.
+const (
+	ActionRebootSystem      = "reboot_system"
+	ActionShutdownSystem    = "shutdown_system"
+	ActionUpgradeSystem     = "upgrade_system"
+	ActionUpdateInformation = "update_information"
+)
+
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
 var ErrRegistrationTokenNotFound = errors.New("no registration token found with the given name")
 
