@@ -42,6 +42,11 @@ func runDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 	}
 	if err != nil {
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
+			if force {
+				utils.CliErrorWithExit("Server '%s' is still busy with active user work "+
+					"(open Websh/WebFTP session or in-flight command) despite --force. "+
+					"Retry when idle", serverName)
+			}
 			utils.CliErrorWithExit("Server '%s' is busy with active user work "+
 				"(open Websh/WebFTP session or in-flight command). "+
 				"Retry when idle, or pass --force to override", serverName)
