@@ -29,4 +29,5 @@ func init() {
 	ServerCmd.AddCommand(rebootServerCmd)
 	ServerCmd.AddCommand(shutdownServerCmd)
 	ServerCmd.AddCommand(upgradeServerCmd)
+	ServerCmd.AddCommand(refreshServerCmd)
 }

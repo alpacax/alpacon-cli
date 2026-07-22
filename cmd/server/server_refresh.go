@@ -28,7 +28,3 @@ var refreshServerCmd = &cobra.Command{
 		utils.CliSuccess("System information refresh requested. Run 'alpacon events' to monitor progress.")
 	},
 }
-
-func init() {
-	ServerCmd.AddCommand(refreshServerCmd)
-}
