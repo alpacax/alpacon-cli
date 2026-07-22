@@ -44,7 +44,7 @@ func runDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 	}
 	if err != nil {
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
-			utils.CliErrorWithExit("%s", busyGuardMessage(serverName, force))
+			utils.CliErrorWithExitCode(utils.ExitCodeServerBusy, "%s", busyGuardMessage(serverName, force))
 		}
 		utils.CliErrorWithExit("%s: %s.", failMsg, err)
 	}

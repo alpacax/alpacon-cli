@@ -37,6 +37,13 @@ const (
 	// PendingApprovalStatus is the stable machine-readable status string emitted
 	// under --output json when an action is pending human approval.
 	PendingApprovalStatus = "pending_approval"
+
+	// ExitCodeServerBusy is the process exit code for a disruptive server action
+	// refused because the server has active user work (server_busy_with_user_work).
+	// It is a transient, retryable "busy now → retry later" condition, distinct from
+	// a hard failure (1): scripts and AI agents branch on it to retry when idle
+	// (or re-run with --force) rather than give up.
+	ExitCodeServerBusy = 5
 )
 
 type ErrorResponse struct {

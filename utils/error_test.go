@@ -124,3 +124,9 @@ func TestWorkSessionConstants(t *testing.T) {
 	assert.Equal(t, "work_session_assignee_mismatch", WorkSessionAssigneeMismatch)
 	assert.Equal(t, 3, ExitCodeWorkSessionDenied)
 }
+
+func TestServerBusyExitCode(t *testing.T) {
+	// Stable, script-facing contract—see README "Exit codes".
+	assert.Equal(t, "server_busy_with_user_work", ServerBusyWithUserWork)
+	assert.Equal(t, 5, ExitCodeServerBusy)
+}

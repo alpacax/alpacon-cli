@@ -28,6 +28,15 @@ func CliErrorWithExit(msg string, args ...any) {
 	os.Exit(1)
 }
 
+// CliErrorWithExitCode prints an error message to stderr and exits with the given code.
+// Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
+// machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
+func CliErrorWithExitCode(code int, msg string, args ...any) {
+	errorMessage := fmt.Sprintf(msg, args...)
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), errorMessage)
+	os.Exit(code)
+}
+
 // CliInfo handles all informational messages in the CLI.
 func CliInfo(msg string, args ...any) {
 	infoMessage := fmt.Sprintf(msg, args...)
