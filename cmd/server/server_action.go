@@ -1,6 +1,8 @@
 package server
 
 import (
+	"fmt"
+
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
@@ -42,17 +44,22 @@ func runDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 	}
 	if err != nil {
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
-			if force {
-				utils.CliErrorWithExit("Server '%s' is still busy with active user work "+
-					"(open Websh/WebFTP session or in-flight command) despite --force. "+
-					"Retry when idle", serverName)
-			}
-			utils.CliErrorWithExit("Server '%s' is busy with active user work "+
-				"(open Websh/WebFTP session or in-flight command). "+
-				"Retry when idle, or pass --force to override", serverName)
+			utils.CliErrorWithExit("%s", busyGuardMessage(serverName, force))
 		}
 		utils.CliErrorWithExit("%s: %s.", failMsg, err)
 	}
 
 	utils.CliSuccess("%s", successMsg)
+}
+
+// busyGuardMessage returns the busy-guard refusal text, tailored to whether --force was already used.
+func busyGuardMessage(serverName string, force bool) string {
+	if force {
+		return fmt.Sprintf("Server '%s' is still busy with active user work "+
+			"(open Websh/WebFTP session or in-flight command) despite --force. "+
+			"Retry when idle", serverName)
+	}
+	return fmt.Sprintf("Server '%s' is busy with active user work "+
+		"(open Websh/WebFTP session or in-flight command). "+
+		"Retry when idle, or pass --force to override", serverName)
 }
