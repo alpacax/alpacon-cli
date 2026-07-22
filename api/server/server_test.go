@@ -518,8 +518,8 @@ func TestRequestServerAction(t *testing.T) {
 		action string
 		force  bool
 	}{
-		{"reboot with force", "reboot_system", true},
-		{"refresh without force", "update_information", false},
+		{"reboot with force", ActionRebootSystem, true},
+		{"refresh without force", ActionUpdateInformation, false},
 	}
 
 	for _, tt := range tests {
