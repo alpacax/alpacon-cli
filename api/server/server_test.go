@@ -537,7 +537,7 @@ func TestRequestServerAction(t *testing.T) {
 				}
 				if r.Method == http.MethodPost {
 					postCalled = true
-					if !strings.Contains(r.URL.Path, serverID) || !strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "actions") {
+					if r.URL.Path != serverURL+serverID+"/actions/" {
 						t.Errorf("unexpected POST path: %s", r.URL.Path)
 					}
 					var req serverActionRequest
