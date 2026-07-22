@@ -10,6 +10,9 @@ const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
 
+	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
+	ServerBusyWithUserWork = "server_busy_with_user_work"
+
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
 	WorkSessionRequired         = "work_session_required"
 	WorkSessionNotUsable        = "work_session_not_usable"
@@ -34,6 +37,13 @@ const (
 	// PendingApprovalStatus is the stable machine-readable status string emitted
 	// under --output json when an action is pending human approval.
 	PendingApprovalStatus = "pending_approval"
+
+	// ExitCodeServerBusy is the process exit code for a disruptive server action
+	// refused because the server has active user work (server_busy_with_user_work).
+	// It is a transient, retryable "busy now → retry later" condition, distinct from
+	// a hard failure (1): scripts and AI agents branch on it to retry when idle
+	// (or re-run with --force) rather than give up.
+	ExitCodeServerBusy = 5
 )
 
 type ErrorResponse struct {
@@ -82,12 +92,12 @@ func ParseErrorResponse(err error) (string, string) {
 
 		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
 		var iterCode, iterSource string
-		for _, part := range strings.Split(errStr, "; ") {
+		for part := range strings.SplitSeq(errStr, "; ") {
 			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "code: ") {
-				iterCode = strings.TrimPrefix(part, "code: ")
-			} else if strings.HasPrefix(part, "source: ") {
-				iterSource = strings.TrimPrefix(part, "source: ")
+			if after, ok := strings.CutPrefix(part, "code: "); ok {
+				iterCode = after
+			} else if after, ok := strings.CutPrefix(part, "source: "); ok {
+				iterSource = after
 			}
 		}
 		if iterCode != "" {

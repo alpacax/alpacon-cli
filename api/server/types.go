@@ -108,6 +108,12 @@ type ServerStatusMeta struct {
 	DelayNow float64 `json:"delay_now"`
 }
 
+// serverActionRequest is the actions-endpoint body; Force overrides the busy guard.
+type serverActionRequest struct {
+	Action string `json:"action"`
+	Force  bool   `json:"force"`
+}
+
 type ServerDetails struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
