@@ -509,3 +509,61 @@ func TestDeleteServer(t *testing.T) {
 		t.Error("DELETE request was not sent")
 	}
 }
+
+func TestRequestServerAction(t *testing.T) {
+	const serverID = "action-server-id"
+
+	tests := []struct {
+		name   string
+		action string
+		force  bool
+	}{
+		{"reboot with force", "reboot_system", true},
+		{"refresh without force", "update_information", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var postCalled bool
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "name=") {
+					resp := api.ListResponse[ServerDetails]{
+						Count:   1,
+						Results: []ServerDetails{{ID: serverID, Name: "target-server"}},
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(resp)
+					return
+				}
+				if r.Method == http.MethodPost {
+					postCalled = true
+					if !strings.Contains(r.URL.Path, serverID) || !strings.HasSuffix(strings.TrimRight(r.URL.Path, "/"), "actions") {
+						t.Errorf("unexpected POST path: %s", r.URL.Path)
+					}
+					var req serverActionRequest
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Fatalf("failed to decode request body: %v", err)
+					}
+					if req.Action != tt.action {
+						t.Errorf("expected action %q, got %q", tt.action, req.Action)
+					}
+					if req.Force != tt.force {
+						t.Errorf("expected force %v, got %v", tt.force, req.Force)
+					}
+					w.WriteHeader(http.StatusCreated)
+					return
+				}
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			if err := RequestServerAction(ac, "target-server", tt.action, tt.force); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !postCalled {
+				t.Error("POST request was not sent")
+			}
+		})
+	}
+}

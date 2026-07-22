@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -77,6 +78,18 @@ func DeleteServer(ac *client.AlpaconClient, serverName string) error {
 	}
 
 	return nil
+}
+
+func RequestServerAction(ac *client.AlpaconClient, serverName, action string, force bool) error {
+	serverID, err := GetServerIDByName(ac, serverName)
+	if err != nil {
+		return err
+	}
+
+	req := serverActionRequest{Action: action, Force: force}
+	relativePath := path.Join(serverID, "actions")
+	_, err = ac.SendPostRequest(utils.BuildURL(serverURL, relativePath, nil), req)
+	return err
 }
 
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
