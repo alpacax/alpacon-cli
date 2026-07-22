@@ -4,10 +4,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var upgradeServerCmd = &cobra.Command{
+var serverUpgradeCmd = &cobra.Command{
 	Use:     "upgrade SERVER",
 	Short:   "Upgrade a server's operating system packages",
-	Example: `alpacon server upgrade myserver`,
+	Example: `alpacon server upgrade my-server`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -24,6 +24,5 @@ var upgradeServerCmd = &cobra.Command{
 }
 
 func init() {
-	upgradeServerCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	upgradeServerCmd.Flags().Bool("force", false, "Override the busy guard even when the server has active user work")
+	addDisruptiveActionFlags(serverUpgradeCmd)
 }

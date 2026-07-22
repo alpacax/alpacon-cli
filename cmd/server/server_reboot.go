@@ -4,10 +4,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rebootServerCmd = &cobra.Command{
+var serverRebootCmd = &cobra.Command{
 	Use:     "reboot SERVER",
 	Short:   "Reboot a server's operating system",
-	Example: `alpacon server reboot myserver`,
+	Example: `alpacon server reboot my-server`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		yes, _ := cmd.Flags().GetBool("yes")
@@ -24,6 +24,5 @@ var rebootServerCmd = &cobra.Command{
 }
 
 func init() {
-	rebootServerCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
-	rebootServerCmd.Flags().Bool("force", false, "Override the busy guard even when the server has active user work")
+	addDisruptiveActionFlags(serverRebootCmd)
 }
