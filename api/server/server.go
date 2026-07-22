@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -87,7 +86,7 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 	}
 
 	req := serverActionRequest{Action: action, Force: force}
-	_, err = ac.SendPostRequest(utils.BuildURL(serverURL, path.Join(serverID, "actions"), nil), req)
+	_, err = ac.SendPostRequest(utils.BuildURL(serverURL, serverID+"/actions", nil), req)
 	return err
 }
 
