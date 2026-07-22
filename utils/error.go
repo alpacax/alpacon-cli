@@ -10,8 +10,7 @@ const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
 
-	// ServerBusyWithUserWork is returned when a disruptive server action is
-	// refused because the server has active user work; --force overrides it.
+	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
