@@ -35,7 +35,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 		var results []ServerDetails
 		switch page {
 		case "1", "": // page=1 or unspecified
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, ServerDetails{
 					ID:       fmt.Sprintf("id-%d", i),
 					Name:     fmt.Sprintf("server-%d", i),
@@ -44,7 +44,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, ServerDetails{
 					ID:       fmt.Sprintf("id-p2-%d", i),
 					Name:     fmt.Sprintf("server-p2-%d", i),

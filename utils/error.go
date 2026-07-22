@@ -86,12 +86,12 @@ func ParseErrorResponse(err error) (string, string) {
 
 		// Try "code: X; source: Y" format (produced by parseAPIError in the HTTP client)
 		var iterCode, iterSource string
-		for _, part := range strings.Split(errStr, "; ") {
+		for part := range strings.SplitSeq(errStr, "; ") {
 			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "code: ") {
-				iterCode = strings.TrimPrefix(part, "code: ")
-			} else if strings.HasPrefix(part, "source: ") {
-				iterSource = strings.TrimPrefix(part, "source: ")
+			if after, ok := strings.CutPrefix(part, "code: "); ok {
+				iterCode = after
+			} else if after, ok := strings.CutPrefix(part, "source: "); ok {
+				iterSource = after
 			}
 		}
 		if iterCode != "" {
