@@ -1103,16 +1103,31 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// holeServer serves /chunks/?seq__gte=N returning every seq >= N except those
-// in `hole`. fetches counts the chunk requests. Used to simulate a seq that is
-// never persisted server-side.
+// parseSeqLte reads the optional seq__lte upper bound; an absent or
+// unparseable value means "no upper bound" (mirroring the server).
+func parseSeqLte(r *http.Request) (to int, hasLte bool) {
+	if lte := r.URL.Query().Get("seq__lte"); lte != "" {
+		if v, err := strconv.Atoi(lte); err == nil {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// holeServer serves /chunks/?seq__gte=N[&seq__lte=M] returning every seq in the
+// window except those in `hole`. fetches counts the chunk requests. Used to
+// simulate a seq that is never persisted server-side.
 func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int32) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetches.Add(1)
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		to, hasLte := parseSeqLte(r)
 		var results []Chunk
 		for s := from; s <= maxSeq; s++ {
+			if hasLte && s > to {
+				break
+			}
 			if hole[s] {
 				continue
 			}
@@ -1125,18 +1140,20 @@ func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 }
 
-// chunkServer serves an explicit chunk list (filtered by seq__gte), for tests
-// that need specific or out-of-range seqs holeServer's contiguous range can't
-// express.
+// chunkServer serves an explicit chunk list (filtered by seq__gte and optional
+// seq__lte), for tests that need specific or out-of-range seqs holeServer's
+// contiguous range can't express.
 func chunkServer(t *testing.T, chunks []Chunk) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		to, hasLte := parseSeqLte(r)
 		var results []Chunk
 		for _, c := range chunks {
-			if c.Seq >= from {
-				results = append(results, c)
+			if c.Seq < from || (hasLte && c.Seq > to) {
+				continue
 			}
+			results = append(results, c)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
@@ -1342,7 +1359,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	out := &bytes.Buffer{}
 	last := 0
 	stderr := captureStderr(t, func() {
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
 			last = g.giveUpGap(last, next, nil, out)
 		}
