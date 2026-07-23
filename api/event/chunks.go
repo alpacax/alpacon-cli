@@ -10,7 +10,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 )
 
-// noSeqBound is the toSeq sentinel that leaves GetCommandChunks unbounded (seq
+// noSeqBound is the toSeq sentinel that leaves getCommandChunks unbounded (seq
 // is 0-indexed, so 0 is a valid upper bound and cannot mean "no bound").
 const noSeqBound = -1
 
@@ -20,11 +20,11 @@ type Chunk struct {
 	Content string `json:"content"`
 }
 
-// GetCommandChunks fetches chunks for cmdID with seq in [fromSeq, toSeq],
+// getCommandChunks fetches chunks for cmdID with seq in [fromSeq, toSeq],
 // sorted by seq ascending. A negative toSeq (noSeqBound) omits the upper
 // bound. The streaming consumers rely on the order, so we sort defensively
 // in case the server does not honor the ordering param.
-func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int) ([]Chunk, error) {
+func getCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int) ([]Chunk, error) {
 	endpoint := "/api/events/commands/" + url.PathEscape(cmdID) + "/chunks/"
 	params := map[string]string{
 		"seq__gte": strconv.Itoa(fromSeq),
@@ -47,7 +47,7 @@ func GetCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int
 // order. Empty when no chunks were produced. Used by non-streaming paths (exec
 // logs, polling fallback) where Result is empty under the chunk contract.
 func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
-	chunks, err := GetCommandChunks(ac, cmdID, 0, noSeqBound)
+	chunks, err := getCommandChunks(ac, cmdID, 0, noSeqBound)
 	if err != nil {
 		return "", err
 	}

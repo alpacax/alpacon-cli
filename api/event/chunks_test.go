@@ -38,7 +38,7 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := GetCommandChunks(ac, cmdID, 5, noSeqBound)
+	got, err := getCommandChunks(ac, cmdID, 5, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 5, Content: "hello\n"},
@@ -96,7 +96,7 @@ func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := GetCommandChunks(ac, cmdID, 0, noSeqBound)
+	got, err := getCommandChunks(ac, cmdID, 0, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 0, Content: "a\n"},
@@ -131,7 +131,7 @@ func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			_, err := GetCommandChunks(ac, cmdID, tt.fromSeq, tt.toSeq)
+			_, err := getCommandChunks(ac, cmdID, tt.fromSeq, tt.toSeq)
 			require.NoError(t, err)
 			for _, want := range tt.wantQ {
 				assert.Contains(t, capturedQuery, want)

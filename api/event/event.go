@@ -103,7 +103,7 @@ func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, ou
 	if len(g.skipped) == 0 {
 		return
 	}
-	final, err := GetCommandChunks(ac, cmdID, g.skipped[0], g.skipped[len(g.skipped)-1])
+	final, err := getCommandChunks(ac, cmdID, g.skipped[0], g.skipped[len(g.skipped)-1])
 	if err != nil {
 		utils.CliWarning("failed to fetch skipped chunks (seq %s): %v; output may be incomplete", formatSeqs(g.skipped), err)
 		return
@@ -347,7 +347,7 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	// as a duplicate. Chunks past the gap are picked up by applyChunk or the
 	// terminal drain once the gap is filled.
 	lastSeq := -1
-	if existing, err := GetCommandChunks(ac, cmdID, 0, noSeqBound); err == nil {
+	if existing, err := getCommandChunks(ac, cmdID, 0, noSeqBound); err == nil {
 		for _, c := range existing {
 			if c.Seq != lastSeq+1 {
 				break
@@ -413,7 +413,7 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 			return lastSeq
 		}
 		before := lastSeq
-		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1, chunk.Seq-1)
+		missing, err := getCommandChunks(ac, cmdID, lastSeq+1, chunk.Seq-1)
 		g.lastAttempt = gapFillNow()
 		if err != nil {
 			// Fetch failed: back off (noProgress++ keeps the throttle window
@@ -471,7 +471,7 @@ func chunkContent(chunks []Chunk) map[int]string {
 }
 
 func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
-	final, err := GetCommandChunks(ac, cmdID, lastSeq+1, noSeqBound)
+	final, err := getCommandChunks(ac, cmdID, lastSeq+1, noSeqBound)
 	if err != nil {
 		utils.CliWarning("failed to fetch trailing chunks (from seq %d): %v; output may be incomplete",
 			lastSeq+1, err)
