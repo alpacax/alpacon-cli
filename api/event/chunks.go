@@ -30,9 +30,9 @@ func getCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int
 		"seq__gte": strconv.Itoa(fromSeq),
 		"ordering": "seq",
 	}
+	// Send seq__lte only when bounded; omit rather than send empty, since the
+	// server's strict integer filter rejects an empty seq__lte.
 	if toSeq >= 0 {
-		// Omit rather than send empty when unbounded: the server's strict
-		// integer filter rejects an empty seq__lte.
 		params["seq__lte"] = strconv.Itoa(toSeq)
 	}
 	chunks, err := api.FetchAllPages[Chunk](ac, endpoint, params)
