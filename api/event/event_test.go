@@ -1103,8 +1103,9 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// parseSeqLte reads the optional seq__lte upper bound; an absent or
-// unparseable value means "no upper bound" (mirroring the server).
+// parseSeqLte reads the optional seq__lte upper bound. An absent value means
+// "no upper bound". An unparseable value is ignored here too, unlike the real
+// server, whose strict integer filter rejects it — the CLI never sends one.
 func parseSeqLte(r *http.Request) (to int, hasLte bool) {
 	if lte := r.URL.Query().Get("seq__lte"); lte != "" {
 		if v, err := strconv.Atoi(lte); err == nil {
