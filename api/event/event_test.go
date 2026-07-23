@@ -1440,3 +1440,78 @@ func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	assert.Equal(t, "c3\nc4\nc5\nc6\n", out.String())
 	assert.NotContains(t, stderr, "never arrived")
 }
+
+// TestApplyChunk_SendsSeqLteBound verifies the gap-fill re-fetch is bounded by
+// the live chunk that exposed the hole (seq__lte == chunk.Seq-1).
+func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
+	var lastLte atomic.Pointer[string]
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := r.URL.Query().Get("seq__lte")
+		lastLte.Store(&s)
+		// Return the whole gap so applyChunk can advance contiguously.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{
+			Count:   2,
+			Results: []Chunk{{Seq: 1, Content: "c1\n"}, {Seq: 2, Content: "c2\n"}},
+		})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	// lastSeq=0, live chunk seq=3 -> gap [1,2], bound seq__lte=2.
+	_ = applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+
+	got := lastLte.Load()
+	require.NotNil(t, got)
+	assert.Equal(t, "2", *got)
+}
+
+// TestRecoverSkippedChunks_SendsSeqLteBound verifies the final recovery fetch is
+// bounded by the last skipped seq (g.skipped is ascending).
+func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
+	var lastLte atomic.Pointer[string]
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := r.URL.Query().Get("seq__lte")
+		lastLte.Store(&s)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	g := &gapFillState{skipped: []int{1, 4}}
+	out := &bytes.Buffer{}
+	g.recoverSkipped(ac, "cmd", out)
+
+	got := lastLte.Load()
+	require.NotNil(t, got)
+	assert.Equal(t, "4", *got)
+}
+
+// TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical verifies that when a
+// server ignores seq__lte and returns the full tail, applyChunk's contiguous
+// consumption still stops at the live chunk (client-side upper-bound filter).
+func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Old server: ignores seq__lte, returns everything from seq__gte on.
+		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		var results []Chunk
+		for s := from; s <= 5; s++ {
+			results = append(results, Chunk{Seq: s, Content: fmt.Sprintf("c%d\n", s)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	// Gap [1,2] exposed by live chunk seq=3; server also returns 4,5 (ignored).
+	lastSeq := applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+
+	assert.Equal(t, 3, lastSeq, "advances only through the live chunk, not the extra tail")
+	assert.Equal(t, "c1\nc2\nc3\n", out.String(), "extra tail beyond the bound is not emitted")
+}
