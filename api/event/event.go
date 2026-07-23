@@ -426,8 +426,9 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 		} else {
 			// Advance only over contiguous seqs, stopping at the first hole, so a
 			// gap-fill racing ahead of persistence can't skip a not-yet-stored seq.
-			// The c.Seq > chunk.Seq clip is a safety net for old servers that
-			// ignore seq__lte and return the tail past the requested bound.
+			// The c.Seq > chunk.Seq clip caps consumption at the live chunk's seq
+			// (one past the requested seq__lte), so an old server that ignores
+			// seq__lte and returns the whole tail can't overrun the live chunk.
 			for _, c := range missing {
 				if c.Seq != lastSeq+1 || c.Seq > chunk.Seq {
 					break
