@@ -1103,16 +1103,32 @@ func captureStderr(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// holeServer serves /chunks/?seq__gte=N returning every seq >= N except those
-// in `hole`. fetches counts the chunk requests. Used to simulate a seq that is
-// never persisted server-side.
+// parseSeqLte reads the optional seq__lte upper bound. An absent value means
+// "no upper bound". An unparseable value is ignored here too, unlike the real
+// server, whose strict integer filter rejects it — the CLI never sends one.
+func parseSeqLte(r *http.Request) (to int, hasLte bool) {
+	if lte := r.URL.Query().Get("seq__lte"); lte != "" {
+		if v, err := strconv.Atoi(lte); err == nil {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// holeServer serves /chunks/?seq__gte=N[&seq__lte=M] returning every seq in the
+// window except those in `hole`. fetches counts the chunk requests. Used to
+// simulate a seq that is never persisted server-side.
 func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int32) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetches.Add(1)
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		to, hasLte := parseSeqLte(r)
 		var results []Chunk
 		for s := from; s <= maxSeq; s++ {
+			if hasLte && s > to {
+				break
+			}
 			if hole[s] {
 				continue
 			}
@@ -1125,18 +1141,20 @@ func holeServer(t *testing.T, maxSeq int, hole map[int]bool, fetches *atomic.Int
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 }
 
-// chunkServer serves an explicit chunk list (filtered by seq__gte), for tests
-// that need specific or out-of-range seqs holeServer's contiguous range can't
-// express.
+// chunkServer serves an explicit chunk list (filtered by seq__gte and optional
+// seq__lte), for tests that need specific or out-of-range seqs holeServer's
+// contiguous range can't express.
 func chunkServer(t *testing.T, chunks []Chunk) *client.AlpaconClient {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		to, hasLte := parseSeqLte(r)
 		var results []Chunk
 		for _, c := range chunks {
-			if c.Seq >= from {
-				results = append(results, c)
+			if c.Seq < from || (hasLte && c.Seq > to) {
+				continue
 			}
+			results = append(results, c)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
@@ -1422,4 +1440,106 @@ func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	assert.Equal(t, 6, lastSeq)
 	assert.Equal(t, "c3\nc4\nc5\nc6\n", out.String())
 	assert.NotContains(t, stderr, "never arrived")
+}
+
+// lteCapturingServer serves results and records the seq__gte/seq__lte query
+// params of the last request, so a caller can assert the fetch was bounded.
+// bounds() is read after the fetch completes, so the plain vars need no lock.
+func lteCapturingServer(t *testing.T, results []Chunk) (ac *client.AlpaconClient, bounds func() (gte, lte string)) {
+	t.Helper()
+	var gte, lte string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gte = r.URL.Query().Get("seq__gte")
+		lte = r.URL.Query().Get("seq__lte")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	ac = &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	return ac, func() (string, string) { return gte, lte }
+}
+
+// TestApplyChunk_SendsSeqLteBound verifies the gap-fill re-fetch is bounded by
+// the live chunk that exposed the hole (seq__gte == lastSeq+1, seq__lte == chunk.Seq-1).
+func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
+	// Return the whole gap so applyChunk can advance contiguously.
+	ac, bounds := lteCapturingServer(t, []Chunk{{Seq: 1, Content: "c1\n"}, {Seq: 2, Content: "c2\n"}})
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	// lastSeq=0, live chunk seq=3 -> gap [1,2], bounds seq__gte=1, seq__lte=2.
+	_ = applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+
+	gte, lte := bounds()
+	assert.Equal(t, "1", gte)
+	assert.Equal(t, "2", lte)
+}
+
+// TestRecoverSkippedChunks_SendsSeqLteBound verifies the final recovery fetch is
+// bounded by the first and last skipped seq (g.skipped is ascending).
+func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
+	ac, bounds := lteCapturingServer(t, nil)
+
+	g := &gapFillState{skipped: []int{1, 4}}
+	out := &bytes.Buffer{}
+	_ = captureStderr(t, func() {
+		g.recoverSkipped(ac, "cmd", out)
+	})
+
+	gte, lte := bounds()
+	assert.Equal(t, "1", gte)
+	assert.Equal(t, "4", lte)
+}
+
+// TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical verifies that when a
+// server ignores seq__lte and returns the full tail, applyChunk's contiguous
+// consumption still stops at the live chunk (client-side upper-bound filter).
+func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Old server: ignores seq__lte, returns everything from seq__gte on.
+		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		var results []Chunk
+		for s := from; s <= 5; s++ {
+			results = append(results, Chunk{Seq: s, Content: fmt.Sprintf("c%d\n", s)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	g := &gapFillState{}
+	out := &bytes.Buffer{}
+	// Gap [1,2] exposed by live chunk seq=3; server also returns 4,5 (ignored).
+	lastSeq := applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+
+	assert.Equal(t, 3, lastSeq, "advances only through the live chunk, not the extra tail")
+	assert.Equal(t, "c1\nc2\nc3\n", out.String(), "extra tail beyond the bound is not emitted")
+}
+
+// TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical verifies that
+// when a server ignores seq__lte and returns extra chunks, recoverSkipped emits
+// only the skipped seqs it looks up via the bySeq map, never the extra tail.
+func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Old server: ignores seq__lte, returns everything from seq__gte on.
+		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
+		var results []Chunk
+		for s := from; s <= 6; s++ {
+			results = append(results, Chunk{Seq: s, Content: fmt.Sprintf("c%d\n", s)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	g := &gapFillState{skipped: []int{1, 4}}
+	out := &bytes.Buffer{}
+	// Server returns 1..6 (ignoring seq__lte=4); only skipped 1 and 4 are emitted.
+	_ = captureStderr(t, func() {
+		g.recoverSkipped(ac, "cmd", out)
+	})
+
+	assert.Equal(t, "c1\nc4\n", out.String(), "only skipped seqs emitted, extra tail ignored")
 }

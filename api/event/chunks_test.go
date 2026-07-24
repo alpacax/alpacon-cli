@@ -38,7 +38,7 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := GetCommandChunks(ac, cmdID, 5)
+	got, err := getCommandChunks(ac, cmdID, 5, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 5, Content: "hello\n"},
@@ -46,6 +46,7 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	}, got)
 	assert.Contains(t, capturedQuery, "seq__gte=5")
 	assert.Contains(t, capturedQuery, "ordering=seq")
+	assert.NotContains(t, capturedQuery, "seq__lte")
 }
 
 // TestGetCommandOutput_ConcatenatesChunksInSeqOrder verifies the full output is
@@ -95,11 +96,46 @@ func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := GetCommandChunks(ac, cmdID, 0)
+	got, err := getCommandChunks(ac, cmdID, 0, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 0, Content: "a\n"},
 		{Seq: 1, Content: "b\n"},
 		{Seq: 2, Content: "c\n"},
 	}, got)
+}
+
+// TestGetCommandChunks_SendsSeqLteWhenBounded verifies a non-negative toSeq is
+// sent as the seq__lte upper bound.
+func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
+	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
+	tests := []struct {
+		name    string
+		fromSeq int
+		toSeq   int
+		wantQ   []string
+	}{
+		{"bounded range", 5, 8, []string{"seq__gte=5", "seq__lte=8"}},
+		// toSeq=0 is a valid bound (seq is 0-indexed), not treated as "unbounded".
+		{"zero is a valid bound", 0, 0, []string{"seq__lte=0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedQuery string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				capturedQuery = r.URL.RawQuery
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{})
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := getCommandChunks(ac, cmdID, tt.fromSeq, tt.toSeq)
+			require.NoError(t, err)
+			for _, want := range tt.wantQ {
+				assert.Contains(t, capturedQuery, want)
+			}
+		})
+	}
 }

@@ -98,12 +98,12 @@ func (g *gapFillState) giveUpGap(lastSeq, nextSeq int, missing []Chunk, out io.W
 
 // recoverSkipped makes a final fetch for seqs skipped mid-stream (giveUpGap),
 // printing late content out of order and reporting still-absent seqs as lost.
-// g.skipped is ascending, so the fetch starts at its first seq.
+// g.skipped is ascending, so the fetch is bounded to [first seq, last seq].
 func (g *gapFillState) recoverSkipped(ac *client.AlpaconClient, cmdID string, out io.Writer) {
 	if len(g.skipped) == 0 {
 		return
 	}
-	final, err := GetCommandChunks(ac, cmdID, g.skipped[0])
+	final, err := getCommandChunks(ac, cmdID, g.skipped[0], g.skipped[len(g.skipped)-1])
 	if err != nil {
 		utils.CliWarning("failed to fetch skipped chunks (seq %s): %v; output may be incomplete", formatSeqs(g.skipped), err)
 		return
@@ -347,7 +347,7 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	// as a duplicate. Chunks past the gap are picked up by applyChunk or the
 	// terminal drain once the gap is filled.
 	lastSeq := -1
-	if existing, err := GetCommandChunks(ac, cmdID, 0); err == nil {
+	if existing, err := getCommandChunks(ac, cmdID, 0, noSeqBound); err == nil {
 		for _, c := range existing {
 			if c.Seq != lastSeq+1 {
 				break
@@ -413,7 +413,7 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 			return lastSeq
 		}
 		before := lastSeq
-		missing, err := GetCommandChunks(ac, cmdID, lastSeq+1)
+		missing, err := getCommandChunks(ac, cmdID, lastSeq+1, chunk.Seq-1)
 		g.lastAttempt = gapFillNow()
 		if err != nil {
 			// Fetch failed: back off (noProgress++ keeps the throttle window
@@ -426,6 +426,9 @@ func applyChunk(ac *client.AlpaconClient, cmdID string, lastSeq int, chunk Chunk
 		} else {
 			// Advance only over contiguous seqs, stopping at the first hole, so a
 			// gap-fill racing ahead of persistence can't skip a not-yet-stored seq.
+			// The c.Seq > chunk.Seq clip caps consumption at the live chunk's seq
+			// (one past the requested seq__lte), so an old server that ignores
+			// seq__lte and returns the whole tail can't overrun the live chunk.
 			for _, c := range missing {
 				if c.Seq != lastSeq+1 || c.Seq > chunk.Seq {
 					break
@@ -468,7 +471,7 @@ func chunkContent(chunks []Chunk) map[int]string {
 }
 
 func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, out io.Writer) int {
-	final, err := GetCommandChunks(ac, cmdID, lastSeq+1)
+	final, err := getCommandChunks(ac, cmdID, lastSeq+1, noSeqBound)
 	if err != nil {
 		utils.CliWarning("failed to fetch trailing chunks (from seq %d): %v; output may be incomplete",
 			lastSeq+1, err)
