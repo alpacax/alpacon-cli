@@ -145,9 +145,10 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 
 	sl := NewSudoListener(nil, wsURL, "")
 
-	// Run connectAndListen and signal when the read loop processes a message
+	// Local signal, so the test does not close the skeleton's stopped channel
+	readDone := make(chan struct{})
 	go func() {
-		defer close(sl.stopped)
+		defer close(readDone)
 		_ = sl.connectAndListen()
 	}()
 
@@ -161,7 +162,7 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 	close(clientRead) // server closes → client read loop exits
 
 	select {
-	case <-sl.stopped:
+	case <-readDone:
 		// connectAndListen returned cleanly after server disconnect
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for connectAndListen to return")
