@@ -27,7 +27,7 @@ type wsListener struct {
 	connected   chan struct{} // closed after first successful WebSocket connection
 	connectOnce sync.Once
 	closeOnce   sync.Once
-	mu          sync.Mutex // guards conn; embedders may reuse it for their own state
+	mu          sync.Mutex // guards conn
 	conn        *websocket.Conn
 }
 

@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -28,6 +29,7 @@ type ChunkEvent struct {
 // Stop is idempotent and safe to call from any goroutine.
 type CommandOutputListener struct {
 	*wsListener
+	cmdMu     sync.Mutex // guards commandID
 	commandID string
 	chunks    chan ChunkEvent
 }
@@ -68,9 +70,9 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	if env.EventType != "command_output" {
 		return
 	}
-	l.mu.Lock()
+	l.cmdMu.Lock()
 	cid := l.commandID
-	l.mu.Unlock()
+	l.cmdMu.Unlock()
 	if env.Payload.CommandID != cid {
 		return
 	}
@@ -84,7 +86,7 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 // setCommandID assigns the commandID after construction. Used because
 // SubmitCommand must run after the WS is already connected.
 func (l *CommandOutputListener) setCommandID(id string) {
-	l.mu.Lock()
+	l.cmdMu.Lock()
 	l.commandID = id
-	l.mu.Unlock()
+	l.cmdMu.Unlock()
 }
