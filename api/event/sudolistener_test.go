@@ -69,6 +69,17 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 	}
 }
 
+func TestSudoListener_HandleSudoMFA_DropsRequestWhenClientIsNil(t *testing.T) {
+	sl := NewSudoListener(nil, "", "")
+
+	var event sudoMFAEvent
+	event.Payload.Type = "auth"
+	event.Payload.Query = "mfa_request"
+	event.Payload.SudoGrantID = "test-grant-id"
+
+	assert.NotPanics(t, func() { sl.handleSudoMFA(event) })
+}
+
 func TestSudoListener_StopIsIdempotent(t *testing.T) {
 	sl := NewSudoListener(nil, "", "")
 

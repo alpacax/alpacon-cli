@@ -55,7 +55,7 @@ type SudoListener struct {
 }
 
 // NewSudoListener creates a SudoListener but does not connect yet. ac may be
-// nil only in tests that never reach the MFA flow, which dereferences it.
+// nil in tests; MFA request frames are then dropped instead of dereferencing it.
 func NewSudoListener(ac *client.AlpaconClient, wsURL, serverName string) *SudoListener {
 	sl := &SudoListener{
 		wsListener: newWSListener(ac, wsURL, sudoHandshakeTimeout),
@@ -84,6 +84,11 @@ func (sl *SudoListener) handleMessage(message []byte) {
 }
 
 func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
+	// Every step below dereferences ac, which is nil only in tests.
+	if sl.ac == nil {
+		return
+	}
+
 	// Check if shutdown was requested before acquiring the lock or doing side effects
 	select {
 	case <-sl.done:

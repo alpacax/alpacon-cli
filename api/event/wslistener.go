@@ -50,6 +50,12 @@ func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time
 // Start reads events in a background goroutine, reconnecting automatically
 // until Stop is called.
 func (w *wsListener) Start() {
+	// Fail here rather than in the read loop, where the nil call would only
+	// surface after a successful dial, on another goroutine.
+	if w.handleFrame == nil {
+		panic("event: wsListener.handleFrame must be assigned before Start")
+	}
+
 	go func() {
 		defer close(w.stopped)
 		w.listenLoop()
