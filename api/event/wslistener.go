@@ -107,12 +107,18 @@ func (w *wsListener) listenLoop() {
 		case <-w.done:
 			return
 		case <-time.After(delay):
-			delay *= 2
-			if delay > wsReconnectMaxDelay {
-				delay = wsReconnectMaxDelay
-			}
+			delay = nextReconnectDelay(delay)
 		}
 	}
+}
+
+// nextReconnectDelay doubles the backoff first, so the cap is a ceiling on the
+// delay actually waited rather than on the value that gets doubled.
+func nextReconnectDelay(delay time.Duration) time.Duration {
+	if delay *= 2; delay > wsReconnectMaxDelay {
+		return wsReconnectMaxDelay
+	}
+	return delay
 }
 
 // connectAndListen dials the event WebSocket and reads until it drops or Stop

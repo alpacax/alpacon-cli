@@ -1,6 +1,10 @@
 package event
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +50,65 @@ func TestWSListener_WaitConnected_Timeout(t *testing.T) {
 	assert.False(t, result, "should return false on timeout")
 	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
 	assert.Less(t, elapsed, 1*time.Second)
+}
+
+func TestWSListener_NextReconnectDelay(t *testing.T) {
+	tests := []struct {
+		name  string
+		delay time.Duration
+		want  time.Duration
+	}{
+		{"base doubles", wsReconnectBaseDelay, 2 * time.Second},
+		{"below cap doubles", 8 * time.Second, 16 * time.Second},
+		{"overshoot clamps to cap", 16 * time.Second, wsReconnectMaxDelay},
+		{"cap stays at cap", wsReconnectMaxDelay, wsReconnectMaxDelay},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextReconnectDelay(tt.delay))
+		})
+	}
+}
+
+func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T) {
+	// Responds 200 instead of upgrading, so Dial fails with ErrBadHandshake.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	w := newWSListener(nil, "ws"+strings.TrimPrefix(server.URL, "http"), time.Second)
+	w.handleFrame = func([]byte) {}
+
+	assert.False(t, w.connectAndListen(), "failed handshake should not count as connected")
+	assert.False(t, w.WaitConnected(0), "connected must stay open after a failed dial")
+}
+
+func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
+	var dialed atomic.Int32
+
+	// Counted at handler entry so the increment happens-before Dial returns.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dialed.Add(1)
+	}))
+	defer server.Close()
+
+	w := newWSListener(nil, "ws"+strings.TrimPrefix(server.URL, "http"), time.Second)
+	w.handleFrame = func([]byte) {}
+	w.Stop()
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		w.listenLoop()
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listenLoop should return immediately when done is already closed")
+	}
+
+	assert.Zero(t, dialed.Load(), "listenLoop should not dial after Stop")
 }
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
