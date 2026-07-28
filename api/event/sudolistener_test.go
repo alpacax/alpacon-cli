@@ -206,6 +206,13 @@ func TestSudoListener_WaitConnected_Shutdown(t *testing.T) {
 	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
 }
 
+func newTestSudoListener(ts *httptest.Server) *SudoListener {
+	return NewSudoListener(&client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}, "", "")
+}
+
 func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -223,10 +230,7 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sl := NewSudoListener(&client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}, "", "")
+	sl := newTestSudoListener(ts)
 
 	err := sl.verifySudoGrant("grant-123")
 	assert.NoError(t, err)
@@ -238,10 +242,7 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sl := NewSudoListener(&client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
-	}, "", "")
+	sl := newTestSudoListener(ts)
 
 	err := sl.verifySudoGrant("grant-123")
 	assert.Error(t, err)
