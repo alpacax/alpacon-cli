@@ -67,7 +67,7 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return
 	}
-	if env.EventType != "command_output" {
+	if env.EventType != EventTypeCommandOutput {
 		return
 	}
 	l.cmdMu.Lock()
