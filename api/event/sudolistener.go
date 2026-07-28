@@ -48,7 +48,7 @@ type sudoMFAEvent struct {
 // http.Client is concurrency-safe. Token refresh and grant verification are
 // serialized by mfaMu so only one MFA flow runs at a time.
 type SudoListener struct {
-	wsListener
+	*wsListener
 	ac         *client.AlpaconClient
 	serverName string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time

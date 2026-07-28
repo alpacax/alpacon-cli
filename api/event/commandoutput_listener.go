@@ -27,7 +27,7 @@ type ChunkEvent struct {
 // Lifecycle: NewCommandOutputListener -> Start -> (consume Chunks) -> Stop.
 // Stop is idempotent and safe to call from any goroutine.
 type CommandOutputListener struct {
-	wsListener
+	*wsListener
 	commandID string
 	chunks    chan ChunkEvent
 }

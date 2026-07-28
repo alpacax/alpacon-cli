@@ -32,12 +32,12 @@ type wsListener struct {
 }
 
 // newWSListener builds the shared skeleton. ac may be nil (empty header, for tests).
-func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time.Duration) wsListener {
+func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time.Duration) *wsListener {
 	wsHeader := http.Header{}
 	if ac != nil {
 		wsHeader = ac.SetWebsocketHeader()
 	}
-	return wsListener{
+	return &wsListener{
 		wsURL:            wsURL,
 		wsHeader:         wsHeader,
 		handshakeTimeout: handshakeTimeout,
