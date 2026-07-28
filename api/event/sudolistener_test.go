@@ -60,11 +60,7 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 		},
 	}
 
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,11 +70,7 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 }
 
 func TestSudoListener_StopIsIdempotent(t *testing.T) {
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	sl.Stop()
 	sl.Stop()
@@ -102,13 +94,7 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	sl := &SudoListener{
-		wsURL:     wsURL,
-		wsHeader:  http.Header{},
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, wsURL, "")
 	sl.Start()
 
 	// Wait for connection to establish by polling sl.conn
@@ -154,18 +140,12 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	sl := &SudoListener{
-		wsURL:     wsURL,
-		wsHeader:  http.Header{},
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, wsURL, "")
 
 	// Run connectAndListen and signal when the read loop processes a message
 	go func() {
 		defer close(sl.stopped)
-		_, _ = sl.connectAndListen()
+		_ = sl.connectAndListen()
 	}()
 
 	// Wait for connection, then signal server to close
@@ -186,11 +166,7 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 }
 
 func TestSudoListener_WaitConnected_Success(t *testing.T) {
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	// Simulate connection after short delay
 	go func() {
@@ -203,11 +179,7 @@ func TestSudoListener_WaitConnected_Success(t *testing.T) {
 }
 
 func TestSudoListener_WaitConnected_Timeout(t *testing.T) {
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	start := time.Now()
 	result := sl.WaitConnected(100 * time.Millisecond)
@@ -219,11 +191,7 @@ func TestSudoListener_WaitConnected_Timeout(t *testing.T) {
 }
 
 func TestSudoListener_WaitConnected_Shutdown(t *testing.T) {
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -255,15 +223,10 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sl := &SudoListener{
-		ac: &client.AlpaconClient{
-			HTTPClient: ts.Client(),
-			BaseURL:    ts.URL,
-		},
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(&client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}, "", "")
 
 	err := sl.verifySudoGrant("grant-123")
 	assert.NoError(t, err)
@@ -275,15 +238,10 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sl := &SudoListener{
-		ac: &client.AlpaconClient{
-			HTTPClient: ts.Client(),
-			BaseURL:    ts.URL,
-		},
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(&client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}, "", "")
 
 	err := sl.verifySudoGrant("grant-123")
 	assert.Error(t, err)
@@ -305,13 +263,7 @@ func TestSudoListener_ReconnectsAfterDisconnect(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	sl := &SudoListener{
-		wsURL:     wsURL,
-		wsHeader:  http.Header{},
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, wsURL, "")
 	sl.Start()
 
 	// Wait for at least 2 connection attempts (initial + reconnect)
@@ -329,11 +281,7 @@ func TestSudoListener_ReconnectsAfterDisconnect(t *testing.T) {
 }
 
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
-	sl := &SudoListener{
-		done:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	sl := NewSudoListener(nil, "", "")
 
 	start := time.Now()
 	go func() {

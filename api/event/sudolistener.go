@@ -3,7 +3,6 @@ package event
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"sync"
@@ -12,7 +11,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -28,11 +26,7 @@ const (
 	// extra buffer over that so a slow browser MFA does not race the expiry.
 	mfaPollingTimeout = 60 * time.Second
 
-	// reconnectBaseDelay is the initial delay for WebSocket reconnection.
-	reconnectBaseDelay = 1 * time.Second
-
-	// reconnectMaxDelay is the maximum delay between reconnection attempts.
-	reconnectMaxDelay = 30 * time.Second
+	sudoHandshakeTimeout = 10 * time.Second
 )
 
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
@@ -54,145 +48,22 @@ type sudoMFAEvent struct {
 // http.Client is concurrency-safe. Token refresh and grant verification are
 // serialized by mfaMu so only one MFA flow runs at a time.
 type SudoListener struct {
-	ac          *client.AlpaconClient
-	serverName  string
-	wsURL       string
-	wsHeader    http.Header
-	done        chan struct{}
-	stopped     chan struct{} // closed when listenLoop exits
-	connected   chan struct{} // closed after first successful WebSocket connection
-	connectOnce sync.Once
-	closeOnce   sync.Once
-	mu          sync.Mutex
-	conn        *websocket.Conn
-	mfaMu       sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
+	wsListener
+	ac         *client.AlpaconClient
+	serverName string
+	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 }
 
-// NewSudoListener creates a SudoListener but does not connect yet.
+// NewSudoListener creates a SudoListener but does not connect yet. ac may be
+// nil only in tests that never reach the MFA flow, which dereferences it.
 func NewSudoListener(ac *client.AlpaconClient, wsURL, serverName string) *SudoListener {
-	return &SudoListener{
+	sl := &SudoListener{
+		wsListener: newWSListener(ac, wsURL, sudoHandshakeTimeout),
 		ac:         ac,
 		serverName: serverName,
-		wsURL:      wsURL,
-		wsHeader:   ac.SetWebsocketHeader(),
-		done:       make(chan struct{}),
-		stopped:    make(chan struct{}),
-		connected:  make(chan struct{}),
 	}
-}
-
-// Start begins listening for sudo MFA events in a background goroutine.
-// It automatically reconnects on disconnection. Call Stop() to shut down.
-func (sl *SudoListener) Start() {
-	go func() {
-		defer close(sl.stopped)
-		sl.listenLoop()
-	}()
-}
-
-// WaitConnected blocks until the WebSocket connection is established or the
-// timeout expires. Returns true if connected, false on timeout or shutdown.
-func (sl *SudoListener) WaitConnected(timeout time.Duration) bool {
-	select {
-	case <-sl.connected:
-		return true
-	case <-sl.done:
-		return false
-	case <-time.After(timeout):
-		return false
-	}
-}
-
-// Stop signals the listener to shut down and closes the WebSocket connection
-// to unblock any pending ReadMessage call.
-func (sl *SudoListener) Stop() {
-	sl.closeOnce.Do(func() {
-		close(sl.done)
-		sl.mu.Lock()
-		if sl.conn != nil {
-			_ = sl.conn.Close()
-		}
-		sl.mu.Unlock()
-	})
-}
-
-func (sl *SudoListener) listenLoop() {
-	delay := reconnectBaseDelay
-
-	for {
-		select {
-		case <-sl.done:
-			return
-		default:
-		}
-
-		connected, err := sl.connectAndListen()
-		if err == nil {
-			return
-		}
-
-		// Reset backoff if we had a successful connection that later dropped
-		if connected {
-			delay = reconnectBaseDelay
-		}
-
-		select {
-		case <-sl.done:
-			return
-		case <-time.After(delay):
-			delay *= 2
-			if delay > reconnectMaxDelay {
-				delay = reconnectMaxDelay
-			}
-		}
-	}
-}
-
-// connectAndListen dials the event WebSocket and reads messages until
-// the connection drops or Stop() is called. Returns (true, err) if the
-// connection was established, (false, err) if the dial itself failed.
-func (sl *SudoListener) connectAndListen() (connected bool, err error) {
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-	conn, _, dialErr := dialer.Dial(sl.wsURL, sl.wsHeader)
-	if dialErr != nil {
-		return false, fmt.Errorf("event websocket connection failed: %w", dialErr)
-	}
-
-	sl.mu.Lock()
-	sl.conn = conn
-	sl.mu.Unlock()
-
-	// Signal that we have successfully connected (first time only)
-	sl.connectOnce.Do(func() { close(sl.connected) })
-
-	defer func() {
-		sl.mu.Lock()
-		sl.conn = nil
-		sl.mu.Unlock()
-		_ = conn.Close()
-	}()
-
-	for {
-		select {
-		case <-sl.done:
-			return true, nil
-		default:
-		}
-
-		_, message, readErr := conn.ReadMessage()
-		if readErr != nil {
-			select {
-			case <-sl.done:
-				return true, nil
-			default:
-			}
-			return true, fmt.Errorf("event websocket read error: %w", readErr)
-		}
-
-		sl.handleMessage(message)
-	}
+	sl.handleFrame = sl.handleMessage
+	return sl
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {

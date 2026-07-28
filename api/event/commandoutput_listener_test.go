@@ -45,11 +45,7 @@ func TestCommandOutputListener_HandleMessage_FiltersAndEmits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := &CommandOutputListener{
-				commandID: "cmd-1",
-				chunks:    make(chan ChunkEvent, 1),
-				done:      make(chan struct{}),
-			}
+			l := NewCommandOutputListener(nil, "", "cmd-1")
 			l.handleMessage([]byte(tt.payload))
 
 			select {
@@ -124,11 +120,7 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 }
 
 func TestCommandOutputListener_StopIsIdempotent(t *testing.T) {
-	l := &CommandOutputListener{
-		chunks:    make(chan ChunkEvent, 1),
-		done:      make(chan struct{}),
-		connected: make(chan struct{}),
-	}
+	l := NewCommandOutputListener(nil, "", "")
 	l.Stop()
 	l.Stop()
 	l.Stop()
