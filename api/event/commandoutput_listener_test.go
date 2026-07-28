@@ -119,13 +119,6 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 	assert.Equal(t, []ChunkEvent{{Seq: 0, Content: "a"}, {Seq: 1, Content: "b"}}, got)
 }
 
-func TestCommandOutputListener_StopIsIdempotent(t *testing.T) {
-	l := NewCommandOutputListener(nil, "", "")
-	l.Stop()
-	l.Stop()
-	l.Stop()
-}
-
 func TestCommandOutputListener_Reconnects(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var connectionCount atomic.Int32

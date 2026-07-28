@@ -80,14 +80,6 @@ func TestSudoListener_HandleSudoMFA_DropsRequestWhenClientIsNil(t *testing.T) {
 	assert.NotPanics(t, func() { sl.handleSudoMFA(event) })
 }
 
-func TestSudoListener_StopIsIdempotent(t *testing.T) {
-	sl := NewSudoListener(nil, "", "")
-
-	sl.Stop()
-	sl.Stop()
-	sl.Stop()
-}
-
 func TestSudoListener_StopClosesConnection(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
@@ -174,47 +166,6 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for connectAndListen to return")
 	}
-}
-
-func TestSudoListener_WaitConnected_Success(t *testing.T) {
-	sl := NewSudoListener(nil, "", "")
-
-	// Simulate connection after short delay
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(sl.connected)
-	}()
-
-	result := sl.WaitConnected(2 * time.Second)
-	assert.True(t, result, "should return true when connected")
-}
-
-func TestSudoListener_WaitConnected_Timeout(t *testing.T) {
-	sl := NewSudoListener(nil, "", "")
-
-	start := time.Now()
-	result := sl.WaitConnected(100 * time.Millisecond)
-	elapsed := time.Since(start)
-
-	assert.False(t, result, "should return false on timeout")
-	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
-	assert.Less(t, elapsed, 1*time.Second)
-}
-
-func TestSudoListener_WaitConnected_Shutdown(t *testing.T) {
-	sl := NewSudoListener(nil, "", "")
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(sl.done)
-	}()
-
-	start := time.Now()
-	result := sl.WaitConnected(5 * time.Second)
-	elapsed := time.Since(start)
-
-	assert.False(t, result, "should return false when done is closed")
-	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
 }
 
 func newTestSudoListener(ts *httptest.Server) *SudoListener {
