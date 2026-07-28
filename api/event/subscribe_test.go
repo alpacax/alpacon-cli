@@ -40,31 +40,47 @@ func TestCreateEventSession(t *testing.T) {
 	assert.Equal(t, expected.ChannelID, resp.ChannelID)
 }
 
-func TestSubscribeSudoEvent(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Contains(t, r.URL.Path, "events/subscriptions")
-
-		var req EventSubscriptionRequest
-		err := json.NewDecoder(r.Body).Decode(&req)
-		assert.NoError(t, err)
-		assert.Equal(t, "channel-456", req.Channel)
-		assert.Equal(t, "sudo", req.EventType)
-		assert.Equal(t, "session-123", req.TargetID)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"sub-789"}`))
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
+func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		targetID  string
+	}{
+		{name: "sudo", eventType: EventTypeSudo, targetID: "session-123"},
+		{name: "command output", eventType: EventTypeCommandOutput, targetID: "command-uuid"},
+		{name: "type the CLI does not know yet", eventType: "work_session", targetID: "ws-uuid"},
 	}
 
-	err := SubscribeSudoEvent(ac, "channel-456", "session-123")
-	assert.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Contains(t, r.URL.Path, "events/subscriptions")
+
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+
+				var req EventSubscriptionRequest
+				require.NoError(t, json.Unmarshal(body, &req))
+				assert.Equal(t, "channel-456", req.Channel)
+				assert.Equal(t, tt.eventType, req.EventType)
+				assert.Equal(t, tt.targetID, req.TargetID)
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":"sub-789"}`))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{
+				HTTPClient: ts.Client(),
+				BaseURL:    ts.URL,
+			}
+
+			err := SubscribeEvent(ac, "channel-456", tt.eventType, tt.targetID)
+			assert.NoError(t, err)
+		})
+	}
 }
 
 func TestCreateEventSession_ServerError(t *testing.T) {
@@ -83,7 +99,7 @@ func TestCreateEventSession_ServerError(t *testing.T) {
 	assert.Nil(t, resp)
 }
 
-func TestSubscribeSudoEvent_ServerError(t *testing.T) {
+func TestSubscribeEvent_ServerError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -94,35 +110,8 @@ func TestSubscribeSudoEvent_ServerError(t *testing.T) {
 		BaseURL:    ts.URL,
 	}
 
-	err := SubscribeSudoEvent(ac, "channel-456", "session-123")
-	assert.Error(t, err)
-}
-
-func TestSubscribeCommandOutput_SendsExpectedPayload(t *testing.T) {
-	channelID := "channel-uuid"
-	cmdID := "command-uuid"
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Contains(t, r.URL.Path, "events/subscriptions")
-
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-
-		var req EventSubscriptionRequest
-		require.NoError(t, json.Unmarshal(body, &req))
-		assert.Equal(t, channelID, req.Channel)
-		assert.Equal(t, "command_output", req.EventType)
-		assert.Equal(t, cmdID, req.TargetID)
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	err := SubscribeCommandOutput(ac, channelID, cmdID)
-	assert.NoError(t, err)
+	err := SubscribeEvent(ac, "channel-456", EventTypeSudo, "session-123")
+	require.Error(t, err)
+	// websh's isNotFoundError matches a literal ": not found" suffix, so the wrap must keep the server's message last.
+	assert.Contains(t, err.Error(), "failed to subscribe to sudo events: ")
 }

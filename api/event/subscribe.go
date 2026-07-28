@@ -10,6 +10,10 @@ import (
 const (
 	eventSessionsURL      = "/api/events/sessions/"
 	eventSubscriptionsURL = "/api/events/subscriptions/"
+
+	// Event types the CLI subscribes to; the server defines the full set.
+	EventTypeSudo          = "sudo"
+	EventTypeCommandOutput = "command_output"
 )
 
 // EventSessionResponse is returned when creating an event session.
@@ -42,34 +46,18 @@ func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error)
 	return &resp, nil
 }
 
-// SubscribeSudoEvent subscribes the given channel to sudo events for a websh session.
-func SubscribeSudoEvent(ac *client.AlpaconClient, channelID, sessionID string) error {
+// SubscribeEvent subscribes the given channel to eventType events, scoped to
+// targetID (a websh session for sudo, a command for command_output).
+func SubscribeEvent(ac *client.AlpaconClient, channelID, eventType, targetID string) error {
 	req := &EventSubscriptionRequest{
 		Channel:   channelID,
-		EventType: "sudo",
-		TargetID:  sessionID,
+		EventType: eventType,
+		TargetID:  targetID,
 	}
 
 	_, err := ac.SendPostRequest(eventSubscriptionsURL, req)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to sudo events: %w", err)
-	}
-
-	return nil
-}
-
-// SubscribeCommandOutput subscribes the channel to command_output events for the
-// given command (target_id scopes delivery to that command's chunks).
-func SubscribeCommandOutput(ac *client.AlpaconClient, channelID, commandID string) error {
-	req := &EventSubscriptionRequest{
-		Channel:   channelID,
-		EventType: "command_output",
-		TargetID:  commandID,
-	}
-
-	_, err := ac.SendPostRequest(eventSubscriptionsURL, req)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to command_output events: %w", err)
+		return fmt.Errorf("failed to subscribe to %s events: %w", eventType, err)
 	}
 
 	return nil

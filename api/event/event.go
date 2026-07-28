@@ -336,7 +336,7 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 // chunks, then writes live chunks to out until the command reaches a terminal
 // state. Shared by the fresh-submit and approval-resume paths.
 func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID string, out io.Writer, timeout time.Duration, waitApproval bool) error {
-	if err := SubscribeCommandOutput(ac, session.ChannelID, cmdID); err != nil {
+	if err := SubscribeEvent(ac, session.ChannelID, EventTypeCommandOutput, cmdID); err != nil {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, waitApproval, err)
 	}
