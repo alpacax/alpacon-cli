@@ -10,10 +10,15 @@ import (
 const (
 	eventSessionsURL      = "/api/events/sessions/"
 	eventSubscriptionsURL = "/api/events/subscriptions/"
+)
 
-	// Event types the CLI subscribes to; the server defines the full set.
-	EventTypeSudo          = "sudo"
-	EventTypeCommandOutput = "command_output"
+// EventType is a server event channel type, marshalled as a plain string. The server
+// defines the full set; untyped literals convert, so types the CLI lacks a constant for stay usable.
+type EventType string
+
+const (
+	EventTypeSudo          EventType = "sudo"
+	EventTypeCommandOutput EventType = "command_output"
 )
 
 // EventSessionResponse is returned when creating an event session.
@@ -25,9 +30,9 @@ type EventSessionResponse struct {
 
 // EventSubscriptionRequest is sent to subscribe to an event type.
 type EventSubscriptionRequest struct {
-	Channel   string `json:"channel"`
-	EventType string `json:"event_type"`
-	TargetID  string `json:"target_id"`
+	Channel   string    `json:"channel"`
+	EventType EventType `json:"event_type"`
+	TargetID  string    `json:"target_id"`
 }
 
 // CreateEventSession creates a new event session and returns the WebSocket URL
@@ -48,7 +53,7 @@ func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error)
 
 // SubscribeEvent subscribes the given channel to eventType events, scoped to
 // targetID (a websh session for sudo, a command for command_output).
-func SubscribeEvent(ac *client.AlpaconClient, channelID, eventType, targetID string) error {
+func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventType, targetID string) error {
 	req := &EventSubscriptionRequest{
 		Channel:   channelID,
 		EventType: eventType,

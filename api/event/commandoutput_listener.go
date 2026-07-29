@@ -36,7 +36,7 @@ type CommandOutputListener struct {
 
 // commandOutputEnvelope is the WS message format emitted by alpacon-server.
 type commandOutputEnvelope struct {
-	EventType string `json:"event_type"`
+	EventType EventType `json:"event_type"`
 	Payload   struct {
 		CommandID string `json:"command_id"`
 		Seq       int    `json:"seq"`
