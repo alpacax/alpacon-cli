@@ -44,7 +44,7 @@ func TestCreateEventSession(t *testing.T) {
 func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 	tests := []struct {
 		name      string
-		eventType string
+		eventType EventType
 		targetID  string
 	}{
 		{name: "sudo", eventType: EventTypeSudo, targetID: "session-123"},

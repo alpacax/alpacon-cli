@@ -32,6 +32,9 @@ intended for the remote command (e.g., -U, -d) are not interpreted as alpacon fl
 
 All flags must be placed before the server name.
 
+Subcommand names (ls, logs) win over a server of the same name. To reach a server
+literally named 'ls' or 'logs', put -- before it: alpacon exec -- ls uptime
+
 Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon exec server 'echo hello;world'
