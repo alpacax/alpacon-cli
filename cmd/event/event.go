@@ -24,17 +24,11 @@ The 'event' name is being repurposed for the Alpacon event channel.`,
 }
 
 func init() {
-	EventCmd.Flags().IntP("tail", "t", 25, "Number of command entries to show from the end")
-	EventCmd.Flags().StringP("server", "s", "", "Filter by server name")
-	EventCmd.Flags().StringP("user", "u", "", "Filter by requesting user")
+	exec.AddListFlags(EventCmd)
 }
 
 func runEvent(cmd *cobra.Command, _ []string) {
 	utils.CliWarning("'alpacon event' has moved to 'alpacon exec ls' and will be removed in a future release.")
 
-	pageSize, _ := cmd.Flags().GetInt("tail")
-	serverName, _ := cmd.Flags().GetString("server")
-	userName, _ := cmd.Flags().GetString("user")
-
-	exec.RunList(pageSize, serverName, userName)
+	exec.RunListFromFlags(cmd)
 }

@@ -19,25 +19,34 @@ and --user to filter by the requesting user.`,
   alpacon exec ls --tail 10
   alpacon exec ls --tail 10 --server my-server --user admin`,
 	Run: func(cmd *cobra.Command, _ []string) {
-		pageSize, _ := cmd.Flags().GetInt("tail")
-		serverName, _ := cmd.Flags().GetString("server")
-		userName, _ := cmd.Flags().GetString("user")
-
-		RunList(pageSize, serverName, userName)
+		RunListFromFlags(cmd)
 	},
 }
 
 func init() {
-	listCmd.Flags().IntP("tail", "t", 25, "Number of command entries to show from the end")
-	listCmd.Flags().StringP("server", "s", "", "Filter by server name")
-	listCmd.Flags().StringP("user", "u", "", "Filter by requesting user")
+	AddListFlags(listCmd)
 
 	ExecCmd.AddCommand(listCmd)
 }
 
-// RunList is exported for the deprecated 'alpacon event', which delegates here so the
-// two cannot drift. Their flag sets are still declared separately and must stay in sync.
-func RunList(pageSize int, serverName, userName string) {
+// AddListFlags and RunListFromFlags are exported for the deprecated 'alpacon event', which
+// delegates here. Both live in this file so the flag names exist in exactly one place.
+func AddListFlags(cmd *cobra.Command) {
+	cmd.Flags().IntP("tail", "t", 25, "Number of command entries to show from the end")
+	cmd.Flags().StringP("server", "s", "", "Filter by server name")
+	cmd.Flags().StringP("user", "u", "", "Filter by requesting user")
+}
+
+// RunListFromFlags requires the flag set registered by AddListFlags.
+func RunListFromFlags(cmd *cobra.Command) {
+	pageSize, _ := cmd.Flags().GetInt("tail")
+	serverName, _ := cmd.Flags().GetString("server")
+	userName, _ := cmd.Flags().GetString("user")
+
+	runList(pageSize, serverName, userName)
+}
+
+func runList(pageSize int, serverName, userName string) {
 	utils.RequirePositiveInt("tail", pageSize)
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
