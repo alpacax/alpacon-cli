@@ -52,13 +52,11 @@ func runList(pageSize int, serverName, userName string) {
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		return
 	}
 
 	eventList, err := event.GetEventList(alpaconClient, pageSize, serverName, userName)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to retrieve the commands: %s.", err)
-		return
 	}
 
 	utils.PrintTable(eventList)
