@@ -9,7 +9,7 @@ import (
 var EventCmd = &cobra.Command{
 	Use:     "event",
 	Aliases: []string{"events"},
-	Short:   "List recent remote command executions (deprecated: use 'exec ls')",
+	Short:   "List recent remote command executions (deprecated)",
 	Long: `List recent remote command executions, most recent last.
 
 This command has moved to 'alpacon exec ls' and will be removed in a future
