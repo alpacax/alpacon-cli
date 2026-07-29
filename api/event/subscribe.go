@@ -10,16 +10,16 @@ import (
 const (
 	eventSessionsURL      = "/api/events/sessions/"
 	eventSubscriptionsURL = "/api/events/subscriptions/"
+
+	// Left untyped so every const stays in one block; they remain assignable and
+	// comparable to EventType.
+	EventTypeSudo          = "sudo"
+	EventTypeCommandOutput = "command_output"
 )
 
 // EventType is a server event channel type, marshalled as a plain string. The server
 // defines the full set; untyped literals convert, so types the CLI lacks a constant for stay usable.
 type EventType string
-
-const (
-	EventTypeSudo          EventType = "sudo"
-	EventTypeCommandOutput EventType = "command_output"
-)
 
 // EventSessionResponse is returned when creating an event session.
 type EventSessionResponse struct {
