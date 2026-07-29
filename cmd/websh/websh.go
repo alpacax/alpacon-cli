@@ -354,7 +354,7 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 		return nil
 	}
 
-	if err := event.SubscribeSudoEvent(ac, eventSession.ChannelID, sessionID); err != nil {
+	if err := event.SubscribeEvent(ac, eventSession.ChannelID, event.EventTypeSudo, sessionID); err != nil {
 		listener.Stop()
 		if !isNotFoundError(err) {
 			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
