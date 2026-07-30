@@ -84,6 +84,35 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 	}
 }
 
+func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
+	bodies := make(chan map[string]any, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		bodies <- body
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"sub-789"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	require.NoError(t, SubscribeEvent(ac, "channel-456", "notification", ""))
+
+	body := <-bodies
+	_, present := body["target_id"]
+	// The server validates target_id as a UUID, so an empty string would be a 400.
+	assert.False(t, present, "empty target must be omitted from the request body")
+	assert.Equal(t, "channel-456", body["channel"])
+	assert.Equal(t, "notification", body["event_type"])
+}
+
 func TestCreateEventSession_ServerError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

@@ -32,7 +32,8 @@ type EventSessionResponse struct {
 type EventSubscriptionRequest struct {
 	Channel   string    `json:"channel"`
 	EventType EventType `json:"event_type"`
-	TargetID  string    `json:"target_id"`
+	// Omitted rather than sent empty: the server validates target_id as a UUID.
+	TargetID string `json:"target_id,omitempty"`
 }
 
 // CreateEventSession creates a new event session and returns the WebSocket URL
@@ -51,8 +52,9 @@ func CreateEventSession(ac *client.AlpaconClient) (*EventSessionResponse, error)
 	return &resp, nil
 }
 
-// SubscribeEvent subscribes the given channel to eventType events, scoped to
-// targetID (a websh session for sudo, a command for command_output).
+// SubscribeEvent subscribes the given channel to eventType events, scoped to targetID
+// (a websh session for sudo, a command for command_output, a work session for
+// work_session). An empty targetID is omitted, which only some event types allow.
 func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventType, targetID string) error {
 	req := &EventSubscriptionRequest{
 		Channel:   channelID,
