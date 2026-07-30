@@ -76,6 +76,8 @@ func runWatch(cmd *cobra.Command, _ []string) {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// Runs before watcher.Stop, so a second Ctrl+C still kills a hung teardown.
+	defer signal.Stop(sigChan)
 
 	for {
 		select {
