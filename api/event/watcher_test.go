@@ -33,7 +33,7 @@ func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, s
 		w.Header().Set("Content-Type", "application/json")
 		if status := sessionStatus(n); status >= 400 {
 			w.WriteHeader(status)
-			_, _ = w.Write([]byte(`{"detail":"Bad gateway."}`))
+			_, _ = fmt.Fprintf(w, `{"detail":"Session create failed with %d."}`, status)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(EventSessionResponse{
