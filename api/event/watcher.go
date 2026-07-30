@@ -3,11 +3,13 @@ package event
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -54,8 +56,8 @@ func NewWatcher(ac *client.AlpaconClient, eventType EventType, targetID string) 
 	return w
 }
 
-// Only after a first success: before that, a dial is worth retrying inside
-// WaitConnected's window rather than ending the command.
+// Only after a first success: before that, a retryable attempt is worth another try
+// inside WaitConnected's window rather than ending the command.
 func (w *Watcher) announceOutage(cause error) {
 	w.stateMu.Lock()
 	subscribed := w.subscribed
@@ -83,10 +85,21 @@ func (w *Watcher) Err() error {
 	return w.err
 }
 
+// The session request carries neither --type nor --target, so only a 4xx proves retrying
+// pointless. Anything else gets the retry window a dial failure already gets.
+func (w *Watcher) sessionCreateFailed(cause error) error {
+	if status := utils.HTTPStatusCode(cause); status >= http.StatusBadRequest && status < http.StatusInternalServerError {
+		return w.fail(cause)
+	}
+
+	w.announceOutage(cause)
+	return cause
+}
+
 func (w *Watcher) provisionSession() (string, error) {
 	session, err := CreateEventSession(w.ac)
 	if err != nil {
-		return "", w.fail(err)
+		return "", w.sessionCreateFailed(err)
 	}
 
 	// Rejected here because the dialer's own *url.Error quotes the whole URL, and this
@@ -137,10 +150,9 @@ func (w *Watcher) subscribe() error {
 	return nil
 }
 
-// A failure before any successful subscribe is fatal, so a bad target or an
-// unreachable server surfaces the server's own message rather than a generic connect
-// timeout. Session creation counts: before a first success nothing proves the request
-// valid. Later failures are ordinary reconnect material.
+// A failure before any successful subscribe is fatal, so a bad target or an expired
+// login surfaces the server's own message rather than a generic connect timeout.
+// Later failures are ordinary reconnect material.
 func (w *Watcher) fail(cause error) error {
 	w.stateMu.Lock()
 	fatal := !w.subscribed

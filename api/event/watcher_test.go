@@ -17,9 +17,9 @@ import (
 )
 
 // newWatcherTestServer serves the session, subscription, and WebSocket endpoints on one
-// httptest server so a Watcher can run end to end. shouldUpgrade and subscribeStatus each
-// receive their own 1-based attempt count, in the order the runtime reaches them.
-func newWatcherTestServer(t *testing.T, shouldUpgrade func(attempt int32) bool, subscribeStatus func(attempt int32) int, wsHandler func(conn *websocket.Conn, n int32)) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
+// httptest server so a Watcher can run end to end. Each hook receives its own 1-based
+// attempt count, in the order the runtime reaches them.
+func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, shouldUpgrade func(attempt int32) bool, subscribeStatus func(attempt int32) int, wsHandler func(conn *websocket.Conn, n int32)) (*httptest.Server, *atomic.Int32, *atomic.Int32) {
 	t.Helper()
 
 	var sessions, conns, subscribes atomic.Int32
@@ -31,6 +31,11 @@ func newWatcherTestServer(t *testing.T, shouldUpgrade func(attempt int32) bool, 
 	mux.HandleFunc(eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
 		n := sessions.Add(1)
 		w.Header().Set("Content-Type", "application/json")
+		if status := sessionStatus(n); status >= 400 {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"detail":"Bad gateway."}`))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(EventSessionResponse{
 			ID:           "session",
 			WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/",
@@ -74,7 +79,7 @@ func alwaysRejected(int32) int { return http.StatusBadRequest }
 func TestWatcher_ForwardsFramesVerbatim(t *testing.T) {
 	frame := `{"event_type":"work_session","payload":{"category":"status","sub_type":"approved","unknown":1}}`
 
-	ts, _, _ := newWatcherTestServer(t, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(frame))
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -100,7 +105,7 @@ func TestWatcher_ForwardsFramesVerbatim(t *testing.T) {
 }
 
 func TestWatcher_CreatesANewSessionOnReconnect(t *testing.T) {
-	ts, sessions, subscribes := newWatcherTestServer(t, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
+	ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// The token is single-use, so recovering means a whole new session.
 			_ = conn.Close()
@@ -131,7 +136,7 @@ func TestWatcher_CreatesANewSessionOnReconnect(t *testing.T) {
 }
 
 func TestWatcher_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
-	ts, _, _ := newWatcherTestServer(t, alwaysUpgrade, alwaysRejected, func(conn *websocket.Conn, _ int32) {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, func(conn *websocket.Conn, _ int32) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -159,7 +164,7 @@ func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 		return http.StatusBadRequest
 	}
 
-	ts, _, subscribes := newWatcherTestServer(t, alwaysUpgrade, firstOnly, func(conn *websocket.Conn, n int32) {
+	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, firstOnly, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// Dropped only after its subscribe succeeded, so the reconnect is the
 			// attempt that gets rejected.
@@ -217,7 +222,7 @@ func TestWatcher_DialFailureAfterFirstSuccessIsAnnounced(t *testing.T) {
 	// subscribe.
 	firstConnOnly := func(attempt int32) bool { return attempt == 1 }
 
-	ts, _, _ := newWatcherTestServer(t, firstConnOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, firstConnOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		_ = conn.Close()
 	})
 
@@ -247,7 +252,7 @@ func TestWatcher_StaleFailureNoticeIsDroppedOnRecovery(t *testing.T) {
 		return http.StatusCreated
 	}
 
-	ts, _, subscribes := newWatcherTestServer(t, alwaysUpgrade, secondOnly, func(conn *websocket.Conn, n int32) {
+	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, secondOnly, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			_ = conn.Close()
 			return
@@ -315,9 +320,11 @@ func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
 	assert.Contains(t, err.Error(), "malformed event channel URL")
 }
 
-func TestWatcher_SessionCreateFailureStopsAndSurfaces(t *testing.T) {
+func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"detail":"Invalid token."}`))
 	}))
 	defer ts.Close()
 
@@ -329,4 +336,31 @@ func TestWatcher_SessionCreateFailureStopsAndSurfaces(t *testing.T) {
 	assert.False(t, w.WaitConnected(2*time.Second))
 	require.Error(t, w.Err())
 	assert.Contains(t, w.Err().Error(), "failed to create event session")
+}
+
+func TestWatcher_SessionCreateServerErrorIsRetried(t *testing.T) {
+	failFirst := func(attempt int32) int {
+		if attempt == 1 {
+			return http.StatusBadGateway
+		}
+		return http.StatusCreated
+	}
+
+	ts, sessions, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	w := NewWatcher(ac, "work_session", "ws-uuid")
+	w.reconnectBaseDelay = testReconnectBaseDelay
+	w.Start()
+	defer w.Stop()
+
+	require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
+	assert.NoError(t, w.Err())
+	assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
 }
