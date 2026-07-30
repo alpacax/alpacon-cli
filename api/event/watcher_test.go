@@ -338,29 +338,43 @@ func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {
 	assert.Contains(t, w.Err().Error(), "failed to create event session")
 }
 
-func TestWatcher_SessionCreateServerErrorIsRetried(t *testing.T) {
-	failFirst := func(attempt int32) int {
-		if attempt == 1 {
-			return http.StatusBadGateway
-		}
-		return http.StatusCreated
+func TestWatcher_SessionCreateRetryableStatusIsRetried(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+	}{
+		{"server error", http.StatusBadGateway},
+		// Both are 4xx that ask to be retried, so the fatal band has to skip them.
+		{"request timeout", http.StatusRequestTimeout},
+		{"too many requests", http.StatusTooManyRequests},
 	}
 
-	ts, sessions, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failFirst := func(attempt int32) int {
+				if attempt == 1 {
+					return tt.status
+				}
+				return http.StatusCreated
 			}
-		}
-	})
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	w := NewWatcher(ac, "work_session", "ws-uuid")
-	w.reconnectBaseDelay = testReconnectBaseDelay
-	w.Start()
-	defer w.Stop()
+			ts, sessions, _ := newWatcherTestServer(t, failFirst, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+				for {
+					if _, _, err := conn.ReadMessage(); err != nil {
+						return
+					}
+				}
+			})
 
-	require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
-	assert.NoError(t, w.Err())
-	assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			w := NewWatcher(ac, "work_session", "ws-uuid")
+			w.reconnectBaseDelay = testReconnectBaseDelay
+			w.Start()
+			defer w.Stop()
+
+			require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
+			assert.NoError(t, w.Err())
+			assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
+		})
+	}
 }
