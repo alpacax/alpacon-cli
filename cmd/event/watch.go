@@ -16,14 +16,16 @@ import (
 const watchConnectTimeout = 15 * time.Second
 
 var watchCmd = &cobra.Command{
-	Use:   "watch --type TYPE [--target ID] [flags]",
+	Use:   "watch --type TYPE [--target TARGET_ID]",
 	Short: "Stream events from the Alpacon event channel",
 	Long: `Stream events from the Alpacon event channel until interrupted.
 
 One line is written to stdout per event; everything else goes to stderr, so the
 stream stays machine-readable when piped. With --output json each line is the
-server frame verbatim (NDJSON). The default table format prints four fixed
-fields: receive time, event type, sub type, and the target given by --target.
+server frame compacted to a single line (NDJSON)—whitespace is dropped, but
+every field and the server's key order survive, including fields this CLI does
+not know. The default table format prints four fixed fields: receive time,
+event type, sub type, and the target given by --target.
 
 The connection is re-established automatically. Events published while
 disconnected are lost—the event channel has no history to replay—and both
