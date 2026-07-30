@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Covers one dial (watchHandshakeTimeout in api/event) plus the subscribe that follows.
+// Covers one provision + dial (watchHandshakeTimeout in api/event) plus the subscribe.
 const watchConnectTimeout = 15 * time.Second
 
 var watchCmd = &cobra.Command{
