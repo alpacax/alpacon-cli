@@ -1387,3 +1387,66 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 	assert.False(t, success)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&calls))
 }
+
+func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		firstStatus int
+	}{
+		{name: "request timeout", firstStatus: http.StatusRequestTimeout},
+		{name: "too many requests", firstStatus: http.StatusTooManyRequests},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if atomic.AddInt32(&calls, 1) == 1 {
+					w.WriteHeader(tt.firstStatus)
+					return
+				}
+				_, _ = w.Write([]byte("payload"))
+			}))
+			defer ts.Close()
+
+			path := filepath.Join(t.TempDir(), "out")
+			written, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 3)
+
+			require.NoError(t, err)
+			assert.Equal(t, int64(len("payload")), written)
+			assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "the status asks for a retry")
+		})
+	}
+}
+
+func TestFetchFromURLToFile_GivesUpOnAFatalClientError(t *testing.T) {
+	var calls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	_, err := fetchFromURLToFile(ts.Client(), ts.URL, filepath.Join(t.TempDir(), "out"), 5)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "client error: 404")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "a 404 will be a 404 again")
+}
+
+func TestBackoffDelay(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    time.Duration
+	}{
+		{attempt: 0, want: 250 * time.Millisecond},
+		{attempt: 1, want: 500 * time.Millisecond},
+		{attempt: 2, want: time.Second},
+		{attempt: 3, want: time.Second},
+		{attempt: 50, want: time.Second},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, backoffDelay(tt.attempt, initialDownloadRetryDelay, maxDownloadRetryDelay))
+	}
+}

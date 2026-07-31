@@ -31,25 +31,37 @@ const (
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 	pollBackoffFactor   = 2
-	basePollTimeout     = 30 * time.Second
-	perFilePollTimeout  = 10 * time.Second
-	perMBPollTimeout    = 5 * time.Second
+
+	// Download retries back off to maxDownloadRetryDelay, chosen so the total wait over
+	// maxAttempts stays what the flat one-second retry gave while a brief blip recovers
+	// sooner.
+	initialDownloadRetryDelay = 250 * time.Millisecond
+	maxDownloadRetryDelay     = time.Second
+
+	basePollTimeout    = 30 * time.Second
+	perFilePollTimeout = 10 * time.Second
+	perMBPollTimeout   = 5 * time.Second
 
 	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
 
-// nextPollInterval returns the backoff delay for a 0-based poll attempt:
-// initialPollInterval doubled per attempt, capped at maxPollInterval.
-func nextPollInterval(attempt int) time.Duration {
-	d := initialPollInterval
+// backoffDelay returns initial doubled once per 0-based attempt, capped at limit.
+func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
+	d := initial
 	for i := 0; i < attempt; i++ {
 		d *= pollBackoffFactor
-		if d >= maxPollInterval {
-			return maxPollInterval
+		if d >= limit {
+			return limit
 		}
 	}
 	return d
+}
+
+// nextPollInterval returns the backoff delay for a 0-based poll attempt:
+// initialPollInterval doubled per attempt, capped at maxPollInterval.
+func nextPollInterval(attempt int) time.Duration {
+	return backoffDelay(attempt, initialPollInterval, maxPollInterval)
 }
 
 // alignedPollDelay returns the sleep before the next poll: the backoff for this
@@ -546,15 +558,17 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		}
 		_ = resp.Body.Close()
 
-		// Client errors (4xx) will never succeed on retry
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		// Client errors (4xx) will never succeed on retry—except 408 and 429, which ask
+		// for exactly that. A throttled download otherwise fails on the first 429.
+		retryLater := resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests
+		if !retryLater && resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
 		if count == maxAttempts-1 {
 			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
 		}
-		time.Sleep(time.Second)
+		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
 
 	defer func() { _ = resp.Body.Close() }()
