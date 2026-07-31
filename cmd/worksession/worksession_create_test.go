@@ -2,6 +2,8 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,17 +15,72 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPollForApprovalCancelled(t *testing.T) {
+func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
+	// A rejection and a network failure must not collapse into the same exit code:
+	// an agent reading only $? would retry a rejected request forever.
+	tests := []struct {
+		status  string
+		wantMsg string
+	}{
+		{status: "rejected", wantMsg: "work session was rejected"},
+		{status: "expired", wantMsg: "work session expired while waiting for approval"},
+		{status: "revoked", wantMsg: "work session was revoked"},
+		{status: "cancelled", wantMsg: "work session was cancelled"},
+		{status: "completed", wantMsg: "work session was completed unexpectedly"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"ws-uuid","status":%q}`, tt.status)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantMsg)
+
+			var terminal *terminalWaitError
+			assert.True(t, errors.As(err, &terminal), "a settled status must be typed so the caller can exit 6")
+		})
+	}
+}
+
+func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ses-c","status":"cancelled"}`))
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollForApproval(ac, "ses-c", false, 0, 30*time.Second)
+
+	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "cancelled")
+	var terminal *terminalWaitError
+	// A 500 is a transient failure, not a settled outcome—exit 1, not 6.
+	assert.False(t, errors.As(err, &terminal))
+}
+
+func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+
+	require.Error(t, err)
+	var terminal *terminalWaitError
+	// Still pending is exit 4's territory, and it already reads as a timeout here.
+	assert.False(t, errors.As(err, &terminal))
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned

@@ -32,6 +32,15 @@ const (
 	useDecisionSkipScheduled
 )
 
+// terminalWaitError marks a wait that ended in a status the session can never leave.
+// Distinguished from a polling failure so the two do not share an exit code: an agent
+// that reads only the exit code would otherwise retry a rejected request forever.
+type terminalWaitError struct {
+	message string
+}
+
+func (e *terminalWaitError) Error() string { return e.message }
+
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
@@ -257,6 +266,11 @@ so it is recorded and scoped accordingly.`,
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval, waitTimeout)
 		if err != nil {
+			var terminal *terminalWaitError
+			if errors.As(err, &terminal) {
+				// Matches 'alpacon event wait': a settled negative outcome is 6, not 1.
+				utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, opCreate, err, "%s", err)
+			}
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
 
@@ -413,15 +427,15 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return s, nil
 			}
 		case rejectedWorkSessionStatus:
-			return nil, errors.New("work session was rejected")
+			return nil, &terminalWaitError{message: "work session was rejected"}
 		case expiredWorkSessionStatus:
-			return nil, errors.New("work session expired while waiting for approval")
+			return nil, &terminalWaitError{message: "work session expired while waiting for approval"}
 		case revokedWorkSessionStatus:
-			return nil, errors.New("work session was revoked")
+			return nil, &terminalWaitError{message: "work session was revoked"}
 		case cancelledWorkSessionStatus:
-			return nil, errors.New("work session was cancelled")
+			return nil, &terminalWaitError{message: "work session was cancelled"}
 		case completedWorkSessionStatus:
-			return nil, errors.New("work session was completed unexpectedly")
+			return nil, &terminalWaitError{message: "work session was completed unexpectedly"}
 		}
 
 		remaining := time.Until(deadline)
