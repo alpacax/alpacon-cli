@@ -191,7 +191,7 @@ func TestWaiter_CatchUpErrorIsReportedButDoesNotEndTheWait(t *testing.T) {
 	select {
 	case reported := <-w.CatchUpFailed():
 		assert.Contains(t, reported.Error(), "rest is down")
-	default:
+	case <-time.After(testWaitTimeout):
 		t.Fatal("a catch-up failure must be reported to the caller")
 	}
 }

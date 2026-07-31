@@ -107,14 +107,12 @@ func (w *Waiter) Wait() ([]byte, Outcome, error) {
 		return nil, OutcomeError, fmt.Errorf("timed out connecting to the event channel after %s", waitConnectTimeout)
 	}
 
-	// Only now: a catch-up before the subscription stands would leave a window in which
-	// a publish reaches nobody.
-	if frame, outcome, decided := w.runCatchUp(); decided {
-		return frame, outcome, nil
-	}
-
 	timer := time.NewTimer(w.opts.Timeout)
 	defer timer.Stop()
+
+	// Only now: a catch-up before the subscription stands would leave a window in which
+	// a publish reaches nobody.
+	catchUp := w.startCatchUp()
 
 	for {
 		select {
@@ -123,8 +121,10 @@ func (w *Waiter) Wait() ([]byte, Outcome, error) {
 		case <-timer.C:
 			return nil, OutcomeTimeout, nil
 		case <-w.Reconnected():
-			if frame, outcome, decided := w.runCatchUp(); decided {
-				return frame, outcome, nil
+			catchUp = w.startCatchUp()
+		case subType := <-catchUp:
+			if outcome, decided := w.classify(subType); decided {
+				return w.synthesize(subType), outcome, nil
 			}
 		case raw := <-w.Frames():
 			if outcome, decided := w.classify(subTypeOf(raw)); decided {
@@ -143,25 +143,29 @@ func (w *Waiter) isStopped() bool {
 	}
 }
 
-func (w *Waiter) runCatchUp() ([]byte, Outcome, bool) {
+// startCatchUp reads the current state in its own goroutine and delivers the sub type on
+// a buffered channel. Off the wait loop because the read is a plain REST call with no
+// deadline of its own: run inline, a server that never answers would outlast Timeout and
+// ignore Stop. Returns nil when there is nothing to read—a nil channel blocks forever in
+// a select, which is exactly right here.
+func (w *Waiter) startCatchUp() <-chan string {
 	if w.opts.CatchUp == nil {
-		return nil, OutcomeError, false
+		return nil
 	}
 
-	subType, err := w.opts.CatchUp()
-	if err != nil {
-		select {
-		case w.catchUpFailed <- err:
-		default:
+	result := make(chan string, 1)
+	go func() {
+		subType, err := w.opts.CatchUp()
+		if err != nil {
+			select {
+			case w.catchUpFailed <- err:
+			default:
+			}
+			return
 		}
-		return nil, OutcomeError, false
-	}
-
-	outcome, decided := w.classify(subType)
-	if !decided {
-		return nil, OutcomeError, false
-	}
-	return w.synthesize(subType), outcome, true
+		result <- subType
+	}()
+	return result
 }
 
 // classify reports the outcome for a sub_type and whether it decides the wait.
