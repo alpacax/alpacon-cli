@@ -1,6 +1,7 @@
 package event
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -35,10 +36,11 @@ fixed fields. Everything else goes to stderr.
 For work_session the end condition is built in. For any other type, name the
 sub types that end the wait with --until.
 
-After subscribing, the current state is read once over REST so an outcome that
-landed between the subscribe and the first publish is not missed. That check is
-repeated after every reconnect, since events published while disconnected are
-lost—the event channel has no history to replay.
+For a type with a built-in end condition, passing --target also reads the
+current state once over REST after subscribing, so an outcome that landed
+between the subscribe and the first publish is not missed; the read is repeated
+after every reconnect, since events published while disconnected are lost—the
+event channel has no history to replay. No other type gets that read.
 
 Run 'alpacon work-session ls' or the Alpacon console to find a target ID.`,
 	Example: `  alpacon event wait --type work_session --target a1b2c3d4-5678-abcd-ef01-234567890abc
@@ -107,13 +109,21 @@ func runWait(cmd *cobra.Command, _ []string) {
 		utils.CliErrorWithExit("%s.", strip(err.Error()))
 	}
 
+	// PrintPendingApproval, not CliError: exit 4 owes a machine consumer the
+	// pending_approval envelope under --output json, the same as every other surface
+	// that returns it. No retry action—this CLI cannot rebuild the invocation as a
+	// string a consumer could run unedited.
 	switch outcome {
 	case eventapi.OutcomeTimeout:
-		utils.CliErrorWithExitCode(utils.ExitCodePendingApproval,
-			"Timed out after %s with no matching %s event. The outcome is still open.", timeout, eventType)
+		utils.PrintPendingApproval(
+			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, eventType),
+			"", utils.NextAction{})
+		os.Exit(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
-		utils.CliErrorWithExitCode(utils.ExitCodePendingApproval,
-			"Interrupted before a matching %s event arrived. The outcome is still open.", eventType)
+		utils.PrintPendingApproval(
+			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", eventType),
+			"", utils.NextAction{})
+		os.Exit(utils.ExitCodePendingApproval)
 	}
 
 	// A render failure must not change a settled outcome's exit code—renderEvent writes
