@@ -218,6 +218,9 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// Runs before the terminal restore and the close below, so a second Ctrl+C reaches
+	// the default disposition instead of the goroutine that already consumed the first.
+	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
 		select {
