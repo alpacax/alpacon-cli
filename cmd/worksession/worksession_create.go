@@ -257,10 +257,21 @@ so it is recorded and scoped accordingly.`,
 		// Phase 2: poll. With --use we wait for active; otherwise approved is enough.
 		finalSession, err := pollForApproval(ac, session.ID, useAfterCreate, pollInterval, waitTimeout)
 		if err != nil {
+			// Both branches match 'alpacon event wait': a settled negative outcome is 6,
+			// a wait that ran out with the outcome still open is 4. Only a polling
+			// failure falls through to the general-error code.
 			var terminal *terminalWaitError
 			if errors.As(err, &terminal) {
-				// Matches 'alpacon event wait': a settled negative outcome is 6, not 1.
 				utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, opCreate, err, "%s", err)
+			}
+			var pending *pendingWaitError
+			if errors.As(err, &pending) {
+				utils.PrintPendingApproval(
+					fmt.Sprintf("%s. The outcome for work session %s is still open.", err, session.ID),
+					session.ApprovalRequestID,
+					utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", session.ID), Description: "after approval"},
+				)
+				os.Exit(utils.ExitCodePendingApproval)
 			}
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
@@ -301,6 +312,15 @@ type terminalWaitError struct {
 }
 
 func (e *terminalWaitError) Error() string { return e.message }
+
+// pendingWaitError marks a wait that ran out of time with the outcome still open. Nothing
+// failed—a human simply has not decided yet—so it carries the same exit code a create
+// without --wait does, rather than the general-error code a polling failure gets.
+type pendingWaitError struct {
+	message string
+}
+
+func (e *pendingWaitError) Error() string { return e.message }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
 // and returns an RFC3339 expires_at string.
@@ -440,7 +460,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, fmt.Errorf("timed out waiting for approval after %s", timeout)
+			return nil, &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
 		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {

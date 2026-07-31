@@ -78,9 +78,11 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
 
 	require.Error(t, err)
+	// Still pending is exit 4's territory, not the settled-negative code.
 	var terminal *terminalWaitError
-	// Still pending is exit 4's territory, and it already reads as a timeout here.
 	assert.False(t, errors.As(err, &terminal))
+	var pending *pendingWaitError
+	assert.True(t, errors.As(err, &pending))
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned
