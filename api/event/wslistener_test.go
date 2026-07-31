@@ -1,6 +1,7 @@
 package event
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,8 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// testReconnectBaseDelay keeps reconnect assertions off the production 1s backoff.
+const testReconnectBaseDelay = 10 * time.Millisecond
 
 func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
 	w := newWSListener(nil, "", 0)
@@ -125,4 +131,129 @@ func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
 
 	assert.False(t, result, "should return false when done is closed")
 	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+}
+
+func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var conns atomic.Int32
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		if conns.Add(1) == 1 {
+			// Drop the first connection so the listener has to dial again.
+			_ = conn.Close()
+			return
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	var provisions atomic.Int32
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+
+	w := newProvisionedWSListener(nil, func() (string, error) {
+		provisions.Add(1)
+		return wsURL, nil
+	}, time.Second)
+	w.handleFrame = func([]byte) {}
+	w.reconnectBaseDelay = testReconnectBaseDelay
+	w.Start()
+	defer w.Stop()
+
+	require.True(t, w.WaitConnected(2*time.Second))
+
+	// The listener reconnects on its own; wait for the second dial.
+	deadline := time.After(5 * time.Second)
+	for conns.Load() < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("expected a reconnect, conns=%d provisions=%d", conns.Load(), provisions.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	assert.GreaterOrEqual(t, provisions.Load(), int32(2), "provision must run once per dial attempt")
+}
+
+func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
+	var provisions atomic.Int32
+
+	w := newProvisionedWSListener(nil, func() (string, error) {
+		provisions.Add(1)
+		return "", errors.New("provision failed")
+	}, time.Second)
+	w.handleFrame = func([]byte) {}
+
+	assert.False(t, w.connectAndListen(), "a provision error must not count as connected")
+	assert.Equal(t, int32(1), provisions.Load())
+	assert.False(t, w.WaitConnected(0), "connected must stay open when provisioning fails")
+}
+
+func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	// Atomics because the hook runs on the listener goroutine.
+	var hookRan, openDuringHook atomic.Bool
+
+	w := newProvisionedWSListener(nil, func() (string, error) {
+		return "ws" + strings.TrimPrefix(ts.URL, "http"), nil
+	}, time.Second)
+	w.handleFrame = func([]byte) {}
+	w.onConnected = func() error {
+		hookRan.Store(true)
+		openDuringHook.Store(!w.WaitConnected(0))
+		return nil
+	}
+	w.Start()
+	defer w.Stop()
+
+	require.True(t, w.WaitConnected(2*time.Second))
+	assert.True(t, hookRan.Load(), "onConnected must run on a successful dial")
+	assert.True(t, openDuringHook.Load(), "connected must not close before onConnected returns")
+}
+
+func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer ts.Close()
+
+	w := newProvisionedWSListener(nil, func() (string, error) {
+		return "ws" + strings.TrimPrefix(ts.URL, "http"), nil
+	}, time.Second)
+	w.handleFrame = func([]byte) {}
+	w.onConnected = func() error { return errors.New("subscribe rejected") }
+
+	assert.False(t, w.connectAndListen(), "an onConnected error must not count as connected")
+	assert.False(t, w.WaitConnected(0), "connected must stay open when onConnected fails")
 }

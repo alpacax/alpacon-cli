@@ -15,7 +15,8 @@ var EventCmd = &cobra.Command{
 This command has moved to 'alpacon exec ls' and will be removed in a future
 release. It still works today and takes the same flags.
 
-The 'event' name is being repurposed for the Alpacon event channel.`,
+The 'event' name is being repurposed for the Alpacon event channel—see
+'alpacon event watch'.`,
 	Example: `  alpacon event
   alpacon event --tail 10 --server my-server --user admin`,
 	// Deprecated is deliberately unused: it makes IsAvailableCommand() false, dropping
@@ -28,7 +29,7 @@ func init() {
 }
 
 func runEvent(cmd *cobra.Command, _ []string) {
-	utils.CliWarning("'alpacon event' has moved to 'alpacon exec ls' and will be removed in a future release.")
+	utils.CliWarning("'alpacon event' has moved to 'alpacon exec ls' and will be removed in a future release. 'alpacon event watch' streams the event channel.")
 
 	exec.RunListFromFlags(cmd)
 }

@@ -17,33 +17,51 @@ const (
 // wsListener is the shared dial/reconnect/shutdown skeleton for event WebSocket
 // consumers; embedders must assign handleFrame before calling Start.
 type wsListener struct {
-	wsURL            string
+	// Event channel tokens are single-use, so a reconnect needs a freshly provisioned URL.
+	provision func() (string, error)
+	// The server accepts a subscription only once the channel is connected.
+	onConnected func() error
+	// A dial error reaches neither provision nor onConnected, so without this an outage
+	// at the transport level is silent.
+	onDialFailed     func(error)
+	handleFrame      func(message []byte)
 	wsHeader         http.Header
 	handshakeTimeout time.Duration
-	handleFrame      func(message []byte)
+	readLimit        int64 // 0 for gorilla's default of no limit
+	// The first backoff step, lowered by tests so a reconnect assertion does not have to
+	// sit through the production delay.
+	reconnectBaseDelay time.Duration
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
-	connected   chan struct{} // closed after first successful WebSocket connection
+	connected   chan struct{} // closed after the first successful connect and subscribe
 	connectOnce sync.Once
 	closeOnce   sync.Once
 	mu          sync.Mutex // guards conn
 	conn        *websocket.Conn
 }
 
-// newWSListener builds the shared skeleton. ac may be nil (empty header, for tests).
+// newWSListener builds the skeleton for a listener that always dials the same
+// URL. ac may be nil (empty header, for tests).
 func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time.Duration) *wsListener {
+	return newProvisionedWSListener(ac, func() (string, error) { return wsURL, nil }, handshakeTimeout)
+}
+
+// newProvisionedWSListener builds the skeleton for a listener that obtains a new
+// URL for every dial attempt. ac may be nil (empty header, for tests).
+func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
 	wsHeader := http.Header{}
 	if ac != nil {
 		wsHeader = ac.SetWebsocketHeader()
 	}
 	return &wsListener{
-		wsURL:            wsURL,
-		wsHeader:         wsHeader,
-		handshakeTimeout: handshakeTimeout,
-		done:             make(chan struct{}),
-		stopped:          make(chan struct{}),
-		connected:        make(chan struct{}),
+		provision:          provision,
+		wsHeader:           wsHeader,
+		handshakeTimeout:   handshakeTimeout,
+		reconnectBaseDelay: wsReconnectBaseDelay,
+		done:               make(chan struct{}),
+		stopped:            make(chan struct{}),
+		connected:          make(chan struct{}),
 	}
 }
 
@@ -62,8 +80,8 @@ func (w *wsListener) Start() {
 	}()
 }
 
-// WaitConnected blocks until connected, timeout, or shutdown; returns whether
-// it connected.
+// WaitConnected blocks until connected and subscribed, timeout, or shutdown;
+// returns whether it connected.
 func (w *wsListener) WaitConnected(timeout time.Duration) bool {
 	select {
 	case <-w.connected:
@@ -89,7 +107,7 @@ func (w *wsListener) Stop() {
 }
 
 func (w *wsListener) listenLoop() {
-	delay := wsReconnectBaseDelay
+	delay := w.reconnectBaseDelay
 
 	for {
 		select {
@@ -100,7 +118,7 @@ func (w *wsListener) listenLoop() {
 
 		// Reset backoff if we had a successful connection that later dropped
 		if w.connectAndListen() {
-			delay = wsReconnectBaseDelay
+			delay = w.reconnectBaseDelay
 		}
 
 		select {
@@ -121,20 +139,31 @@ func nextReconnectDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-// connectAndListen dials the event WebSocket and reads until it drops or Stop
-// is called; returns whether it connected, so the caller can reset backoff.
+// connectAndListen dials the event WebSocket, runs onConnected if set, then reads
+// until the connection drops or Stop is called. Returns whether it connected and
+// subscribed, so the caller can reset backoff.
 func (w *wsListener) connectAndListen() (connected bool) {
-	dialer := websocket.Dialer{HandshakeTimeout: w.handshakeTimeout}
-	conn, _, dialErr := dialer.Dial(w.wsURL, w.wsHeader)
-	if dialErr != nil {
+	wsURL, err := w.provision()
+	if err != nil {
 		return false
+	}
+
+	dialer := websocket.Dialer{HandshakeTimeout: w.handshakeTimeout}
+	conn, _, dialErr := dialer.Dial(wsURL, w.wsHeader)
+	if dialErr != nil {
+		if w.onDialFailed != nil {
+			w.onDialFailed(dialErr)
+		}
+		return false
+	}
+
+	if w.readLimit > 0 {
+		conn.SetReadLimit(w.readLimit)
 	}
 
 	w.mu.Lock()
 	w.conn = conn
 	w.mu.Unlock()
-
-	w.connectOnce.Do(func() { close(w.connected) })
 
 	defer func() {
 		w.mu.Lock()
@@ -142,6 +171,14 @@ func (w *wsListener) connectAndListen() (connected bool) {
 		w.mu.Unlock()
 		_ = conn.Close()
 	}()
+
+	if w.onConnected != nil {
+		if err := w.onConnected(); err != nil {
+			return false
+		}
+	}
+
+	w.connectOnce.Do(func() { close(w.connected) })
 
 	for {
 		select {
