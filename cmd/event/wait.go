@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultWaitTimeout = 5 * time.Minute
-
 var waitCmd = &cobra.Command{
 	Use:   "wait --type TYPE [--target TARGET_ID]",
 	Short: "Wait for one event, then exit",
@@ -21,10 +19,14 @@ var waitCmd = &cobra.Command{
 
 The outcome is carried by the exit code, so a script never has to parse prose:
 
-  0  the event arrived and counts as success (a work session was approved)
-  4  the wait timed out or was interrupted—the outcome is still open
-  6  the event arrived and counts as failure (rejected, expired, revoked,
-     cancelled, or completed)
+  0  an event in the success set arrived
+  1  the wait could not run: connection failed, the subscription was
+     rejected, or a usage error
+  4  timed out or interrupted—the outcome is still open
+  6  an event in the failure set arrived. Only a type with a built-in end
+     condition has a failure set (work_session's is rejected, expired,
+     revoked, cancelled, or completed), so this cannot happen when --until
+     names the end condition instead
 
 One line is written to stdout, in the same shape 'alpacon event watch' uses:
 with --output json the server frame compacted to a single line, otherwise four
@@ -50,7 +52,7 @@ func init() {
 	waitCmd.Flags().String("type", "", "Event type to subscribe to, e.g. work_session (required)")
 	waitCmd.Flags().String("target", "", "Target resource ID; omit where the server allows a subscription without one")
 	waitCmd.Flags().StringSlice("until", nil, "Sub types that end the wait (comma-separated). Overrides the built-in condition, and is required for a type this CLI has none for")
-	waitCmd.Flags().Duration("timeout", defaultWaitTimeout, "How long to wait before giving up")
+	waitCmd.Flags().Duration("timeout", utils.DefaultApprovalWaitTimeout, "How long to wait before giving up")
 
 	EventCmd.AddCommand(waitCmd)
 }

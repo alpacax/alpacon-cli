@@ -32,15 +32,6 @@ const (
 	useDecisionSkipScheduled
 )
 
-// terminalWaitError marks a wait that ended in a status the session can never leave.
-// Distinguished from a polling failure so the two do not share an exit code: an agent
-// that reads only the exit code would otherwise retry a rejected request forever.
-type terminalWaitError struct {
-	message string
-}
-
-func (e *terminalWaitError) Error() string { return e.message }
-
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
 
 var (
@@ -301,6 +292,15 @@ so it is recorded and scoped accordingly.`,
 		printSessionAdvisories(finalSession)
 	},
 }
+
+// terminalWaitError marks a wait that ended in a status the session can never leave.
+// Distinguished from a polling failure so the two do not share an exit code: an agent
+// that reads only the exit code would otherwise retry a rejected request forever.
+type terminalWaitError struct {
+	message string
+}
+
+func (e *terminalWaitError) Error() string { return e.message }
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
 // and returns an RFC3339 expires_at string.

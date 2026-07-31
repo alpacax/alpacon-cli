@@ -62,8 +62,10 @@ type waitFrame struct {
 	} `json:"payload"`
 }
 
-// synthesizedFrame is the shape a catch-up result is rendered as, so stdout carries one
-// schema whether the outcome arrived over the channel or over REST.
+// synthesizedFrame is the shape a catch-up result is rendered as: only event_type and a
+// payload carrying sub_type, with source "catch_up" marking the synthetic origin. It is
+// not the full server payload—fields a real frame carries (category, data, ts, seq) are
+// absent here.
 type synthesizedFrame struct {
 	EventType string                  `json:"event_type"`
 	Payload   synthesizedFramePayload `json:"payload"`
