@@ -19,10 +19,6 @@ const (
 	catchUpSource = "catch_up"
 )
 
-// Outcome is how a Wait ended. OutcomeError is the zero value: it is only returned
-// alongside a non-nil error, so a caller that forgets to check err still sees it.
-type Outcome int
-
 const (
 	OutcomeError Outcome = iota
 	OutcomeMatched
@@ -30,6 +26,10 @@ const (
 	OutcomeTimeout
 	OutcomeCanceled
 )
+
+// Outcome is how a Wait ended. OutcomeError is the zero value: it is only returned
+// alongside a non-nil error, so a caller that forgets to check err still sees it.
+type Outcome int
 
 // CatchUpFunc reads the target's current state over REST and returns it in the event
 // channel's sub_type vocabulary. It closes the window between subscribing and the
