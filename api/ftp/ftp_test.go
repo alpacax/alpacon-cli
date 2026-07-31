@@ -1399,9 +1399,9 @@ func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var calls int32
+			var calls atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if atomic.AddInt32(&calls, 1) == 1 {
+				if calls.Add(1) == 1 {
 					w.WriteHeader(tt.firstStatus)
 					return
 				}
@@ -1414,15 +1414,15 @@ func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, int64(len("payload")), written)
-			assert.Equal(t, int32(2), atomic.LoadInt32(&calls), "the status asks for a retry")
+			assert.Equal(t, int32(2), calls.Load(), "the status asks for a retry")
 		})
 	}
 }
 
 func TestFetchFromURLToFile_GivesUpOnAFatalClientError(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
@@ -1431,7 +1431,7 @@ func TestFetchFromURLToFile_GivesUpOnAFatalClientError(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "client error: 404")
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "a 404 will be a 404 again")
+	assert.Equal(t, int32(1), calls.Load(), "a 404 will be a 404 again")
 }
 
 func TestBackoffDelay(t *testing.T) {
