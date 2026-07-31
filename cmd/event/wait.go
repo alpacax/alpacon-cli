@@ -82,10 +82,16 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// Runs before the waiter is torn down, so a second Ctrl+C still kills a hung teardown.
+	// Covers the plain-return path (no signal ever arrived); harmless and idempotent
+	// alongside the Stop call below.
 	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
+		// Disarmed here, not only in the deferred call above: waiter.Stop can hang closing
+		// the WebSocket, and every exit path below it uses os.Exit, which skips defers—so
+		// this goroutine is the only place a second Ctrl+C is guaranteed to restore the
+		// default terminate disposition before the (possibly stuck) Stop call.
+		signal.Stop(sigChan)
 		waiter.Stop()
 	}()
 
@@ -108,8 +114,10 @@ func runWait(cmd *cobra.Command, _ []string) {
 			"Interrupted before a matching %s event arrived. The outcome is still open.", eventType)
 	}
 
-	if err := renderEvent(os.Stdout, frame, utils.OutputFormat, target, time.Now()); err != nil {
-		utils.CliErrorWithExit("%s.", err)
+	// A render failure must not change a settled outcome's exit code—renderEvent writes
+	// nothing to stdout on failure, so the failure itself only ever reaches stderr.
+	if renderErr := renderEvent(os.Stdout, frame, utils.OutputFormat, target, time.Now()); renderErr != nil {
+		utils.CliWarning("%s.", renderErr)
 	}
 
 	if outcome == eventapi.OutcomeFailed {
