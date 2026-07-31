@@ -47,10 +47,10 @@ const (
 	ExitCodeServerBusy = 5
 
 	// ExitCodeNotApproved is the process exit code for an awaited approval that
-	// ended without being granted—rejected, expired, revoked, or cancelled. It is
-	// the counterpart of ExitCodePendingApproval (4): 4 means the outcome is still
-	// open, 6 means it is settled and negative. Scripts and AI agents branch on it
-	// to stop retrying rather than keep re-requesting approval.
+	// ended without being granted—rejected, expired, revoked, cancelled, or
+	// completed. It is the counterpart of ExitCodePendingApproval (4): 4 means the
+	// outcome is still open, 6 means it settled without the grant. Scripts and AI
+	// agents branch on it to stop retrying rather than keep re-requesting approval.
 	ExitCodeNotApproved = 6
 )
 
