@@ -27,29 +27,53 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
+	backoffFactor = 2
+
 	// Poll interval backs off exponentially up to maxPollInterval.
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
-	pollBackoffFactor   = 2
-	basePollTimeout     = 30 * time.Second
-	perFilePollTimeout  = 10 * time.Second
-	perMBPollTimeout    = 5 * time.Second
+
+	downloadMaxAttempts = 100
+
+	// A server that answered "too many requests" is not persuaded by more of them,
+	// and without Retry-After the window is a guess—so this errs small.
+	throttledMaxAttempts = 10
+
+	// The drain only buys connection reuse, and the shared client sets no timeout,
+	// so this bound is the retry loop's only defense against a stalled error body.
+	maxDrainedErrorBody = 8 << 10
+
+	basePollTimeout    = 30 * time.Second
+	perFilePollTimeout = 10 * time.Second
+	perMBPollTimeout   = 5 * time.Second
 
 	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
 
-// nextPollInterval returns the backoff delay for a 0-based poll attempt:
-// initialPollInterval doubled per attempt, capped at maxPollInterval.
-func nextPollInterval(attempt int) time.Duration {
-	d := initialPollInterval
-	for i := 0; i < attempt; i++ {
-		d *= pollBackoffFactor
-		if d >= maxPollInterval {
-			return maxPollInterval
+// A brief blip recovers sooner than the flat one-second retry did, while
+// downloadMaxAttempts still spans roughly the same ~99s.
+// var, not const, so tests can shorten them.
+var (
+	initialDownloadRetryDelay = 250 * time.Millisecond
+	maxDownloadRetryDelay     = time.Second
+)
+
+// backoffDelay returns initial doubled once per 0-based attempt, capped at limit.
+func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
+	d := min(initial, limit)
+	for range attempt {
+		d *= backoffFactor
+		if d >= limit {
+			return limit
 		}
 	}
 	return d
+}
+
+// nextPollInterval returns the backoff delay for a 0-based poll attempt.
+func nextPollInterval(attempt int) time.Duration {
+	return backoffDelay(attempt, initialPollInterval, maxPollInterval)
 }
 
 // alignedPollDelay returns the sleep before the next poll: the backoff for this
@@ -188,7 +212,7 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	failuresByIndex := make([]string, count)
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(index int) {
@@ -356,7 +380,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	for i, filePath := range src {
 		f, err := os.Open(filePath)
 		if err != nil {
-			for j := 0; j < i; j++ {
+			for j := range i {
 				_ = files[j].Close()
 			}
 			return err
@@ -364,7 +388,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		stat, err := f.Stat()
 		if err != nil {
 			_ = f.Close()
-			for j := 0; j < i; j++ {
+			for j := range i {
 				_ = files[j].Close()
 			}
 			return err
@@ -535,7 +559,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 	var resp *http.Response
 	var err error
 
-	for count := 0; count < maxAttempts; count++ {
+	for count := range maxAttempts {
 		resp, err = httpClient.Get(url)
 		if err != nil {
 			return 0, fmt.Errorf("network error while downloading: %w", err)
@@ -544,17 +568,23 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
+		// An unread body keeps net/http from reusing the connection, so every retry
+		// would open a new one.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainedErrorBody))
 		_ = resp.Body.Close()
 
-		// Client errors (4xx) will never succeed on retry
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if utils.IsFatalClientError(resp.StatusCode) {
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
-		if count == maxAttempts-1 {
-			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
+		budget := maxAttempts
+		if utils.IsRetryLaterStatus(resp.StatusCode) {
+			budget = min(budget, throttledMaxAttempts)
 		}
-		time.Sleep(time.Second)
+		if count >= budget-1 {
+			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
+		}
+		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -663,7 +693,7 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 		return DownloadedFile{}, fmt.Errorf("%s", status.Result)
 	}
 
-	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, 100)
+	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, downloadMaxAttempts)
 	if err != nil {
 		return DownloadedFile{}, err
 	}
@@ -723,7 +753,7 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return err
 	}
 	defer func() { _ = utils.DeleteFile(zipPath) }()
-	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, 100)
+	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, downloadMaxAttempts)
 	if err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}

@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -123,6 +124,30 @@ func TestWorkSessionConstants(t *testing.T) {
 	assert.Equal(t, "work_session_server_not_allowed", WorkSessionServerNotAllowed)
 	assert.Equal(t, "work_session_assignee_mismatch", WorkSessionAssigneeMismatch)
 	assert.Equal(t, 3, ExitCodeWorkSessionDenied)
+}
+
+func TestClientErrorBand(t *testing.T) {
+	tests := []struct {
+		name           string
+		status         int
+		wantFatal      bool
+		wantRetryLater bool
+	}{
+		{name: "not found", status: http.StatusNotFound, wantFatal: true},
+		{name: "forbidden", status: http.StatusForbidden, wantFatal: true},
+		{name: "request timeout", status: http.StatusRequestTimeout, wantRetryLater: true},
+		{name: "too many requests", status: http.StatusTooManyRequests, wantRetryLater: true},
+		{name: "server error", status: http.StatusInternalServerError},
+		{name: "ok", status: http.StatusOK},
+		{name: "no status carried", status: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantFatal, IsFatalClientError(tt.status))
+			assert.Equal(t, tt.wantRetryLater, IsRetryLaterStatus(tt.status))
+		})
+	}
 }
 
 func TestServerBusyExitCode(t *testing.T) {

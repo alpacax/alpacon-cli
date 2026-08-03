@@ -3,7 +3,6 @@ package event
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"sync"
 	"time"
@@ -85,14 +84,10 @@ func (w *Watcher) Err() error {
 	return w.err
 }
 
-// The session request carries neither --type nor --target, so only a 4xx proves retrying
-// pointless—except 408 and 429, which ask for exactly that. Anything else gets the retry
-// window a dial failure already gets.
+// The session request carries neither --type nor --target, so only a fatal 4xx proves
+// retrying pointless. Anything else gets the retry window a dial failure already gets.
 func (w *Watcher) sessionCreateFailed(cause error) error {
-	status := utils.HTTPStatusCode(cause)
-	retryLater := status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
-
-	if !retryLater && status >= http.StatusBadRequest && status < http.StatusInternalServerError {
+	if utils.IsFatalClientError(utils.HTTPStatusCode(cause)) {
 		return w.fail(cause)
 	}
 
