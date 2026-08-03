@@ -115,7 +115,7 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 		if sev == "" {
 			sev = "info"
 		}
-		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sev), r.Text)
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sanitizeAdvisory(sev)), sanitizeAdvisory(r.Text))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -130,11 +130,22 @@ func printSessionAdvisories(session *wsapi.WorkSession) {
 	}
 }
 
+// The approver writes recommendation text freely and the server stores it
+// unchecked, so a control sequence here rewrites the terminal of the requester
+// reading how their session was limited.
+func sanitizeAdvisory(s string) string {
+	return utils.StripControlChars(utils.StripANSIEscapes(s))
+}
+
 func joinOrNone(items []string) string {
 	if len(items) == 0 {
 		return "none"
 	}
-	return strings.Join(items, ", ")
+	sanitized := make([]string, len(items))
+	for i, item := range items {
+		sanitized[i] = sanitizeAdvisory(item)
+	}
+	return strings.Join(sanitized, ", ")
 }
 
 func joinServerNames(servers []types.ServerSummary) string {
@@ -143,7 +154,7 @@ func joinServerNames(servers []types.ServerSummary) string {
 	}
 	names := make([]string, len(servers))
 	for i, s := range servers {
-		names[i] = s.Name
+		names[i] = sanitizeAdvisory(s.Name)
 	}
 	return strings.Join(names, ", ")
 }

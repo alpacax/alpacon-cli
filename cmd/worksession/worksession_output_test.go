@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -347,6 +348,72 @@ func TestFormatRecommendations(t *testing.T) {
 		{Severity: "", Text: "No severity set"},
 	})
 	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set", got)
+}
+
+func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
+	// The approver-facing block is where a request's real scope is read, so a
+	// control sequence in any interpolated field can hide what was granted.
+	const payload = "reboot db-01\x1b[2K\rapproved: read-only access"
+	tests := []struct {
+		name string
+		got  func() string
+		// Severity is uppercased before it is interpolated, so that case checks
+		// its own spelling of the payload. The server whitelists severity today;
+		// the case stays because this sanitisation does not rely on that.
+		wantParts []string
+	}{
+		{
+			"recommendation text",
+			func() string {
+				return formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: payload}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+		{
+			"recommendation severity",
+			func() string {
+				return formatRecommendations([]wsapi.Recommendation{{Severity: payload, Text: "rotate the key"}})
+			},
+			[]string{"REBOOT DB-01", "APPROVED: READ-ONLY ACCESS"},
+		},
+		{
+			"server name",
+			func() string {
+				return formatAdjustments(&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+					Old: []types.ServerSummary{{Name: payload}},
+					New: []types.ServerSummary{{Name: "web-01"}},
+				}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+		{
+			"scope name",
+			func() string {
+				return formatAdjustments(&wsapi.Adjustments{Scopes: &wsapi.ScopeDiff{
+					Old: []string{payload},
+					New: []string{"command"},
+				}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.got()
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			for _, part := range tt.wantParts {
+				assert.Contains(t, got, part)
+			}
+		})
+	}
+}
+
+func TestFormatAdvisories_KeepsOneLinePerEntry(t *testing.T) {
+	// A newline inside a value would forge an extra advisory line, since the
+	// formatters join their entries with \n.
+	got := formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: "granted\n  [HIGH] full root access"}})
+	assert.Len(t, strings.Split(got, "\n"), 1)
 }
 
 func setupWorkSessionCommandConfig(t *testing.T, workspaceURL string) {
