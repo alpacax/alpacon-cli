@@ -1400,13 +1400,14 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
-func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
+func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
 	tests := []struct {
 		name        string
 		firstStatus int
 	}{
 		{name: "request timeout", firstStatus: http.StatusRequestTimeout},
 		{name: "too many requests", firstStatus: http.StatusTooManyRequests},
+		{name: "bad gateway", firstStatus: http.StatusBadGateway},
 	}
 
 	for _, tt := range tests {
@@ -1426,9 +1427,27 @@ func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, int64(len("payload")), written)
-			assert.Equal(t, int32(2), calls.Load(), "the status asks for a retry")
+			assert.Equal(t, int32(2), calls.Load(), "the status is retryable")
 		})
 	}
+}
+
+func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer ts.Close()
+
+	path := filepath.Join(t.TempDir(), "out")
+	_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 2)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "download failed after 2 attempts (last status: 429)")
+	assert.Equal(t, int32(2), calls.Load(), "the budget is spent, not exceeded")
+	_, statErr := os.Stat(path)
+	assert.True(t, os.IsNotExist(statErr))
 }
 
 func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
