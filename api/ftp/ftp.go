@@ -34,9 +34,9 @@ const (
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 
-	// Download retries back off to maxDownloadRetryDelay, chosen so the total wait over
-	// maxAttempts stays what the flat one-second retry gave while a brief blip recovers
-	// sooner.
+	// Download retries back off to maxDownloadRetryDelay, so a brief blip recovers sooner
+	// while the 100-attempt ceiling still spans roughly the ~99s the flat one-second retry
+	// took.
 	initialDownloadRetryDelay = 250 * time.Millisecond
 	maxDownloadRetryDelay     = time.Second
 
