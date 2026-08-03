@@ -62,11 +62,20 @@ func init() {
 func runWait(cmd *cobra.Command, _ []string) {
 	eventType, _ := cmd.Flags().GetString("type")
 	target, _ := cmd.Flags().GetString("target")
-	until, _ := cmd.Flags().GetStringSlice("until")
+	untilRaw, _ := cmd.Flags().GetStringSlice("until")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
+
+	// The slice reaches here as typed: '--until "approved, activated"' leaves a leading
+	// space on the second entry, which would never match a sub type.
+	until := utils.CompactStrings(untilRaw)
 
 	if eventType == "" {
 		utils.CliErrorWithExit("--type is required.")
+	}
+	// Rejected rather than ignored: falling back to the built-in condition would run a
+	// wait the caller did not ask for.
+	if cmd.Flags().Changed("until") && len(until) == 0 {
+		utils.CliErrorWithExit("--until needs at least one sub type.")
 	}
 	if timeout <= 0 {
 		utils.CliErrorWithExit("--timeout must be positive.")
