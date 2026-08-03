@@ -42,11 +42,10 @@ func TestWaiter_CatchUpRunsOnlyAfterTheSubscriptionStands(t *testing.T) {
 	var subscribes atomic.Int32
 	var catchUpSawSubscribes atomic.Int32
 
-	ts, _, subs := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, func(n int32) int {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, func(n int32) int {
 		subscribes.Store(n)
 		return http.StatusCreated
 	}, holdOpen)
-	_ = subs
 
 	w := newTestWaiter(t, ts, WaitOptions{
 		CatchUp: func() (string, error) {
