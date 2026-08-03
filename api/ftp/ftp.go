@@ -40,6 +40,10 @@ const (
 	initialDownloadRetryDelay = 250 * time.Millisecond
 	maxDownloadRetryDelay     = time.Second
 
+	// Cap on the error body drained before a retry, so a keep-alive connection can be
+	// reused without reading an unbounded body from a failing server.
+	maxDrainedErrorBody = 64 << 10
+
 	basePollTimeout    = 30 * time.Second
 	perFilePollTimeout = 10 * time.Second
 	perMBPollTimeout   = 5 * time.Second
@@ -558,6 +562,9 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
+		// Drain before closing: an unread body keeps net/http from reusing the
+		// connection, so every retry would open a new one.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainedErrorBody))
 		_ = resp.Body.Close()
 
 		// Client errors (4xx) will never succeed on retry—except 408 and 429, which ask
