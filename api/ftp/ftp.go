@@ -27,21 +27,19 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
-	// Shared by the poll interval and the download retry delay.
 	backoffFactor = 2
 
 	// Poll interval backs off exponentially up to maxPollInterval.
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 
-	// Download retries back off to maxDownloadRetryDelay, so a brief blip recovers sooner
-	// while the 100-attempt ceiling still spans roughly the ~99s the flat one-second retry
-	// took.
+	// A brief blip recovers sooner than the flat one-second retry did, while the
+	// 100-attempt ceiling still spans roughly the same ~99s.
 	initialDownloadRetryDelay = 250 * time.Millisecond
 	maxDownloadRetryDelay     = time.Second
 
-	// Cap on the error body drained before a retry, so a keep-alive connection can be
-	// reused without reading an unbounded body from a failing server.
+	// Bounded so a keep-alive connection can be reused without reading an unbounded
+	// body from a failing server.
 	maxDrainedErrorBody = 64 << 10
 
 	basePollTimeout    = 30 * time.Second
@@ -54,7 +52,7 @@ const (
 
 // backoffDelay returns initial doubled once per 0-based attempt, capped at limit.
 func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
-	d := initial
+	d := min(initial, limit)
 	for range attempt {
 		d *= backoffFactor
 		if d >= limit {
@@ -64,8 +62,7 @@ func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
 	return d
 }
 
-// nextPollInterval returns the backoff delay for a 0-based poll attempt:
-// initialPollInterval doubled per attempt, capped at maxPollInterval.
+// nextPollInterval returns the backoff delay for a 0-based poll attempt.
 func nextPollInterval(attempt int) time.Duration {
 	return backoffDelay(attempt, initialPollInterval, maxPollInterval)
 }
@@ -562,13 +559,13 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		if resp.StatusCode == http.StatusOK {
 			break
 		}
-		// Drain before closing: an unread body keeps net/http from reusing the
-		// connection, so every retry would open a new one.
+		// An unread body keeps net/http from reusing the connection, so every retry
+		// would open a new one.
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainedErrorBody))
 		_ = resp.Body.Close()
 
 		// Client errors (4xx) will never succeed on retry—except 408 and 429, which ask
-		// for exactly that. A throttled download otherwise fails on the first 429.
+		// for exactly that.
 		retryLater := resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests
 		if !retryLater && resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)

@@ -1450,3 +1450,8 @@ func TestBackoffDelay(t *testing.T) {
 		assert.Equal(t, tt.want, backoffDelay(tt.attempt, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
 }
+
+func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
+	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
+	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
+}
