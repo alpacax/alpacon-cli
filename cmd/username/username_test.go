@@ -1,10 +1,17 @@
 package username
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetUsernameErrorText(t *testing.T) {
@@ -28,4 +35,37 @@ func TestSetUsernameErrorText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
+	// The name comes back from the API and goes straight to the terminal; the
+	// server escapes it in JSON, so what arrives here is a real ESC byte.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"username":"chae\u001b[2K\rroot"}`))
+	}))
+	defer ts.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.String()
+	}()
+	usernameGetCmd.Run(usernameGetCmd, nil)
+	_ = w.Close()
+	os.Stdout = old
+	got := <-done
+
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.Contains(t, got, "chae")
+	assert.Contains(t, got, "root")
 }

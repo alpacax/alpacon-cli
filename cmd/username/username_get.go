@@ -40,6 +40,6 @@ var usernameGetCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Println(user.Username)
+		fmt.Println(utils.SanitizeTerminalText(user.Username))
 	},
 }
