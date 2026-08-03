@@ -777,22 +777,34 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 }
 
 func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
-	var requestCount atomic.Int32
+	tests := []struct {
+		name    string
+		status  int
+		wantErr string
+	}{
+		{name: "forbidden", status: http.StatusForbidden, wantErr: "client error: 403"},
+		{name: "not found", status: http.StatusNotFound, wantErr: "client error: 404"},
+	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount.Add(1)
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer ts.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestCount atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requestCount.Add(1)
+				w.WriteHeader(tt.status)
+			}))
+			defer ts.Close()
 
-	dest := filepath.Join(t.TempDir(), "download.bin")
-	_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "client error: 403")
-	// Should fail on first attempt, not retry
-	assert.Equal(t, int32(1), requestCount.Load())
-	_, statErr := os.Stat(dest)
-	assert.True(t, os.IsNotExist(statErr))
+			dest := filepath.Join(t.TempDir(), "download.bin")
+			_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Equal(t, int32(1), requestCount.Load(), "a fatal client error fails the same way on retry")
+			_, statErr := os.Stat(dest)
+			assert.True(t, os.IsNotExist(statErr))
+		})
+	}
 }
 
 func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
@@ -1417,21 +1429,6 @@ func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
 			assert.Equal(t, int32(2), calls.Load(), "the status asks for a retry")
 		})
 	}
-}
-
-func TestFetchFromURLToFile_GivesUpOnAFatalClientError(t *testing.T) {
-	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer ts.Close()
-
-	_, err := fetchFromURLToFile(ts.Client(), ts.URL, filepath.Join(t.TempDir(), "out"), 5)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "client error: 404")
-	assert.Equal(t, int32(1), calls.Load(), "a 404 will be a 404 again")
 }
 
 func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
