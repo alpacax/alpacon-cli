@@ -210,14 +210,12 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}
 	defer func() { _ = wsClient.conn.Close() }()
 
-	oldState, err := checkTerminal()
-	if err != nil {
-		utils.CliErrorWithExit("failed to set up terminal: %v", err)
-	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	// Registered before the term.Restore defer so LIFO runs it after: a signal
+	// arriving mid-teardown lands in the buffered channel instead of killing the
+	// process with the terminal still in raw mode.
+	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
 		select {
@@ -225,6 +223,12 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		default:
 		}
 	}()
+
+	oldState, err := checkTerminal()
+	if err != nil {
+		utils.CliErrorWithExit("failed to set up terminal: %v", err)
+	}
+	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 
 	// In raw mode Ctrl+C is 0x03 — detect it to exit
 	go func() {
