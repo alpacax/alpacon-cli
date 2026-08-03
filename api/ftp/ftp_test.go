@@ -1436,20 +1436,37 @@ func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
 	tests := []struct {
 		name        string
 		maxAttempts int
+		statusFor   func(call int32) int
 		wantCalls   int32
 		wantErr     string
 	}{
 		{
 			name:        "caller budget",
 			maxAttempts: 2,
+			statusFor:   func(int32) int { return http.StatusTooManyRequests },
 			wantCalls:   2,
 			wantErr:     "download failed after 2 attempts (last status: 429)",
 		},
 		{
 			name:        "throttle budget",
 			maxAttempts: downloadMaxAttempts,
+			statusFor:   func(int32) int { return http.StatusTooManyRequests },
 			wantCalls:   throttledMaxAttempts,
 			wantErr:     "download failed after 10 attempts (last status: 429)",
+		},
+		{
+			// The throttle budget collapses below the attempts already spent, so the
+			// loop has to stop on the first 429 and count what it made, not the budget.
+			name:        "throttle budget after other failures",
+			maxAttempts: downloadMaxAttempts,
+			statusFor: func(call int32) int {
+				if call <= throttledMaxAttempts {
+					return http.StatusBadGateway
+				}
+				return http.StatusTooManyRequests
+			},
+			wantCalls: throttledMaxAttempts + 1,
+			wantErr:   "download failed after 11 attempts (last status: 429)",
 		},
 	}
 
@@ -1457,8 +1474,7 @@ func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var calls atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				calls.Add(1)
-				w.WriteHeader(http.StatusTooManyRequests)
+				w.WriteHeader(tt.statusFor(calls.Add(1)))
 			}))
 			defer ts.Close()
 
