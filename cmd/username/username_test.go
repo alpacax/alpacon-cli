@@ -1,15 +1,13 @@
 package username
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -48,20 +46,7 @@ func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
 
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, r)
-		done <- buf.String()
-	}()
-	usernameGetCmd.Run(usernameGetCmd, nil)
-	_ = w.Close()
-	os.Stdout = old
-	got := <-done
+	got := testutil.CaptureStdout(t, func() { usernameGetCmd.Run(usernameGetCmd, nil) })
 
 	assert.NotContains(t, got, "\x1b")
 	assert.NotContains(t, got, "\r")

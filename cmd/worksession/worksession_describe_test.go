@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -25,7 +26,7 @@ func TestWorkSessionDescribePrintsAdvisories(t *testing.T) {
 
 	setupWorkSessionCommandConfig(t, ts.URL)
 
-	stdout, _ := captureWorkSessionCommandOutput(t, func() {
+	stdout, _ := testutil.CaptureOutput(t, func() {
 		workSessionDescribeCmd.Run(workSessionDescribeCmd, []string{"ses-x"})
 	})
 

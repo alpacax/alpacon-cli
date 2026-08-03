@@ -1,12 +1,9 @@
 package worksession
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -127,7 +125,7 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	requesterType = "user"
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
 	})
 
@@ -171,7 +169,7 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	unsetActiveWorkSession = false
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionUseCmd.Run(workSessionUseCmd, []string{"ses-active"})
 	})
 
@@ -204,7 +202,7 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	unsetActiveWorkSession = true
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionUseCmd.Run(workSessionUseCmd, nil)
 	})
 
@@ -243,7 +241,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 		extendExpiresAt = ""
 	})
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-active"})
 	})
 
@@ -281,7 +279,7 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCancelCmd.Run(workSessionCancelCmd, []string{"ses-pending"})
 	})
 
@@ -455,47 +453,4 @@ func resetCreateCommandState(t *testing.T) {
 		createSudo = nil
 		createSudoReason = ""
 	})
-}
-
-func captureWorkSessionCommandOutput(t *testing.T, fn func()) (stdout string, stderr string) {
-	t.Helper()
-	oldStdout := os.Stdout
-	oldStderr := os.Stderr
-	stdoutReader, stdoutWriter, err := os.Pipe()
-	require.NoError(t, err)
-	stderrReader, stderrWriter, err := os.Pipe()
-	require.NoError(t, err)
-
-	os.Stdout = stdoutWriter
-	os.Stderr = stderrWriter
-	defer func() {
-		os.Stdout = oldStdout
-		os.Stderr = oldStderr
-	}()
-
-	stdoutDone := make(chan string, 1)
-	stderrDone := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, stdoutReader)
-		stdoutDone <- buf.String()
-	}()
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, stderrReader)
-		stderrDone <- buf.String()
-	}()
-
-	fn()
-
-	_ = stdoutWriter.Close()
-	_ = stderrWriter.Close()
-	os.Stdout = oldStdout
-	os.Stderr = oldStderr
-	t.Cleanup(func() {
-		_ = stdoutReader.Close()
-		_ = stderrReader.Close()
-	})
-
-	return <-stdoutDone, <-stderrDone
 }

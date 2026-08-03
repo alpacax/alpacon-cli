@@ -1,29 +1,15 @@
 package worksession
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
-	"os"
 	"testing"
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func captureStdout(f func()) string {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	f()
-	_ = w.Close()
-	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	return buf.String()
-}
 
 func mustParseTime(ts string) time.Time {
 	t, _ := time.Parse(time.RFC3339Nano, ts)
@@ -233,7 +219,7 @@ func TestFormatDetails_Unknown(t *testing.T) {
 // outputTimelineJSON must emit recordings as [] not null when no recordings exist,
 // including when --no-records passes nil for recordings.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
-	out := captureStdout(func() {
+	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
 	})
 	var result map[string]json.RawMessage
@@ -243,7 +229,7 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 
 // Both timeline and recordings keys must always be present in JSON output.
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
-	out := captureStdout(func() {
+	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
 	})
 	var keys map[string]json.RawMessage

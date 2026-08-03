@@ -1,10 +1,7 @@
 package cmd
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -13,8 +10,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestApplyApplicationPrincipal(t *testing.T) {
@@ -323,27 +320,6 @@ func TestIsWorksessionRequired(t *testing.T) {
 	}
 }
 
-func captureWhoamiStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stdout = w
-	defer func() { os.Stdout = old }()
-
-	done := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, r)
-		done <- buf.String()
-	}()
-
-	fn()
-	_ = w.Close()
-	os.Stdout = old
-	return <-done
-}
-
 func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	// Each field named here is set by someone other than the reader.
 	const payload = "prod-workspace\x1b[2K\rspoofed"
@@ -358,7 +334,7 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := captureWhoamiStdout(t, func() { printWhoami(tt.output) })
+			got := testutil.CaptureStdout(t, func() { printWhoami(tt.output) })
 			assert.NotContains(t, got, "\x1b")
 			assert.NotContains(t, got, "\r")
 			assert.Contains(t, got, "prod-workspace")
@@ -369,7 +345,7 @@ func TestPrintWhoami_StripsControlSequences(t *testing.T) {
 
 func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
 	// A newline inside a value would forge an identity line the account does not have.
-	plain := captureWhoamiStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
-	forged := captureWhoamiStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	plain := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
 	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
 }

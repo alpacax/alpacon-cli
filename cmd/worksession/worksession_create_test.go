@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -254,7 +255,7 @@ func TestWorkSessionCreateWaitPrintsAdvisories(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
-	_, stderr := captureWorkSessionCommandOutput(t, func() {
+	_, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
 	})
 
@@ -289,7 +290,7 @@ func TestWorkSessionCreateAutoApprovedPrintsAdvisories(t *testing.T) {
 	createServers = []string{"prod"}
 	expiresAt = "2026-06-01T12:00:00Z"
 
-	_, stderr := captureWorkSessionCommandOutput(t, func() {
+	_, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
 	})
 
@@ -327,7 +328,7 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	wait = true
 
-	stdout, _ := captureWorkSessionCommandOutput(t, func() {
+	stdout, _ := testutil.CaptureOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
 	})
 
