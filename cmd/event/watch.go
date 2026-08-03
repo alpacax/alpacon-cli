@@ -72,7 +72,7 @@ func runWatch(cmd *cobra.Command, _ []string) {
 		utils.CliErrorWithExit("Timed out connecting to the event channel after %s.", watchConnectTimeout)
 	}
 
-	utils.CliInfo("Watching %s events. Press Ctrl+C to stop.", eventType)
+	utils.CliInfo("Watching %s events. Press Ctrl+C to stop.", strip(eventType))
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)

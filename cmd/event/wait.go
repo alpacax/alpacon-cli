@@ -88,7 +88,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	opts, err := resolveWaitOptions(alpaconClient, eventapi.EventType(eventType), target, until, timeout)
 	if err != nil {
-		utils.CliUsageErrorEnvelopeWithExit(opWait, "%s.", err)
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "%s.", strip(err.Error()))
 	}
 
 	waiter := eventapi.NewWaiter(alpaconClient, eventapi.EventType(eventType), target, opts)
@@ -110,7 +110,11 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	go reportOutages(waiter)
 
-	utils.CliInfo("Waiting for a %s event (timeout %s). Press Ctrl+C to stop.", eventType, timeout)
+	// Stripped for the same reason server text is: --type lands in a terminal, and a CI
+	// script or an agent may build it from a source the caller does not control.
+	displayType := strip(eventType)
+
+	utils.CliInfo("Waiting for a %s event (timeout %s). Press Ctrl+C to stop.", displayType, timeout)
 
 	frame, outcome, err := waiter.Wait()
 	if err != nil {
@@ -125,12 +129,12 @@ func runWait(cmd *cobra.Command, _ []string) {
 	switch outcome {
 	case eventapi.OutcomeTimeout:
 		utils.PrintPendingApproval(
-			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, eventType),
+			fmt.Sprintf("Timed out after %s with no matching %s event. The outcome is still open.", timeout, displayType),
 			"", utils.NextAction{})
 		os.Exit(utils.ExitCodePendingApproval)
 	case eventapi.OutcomeCanceled:
 		utils.PrintPendingApproval(
-			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", eventType),
+			fmt.Sprintf("Interrupted before a matching %s event arrived. The outcome is still open.", displayType),
 			"", utils.NextAction{})
 		os.Exit(utils.ExitCodePendingApproval)
 	}
