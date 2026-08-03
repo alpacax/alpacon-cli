@@ -62,10 +62,8 @@ type waitFrame struct {
 	} `json:"payload"`
 }
 
-// synthesizedFrame is the shape a catch-up result is rendered as: only event_type and a
-// payload carrying sub_type, with source "catch_up" marking the synthetic origin. It is
-// not the full server payload—fields a real frame carries (category, data, ts, seq) are
-// absent here.
+// synthesizedFrame is not the full server payload—fields a real frame carries
+// (category, data, ts, seq) are absent here.
 type synthesizedFrame struct {
 	EventType string                  `json:"event_type"`
 	Payload   synthesizedFramePayload `json:"payload"`
@@ -143,9 +141,8 @@ func (w *Waiter) isStopped() bool {
 	}
 }
 
-// startCatchUp reads the current state in its own goroutine and delivers the sub type on
-// a buffered channel. Off the wait loop because the read is a plain REST call with no
-// deadline of its own: run inline, a server that never answers would outlast Timeout and
+// startCatchUp runs the read off the wait loop because it is a plain REST call with no
+// deadline of its own: inline, a server that never answers would outlast Timeout and
 // ignore Stop. Returns nil when there is nothing to read—a nil channel blocks forever in
 // a select, which is exactly right here.
 func (w *Waiter) startCatchUp() <-chan string {
@@ -168,7 +165,6 @@ func (w *Waiter) startCatchUp() <-chan string {
 	return result
 }
 
-// classify reports the outcome for a sub_type and whether it decides the wait.
 func (w *Waiter) classify(subType string) (Outcome, bool) {
 	switch {
 	case subType == "":
