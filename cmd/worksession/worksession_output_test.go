@@ -351,15 +351,15 @@ func TestFormatRecommendations(t *testing.T) {
 }
 
 func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
-	// The approver-facing block is where a request's real scope is read, so a
-	// control sequence in any interpolated field can hide what was granted.
+	// This block is where a requester reads what was granted, so a control
+	// sequence in any interpolated field can hide it.
 	const payload = "reboot db-01\x1b[2K\rapproved: read-only access"
 	tests := []struct {
 		name string
 		got  func() string
-		// Severity is uppercased before it is interpolated, so that case checks
-		// its own spelling of the payload. The server whitelists severity today;
-		// the case stays because this sanitisation does not rely on that.
+		// Severity is uppercased before interpolation, so that case spells the
+		// payload its own way. The server whitelists severity today; the case
+		// stays because this sanitisation does not rely on that.
 		wantParts []string
 	}{
 		{
@@ -410,8 +410,8 @@ func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
 }
 
 func TestFormatAdvisories_KeepsOneLinePerEntry(t *testing.T) {
-	// A newline inside a value would forge an extra advisory line, since the
-	// formatters join their entries with \n.
+	// The formatters join entries with \n, so a newline inside a value forges an
+	// extra advisory line.
 	got := formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: "granted\n  [HIGH] full root access"}})
 	assert.Len(t, strings.Split(got, "\n"), 1)
 }

@@ -104,16 +104,13 @@ func TestPrintTable_TableOutput(t *testing.T) {
 }
 
 func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
-	// Every payload hides the second command behind a control sequence, so a
-	// terminal reading it unsanitised shows only one of the two.
+	// Each payload hides the second command behind a control sequence.
 	tests := []struct {
 		name    string
 		payload string
 	}{
 		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql"},
-		// 0x9b introduces CSI on an 8-bit terminal; ansiEscapeRE only matches the
-		// ESC form, so this one rests on StripControlChars alone.
-		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql"},
+		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql"}, // ansiEscapeRE matches ESC only; rests on StripControlChars
 		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql"},
 		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql"},
 	}

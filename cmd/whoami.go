@@ -370,9 +370,8 @@ func printWhoami(output whoamiOutput) {
 		if l.value == "" || l.value == "0" {
 			continue
 		}
-		// Values come from the API: the application, workspace and group names are
-		// set by other people, so a control sequence here rewrites the identity
-		// lines the reader is checking.
+		// Application, workspace and group names are set by other people, so a
+		// control sequence here rewrites the identity lines being read.
 		fmt.Fprintf(os.Stdout, "%-*s%s\n", pad, l.label+":", utils.SanitizeTerminalText(l.value))
 	}
 }

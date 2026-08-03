@@ -38,8 +38,7 @@ func TestSetUsernameErrorText(t *testing.T) {
 }
 
 func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
-	// The name comes back from the API and goes straight to the terminal; the
-	// server escapes it in JSON, so what arrives here is a real ESC byte.
+	// JSON escapes it on the wire, so what reaches the printer is a real ESC byte.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"username":"chae\u001b[2K\rroot"}`))

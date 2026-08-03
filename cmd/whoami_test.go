@@ -345,9 +345,7 @@ func captureWhoamiStdout(t *testing.T, fn func()) string {
 }
 
 func TestPrintWhoami_StripsControlSequences(t *testing.T) {
-	// The identity screen names things other people control—the application, the
-	// workspace, the groups—so a control sequence there rewrites lines the reader
-	// uses to judge what their credential is.
+	// Each field named here is set by someone other than the reader.
 	const payload = "prod-workspace\x1b[2K\rspoofed"
 	tests := []struct {
 		name   string

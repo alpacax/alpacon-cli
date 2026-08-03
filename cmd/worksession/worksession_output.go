@@ -106,8 +106,7 @@ func formatAdjustments(adj *wsapi.Adjustments) string {
 }
 
 // The approver writes this text freely and the server stores it unchecked, so a
-// control sequence here rewrites the terminal of the requester reading how their
-// session was limited.
+// control sequence here rewrites the requester's terminal.
 func formatRecommendations(recs []wsapi.Recommendation) string {
 	if len(recs) == 0 {
 		return ""
