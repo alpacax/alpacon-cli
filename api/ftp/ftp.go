@@ -206,7 +206,7 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	failuresByIndex := make([]string, count)
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(index int) {
@@ -374,7 +374,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	for i, filePath := range src {
 		f, err := os.Open(filePath)
 		if err != nil {
-			for j := 0; j < i; j++ {
+			for j := range i {
 				_ = files[j].Close()
 			}
 			return err
@@ -382,7 +382,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 		stat, err := f.Stat()
 		if err != nil {
 			_ = f.Close()
-			for j := 0; j < i; j++ {
+			for j := range i {
 				_ = files[j].Close()
 			}
 			return err
@@ -553,7 +553,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 	var resp *http.Response
 	var err error
 
-	for count := 0; count < maxAttempts; count++ {
+	for count := range maxAttempts {
 		resp, err = httpClient.Get(url)
 		if err != nil {
 			return 0, fmt.Errorf("network error while downloading: %w", err)

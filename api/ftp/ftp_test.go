@@ -228,7 +228,7 @@ func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
 	go func() {
 		errCh <- executeBulkUpload(ac, request, files, sizes)
 	}()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-uploadsEntered:
 		case <-time.After(2 * time.Second):
@@ -288,7 +288,7 @@ func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
 	go func() {
 		errCh <- executeBulkUpload(ac, request, files, sizes)
 	}()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-pollsEntered:
 		case <-time.After(2 * time.Second):
@@ -1290,9 +1290,9 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below
 	// the old fixed 2s+2s = 4s. Assert both the poll count and a loose upper
 	// bound that the old fixed interval could not have met.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n < 3 {
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
@@ -1311,7 +1311,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(3), calls.Load())
 	// Lower bound proves the two waits actually backed off (250ms+500ms);
 	// loose upper bound proves it beat the old fixed 2s+2s without being
 	// flaky under slow CI scheduling.
@@ -1322,9 +1322,9 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
 	// status: PollTransferStatus must back off and retry, not treat it as fatal.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n < 3 {
 			w.WriteHeader(http.StatusUnprocessableEntity)
@@ -1342,15 +1342,15 @@ func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(3), calls.Load())
 }
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	// A non-in-progress error (e.g. 403) is fatal: return immediately without
 	// polling again.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "permission denied"})
@@ -1363,16 +1363,16 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.False(t, success)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fatal error must not be retried")
+	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
 }
 
 func TestPollTransferStatus_TimesOut(t *testing.T) {
 	// Server never completes (success=null). With a timeout below the initial
 	// poll interval, the deadline check breaks before the first sleep, so a
 	// single poll happens and the timeout error is returned.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
 	}))
@@ -1385,7 +1385,7 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out")
 	assert.False(t, success)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(1), calls.Load())
 }
 
 func TestFetchFromURLToFile_RetriesRetryableClientErrors(t *testing.T) {
