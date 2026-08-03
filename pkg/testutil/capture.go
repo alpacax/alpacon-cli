@@ -56,12 +56,11 @@ func redirect(t *testing.T, target **os.File) func() string {
 			*target = old
 			_ = w.Close()
 			collected = <-done
+			// io.Copy has returned by now, so both ends are done with the pipe.
+			_ = r.Close()
 		})
 		return collected
 	}
-	t.Cleanup(func() {
-		stop()
-		_ = r.Close()
-	})
+	t.Cleanup(func() { stop() })
 	return stop
 }
