@@ -45,6 +45,9 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 - `1` general error
 - `2` usage error
 - `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
+- `4` Pending human approval, outcome still open (`utils.ExitCodePendingApproval`)
+- `5` Server busy with active user work (`utils.ExitCodeServerBusy`)
+- `6` Approval not granted—settled without the grant (`utils.ExitCodeNotApproved`)
 
 Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
 
