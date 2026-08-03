@@ -33,11 +33,7 @@ const (
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 
-	// A brief blip recovers sooner than the flat one-second retry did, while
-	// downloadMaxAttempts still spans roughly the same ~99s.
-	initialDownloadRetryDelay = 250 * time.Millisecond
-	maxDownloadRetryDelay     = time.Second
-	downloadMaxAttempts       = 100
+	downloadMaxAttempts = 100
 
 	// A server that answered "too many requests" is not persuaded by more of them,
 	// and without Retry-After the window is a guess—so this errs small.
@@ -53,6 +49,14 @@ const (
 
 	bulkUploadConcurrency = 4 // uploads transfer payload bytes, keep low
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
+)
+
+// A brief blip recovers sooner than the flat one-second retry did, while
+// downloadMaxAttempts still spans roughly the same ~99s.
+// var, not const, so tests can shorten them.
+var (
+	initialDownloadRetryDelay = 250 * time.Millisecond
+	maxDownloadRetryDelay     = time.Second
 )
 
 // backoffDelay returns initial doubled once per 0-based attempt, capped at limit.

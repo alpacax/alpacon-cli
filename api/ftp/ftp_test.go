@@ -24,6 +24,14 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+// swapDownloadRetryDelays keeps the retry assertions off the production backoff,
+// which sleeps ~8s per exhausted budget.
+func swapDownloadRetryDelays(initial, max time.Duration) func() {
+	oi, om := initialDownloadRetryDelay, maxDownloadRetryDelay
+	initialDownloadRetryDelay, maxDownloadRetryDelay = initial, max
+	return func() { initialDownloadRetryDelay, maxDownloadRetryDelay = oi, om }
+}
+
 func createTestZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -1433,6 +1441,8 @@ func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
+	defer swapDownloadRetryDelays(time.Millisecond, 2*time.Millisecond)()
+
 	tests := []struct {
 		name        string
 		maxAttempts int
@@ -1536,7 +1546,7 @@ func TestBackoffDelay(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, backoffDelay(tt.attempt, initialDownloadRetryDelay, maxDownloadRetryDelay))
+			assert.Equal(t, tt.want, backoffDelay(tt.attempt, 250*time.Millisecond, time.Second))
 		})
 	}
 }
