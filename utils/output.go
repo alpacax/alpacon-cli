@@ -109,7 +109,7 @@ func PrintTable(slice any) {
 
 	numFields := s.Type().Elem().NumField()
 	headers := make([]string, numFields)
-	for i := 0; i < numFields; i++ {
+	for i := range numFields {
 		field := s.Type().Elem().Field(i)
 		if tag := field.Tag.Get("table"); tag != "" {
 			headers[i] = strings.ToUpper(tag)
@@ -121,7 +121,7 @@ func PrintTable(slice any) {
 
 	for i := 0; i < s.Len(); i++ {
 		row := make([]string, numFields)
-		for j := 0; j < numFields; j++ {
+		for j := range numFields {
 			row[j] = fmt.Sprintf("%v", s.Index(i).Field(j))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
