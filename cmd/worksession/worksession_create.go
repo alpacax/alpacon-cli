@@ -267,7 +267,7 @@ so it is recorded and scoped accordingly.`,
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
 				utils.PrintPendingApproval(
-					fmt.Sprintf("%s. The outcome for work session %s is still open.", err, session.ID),
+					fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 					session.ApprovalRequestID,
 					utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", session.ID), Description: "after approval"},
 				)
