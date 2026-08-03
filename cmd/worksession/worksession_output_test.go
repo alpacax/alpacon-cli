@@ -300,6 +300,41 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "cancelled", got.Status)
 }
 
+func TestSuccessMessages_StripControlSequences(t *testing.T) {
+	session := &wsapi.WorkSession{
+		ID:                "ses-abc\x1b[2K\rses-evil",
+		Status:            "active\nWork session ses-evil created",
+		ApprovalRequestID: "apr-1\x1b[1A",
+	}
+
+	for name, got := range map[string]string{
+		"create": createSuccessMessage(session),
+		"update": updateSuccessMessage(session),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			assert.Equal(t, 0, strings.Count(got, "\n"), "a newline must not forge a second success line")
+			assert.Contains(t, got, "ses-abcses-evil")
+		})
+	}
+}
+
+func TestActiveWorkSessionSetMessage_StripsControlSequences(t *testing.T) {
+	got := activeWorkSessionSetMessage("Work session ses-abc\x1b[2K approved. ", "ses-abc",
+		"db work\nActive work-session set to ses-evil")
+
+	assert.NotContains(t, got, "\x1b")
+	assert.Equal(t, 0, strings.Count(got, "\n"), "a newline must not forge a second success line")
+	assert.Contains(t, got, "(db workActive work-session set to ses-evil)")
+}
+
+func TestActiveWorkSessionSetMessage_DropsDescriptionLeftEmpty(t *testing.T) {
+	// Stripping can empty the description; the parentheses go with it.
+	assert.Equal(t, "Active work-session set to ses-abc.",
+		activeWorkSessionSetMessage("", "ses-abc", "\x1b[2K\r"))
+}
+
 func TestFormatAdjustments(t *testing.T) {
 	tests := []struct {
 		name string
