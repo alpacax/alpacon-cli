@@ -124,7 +124,8 @@ func PrintTable(slice any) {
 		for j := range numFields {
 			// API values are untrusted: a control sequence here rewrites the reader's terminal.
 			// Newlines drop instead of becoming spaces as in cmd/event/render.go: a cell must
-			// not spill into a second row. Full text: describe or --output json.
+			// not spill into a second row. Every text path goes through here, describe
+			// included; --output json is the only one that keeps the value whole.
 			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(j)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
