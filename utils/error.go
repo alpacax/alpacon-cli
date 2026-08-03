@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 )
 
@@ -68,6 +69,15 @@ func HTTPStatusCode(err error) int {
 		}
 	}
 	return 0
+}
+
+// IsFatalClientError reports whether a 4xx will fail the same way on retry—408 and 429
+// ask for exactly that retry, so they are not fatal.
+func IsFatalClientError(status int) bool {
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {
+		return false
+	}
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
 func ParseErrorResponse(err error) (string, string) {

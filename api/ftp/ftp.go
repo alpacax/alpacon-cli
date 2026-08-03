@@ -565,10 +565,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainedErrorBody))
 		_ = resp.Body.Close()
 
-		// Client errors (4xx) will never succeed on retry—except 408 and 429, which ask
-		// for exactly that.
-		retryLater := resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests
-		if !retryLater && resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
+		if utils.IsFatalClientError(resp.StatusCode) {
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
