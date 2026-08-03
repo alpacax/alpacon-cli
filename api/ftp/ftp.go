@@ -33,14 +33,14 @@ const (
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
 
-	// A brief blip recovers sooner than the flat one-second retry did, while the
-	// attempt ceiling still spans roughly the same ~99s.
+	// A brief blip recovers sooner than the flat one-second retry did, while
+	// downloadMaxAttempts still spans roughly the same ~99s.
 	initialDownloadRetryDelay = 250 * time.Millisecond
 	maxDownloadRetryDelay     = time.Second
 	downloadMaxAttempts       = 100
 
-	// A server that answered "too many requests" is not persuaded by ninety more of
-	// them. Without Retry-After the throttle window is a guess, so this errs small.
+	// A server that answered "too many requests" is not persuaded by more of them,
+	// and without Retry-After the window is a guess—so this errs small.
 	throttledMaxAttempts = 10
 
 	// The drain only buys connection reuse, and the shared client sets no timeout,
