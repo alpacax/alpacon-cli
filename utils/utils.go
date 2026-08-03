@@ -171,9 +171,7 @@ func ExtractWorkspaceName(workspaceURL string) string {
 func SplitAndParseInt(input string) []int {
 	var intValues []int
 
-	stringValues := strings.Split(input, ",")
-
-	for _, stringValue := range stringValues {
+	for stringValue := range strings.SplitSeq(input, ",") {
 		trimmedString := strings.TrimSpace(stringValue)
 
 		intValue, err := strconv.Atoi(trimmedString)
