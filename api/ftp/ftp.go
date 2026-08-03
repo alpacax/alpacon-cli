@@ -578,7 +578,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 			budget = min(budget, throttledMaxAttempts)
 		}
 		if count >= budget-1 {
-			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", budget, resp.StatusCode)
+			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
 		}
 		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
