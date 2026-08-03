@@ -34,9 +34,10 @@ const (
 	maxPollInterval     = 2 * time.Second
 
 	// A brief blip recovers sooner than the flat one-second retry did, while the
-	// 100-attempt ceiling still spans roughly the same ~99s.
+	// attempt ceiling still spans roughly the same ~99s.
 	initialDownloadRetryDelay = 250 * time.Millisecond
 	maxDownloadRetryDelay     = time.Second
+	downloadMaxAttempts       = 100
 
 	// Bounded so a keep-alive connection can be reused without reading an unbounded
 	// body from a failing server.
@@ -683,7 +684,7 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 		return DownloadedFile{}, fmt.Errorf("%s", status.Result)
 	}
 
-	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, 100)
+	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, downloadMaxAttempts)
 	if err != nil {
 		return DownloadedFile{}, err
 	}
@@ -743,7 +744,7 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 		return err
 	}
 	defer func() { _ = utils.DeleteFile(zipPath) }()
-	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, 100)
+	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, downloadMaxAttempts)
 	if err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
