@@ -344,8 +344,9 @@ func TestFormatRecommendations(t *testing.T) {
 		{Severity: "high", Text: "Rotate the key"},
 		{Severity: "low", Text: "Prefer reload"},
 		{Severity: "", Text: "No severity set"},
+		{Severity: "\x1b[2K\r", Text: "Severity left empty by stripping"},
 	})
-	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set", got)
+	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set\n  [INFO] Severity left empty by stripping", got)
 }
 
 func TestFormatAdvisories_StripsControlSequences(t *testing.T) {

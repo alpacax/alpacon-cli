@@ -113,11 +113,13 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 	}
 	lines := make([]string, len(recs))
 	for i, r := range recs {
-		sev := r.Severity
+		// Fall back after stripping: a severity made only of control bytes is
+		// empty by the time it reaches the format string.
+		sev := utils.SanitizeTerminalText(r.Severity)
 		if sev == "" {
 			sev = "info"
 		}
-		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(utils.SanitizeTerminalText(sev)), utils.SanitizeTerminalText(r.Text))
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sev), utils.SanitizeTerminalText(r.Text))
 	}
 	return strings.Join(lines, "\n")
 }
