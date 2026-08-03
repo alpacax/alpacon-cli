@@ -81,6 +81,16 @@ func TestPrintTable_JSONOutput_NilSlice(t *testing.T) {
 	assert.Equal(t, "[]\n", got)
 }
 
+func TestPrintTable_JSONOutput_KeepsControlSequencesEscaped(t *testing.T) {
+	items := []outputTestItem{{Name: "a\x1b[2Kb", ID: 1}}
+	var got string
+	withFormat("json", func() {
+		got = captureStdout(t, func() { PrintTable(items) })
+	})
+	assert.Contains(t, got, `\u001b`)
+	assert.NotContains(t, got, "\x1b")
+}
+
 func TestPrintTable_TableOutput(t *testing.T) {
 	items := []outputTestItem{{Name: "alpha", ID: 1}}
 	var got string
@@ -91,6 +101,19 @@ func TestPrintTable_TableOutput(t *testing.T) {
 	assert.Contains(t, got, "ID")
 	assert.Contains(t, got, "alpha")
 	assert.Contains(t, got, "1")
+}
+
+func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
+	items := []outputTestItem{{Name: "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql\nsecond line", ID: 1}}
+	var got string
+	withFormat("table", func() {
+		got = captureStdout(t, func() { PrintTable(items) })
+	})
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.Contains(t, got, "reboot db-01")
+	assert.Contains(t, got, "rm -rf /var/lib/postgresql")
+	assert.Equal(t, 2, strings.Count(strings.TrimSpace(got), "\n")+1, "header plus a single row")
 }
 
 func TestPrintJson_JSONOutput(t *testing.T) {

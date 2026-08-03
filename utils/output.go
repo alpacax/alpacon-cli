@@ -122,7 +122,8 @@ func PrintTable(slice any) {
 	for i := 0; i < s.Len(); i++ {
 		row := make([]string, numFields)
 		for j := range numFields {
-			row[j] = fmt.Sprintf("%v", s.Index(i).Field(j))
+			// API values are untrusted: a control sequence here rewrites the reader's terminal.
+			row[j] = StripControlChars(StripANSIEscapes(fmt.Sprintf("%v", s.Index(i).Field(j))))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
