@@ -74,6 +74,10 @@ func createSuccessMessage(session *wsapi.WorkSession) string {
 	return fmt.Sprintf("Work session created: %s (status: %s)", session.ID, session.Status)
 }
 
+func updateSuccessMessage(session *wsapi.WorkSession) string {
+	return fmt.Sprintf("Work session %s updated (status: %s).", session.ID, session.Status)
+}
+
 func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 	suffix := ""
 	if desc != "" {

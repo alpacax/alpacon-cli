@@ -150,7 +150,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
 		}
 
-		message := fmt.Sprintf("Work session %s updated (status: %s).", updated.ID, updated.Status)
+		message := updateSuccessMessage(updated)
 		if utils.OutputFormat == utils.OutputFormatJSON {
 			printWorkSessionMutationJSON(newWorkSessionMutationOutput(opUpdate, message, updated, nil))
 			return
