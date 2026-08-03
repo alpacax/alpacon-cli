@@ -1450,6 +1450,21 @@ func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr))
 }
 
+func TestFetchFromURLToFile_SpendsASmallerBudgetOnAThrottle(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer ts.Close()
+
+	_, err := fetchFromURLToFile(ts.Client(), ts.URL, filepath.Join(t.TempDir(), "out"), downloadMaxAttempts)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
+	assert.Equal(t, int32(throttledMaxAttempts), calls.Load(), "a throttle does not get the full download budget")
+}
+
 func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
 	stall := make(chan struct{})
 	var releaseOnce sync.Once

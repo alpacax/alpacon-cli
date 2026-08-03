@@ -39,6 +39,10 @@ const (
 	maxDownloadRetryDelay     = time.Second
 	downloadMaxAttempts       = 100
 
+	// A server that answered "too many requests" is not persuaded by ninety more of
+	// them. Without Retry-After the throttle window is a guess, so this errs small.
+	throttledMaxAttempts = 10
+
 	// The drain only buys connection reuse, and the shared client sets no timeout,
 	// so this bound is the retry loop's only defense against a stalled error body.
 	maxDrainedErrorBody = 8 << 10
@@ -569,8 +573,12 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
-		if count == maxAttempts-1 {
-			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", maxAttempts, resp.StatusCode)
+		budget := maxAttempts
+		if utils.IsRetryLaterStatus(resp.StatusCode) {
+			budget = min(budget, throttledMaxAttempts)
+		}
+		if count >= budget-1 {
+			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", budget, resp.StatusCode)
 		}
 		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
