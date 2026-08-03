@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"slices"
 	"strconv"
@@ -228,11 +229,7 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 		return createNewToken(ac)
 	}
 
-	fmt.Fprintln(os.Stderr, "Select a registration token:")
-	for i, t := range tokens {
-		fmt.Fprintf(os.Stderr, "  [%d] %s\n", i+1, t.Name)
-	}
-	fmt.Fprintln(os.Stderr, "  [+] Create new token")
+	printTokenChoices(os.Stderr, tokens)
 
 	for {
 		input := strings.TrimSpace(utils.PromptForRequiredInput("Token: "))
@@ -247,6 +244,16 @@ func selectOrCreateToken(ac *client.AlpaconClient) string {
 		}
 		utils.CliWarning("Invalid selection. Enter a number from the list or '+' to create a new token.")
 	}
+}
+
+// Token names are set by whoever created them, and a newline in one forges a
+// numbered choice the operator can pick.
+func printTokenChoices(w io.Writer, tokens []server.RegistrationTokenDetails) {
+	_, _ = fmt.Fprintln(w, "Select a registration token:")
+	for i, t := range tokens {
+		_, _ = fmt.Fprintf(w, "  [%d] %s\n", i+1, utils.SanitizeTerminalText(t.Name))
+	}
+	_, _ = fmt.Fprintln(w, "  [+] Create new token")
 }
 
 func createNewToken(ac *client.AlpaconClient) string {
@@ -267,12 +274,17 @@ func printGuideHeader(platformLabel, serverName, alpaconURL string) {
 	fmt.Fprintln(os.Stderr)
 	utils.PrintHeader("Installation guide")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintf(os.Stderr, "  Platform : %s\n", platformLabel)
-	if serverName != "" {
-		fmt.Fprintf(os.Stderr, "  Server   : %s\n", serverName)
-	}
-	fmt.Fprintf(os.Stderr, "  URL      : %s\n", alpaconURL)
+	printGuideFields(os.Stderr, platformLabel, serverName, alpaconURL)
 	fmt.Fprintln(os.Stderr)
+}
+
+// Every value here is echoed from the guide response; a newline in one forges a field line.
+func printGuideFields(w io.Writer, platformLabel, serverName, alpaconURL string) {
+	_, _ = fmt.Fprintf(w, "  Platform : %s\n", utils.SanitizeTerminalText(platformLabel))
+	if serverName != "" {
+		_, _ = fmt.Fprintf(w, "  Server   : %s\n", utils.SanitizeTerminalText(serverName))
+	}
+	_, _ = fmt.Fprintf(w, "  URL      : %s\n", utils.SanitizeTerminalText(alpaconURL))
 }
 
 func printGuideVerifyFooter(stepNum int) {
