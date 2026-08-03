@@ -1464,18 +1464,21 @@ func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
 
 func TestBackoffDelay(t *testing.T) {
 	tests := []struct {
+		name    string
 		attempt int
 		want    time.Duration
 	}{
-		{attempt: 0, want: 250 * time.Millisecond},
-		{attempt: 1, want: 500 * time.Millisecond},
-		{attempt: 2, want: time.Second},
-		{attempt: 3, want: time.Second},
-		{attempt: 50, want: time.Second},
+		{name: "no doubling yet", attempt: 0, want: 250 * time.Millisecond},
+		{name: "one double", attempt: 1, want: 500 * time.Millisecond},
+		{name: "reaches the cap", attempt: 2, want: time.Second},
+		{name: "past the cap", attempt: 3, want: time.Second},
+		{name: "far past the cap", attempt: 50, want: time.Second},
 	}
 
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, backoffDelay(tt.attempt, initialDownloadRetryDelay, maxDownloadRetryDelay))
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, backoffDelay(tt.attempt, initialDownloadRetryDelay, maxDownloadRetryDelay))
+		})
 	}
 }
 
