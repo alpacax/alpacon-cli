@@ -55,6 +55,26 @@ func (a NextAction) PlainText() string {
 	}
 }
 
+// escapeJSONControls rewrites DEL and the C1 block as \u escapes. encoding/json escapes
+// only below U+0020, so these reach the terminal as raw bytes and 8-bit CSI opens a
+// control sequence there. Valid JSON carries them inside strings alone, so scanning
+// bytes needs no parser, and a decoder reads the escape back as the same rune.
+func escapeJSONControls(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		switch {
+		case b[i] == 0x7f:
+			out = append(out, `\u007f`...)
+		case b[i] == 0xc2 && i+1 < len(b) && b[i+1] >= 0x80 && b[i+1] <= 0x9f:
+			out = append(out, fmt.Sprintf(`\u00%02x`, b[i+1])...)
+			i++
+		default:
+			out = append(out, b[i])
+		}
+	}
+	return out
+}
+
 func FormatJSON(value any) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -63,7 +83,7 @@ func FormatJSON(value any) (string, error) {
 	if err := enc.Encode(value); err != nil {
 		return "", err
 	}
-	return strings.TrimRight(buf.String(), "\n"), nil
+	return strings.TrimRight(string(escapeJSONControls(buf.Bytes())), "\n"), nil
 }
 
 func PrintJSONValue(w io.Writer, value any) error {
@@ -98,7 +118,7 @@ func PrintTable(slice any) {
 		if err != nil {
 			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
 		}
-		_, _ = fmt.Fprintln(os.Stdout, string(data))
+		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(data)))
 		return
 	}
 
@@ -140,7 +160,7 @@ func PrintJson(body []byte) {
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
 			CliErrorWithExit("Parsing data: Expected a JSON format.")
 		}
-		_, _ = fmt.Fprintln(os.Stdout, buf.String())
+		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(buf.Bytes())))
 		return
 	}
 
@@ -150,7 +170,7 @@ func PrintJson(body []byte) {
 		CliErrorWithExit("Parsing data: Expected a JSON format.")
 	}
 
-	formattedJson := strings.ReplaceAll(prettyJSON.String(), "\\n", "\n")
+	formattedJson := strings.ReplaceAll(string(escapeJSONControls(prettyJSON.Bytes())), "\\n", "\n")
 	formattedJson = strings.ReplaceAll(formattedJson, "\\t", "\t")
 
 	fmt.Println(formattedJson)

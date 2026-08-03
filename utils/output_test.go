@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -53,13 +54,51 @@ func TestPrintTable_JSONOutput_NilSlice(t *testing.T) {
 }
 
 func TestPrintTable_JSONOutput_KeepsControlSequencesEscaped(t *testing.T) {
-	items := []outputTestItem{{Name: "a\x1b[2Kb", ID: 1}}
+	// Escaped, not stripped: no control byte reaches the terminal and a decoder
+	// still reads back what the API sent.
+	tests := []struct {
+		name    string
+		payload string
+		escape  string
+	}{
+		{"7-bit CSI", "a\x1b[2Kb", `\u001b`},
+		{"8-bit CSI", "a\u009b2Kb", `\u009b`},
+		{"DEL", "a\x7fb", `\u007f`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items := []outputTestItem{{Name: tt.payload, ID: 1}}
+			var got string
+			withFormat("json", func() {
+				got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+			})
+			assert.Contains(t, got, tt.escape)
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\u009b")
+			assert.NotContains(t, got, "\x7f")
+
+			var decoded []outputTestItem
+			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			assert.Equal(t, items, decoded)
+		})
+	}
+}
+
+func TestPrintJson_JSONOutput_EscapesRawControlBytes(t *testing.T) {
+	// A server may send these unescaped: JSON only requires escaping below U+0020.
+	body := []byte("{\"name\":\"a\u009b2K\x7fb\"}")
 	var got string
 	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+		got = testutil.CaptureStdout(t, func() { PrintJson(body) })
 	})
-	assert.Contains(t, got, `\u001b`)
-	assert.NotContains(t, got, "\x1b")
+	assert.Contains(t, got, `\u009b`)
+	assert.Contains(t, got, `\u007f`)
+	assert.NotContains(t, got, "\u009b")
+	assert.NotContains(t, got, "\x7f")
+
+	var decoded map[string]string
+	assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+	assert.Equal(t, "a\u009b2K\x7fb", decoded["name"])
 }
 
 func TestPrintTable_TableOutput(t *testing.T) {
