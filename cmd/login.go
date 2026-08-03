@@ -177,7 +177,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 		switch classifyWhoamiVerification(whoErr) {
 		case whoamiVerified:
 			if who.PrincipalType == auth.PrincipalTypeApplication && who.Application != nil {
-				utils.CliInfo("Authenticated as application '%s'.", who.Application.Name)
+				utils.CliInfo("Authenticated as application '%s'.", utils.SanitizeTerminalText(who.Application.Name))
 			}
 		case whoamiFallback:
 			// Old server without whoami: fall back to legacy prefix-based verification.
