@@ -570,7 +570,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		// Client errors (4xx) will never succeed on retry—except 408 and 429, which ask
 		// for exactly that. A throttled download otherwise fails on the first 429.
 		retryLater := resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests
-		if !retryLater && resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		if !retryLater && resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
 			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
 		}
 
