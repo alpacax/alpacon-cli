@@ -1433,36 +1433,45 @@ func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
-	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer ts.Close()
+	tests := []struct {
+		name        string
+		maxAttempts int
+		wantCalls   int32
+		wantErr     string
+	}{
+		{
+			name:        "caller budget",
+			maxAttempts: 2,
+			wantCalls:   2,
+			wantErr:     "download failed after 2 attempts (last status: 429)",
+		},
+		{
+			name:        "throttle budget",
+			maxAttempts: downloadMaxAttempts,
+			wantCalls:   throttledMaxAttempts,
+			wantErr:     "download failed after 10 attempts (last status: 429)",
+		},
+	}
 
-	path := filepath.Join(t.TempDir(), "out")
-	_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 2)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			defer ts.Close()
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "download failed after 2 attempts (last status: 429)")
-	assert.Equal(t, int32(2), calls.Load(), "the budget is spent, not exceeded")
-	_, statErr := os.Stat(path)
-	assert.True(t, os.IsNotExist(statErr))
-}
+			path := filepath.Join(t.TempDir(), "out")
+			_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, tt.maxAttempts)
 
-func TestFetchFromURLToFile_SpendsASmallerBudgetOnAThrottle(t *testing.T) {
-	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer ts.Close()
-
-	_, err := fetchFromURLToFile(ts.Client(), ts.URL, filepath.Join(t.TempDir(), "out"), downloadMaxAttempts)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
-	assert.Equal(t, int32(throttledMaxAttempts), calls.Load(), "a throttle does not get the full download budget")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Equal(t, tt.wantCalls, calls.Load(), "the budget is spent, not exceeded")
+			_, statErr := os.Stat(path)
+			assert.True(t, os.IsNotExist(statErr))
+		})
+	}
 }
 
 func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
