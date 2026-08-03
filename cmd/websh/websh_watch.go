@@ -3,6 +3,7 @@ package websh
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/alpacax/alpacon-cli/api/websh"
@@ -33,11 +34,7 @@ var webshWatchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to parse session info: %s.", err)
 		}
 
-		fmt.Fprintf(os.Stderr, "\nSession:  %s\n", detail.ID)
-		fmt.Fprintf(os.Stderr, "Server:   %s\n", detail.Server.Name)
-		fmt.Fprintf(os.Stderr, "User:     %s\n", detail.User.Name)
-		fmt.Fprintf(os.Stderr, "Username: %s\n", detail.Username)
-		fmt.Fprintf(os.Stderr, "\nWatching in read-only mode. Press Ctrl+C to exit.\n\n")
+		printWatchHeader(os.Stderr, detail)
 
 		session, err := websh.ConnectToSession(alpaconClient, sessionID)
 		if err != nil {
@@ -48,4 +45,14 @@ var webshWatchCmd = &cobra.Command{
 			utils.CliErrorWithExit("websh watch session ended with error: %s.", err)
 		}
 	},
+}
+
+// This header is the only sign of whose session is on screen, and the names in
+// it are set by whoever registered the server or the account.
+func printWatchHeader(w io.Writer, detail websh.SessionDetailResponse) {
+	fmt.Fprintf(w, "\nSession:  %s\n", utils.SanitizeTerminalText(detail.ID))
+	fmt.Fprintf(w, "Server:   %s\n", utils.SanitizeTerminalText(detail.Server.Name))
+	fmt.Fprintf(w, "User:     %s\n", utils.SanitizeTerminalText(detail.User.Name))
+	fmt.Fprintf(w, "Username: %s\n", utils.SanitizeTerminalText(detail.Username))
+	fmt.Fprintf(w, "\nWatching in read-only mode. Press Ctrl+C to exit.\n\n")
 }

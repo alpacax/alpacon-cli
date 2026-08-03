@@ -1,11 +1,14 @@
 package websh
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -387,4 +390,22 @@ func TestSanitizeRecord(t *testing.T) {
 
 	// C1 control (U+0085) separates tokens rather than leaking to the terminal.
 	assert.Equal(t, "foo bar", sanitizeRecord("foo"+string(rune(0x85))+"bar", 100))
+}
+
+func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
+	var buf bytes.Buffer
+	printWatchHeader(&buf, websh.SessionDetailResponse{
+		ID:       "abc123",
+		Server:   types.ServerSummary{Name: "web-01\x1b[2K\rdb-prod"},
+		User:     types.UserSummary{Name: "Alice\nUser: Bob"},
+		Username: "alice\x1b[1A",
+	})
+
+	got := buf.String()
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	// Four fields, the read-only notice, and the three blank lines around them.
+	assert.Equal(t, 8, strings.Count(got, "\n"), "a newline must not forge an identity line")
+	assert.Contains(t, got, "Server:   web-01db-prod\n")
+	assert.Contains(t, got, "Username: alice\n")
 }
