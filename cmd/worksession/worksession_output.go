@@ -105,6 +105,9 @@ func formatAdjustments(adj *wsapi.Adjustments) string {
 	return strings.Join(lines, "\n")
 }
 
+// The approver writes this text freely and the server stores it unchecked, so a
+// control sequence here rewrites the terminal of the requester reading how their
+// session was limited.
 func formatRecommendations(recs []wsapi.Recommendation) string {
 	if len(recs) == 0 {
 		return ""
@@ -115,7 +118,7 @@ func formatRecommendations(recs []wsapi.Recommendation) string {
 		if sev == "" {
 			sev = "info"
 		}
-		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sanitizeAdvisory(sev)), sanitizeAdvisory(r.Text))
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(utils.SanitizeTerminalText(sev)), utils.SanitizeTerminalText(r.Text))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -130,20 +133,13 @@ func printSessionAdvisories(session *wsapi.WorkSession) {
 	}
 }
 
-// The approver writes recommendation text freely and the server stores it
-// unchecked, so a control sequence here rewrites the terminal of the requester
-// reading how their session was limited.
-func sanitizeAdvisory(s string) string {
-	return utils.StripControlChars(utils.StripANSIEscapes(s))
-}
-
 func joinOrNone(items []string) string {
 	if len(items) == 0 {
 		return "none"
 	}
 	sanitized := make([]string, len(items))
 	for i, item := range items {
-		sanitized[i] = sanitizeAdvisory(item)
+		sanitized[i] = utils.SanitizeTerminalText(item)
 	}
 	return strings.Join(sanitized, ", ")
 }
@@ -154,7 +150,7 @@ func joinServerNames(servers []types.ServerSummary) string {
 	}
 	names := make([]string, len(servers))
 	for i, s := range servers {
-		names[i] = sanitizeAdvisory(s.Name)
+		names[i] = utils.SanitizeTerminalText(s.Name)
 	}
 	return strings.Join(names, ", ")
 }

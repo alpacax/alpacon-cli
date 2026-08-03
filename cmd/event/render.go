@@ -73,7 +73,7 @@ func strip(s string) string {
 		}
 	}, s)
 	// Trimmed last so a value of only control bytes reads as absent, not as blank data.
-	return strings.TrimSpace(utils.StripControlChars(utils.StripANSIEscapes(spaced)))
+	return strings.TrimSpace(utils.SanitizeTerminalText(spaced))
 }
 
 func field(s string) string {

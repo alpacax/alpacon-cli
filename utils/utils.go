@@ -498,6 +498,14 @@ func StripControlChars(s string) string {
 	}, s)
 }
 
+// SanitizeTerminalText makes an untrusted string safe to print. The order is the
+// point: escape sequences go first so a full CSI leaves as one unit, then the
+// standalone control bytes the regex leaves behind. Reversed, ESC alone would go
+// and "[2K" would stay on screen as text.
+func SanitizeTerminalText(s string) string {
+	return StripControlChars(StripANSIEscapes(s))
+}
+
 // ProcessEditedData facilitates user modifications to original data,
 // formats it, supports editing via a temp file, compares the edited data against the original,
 // and parses it into JSON. If no changes are made, the update is aborted and an error is returned.

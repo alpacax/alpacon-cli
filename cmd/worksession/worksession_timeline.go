@@ -264,7 +264,7 @@ func formatDetails(item *wsapi.TimelineItem) string {
 				status = "failed"
 			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.StripControlChars(utils.StripANSIEscapes(item.Line)), 60))
+		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.SanitizeTerminalText(item.Line), 60))
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
@@ -284,15 +284,15 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return sessionState(item.ClosedAt)
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", utils.StripControlChars(utils.StripANSIEscapes(item.Name)), formatSize(item.Size))
+		return fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", utils.StripControlChars(utils.StripANSIEscapes(item.Name)), formatSize(item.Size))
+		return fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.StripControlChars(utils.StripANSIEscapes(*item.Command)), 40))
+			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.SanitizeTerminalText(*item.Command), 40))
 		}
 		return detail
 
