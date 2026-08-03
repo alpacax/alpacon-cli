@@ -27,10 +27,12 @@ const (
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
 	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
+	// Shared by the poll interval and the download retry delay.
+	backoffFactor = 2
+
 	// Poll interval backs off exponentially up to maxPollInterval.
 	initialPollInterval = 250 * time.Millisecond
 	maxPollInterval     = 2 * time.Second
-	pollBackoffFactor   = 2
 
 	// Download retries back off to maxDownloadRetryDelay, chosen so the total wait over
 	// maxAttempts stays what the flat one-second retry gave while a brief blip recovers
@@ -50,7 +52,7 @@ const (
 func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
 	d := initial
 	for range attempt {
-		d *= pollBackoffFactor
+		d *= backoffFactor
 		if d >= limit {
 			return limit
 		}
