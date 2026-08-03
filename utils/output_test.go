@@ -76,14 +76,16 @@ func TestPrintTable_TableOutput(t *testing.T) {
 
 func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 	// Each payload hides the second command behind a control sequence.
+	// cell pins the join: the separator drops, it does not become a space.
 	tests := []struct {
 		name    string
 		payload string
+		cell    string
 	}{
-		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql"},
-		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql"}, // ansiEscapeRE matches ESC only; rests on StripControlChars
-		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql"},
-		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql"},
+		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
+		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql", "reboot db-012Krm -rf /var/lib/postgresql"}, // ansiEscapeRE matches ESC only; rests on StripControlChars
+		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
+		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -95,8 +97,7 @@ func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 			assert.NotContains(t, got, "\r")
 			assert.NotContains(t, got, "\u009b")
 			assert.NotContains(t, got, "\x7f")
-			assert.Contains(t, got, "reboot db-01")
-			assert.Contains(t, got, "rm -rf /var/lib/postgresql")
+			assert.Contains(t, got, tt.cell)
 			lines := strings.Split(strings.TrimSpace(got), "\n")
 			assert.Len(t, lines, 2, "header plus a single row")
 		})
