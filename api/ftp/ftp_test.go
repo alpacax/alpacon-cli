@@ -1434,6 +1434,37 @@ func TestFetchFromURLToFile_GivesUpOnAFatalClientError(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load(), "a 404 will be a 404 again")
 }
 
+func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
+	stall := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(stall) }) }
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(make([]byte, maxDrainedErrorBody+1))
+		w.(http.Flusher).Flush()
+		<-stall
+	}))
+	defer ts.Close()
+	defer release() // the handler holds the server open, so it has to run first
+
+	path := filepath.Join(t.TempDir(), "out")
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 1)
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "client error: 404")
+	case <-time.After(5 * time.Second):
+		release()
+		t.Fatal("the drain read past maxDrainedErrorBody and blocked on the stalled body")
+	}
+}
+
 func TestBackoffDelay(t *testing.T) {
 	tests := []struct {
 		attempt int

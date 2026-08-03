@@ -39,9 +39,9 @@ const (
 	maxDownloadRetryDelay     = time.Second
 	downloadMaxAttempts       = 100
 
-	// Bounded so a keep-alive connection can be reused without reading an unbounded
-	// body from a failing server.
-	maxDrainedErrorBody = 64 << 10
+	// The drain only buys connection reuse, and the shared client sets no timeout,
+	// so this bound is the retry loop's only defense against a stalled error body.
+	maxDrainedErrorBody = 8 << 10
 
 	basePollTimeout    = 30 * time.Second
 	perFilePollTimeout = 10 * time.Second
