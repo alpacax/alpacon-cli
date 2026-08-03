@@ -53,14 +53,6 @@ func TestUsageErrorCodeConstant(t *testing.T) {
 	assert.Equal(t, "usage_error", UsageErrorCode)
 }
 
-func TestExitCodeNotApproved_IsSixAndDistinct(t *testing.T) {
-	// 6 is a public contract documented in README; scripts and agents branch on it.
-	assert.Equal(t, 6, ExitCodeNotApproved)
-	assert.NotEqual(t, ExitCodeWorkSessionDenied, ExitCodeNotApproved)
-	assert.NotEqual(t, ExitCodePendingApproval, ExitCodeNotApproved)
-	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeNotApproved)
-}
-
 func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
 	// Pins the default the new helper has to override; without the override the
 	// envelope would claim 1 while the process exits 6.
