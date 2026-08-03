@@ -120,8 +120,8 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	// PrintPendingApproval, not CliError: exit 4 owes a machine consumer the
 	// pending_approval envelope under --output json, the same as every other surface
-	// that returns it. No retry action—this CLI cannot rebuild the invocation as a
-	// string a consumer could run unedited.
+	// that returns it. No retry action: unlike exec's and create's, the only retry here
+	// is the invocation the consumer just ran, so naming it back carries nothing.
 	switch outcome {
 	case eventapi.OutcomeTimeout:
 		utils.PrintPendingApproval(
