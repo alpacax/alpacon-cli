@@ -70,15 +70,15 @@ func runWait(cmd *cobra.Command, _ []string) {
 	until := utils.CompactStrings(untilRaw)
 
 	if eventType == "" {
-		utils.CliErrorWithExit("--type is required.")
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "--type is required.")
 	}
 	// Rejected rather than ignored: falling back to the built-in condition would run a
 	// wait the caller did not ask for.
 	if cmd.Flags().Changed("until") && len(until) == 0 {
-		utils.CliErrorWithExit("--until needs at least one sub type.")
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "--until needs at least one sub type.")
 	}
 	if timeout <= 0 {
-		utils.CliErrorWithExit("--timeout must be positive.")
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "--timeout must be positive.")
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -88,7 +88,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	opts, err := resolveWaitOptions(alpaconClient, eventapi.EventType(eventType), target, until, timeout)
 	if err != nil {
-		utils.CliErrorWithExit("%s.", err)
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "%s.", err)
 	}
 
 	waiter := eventapi.NewWaiter(alpaconClient, eventapi.EventType(eventType), target, opts)

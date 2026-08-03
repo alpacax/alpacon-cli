@@ -6,6 +6,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const opWait = "wait"
+
 var EventCmd = &cobra.Command{
 	Use:     "event",
 	Aliases: []string{"events"},
