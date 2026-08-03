@@ -104,16 +104,35 @@ func TestPrintTable_TableOutput(t *testing.T) {
 }
 
 func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
-	items := []outputTestItem{{Name: "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql\nsecond line", ID: 1}}
-	var got string
-	withFormat("table", func() {
-		got = captureStdout(t, func() { PrintTable(items) })
-	})
-	assert.NotContains(t, got, "\x1b")
-	assert.NotContains(t, got, "\r")
-	assert.Contains(t, got, "reboot db-01")
-	assert.Contains(t, got, "rm -rf /var/lib/postgresql")
-	assert.Equal(t, 2, strings.Count(strings.TrimSpace(got), "\n")+1, "header plus a single row")
+	// Every payload hides the second command behind a control sequence, so a
+	// terminal reading it unsanitised shows only one of the two.
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql"},
+		// 0x9b introduces CSI on an 8-bit terminal; ansiEscapeRE only matches the
+		// ESC form, so this one rests on StripControlChars alone.
+		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql"},
+		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql"},
+		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			withFormat("table", func() {
+				got = captureStdout(t, func() { PrintTable([]outputTestItem{{Name: tt.payload, ID: 1}}) })
+			})
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			assert.NotContains(t, got, "\u009b")
+			assert.NotContains(t, got, "\x7f")
+			assert.Contains(t, got, "reboot db-01")
+			assert.Contains(t, got, "rm -rf /var/lib/postgresql")
+			lines := strings.Split(strings.TrimSpace(got), "\n")
+			assert.Len(t, lines, 2, "header plus a single row")
+		})
+	}
 }
 
 func TestPrintJson_JSONOutput(t *testing.T) {
