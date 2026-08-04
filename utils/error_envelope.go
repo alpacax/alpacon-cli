@@ -43,6 +43,20 @@ func CliErrorEnvelopeWithExit(operation string, err error, format string, args .
 	CliErrorWithExit(format, args...)
 }
 
+// CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
+// code, for refusals a script branches on (e.g. ExitCodeNotApproved).
+func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		envelope := buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...))
+		// buildCliErrorEnvelope hardcodes 1; leaving it would make the envelope
+		// disagree with the process exit code.
+		envelope.ExitCode = code
+		PrintJSONError(os.Stderr, envelope)
+		os.Exit(code)
+	}
+	CliErrorWithExitCode(code, format, args...)
+}
+
 // CliUsageErrorEnvelopeWithExit is the local-validation variant; error_code is fixed to UsageErrorCode. Exits(1).
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
 	if OutputFormat == OutputFormatJSON {

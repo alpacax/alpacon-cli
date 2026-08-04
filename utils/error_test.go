@@ -155,3 +155,11 @@ func TestServerBusyExitCode(t *testing.T) {
 	assert.Equal(t, "server_busy_with_user_work", ServerBusyWithUserWork)
 	assert.Equal(t, 5, ExitCodeServerBusy)
 }
+
+func TestExitCodeNotApproved_IsSixAndDistinct(t *testing.T) {
+	// 6 is a public contract documented in README; scripts and agents branch on it.
+	assert.Equal(t, 6, ExitCodeNotApproved)
+	assert.NotEqual(t, ExitCodeWorkSessionDenied, ExitCodeNotApproved)
+	assert.NotEqual(t, ExitCodePendingApproval, ExitCodeNotApproved)
+	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeNotApproved)
+}
