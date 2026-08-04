@@ -105,7 +105,7 @@ func isCommandInlineCredentialError(err error) bool {
 // warning about.
 func credentialInlineHint() string {
 	return fmt.Sprintf(
-		"%s move the secret to --env instead (its value is read from your shell, not the command line, and is never recorded):\n"+
+		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
 			"  alpacon exec --env=SECRET_NAME db-server -- <command>\n",
 		utils.Yellow("Hint:"))
 }

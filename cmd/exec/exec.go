@@ -44,11 +44,12 @@ Flags:
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
   --env="KEY"                   Pass an environment variable to the remote command,
                                 reading its value from the current shell. This keeps
-                                the value off the alpacon command line and out of the
-                                audit log—use it for secrets such as passwords or tokens.
+                                the value off your local alpacon command line—use it
+                                for secrets such as passwords or tokens.
   --env="KEY=VALUE"             Set 'KEY' to a literal value. Discouraged: the value
-                                is written on the command line and recorded verbatim
-                                in the audit log. Never pass credentials this way.
+                                stays on your local alpacon command line, so it lands
+                                in shell history, ps output, and CI job logs. Never
+                                pass credentials this way.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -80,9 +81,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec -u root prod-docker systemctl status nginx
   alpacon exec -g docker user@server docker images
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line
-  # and out of the audit log. psql reads PGPASSWORD from the environment, so it
-  # never lands in the remote process's argv either.
+  # Pass a secret via the shell env; the value stays off the alpacon command line,
+  # so it never reaches shell history, ps output, or CI job logs. psql reads
+  # PGPASSWORD from the environment, so it never lands in the remote process's
+  # argv either.
   export PGPASSWORD=hunter2
   alpacon exec --env="PGPASSWORD" db-server -- psql -h localhost -U app -c 'SELECT 1'
 

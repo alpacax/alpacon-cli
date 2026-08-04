@@ -143,8 +143,9 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh my-server "ls -la /var/log"
   alpacon websh root@my-server "systemctl status nginx"
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line
-  # and out of the session recording. psql reads PGPASSWORD directly from the env.
+  # Pass a secret via the shell env; the value stays off the alpacon command line,
+  # so it never reaches shell history, ps output, or CI job logs. psql reads
+  # PGPASSWORD directly from the env.
   export PGPASSWORD=hunter2
   alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
@@ -168,12 +169,12 @@ Flags:
   -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
   --env="KEY"                        Pass an environment variable, reading its value
                                      from the current shell. This keeps the value off
-                                     the alpacon command line and out of the audit
-                                     log—use it for secrets such as passwords or tokens.
+                                     your local alpacon command line—use it for
+                                     secrets such as passwords or tokens.
   --env="KEY=VALUE"                  Set 'KEY' to a literal value. Discouraged: the
-                                     value is written on the command line and recorded
-                                     verbatim in the audit log. Never pass credentials
-                                     this way.
+                                     value stays on your local alpacon command line,
+                                     so it lands in shell history, ps output, and CI
+                                     job logs. Never pass credentials this way.
   -s, --share                        Share the terminal via a temporary link.
   --read-only=[true|false]           Set shared session to read-only (default: false).
   --work-session [UUID]              Attach this session to a work-session.
