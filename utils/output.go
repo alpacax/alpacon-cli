@@ -59,7 +59,7 @@ func (a NextAction) PlainText() string {
 
 // escapeJSONControls rewrites DEL, the C1 block, and Unicode format characters as
 // \u escapes. encoding/json escapes only below U+0020, so these reach the terminal
-// as raw bytes: 8-bit CSI opens a control sequence there and a bidi override reorders
+// untouched: 8-bit CSI opens a control sequence there and a bidi override reorders
 // the line. Escaping rather than stripping keeps the value a decoder reads back
 // unchanged. Valid JSON carries them inside strings alone, so scanning needs no
 // parser. json.Indent does not validate UTF-8, so C1 can arrive as a bare byte;
