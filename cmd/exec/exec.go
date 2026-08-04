@@ -71,7 +71,8 @@ DURATION to block with a longer timeout); --output json emits
 The server rejects a command whose command line carries a credential—a
 -p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
 user:pass@host connection string—before it runs, with exit code 1. Pass the
-secret with --env="KEY" instead.
+secret with --env="KEY" instead; --output json emits an error envelope on
+stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
