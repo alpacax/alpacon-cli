@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/term"
@@ -496,10 +497,23 @@ func StripControlChars(s string) string {
 	}, s)
 }
 
+// StripFormatChars removes Unicode format characters. They carry no control byte,
+// so the control passes miss them, while a bidi override reorders what is rendered:
+// "denied" can reach the screen as "approved".
+func StripFormatChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // SanitizeTerminalText strips escape sequences before the standalone control
 // bytes; reversed, ESC alone would go and "[2K" would stay on screen as text.
+// Format characters go first, so one buried in a sequence cannot break the match.
 func SanitizeTerminalText(s string) string {
-	return StripControlChars(StripANSIEscapes(s))
+	return StripControlChars(StripANSIEscapes(StripFormatChars(s)))
 }
 
 // ProcessEditedData facilitates user modifications to original data,

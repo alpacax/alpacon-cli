@@ -368,3 +368,26 @@ func TestStripControlChars(t *testing.T) {
 	assert.Equal(t, "ab", StripControlChars("a\u0085b"))
 	assert.Equal(t, "abé", StripControlChars("a\u0085bé"))
 }
+
+func TestStripFormatChars(t *testing.T) {
+	// Cf carries no control byte, so the control passes leave it behind.
+	assert.Equal(t, "denied approved", StripFormatChars("denied\u202e\u2066 approved"))
+	assert.Equal(t, "abé", StripFormatChars("a\u200dbé"))
+}
+
+func TestSanitizeTerminalText(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"bidi override", "denied\u202e\u2066 approved", "denied approved"},
+		// Cf goes first, or the sequence no longer matches and "[2K" stays on screen.
+		{"Cf buried in a sequence", "a\x1b[2\u200dKb", "ab"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, SanitizeTerminalText(tt.input))
+		})
+	}
+}

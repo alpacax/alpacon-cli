@@ -169,6 +169,20 @@ func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 	}
 }
 
+func TestPrintTable_TableOutput_StripsFormatChars(t *testing.T) {
+	// Every table command reaches the terminal through here, and a bidi override
+	// rewrites the cell without carrying a control byte for the other passes to find.
+	var got string
+	withFormat("table", func() {
+		got = testutil.CaptureStdout(t, func() {
+			PrintTable([]outputTestItem{{Name: "denied\u202e\u2066 approved", ID: 1}})
+		})
+	})
+	assert.NotContains(t, got, "\u202e")
+	assert.NotContains(t, got, "\u2066")
+	assert.Contains(t, got, "denied approved")
+}
+
 func TestPrintJson_JSONOutput(t *testing.T) {
 	compact := []byte(`{"name":"alpha","id":1}`)
 	var got string
