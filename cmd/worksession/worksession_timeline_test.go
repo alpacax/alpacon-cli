@@ -3,27 +3,15 @@ package worksession
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func captureStdout(f func()) string {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-	f()
-	_ = w.Close()
-	os.Stdout = old
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	return buf.String()
-}
 
 func mustParseTime(ts string) time.Time {
 	t, _ := time.Parse(time.RFC3339Nano, ts)
@@ -230,10 +218,44 @@ func TestFormatDetails_Unknown(t *testing.T) {
 	assert.Equal(t, "", formatDetails(&item))
 }
 
+func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {
+	var buf bytes.Buffer
+	printTimelineTableTo(&buf, []wsapi.TimelineAttributes{{
+		Time:    "2024-01-15 10:30:00",
+		Type:    "websh",
+		Server:  "web-01\x1b[2K\rdb-prod",
+		User:    "alice\nroot",
+		Details: "opened",
+	}})
+
+	got := buf.String()
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.Equal(t, 2, strings.Count(got, "\n"), "header and one row only — a newline must not forge a timeline entry")
+	assert.Contains(t, got, "web-01db-prod")
+	assert.Contains(t, got, "aliceroot")
+}
+
+func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
+	serverID := "srv-1"
+	timestamp := "2024-01-15T10:30:00Z"
+	var buf bytes.Buffer
+	printRecordingsSectionTo(&buf, []wsapi.TimelineItem{{
+		Type:      "websh_record",
+		Timestamp: &timestamp,
+		ServerID:  &serverID,
+	}}, map[string]string{serverID: "web-01\x1b[2K\rdb-prod"})
+
+	got := buf.String()
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.Contains(t, got, "web-01db-prod")
+}
+
 // outputTimelineJSON must emit recordings as [] not null when no recordings exist,
 // including when --no-records passes nil for recordings.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
-	out := captureStdout(func() {
+	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
 	})
 	var result map[string]json.RawMessage
@@ -243,7 +265,7 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 
 // Both timeline and recordings keys must always be present in JSON output.
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
-	out := captureStdout(func() {
+	out := testutil.CaptureStdout(t, func() {
 		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
 	})
 	var keys map[string]json.RawMessage

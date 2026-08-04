@@ -67,19 +67,33 @@ func formatMutationExpiresAt(expiresAt time.Time) string {
 	return expiresAt.UTC().Format(time.RFC3339)
 }
 
+// The success lines below echo values the API stores unchecked, the description
+// most of all, and CliSuccess writes them straight to the terminal.
 func createSuccessMessage(session *wsapi.WorkSession) string {
 	if session.ApprovalRequestID != "" {
-		return fmt.Sprintf("Work session created: %s (status: %s, approval request: %s)", session.ID, session.Status, session.ApprovalRequestID)
+		return fmt.Sprintf("Work session created: %s (status: %s, approval request: %s)",
+			utils.SanitizeTerminalText(session.ID),
+			utils.SanitizeTerminalText(session.Status),
+			utils.SanitizeTerminalText(session.ApprovalRequestID))
 	}
-	return fmt.Sprintf("Work session created: %s (status: %s)", session.ID, session.Status)
+	return fmt.Sprintf("Work session created: %s (status: %s)",
+		utils.SanitizeTerminalText(session.ID), utils.SanitizeTerminalText(session.Status))
+}
+
+func updateSuccessMessage(session *wsapi.WorkSession) string {
+	return fmt.Sprintf("Work session %s updated (status: %s).",
+		utils.SanitizeTerminalText(session.ID), utils.SanitizeTerminalText(session.Status))
 }
 
 func activeWorkSessionSetMessage(successPrefix, id, desc string) string {
 	suffix := ""
-	if desc != "" {
-		suffix = fmt.Sprintf(" (%s)", desc)
+	// Stripped first: a description of nothing but control bytes would print as
+	// empty parentheses.
+	if stripped := utils.SanitizeTerminalText(desc); stripped != "" {
+		suffix = fmt.Sprintf(" (%s)", stripped)
 	}
-	return fmt.Sprintf("%sActive work-session set to %s%s.", successPrefix, id, suffix)
+	return fmt.Sprintf("%sActive work-session set to %s%s.",
+		utils.SanitizeTerminalText(successPrefix), utils.SanitizeTerminalText(id), suffix)
 }
 
 func printWorkSessionMutationJSON(output workSessionMutationOutput) {
@@ -105,17 +119,21 @@ func formatAdjustments(adj *wsapi.Adjustments) string {
 	return strings.Join(lines, "\n")
 }
 
+// The approver writes this text freely and the server stores it unchecked, so a
+// control sequence here rewrites the requester's terminal.
 func formatRecommendations(recs []wsapi.Recommendation) string {
 	if len(recs) == 0 {
 		return ""
 	}
 	lines := make([]string, len(recs))
 	for i, r := range recs {
-		sev := r.Severity
+		// Fall back after stripping: a severity made only of control bytes is
+		// empty by the time it reaches the format string.
+		sev := utils.SanitizeTerminalText(r.Severity)
 		if sev == "" {
 			sev = "info"
 		}
-		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sev), r.Text)
+		lines[i] = fmt.Sprintf("  [%s] %s", strings.ToUpper(sev), utils.SanitizeTerminalText(r.Text))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -134,7 +152,11 @@ func joinOrNone(items []string) string {
 	if len(items) == 0 {
 		return "none"
 	}
-	return strings.Join(items, ", ")
+	sanitized := make([]string, len(items))
+	for i, item := range items {
+		sanitized[i] = utils.SanitizeTerminalText(item)
+	}
+	return strings.Join(sanitized, ", ")
 }
 
 func joinServerNames(servers []types.ServerSummary) string {
@@ -143,7 +165,7 @@ func joinServerNames(servers []types.ServerSummary) string {
 	}
 	names := make([]string, len(servers))
 	for i, s := range servers {
-		names[i] = s.Name
+		names[i] = utils.SanitizeTerminalText(s.Name)
 	}
 	return strings.Join(names, ", ")
 }

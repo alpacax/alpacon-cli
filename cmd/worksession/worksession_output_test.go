@@ -1,18 +1,17 @@
 package worksession
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -126,7 +125,7 @@ func TestWorkSessionCreateCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	expiresAt = "2026-06-01T12:00:00Z"
 	requesterType = "user"
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCreateCmd.Run(workSessionCreateCmd, nil)
 	})
 
@@ -170,7 +169,7 @@ func TestWorkSessionUseCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	unsetActiveWorkSession = false
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionUseCmd.Run(workSessionUseCmd, []string{"ses-active"})
 	})
 
@@ -203,7 +202,7 @@ func TestWorkSessionUnsetCommandJSONOutput_OperationIsUnset(t *testing.T) {
 	unsetActiveWorkSession = true
 	t.Cleanup(func() { unsetActiveWorkSession = false })
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionUseCmd.Run(workSessionUseCmd, nil)
 	})
 
@@ -242,7 +241,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 		extendExpiresAt = ""
 	})
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-active"})
 	})
 
@@ -280,7 +279,7 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	setupWorkSessionCommandConfig(t, ts.URL)
 	withWorkSessionCommandJSONMode(t)
 
-	stdout, stderr := captureWorkSessionCommandOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionCancelCmd.Run(workSessionCancelCmd, []string{"ses-pending"})
 	})
 
@@ -299,6 +298,41 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 	assert.Equal(t, "cancel", got.Operation)
 	assert.Equal(t, "ses-pending", got.WorkSessionID)
 	assert.Equal(t, "cancelled", got.Status)
+}
+
+func TestSuccessMessages_StripControlSequences(t *testing.T) {
+	session := &wsapi.WorkSession{
+		ID:                "ses-abc\x1b[2K\rses-evil",
+		Status:            "active\nWork session ses-evil created",
+		ApprovalRequestID: "apr-1\x1b[1A",
+	}
+
+	for name, got := range map[string]string{
+		"create": createSuccessMessage(session),
+		"update": updateSuccessMessage(session),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			assert.Equal(t, 0, strings.Count(got, "\n"), "a newline must not forge a second success line")
+			assert.Contains(t, got, "ses-abcses-evil")
+		})
+	}
+}
+
+func TestActiveWorkSessionSetMessage_StripsControlSequences(t *testing.T) {
+	got := activeWorkSessionSetMessage("Work session ses-abc\x1b[2K approved. ", "ses-abc",
+		"db work\nActive work-session set to ses-evil")
+
+	assert.NotContains(t, got, "\x1b")
+	assert.Equal(t, 0, strings.Count(got, "\n"), "a newline must not forge a second success line")
+	assert.Contains(t, got, "(db workActive work-session set to ses-evil)")
+}
+
+func TestActiveWorkSessionSetMessage_DropsDescriptionLeftEmpty(t *testing.T) {
+	// Stripping can empty the description; the parentheses go with it.
+	assert.Equal(t, "Active work-session set to ses-abc.",
+		activeWorkSessionSetMessage("", "ses-abc", "\x1b[2K\r"))
 }
 
 func TestFormatAdjustments(t *testing.T) {
@@ -345,8 +379,75 @@ func TestFormatRecommendations(t *testing.T) {
 		{Severity: "high", Text: "Rotate the key"},
 		{Severity: "low", Text: "Prefer reload"},
 		{Severity: "", Text: "No severity set"},
+		{Severity: "\x1b[2K\r", Text: "Severity left empty by stripping"},
 	})
-	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set", got)
+	assert.Equal(t, "  [HIGH] Rotate the key\n  [LOW] Prefer reload\n  [INFO] No severity set\n  [INFO] Severity left empty by stripping", got)
+}
+
+func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
+	// This block is where a requester reads what was granted, so a control
+	// sequence in any interpolated field can hide it.
+	const payload = "reboot db-01\x1b[2K\rapproved: read-only access"
+	tests := []struct {
+		name string
+		got  func() string
+		// Severity is uppercased before interpolation, so that case spells the
+		// payload its own way. The server whitelists severity today; the case
+		// stays because this sanitisation does not rely on that.
+		wantParts []string
+	}{
+		{
+			"recommendation text",
+			func() string {
+				return formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: payload}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+		{
+			"recommendation severity",
+			func() string {
+				return formatRecommendations([]wsapi.Recommendation{{Severity: payload, Text: "rotate the key"}})
+			},
+			[]string{"REBOOT DB-01", "APPROVED: READ-ONLY ACCESS"},
+		},
+		{
+			"server name",
+			func() string {
+				return formatAdjustments(&wsapi.Adjustments{Servers: &wsapi.ServerDiff{
+					Old: []types.ServerSummary{{Name: payload}},
+					New: []types.ServerSummary{{Name: "web-01"}},
+				}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+		{
+			"scope name",
+			func() string {
+				return formatAdjustments(&wsapi.Adjustments{Scopes: &wsapi.ScopeDiff{
+					Old: []string{payload},
+					New: []string{"command"},
+				}})
+			},
+			[]string{"reboot db-01", "approved: read-only access"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.got()
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			for _, part := range tt.wantParts {
+				assert.Contains(t, got, part)
+			}
+		})
+	}
+}
+
+func TestFormatAdvisories_KeepsOneLinePerEntry(t *testing.T) {
+	// The formatters join entries with \n, so a newline inside a value forges an
+	// extra advisory line.
+	got := formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: "granted\n  [HIGH] full root access"}})
+	assert.Len(t, strings.Split(got, "\n"), 1)
 }
 
 func setupWorkSessionCommandConfig(t *testing.T, workspaceURL string) {
@@ -388,47 +489,4 @@ func resetCreateCommandState(t *testing.T) {
 		createSudo = nil
 		createSudoReason = ""
 	})
-}
-
-func captureWorkSessionCommandOutput(t *testing.T, fn func()) (stdout string, stderr string) {
-	t.Helper()
-	oldStdout := os.Stdout
-	oldStderr := os.Stderr
-	stdoutReader, stdoutWriter, err := os.Pipe()
-	require.NoError(t, err)
-	stderrReader, stderrWriter, err := os.Pipe()
-	require.NoError(t, err)
-
-	os.Stdout = stdoutWriter
-	os.Stderr = stderrWriter
-	defer func() {
-		os.Stdout = oldStdout
-		os.Stderr = oldStderr
-	}()
-
-	stdoutDone := make(chan string, 1)
-	stderrDone := make(chan string, 1)
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, stdoutReader)
-		stdoutDone <- buf.String()
-	}()
-	go func() {
-		var buf bytes.Buffer
-		_, _ = io.Copy(&buf, stderrReader)
-		stderrDone <- buf.String()
-	}()
-
-	fn()
-
-	_ = stdoutWriter.Close()
-	_ = stderrWriter.Close()
-	os.Stdout = oldStdout
-	os.Stderr = oldStderr
-	t.Cleanup(func() {
-		_ = stdoutReader.Close()
-		_ = stderrReader.Close()
-	})
-
-	return <-stdoutDone, <-stderrDone
 }

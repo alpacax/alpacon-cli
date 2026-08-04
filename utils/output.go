@@ -10,6 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // Valid values for the --output persistent flag.
@@ -55,6 +57,41 @@ func (a NextAction) PlainText() string {
 	}
 }
 
+// escapeJSONControls rewrites DEL, the C1 block, and Unicode format characters as
+// \u escapes. encoding/json escapes only below U+0020, so these reach the terminal
+// untouched: 8-bit CSI opens a control sequence there and a bidi override reorders
+// the line. Escaping rather than stripping keeps the value a decoder reads back
+// unchanged. Valid JSON carries them inside strings alone, so scanning needs no
+// parser. json.Indent does not validate UTF-8, so C1 can arrive as a bare byte;
+// decoding by rune keeps the continuation bytes of valid runes from being mistaken
+// for one.
+func escapeJSONControls(b []byte) []byte {
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
+		switch {
+		case r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.Is(unicode.Cf, r):
+			out = appendUnicodeEscape(out, r)
+		case r == utf8.RuneError && size == 1 && b[i] >= 0x80 && b[i] <= 0x9f:
+			out = appendUnicodeEscape(out, rune(b[i]))
+		default:
+			out = append(out, b[i:i+size]...)
+		}
+		i += size
+	}
+	return out
+}
+
+// appendUnicodeEscape writes r as JSON \u escapes, which are UTF-16 code units:
+// anything past the BMP needs a surrogate pair.
+func appendUnicodeEscape(out []byte, r rune) []byte {
+	if r > 0xffff {
+		hi, lo := utf16.EncodeRune(r)
+		return append(out, fmt.Sprintf(`\u%04x\u%04x`, hi, lo)...)
+	}
+	return append(out, fmt.Sprintf(`\u%04x`, r)...)
+}
+
 func FormatJSON(value any) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -63,7 +100,7 @@ func FormatJSON(value any) (string, error) {
 	if err := enc.Encode(value); err != nil {
 		return "", err
 	}
-	return strings.TrimRight(buf.String(), "\n"), nil
+	return strings.TrimRight(string(escapeJSONControls(buf.Bytes())), "\n"), nil
 }
 
 func PrintJSONValue(w io.Writer, value any) error {
@@ -98,7 +135,7 @@ func PrintTable(slice any) {
 		if err != nil {
 			CliErrorWithExit("Failed to marshal data to JSON: %s", err)
 		}
-		_, _ = fmt.Fprintln(os.Stdout, string(data))
+		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(data)))
 		return
 	}
 
@@ -109,7 +146,7 @@ func PrintTable(slice any) {
 
 	numFields := s.Type().Elem().NumField()
 	headers := make([]string, numFields)
-	for i := 0; i < numFields; i++ {
+	for i := range numFields {
 		field := s.Type().Elem().Field(i)
 		if tag := field.Tag.Get("table"); tag != "" {
 			headers[i] = strings.ToUpper(tag)
@@ -121,8 +158,11 @@ func PrintTable(slice any) {
 
 	for i := 0; i < s.Len(); i++ {
 		row := make([]string, numFields)
-		for j := 0; j < numFields; j++ {
-			row[j] = fmt.Sprintf("%v", s.Index(i).Field(j))
+		for j := range numFields {
+			// API values are untrusted: a control sequence here rewrites the reader's terminal.
+			// Newlines drop instead of becoming spaces as in cmd/event/render.go: a cell must
+			// not spill into a second row. --output json returns the value whole.
+			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(j)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}
@@ -136,7 +176,7 @@ func PrintJson(body []byte) {
 		if err := json.Indent(&buf, body, "", "  "); err != nil {
 			CliErrorWithExit("Parsing data: Expected a JSON format.")
 		}
-		_, _ = fmt.Fprintln(os.Stdout, buf.String())
+		_, _ = fmt.Fprintln(os.Stdout, string(escapeJSONControls(buf.Bytes())))
 		return
 	}
 
@@ -146,7 +186,7 @@ func PrintJson(body []byte) {
 		CliErrorWithExit("Parsing data: Expected a JSON format.")
 	}
 
-	formattedJson := strings.ReplaceAll(prettyJSON.String(), "\\n", "\n")
+	formattedJson := strings.ReplaceAll(string(escapeJSONControls(prettyJSON.Bytes())), "\\n", "\n")
 	formattedJson = strings.ReplaceAll(formattedJson, "\\t", "\t")
 
 	fmt.Println(formattedJson)

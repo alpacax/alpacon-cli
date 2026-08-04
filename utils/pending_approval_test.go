@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,7 @@ import (
 func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = captureStdout(t, func() {
+		out = testutil.CaptureStdout(t, func() {
 			PrintPendingApproval("needs approval", "apr-123", NextAction{Command: "alpacon exec srv -- sudo reboot"})
 		})
 	})
@@ -48,7 +49,7 @@ func TestPrintPendingApproval_JSONOutput(t *testing.T) {
 func TestPrintPendingApproval_JSONOutput_OmitsEmptyCommand(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = captureStdout(t, func() {
+		out = testutil.CaptureStdout(t, func() {
 			PrintPendingApproval("needs approval", "apr-123", NextAction{Command: "alpacon exec srv -- sudo reboot"})
 		})
 	})
@@ -61,7 +62,7 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyCommand(t *testing.T) {
 func TestPrintPendingApproval_JSONOutput_OmitsEmptyRequestID(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = captureStdout(t, func() {
+		out = testutil.CaptureStdout(t, func() {
 			PrintPendingApproval("needs approval", "", NextAction{})
 		})
 	})
@@ -75,7 +76,7 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyRequestID(t *testing.T) {
 func TestPrintPendingApproval_JSONOutput_OmitsEmptyRetry(t *testing.T) {
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = captureStdout(t, func() {
+		out = testutil.CaptureStdout(t, func() {
 			PrintPendingApproval("needs approval", "", NextAction{})
 		})
 	})

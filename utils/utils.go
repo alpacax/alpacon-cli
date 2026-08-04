@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/term"
@@ -171,9 +172,7 @@ func ExtractWorkspaceName(workspaceURL string) string {
 func SplitAndParseInt(input string) []int {
 	var intValues []int
 
-	stringValues := strings.Split(input, ",")
-
-	for _, stringValue := range stringValues {
+	for stringValue := range strings.SplitSeq(input, ",") {
 		trimmedString := strings.TrimSpace(stringValue)
 
 		intValue, err := strconv.Atoi(trimmedString)
@@ -496,6 +495,25 @@ func StripControlChars(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// StripFormatChars removes Unicode format characters. They carry no control byte,
+// so the control passes miss them, while a bidi override reorders what is rendered:
+// "denied" can reach the screen as "approved".
+func StripFormatChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// SanitizeTerminalText strips escape sequences before the standalone control
+// bytes; reversed, ESC alone would go and "[2K" would stay on screen as text.
+// Format characters go first, so one buried in a sequence cannot break the match.
+func SanitizeTerminalText(s string) string {
+	return StripControlChars(StripANSIEscapes(StripFormatChars(s)))
 }
 
 // ProcessEditedData facilitates user modifications to original data,

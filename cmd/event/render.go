@@ -8,7 +8,6 @@ import (
 	"io"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -58,22 +57,18 @@ func renderEvent(w io.Writer, raw []byte, format, target string, now time.Time) 
 	return err
 }
 
-// A TTY and an agent's log receive this text verbatim. Line breaks and tabs become
-// spaces so a multi-line server error does not glue into one word, and format characters
-// go entirely: a bidi override could render "denied" as "approved".
+// A TTY and an agent's log receive this text verbatim, so line breaks and tabs become
+// spaces: a multi-line server error must not glue into one word. Format characters go
+// entirely, in SanitizeTerminalText.
 func strip(s string) string {
 	spaced := strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
+		if r == '\n' || r == '\r' || r == '\t' {
 			return ' '
-		case unicode.Is(unicode.Cf, r):
-			return -1
-		default:
-			return r
 		}
+		return r
 	}, s)
 	// Trimmed last so a value of only control bytes reads as absent, not as blank data.
-	return strings.TrimSpace(utils.StripControlChars(utils.StripANSIEscapes(spaced)))
+	return strings.TrimSpace(utils.SanitizeTerminalText(spaced))
 }
 
 func field(s string) string {

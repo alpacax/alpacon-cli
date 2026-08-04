@@ -3,12 +3,14 @@ package cmd
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -316,4 +318,34 @@ func TestIsWorksessionRequired(t *testing.T) {
 			assert.Equal(t, tt.want, isWorksessionRequired(tt.cfg))
 		})
 	}
+}
+
+func TestPrintWhoami_StripsControlSequences(t *testing.T) {
+	// Each field named here is set by someone other than the reader.
+	const payload = "prod-workspace\x1b[2K\rspoofed"
+	tests := []struct {
+		name   string
+		output whoamiOutput
+	}{
+		{"workspace name", whoamiOutput{WorkspaceName: payload, WorkspaceURL: "https://example.com"}},
+		{"application name", whoamiOutput{ApplicationName: payload}},
+		{"group name", whoamiOutput{Groups: []iam.GroupMembership{{Name: payload, Role: "owner"}}}},
+		{"shell", whoamiOutput{Shell: payload}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := testutil.CaptureStdout(t, func() { printWhoami(tt.output) })
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			assert.Contains(t, got, "prod-workspace")
+			assert.Contains(t, got, "spoofed")
+		})
+	}
+}
+
+func TestPrintWhoami_KeepsOneLinePerField(t *testing.T) {
+	// A newline inside a value would forge an identity line the account does not have.
+	plain := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash"}) })
+	forged := testutil.CaptureStdout(t, func() { printWhoami(whoamiOutput{Shell: "/bin/bash\nRole:        owner"}) })
+	assert.Equal(t, strings.Count(plain, "\n"), strings.Count(forged, "\n"))
 }

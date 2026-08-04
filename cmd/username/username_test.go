@@ -2,9 +2,14 @@ package username
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetUsernameErrorText(t *testing.T) {
@@ -28,4 +33,23 @@ func TestSetUsernameErrorText(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUsernameGetCommand_StripsControlSequences(t *testing.T) {
+	// JSON escapes it on the wire, so what reaches the printer is a real ESC byte.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"username":"chae\u001b[2K\rroot"}`))
+	}))
+	defer ts.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+
+	got := testutil.CaptureStdout(t, func() { usernameGetCmd.Run(usernameGetCmd, nil) })
+
+	assert.NotContains(t, got, "\x1b")
+	assert.NotContains(t, got, "\r")
+	assert.Contains(t, got, "chae")
+	assert.Contains(t, got, "root")
 }

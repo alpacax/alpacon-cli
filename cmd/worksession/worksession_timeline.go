@@ -101,12 +101,7 @@ var workSessionTimelineCmd = &cobra.Command{
 
 		writer, cleanup := utils.WriteToPager()
 		defer cleanup()
-		tw := tabwriter.NewWriter(writer, 0, 0, 3, ' ', 0)
-		_, _ = fmt.Fprintln(tw, "TIME\tTYPE\tSERVER\tUSER\tDETAILS")
-		for _, row := range rows {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", row.Time, row.Type, row.Server, row.User, row.Details)
-		}
-		_ = tw.Flush()
+		printTimelineTableTo(writer, rows)
 		if !noRecords && len(recordings) > 0 {
 			printRecordingsSectionTo(writer, recordings, serverMap)
 		}
@@ -171,10 +166,29 @@ func resolveServer(serverID *string, serverMap map[string]string) string {
 	return *serverID
 }
 
+// The rows bypass utils.PrintTable, so the sanitizing pass every other table
+// gets has to happen here. Server and user names are set by whoever registered
+// them, and a control sequence in a column erases the audit line it sits on.
+func printTimelineTableTo(w io.Writer, rows []wsapi.TimelineAttributes) {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "TIME\tTYPE\tSERVER\tUSER\tDETAILS")
+	for _, row := range rows {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			utils.SanitizeTerminalText(row.Time),
+			utils.SanitizeTerminalText(row.Type),
+			utils.SanitizeTerminalText(row.Server),
+			utils.SanitizeTerminalText(row.User),
+			utils.SanitizeTerminalText(row.Details))
+	}
+	_ = tw.Flush()
+}
+
 func printRecordingsSectionTo(w io.Writer, recordings []wsapi.TimelineItem, serverMap map[string]string) {
 	_, _ = fmt.Fprintf(w, "\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
 	for i, rec := range recordings {
-		_, _ = fmt.Fprintf(w, "[%d]  %s  %s\n", i+1, resolveTimestamp(rec.Timestamp), resolveServer(rec.ServerID, serverMap))
+		_, _ = fmt.Fprintf(w, "[%d]  %s  %s\n", i+1,
+			utils.SanitizeTerminalText(resolveTimestamp(rec.Timestamp)),
+			utils.SanitizeTerminalText(resolveServer(rec.ServerID, serverMap)))
 		if preview := recordingPreview(rec.MaskedRecord); preview != "" {
 			_, _ = fmt.Fprintf(w, "     %s\n", preview)
 		}
@@ -264,7 +278,7 @@ func formatDetails(item *wsapi.TimelineItem) string {
 				status = "failed"
 			}
 		}
-		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.StripControlChars(utils.StripANSIEscapes(item.Line)), 60))
+		return fmt.Sprintf("[%s] %s", status, utils.TruncateString(utils.SanitizeTerminalText(item.Line), 60))
 
 	case "websh_session":
 		state := sessionState(item.ClosedAt)
@@ -284,15 +298,15 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return sessionState(item.ClosedAt)
 
 	case "file_upload":
-		return fmt.Sprintf("↑ %s (%s)", utils.StripControlChars(utils.StripANSIEscapes(item.Name)), formatSize(item.Size))
+		return fmt.Sprintf("↑ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
 
 	case "file_download":
-		return fmt.Sprintf("↓ %s (%s)", utils.StripControlChars(utils.StripANSIEscapes(item.Name)), formatSize(item.Size))
+		return fmt.Sprintf("↓ %s (%s)", utils.SanitizeTerminalText(item.Name), formatSize(item.Size))
 
 	case "sudo_grant":
 		detail := fmt.Sprintf("%s: %s", item.GrantType, item.Status)
 		if item.Command != nil && *item.Command != "" {
-			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.StripControlChars(utils.StripANSIEscapes(*item.Command)), 40))
+			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.SanitizeTerminalText(*item.Command), 40))
 		}
 		return detail
 
