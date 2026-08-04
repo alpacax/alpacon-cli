@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -56,27 +57,39 @@ func (a NextAction) PlainText() string {
 	}
 }
 
-// escapeJSONControls rewrites DEL and the C1 block as \u escapes. encoding/json escapes
-// only below U+0020, so these reach the terminal as raw bytes and 8-bit CSI opens a
-// control sequence there. Valid JSON carries them inside strings alone, so scanning
-// needs no parser, and a decoder reads the escape back as the same rune. json.Indent
-// does not validate UTF-8, so C1 can arrive as a bare byte; decoding by rune keeps the
-// continuation bytes of valid runes from being mistaken for one.
+// escapeJSONControls rewrites DEL, the C1 block, and Unicode format characters as
+// \u escapes. encoding/json escapes only below U+0020, so these reach the terminal
+// as raw bytes: 8-bit CSI opens a control sequence there and a bidi override reorders
+// the line. Escaping rather than stripping keeps the value a decoder reads back
+// unchanged. Valid JSON carries them inside strings alone, so scanning needs no
+// parser. json.Indent does not validate UTF-8, so C1 can arrive as a bare byte;
+// decoding by rune keeps the continuation bytes of valid runes from being mistaken
+// for one.
 func escapeJSONControls(b []byte) []byte {
 	out := make([]byte, 0, len(b))
 	for i := 0; i < len(b); {
 		r, size := utf8.DecodeRune(b[i:])
 		switch {
-		case r == 0x7f || (r >= 0x80 && r <= 0x9f):
-			out = append(out, fmt.Sprintf(`\u%04x`, r)...)
+		case r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.Is(unicode.Cf, r):
+			out = appendUnicodeEscape(out, r)
 		case r == utf8.RuneError && size == 1 && b[i] >= 0x80 && b[i] <= 0x9f:
-			out = append(out, fmt.Sprintf(`\u%04x`, b[i])...)
+			out = appendUnicodeEscape(out, rune(b[i]))
 		default:
 			out = append(out, b[i:i+size]...)
 		}
 		i += size
 	}
 	return out
+}
+
+// appendUnicodeEscape writes r as JSON \u escapes, which are UTF-16 code units:
+// anything past the BMP needs a surrogate pair.
+func appendUnicodeEscape(out []byte, r rune) []byte {
+	if r > 0xffff {
+		hi, lo := utf16.EncodeRune(r)
+		return append(out, fmt.Sprintf(`\u%04x\u%04x`, hi, lo)...)
+	}
+	return append(out, fmt.Sprintf(`\u%04x`, r)...)
 }
 
 func FormatJSON(value any) (string, error) {

@@ -127,6 +127,36 @@ func TestPrintJson_JSONOutput_EscapesBareC1Byte(t *testing.T) {
 	}
 }
 
+func TestPrintJson_JSONOutput_EscapesFormatChars(t *testing.T) {
+	// Escaped, not stripped: the terminal never receives a rune that reorders the
+	// line, and a decoder still reads back the value the API sent.
+	tests := []struct {
+		name   string
+		raw    string
+		escape string
+	}{
+		{"bidi override", "denied\u202e\u2066 approved", `\u202e`},
+		{"past the BMP", "a\U000E0001b", `\udb40\udc01`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"name": tt.raw})
+			assert.NoError(t, err)
+
+			var got string
+			withFormat("json", func() {
+				got = testutil.CaptureStdout(t, func() { PrintJson(body) })
+			})
+			assert.Contains(t, got, tt.escape)
+			assert.NotContains(t, got, tt.raw)
+
+			var decoded map[string]string
+			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			assert.Equal(t, tt.raw, decoded["name"])
+		})
+	}
+}
+
 func TestPrintTable_TableOutput(t *testing.T) {
 	items := []outputTestItem{{Name: "alpha", ID: 1}}
 	var got string
