@@ -101,6 +101,32 @@ func TestPrintJson_JSONOutput_EscapesRawControlBytes(t *testing.T) {
 	assert.Equal(t, "a\u009b2K\x7fb", decoded["name"])
 }
 
+func TestPrintJson_JSONOutput_EscapesBareC1Byte(t *testing.T) {
+	// json.Indent does not validate UTF-8, so a body may carry C1 as a bare byte.
+	// Multibyte runes must survive it: their continuation bytes sit in the same range.
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"bare C1", "{\"name\":\"a\x9b2Kb\"}", "a\u009b2Kb"},
+		{"multibyte rune", `{"name":"가나"}`, "가나"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			withFormat("json", func() {
+				got = testutil.CaptureStdout(t, func() { PrintJson([]byte(tt.body)) })
+			})
+			assert.NotContains(t, got, "\x9b")
+
+			var decoded map[string]string
+			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			assert.Equal(t, tt.want, decoded["name"])
+		})
+	}
+}
+
 func TestPrintTable_TableOutput(t *testing.T) {
 	items := []outputTestItem{{Name: "alpha", ID: 1}}
 	var got string

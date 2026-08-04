@@ -10,6 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Valid values for the --output persistent flag.
@@ -58,19 +59,22 @@ func (a NextAction) PlainText() string {
 // escapeJSONControls rewrites DEL and the C1 block as \u escapes. encoding/json escapes
 // only below U+0020, so these reach the terminal as raw bytes and 8-bit CSI opens a
 // control sequence there. Valid JSON carries them inside strings alone, so scanning
-// bytes needs no parser, and a decoder reads the escape back as the same rune.
+// needs no parser, and a decoder reads the escape back as the same rune. json.Indent
+// does not validate UTF-8, so C1 can arrive as a bare byte; decoding by rune keeps the
+// continuation bytes of valid runes from being mistaken for one.
 func escapeJSONControls(b []byte) []byte {
 	out := make([]byte, 0, len(b))
-	for i := 0; i < len(b); i++ {
+	for i := 0; i < len(b); {
+		r, size := utf8.DecodeRune(b[i:])
 		switch {
-		case b[i] == 0x7f:
-			out = append(out, `\u007f`...)
-		case b[i] == 0xc2 && i+1 < len(b) && b[i+1] >= 0x80 && b[i+1] <= 0x9f:
-			out = append(out, fmt.Sprintf(`\u00%02x`, b[i+1])...)
-			i++
+		case r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			out = append(out, fmt.Sprintf(`\u%04x`, r)...)
+		case r == utf8.RuneError && size == 1 && b[i] >= 0x80 && b[i] <= 0x9f:
+			out = append(out, fmt.Sprintf(`\u%04x`, b[i])...)
 		default:
-			out = append(out, b[i])
+			out = append(out, b[i:i+size]...)
 		}
+		i += size
 	}
 	return out
 }
