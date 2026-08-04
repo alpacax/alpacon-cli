@@ -14,6 +14,13 @@ const (
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
+	// CommandInlineCredential: alpacon-server refused a command because its command
+	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such
+	// as PGPASSWORD=..., or a user:pass@host connection string), which would
+	// otherwise be recorded in the audit log in plaintext. Move the secret to
+	// --env instead. See alpacon-server ADR 0037 (Refs alpacax/alpacon-server#2745).
+	CommandInlineCredential = "command_inline_credential"
+
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
 	WorkSessionRequired         = "work_session_required"
 	WorkSessionNotUsable        = "work_session_not_usable"
