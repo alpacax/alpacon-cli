@@ -16,8 +16,8 @@ const (
 
 	// CommandInlineCredential: alpacon-server refused a command because its command
 	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such
-	// as PGPASSWORD=..., or a user:pass@host connection string), which would
-	// otherwise be recorded in the audit log in plaintext. Move the secret to
+	// as PGPASSWORD=..., or a user:pass@host connection string), which the server
+	// would otherwise persist in the stored command line. Move the secret to
 	// --env instead. See alpacon-server ADR 0037 (Refs alpacax/alpacon-server#2745).
 	CommandInlineCredential = "command_inline_credential"
 

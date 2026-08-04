@@ -25,7 +25,7 @@ const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
 // alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
-const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential, which would land in the audit log in plaintext"
+const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
 
 // ExecInvocation and WebshInvocation name the command the user ran, so a hint
 // can show an example they can copy without translating it first. Both reach
@@ -102,7 +102,7 @@ func sudoDenialHint(output string) string {
 // submitted command line itself contained a credential (e.g. a -p/--password
 // flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
 // connection string), so the server refused the command before it ever ran
-// rather than record it in the audit log in plaintext.
+// rather than persist that line.
 func isCommandInlineCredentialError(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.CommandInlineCredential
