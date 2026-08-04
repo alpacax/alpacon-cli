@@ -16,9 +16,9 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
-	// InvokedAs is the command the user typed, ExecInvocation or
-	// WebshInvocation, so hints can show an example in their own syntax. Empty
-	// means exec.
+	// InvokedAs selects which syntax a hint renders its example in. The caller
+	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
+	// WebshInvocation, and exec leaves it empty, which the hint reads as exec.
 	InvokedAs    string
 	Env          map[string]string
 	WaitApproval time.Duration
