@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	// DefaultApprovalWaitTimeout is the shared --wait default so exec and work-session create match; not a ceiling (--wait-approval exceeds it), preserving the old 30 × 10s window.
+	// DefaultApprovalWaitTimeout is the shared --wait default so exec, work-session create, and event wait match; not a ceiling (--wait-approval exceeds it), preserving the old 30 × 10s window.
 	DefaultApprovalWaitTimeout = 5 * time.Minute
 )
 

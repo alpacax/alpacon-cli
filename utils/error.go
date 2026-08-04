@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 )
 
@@ -44,6 +45,13 @@ const (
 	// a hard failure (1): scripts and AI agents branch on it to retry when idle
 	// (or re-run with --force) rather than give up.
 	ExitCodeServerBusy = 5
+
+	// ExitCodeNotApproved is the process exit code for an awaited approval that
+	// ended without being granted—rejected, expired, revoked, cancelled, or
+	// completed. It is the counterpart of ExitCodePendingApproval (4): 4 means the
+	// outcome is still open, 6 means it settled without the grant. Scripts and AI
+	// agents branch on it to stop retrying rather than keep re-requesting approval.
+	ExitCodeNotApproved = 6
 )
 
 type ErrorResponse struct {
@@ -68,6 +76,19 @@ func HTTPStatusCode(err error) int {
 		}
 	}
 	return 0
+}
+
+// IsRetryLaterStatus reports whether a 4xx is asking to be retried rather than refusing.
+func IsRetryLaterStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
+}
+
+// IsFatalClientError reports whether a 4xx will fail the same way on retry.
+func IsFatalClientError(status int) bool {
+	if IsRetryLaterStatus(status) {
+		return false
+	}
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
 func ParseErrorResponse(err error) (string, string) {

@@ -24,6 +24,14 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+// swapDownloadRetryDelays keeps the retry assertions off the production backoff,
+// which sleeps ~8s per exhausted budget.
+func swapDownloadRetryDelays(initial, max time.Duration) func() {
+	oi, om := initialDownloadRetryDelay, maxDownloadRetryDelay
+	initialDownloadRetryDelay, maxDownloadRetryDelay = initial, max
+	return func() { initialDownloadRetryDelay, maxDownloadRetryDelay = oi, om }
+}
+
 func createTestZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -228,7 +236,7 @@ func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
 	go func() {
 		errCh <- executeBulkUpload(ac, request, files, sizes)
 	}()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-uploadsEntered:
 		case <-time.After(2 * time.Second):
@@ -288,7 +296,7 @@ func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
 	go func() {
 		errCh <- executeBulkUpload(ac, request, files, sizes)
 	}()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		select {
 		case <-pollsEntered:
 		case <-time.After(2 * time.Second):
@@ -777,22 +785,34 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 }
 
 func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
-	var requestCount atomic.Int32
+	tests := []struct {
+		name    string
+		status  int
+		wantErr string
+	}{
+		{name: "forbidden", status: http.StatusForbidden, wantErr: "client error: 403"},
+		{name: "not found", status: http.StatusNotFound, wantErr: "client error: 404"},
+	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount.Add(1)
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer ts.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestCount atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requestCount.Add(1)
+				w.WriteHeader(tt.status)
+			}))
+			defer ts.Close()
 
-	dest := filepath.Join(t.TempDir(), "download.bin")
-	_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "client error: 403")
-	// Should fail on first attempt, not retry
-	assert.Equal(t, int32(1), requestCount.Load())
-	_, statErr := os.Stat(dest)
-	assert.True(t, os.IsNotExist(statErr))
+			dest := filepath.Join(t.TempDir(), "download.bin")
+			_, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 10)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Equal(t, int32(1), requestCount.Load(), "a fatal client error fails the same way on retry")
+			_, statErr := os.Stat(dest)
+			assert.True(t, os.IsNotExist(statErr))
+		})
+	}
 }
 
 func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
@@ -1290,9 +1310,9 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below
 	// the old fixed 2s+2s = 4s. Assert both the poll count and a loose upper
 	// bound that the old fixed interval could not have met.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n < 3 {
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
@@ -1311,7 +1331,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(3), calls.Load())
 	// Lower bound proves the two waits actually backed off (250ms+500ms);
 	// loose upper bound proves it beat the old fixed 2s+2s without being
 	// flaky under slow CI scheduling.
@@ -1322,9 +1342,9 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
 	// status: PollTransferStatus must back off and retry, not treat it as fatal.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&calls, 1)
+		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n < 3 {
 			w.WriteHeader(http.StatusUnprocessableEntity)
@@ -1342,15 +1362,15 @@ func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(3), calls.Load())
 }
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	// A non-in-progress error (e.g. 403) is fatal: return immediately without
 	// polling again.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
 		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "permission denied"})
@@ -1363,16 +1383,16 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.False(t, success)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "fatal error must not be retried")
+	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
 }
 
 func TestPollTransferStatus_TimesOut(t *testing.T) {
 	// Server never completes (success=null). With a timeout below the initial
 	// poll interval, the deadline check breaks before the first sleep, so a
 	// single poll happens and the timeout error is returned.
-	var calls int32
+	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
 	}))
@@ -1385,5 +1405,153 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out")
 	assert.False(t, success)
-	assert.Equal(t, int32(1), atomic.LoadInt32(&calls))
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
+	tests := []struct {
+		name        string
+		firstStatus int
+	}{
+		{name: "request timeout", firstStatus: http.StatusRequestTimeout},
+		{name: "too many requests", firstStatus: http.StatusTooManyRequests},
+		{name: "bad gateway", firstStatus: http.StatusBadGateway},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if calls.Add(1) == 1 {
+					w.WriteHeader(tt.firstStatus)
+					return
+				}
+				_, _ = w.Write([]byte("payload"))
+			}))
+			defer ts.Close()
+
+			path := filepath.Join(t.TempDir(), "out")
+			written, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 3)
+
+			require.NoError(t, err)
+			assert.Equal(t, int64(len("payload")), written)
+			assert.Equal(t, int32(2), calls.Load(), "the status is retryable")
+		})
+	}
+}
+
+func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
+	defer swapDownloadRetryDelays(time.Millisecond, 2*time.Millisecond)()
+
+	tests := []struct {
+		name        string
+		maxAttempts int
+		statusFor   func(call int32) int
+		wantCalls   int32
+		wantErr     string
+	}{
+		{
+			name:        "caller budget",
+			maxAttempts: 2,
+			statusFor:   func(int32) int { return http.StatusTooManyRequests },
+			wantCalls:   2,
+			wantErr:     "download failed after 2 attempts (last status: 429)",
+		},
+		{
+			name:        "throttle budget",
+			maxAttempts: downloadMaxAttempts,
+			statusFor:   func(int32) int { return http.StatusTooManyRequests },
+			wantCalls:   throttledMaxAttempts,
+			wantErr:     "download failed after 10 attempts (last status: 429)",
+		},
+		{
+			// The throttle budget collapses below the attempts already spent, so the
+			// loop has to stop on the first 429 and count what it made, not the budget.
+			name:        "throttle budget after other failures",
+			maxAttempts: downloadMaxAttempts,
+			statusFor: func(call int32) int {
+				if call <= throttledMaxAttempts {
+					return http.StatusBadGateway
+				}
+				return http.StatusTooManyRequests
+			},
+			wantCalls: throttledMaxAttempts + 1,
+			wantErr:   "download failed after 11 attempts (last status: 429)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.statusFor(calls.Add(1)))
+			}))
+			defer ts.Close()
+
+			path := filepath.Join(t.TempDir(), "out")
+			_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, tt.maxAttempts)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+			assert.Equal(t, tt.wantCalls, calls.Load(), "the budget is spent, not exceeded")
+			_, statErr := os.Stat(path)
+			assert.True(t, os.IsNotExist(statErr))
+		})
+	}
+}
+
+func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
+	stall := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(stall) }) }
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(make([]byte, maxDrainedErrorBody+1))
+		w.(http.Flusher).Flush()
+		<-stall
+	}))
+	defer ts.Close()
+	defer release() // the handler holds the server open, so it has to run first
+
+	path := filepath.Join(t.TempDir(), "out")
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := fetchFromURLToFile(ts.Client(), ts.URL, path, 1)
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "client error: 404")
+	case <-time.After(5 * time.Second):
+		release()
+		t.Fatal("the drain read past maxDrainedErrorBody and blocked on the stalled body")
+	}
+}
+
+func TestBackoffDelay(t *testing.T) {
+	tests := []struct {
+		name    string
+		attempt int
+		want    time.Duration
+	}{
+		{name: "no doubling yet", attempt: 0, want: 250 * time.Millisecond},
+		{name: "one double", attempt: 1, want: 500 * time.Millisecond},
+		{name: "reaches the cap", attempt: 2, want: time.Second},
+		{name: "past the cap", attempt: 3, want: time.Second},
+		{name: "far past the cap", attempt: 50, want: time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, backoffDelay(tt.attempt, 250*time.Millisecond, time.Second))
+		})
+	}
+}
+
+func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
+	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
+	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
 }

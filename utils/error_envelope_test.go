@@ -52,3 +52,11 @@ func TestBuildCliErrorEnvelopeFromErr_PlainErr(t *testing.T) {
 func TestUsageErrorCodeConstant(t *testing.T) {
 	assert.Equal(t, "usage_error", UsageErrorCode)
 }
+
+func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
+	// Pins the default the new helper has to override; without the override the
+	// envelope would claim 1 while the process exits 6.
+	envelope := buildCliErrorEnvelope("work-session create", "", "work session was rejected")
+
+	assert.Equal(t, 1, envelope.ExitCode)
+}
