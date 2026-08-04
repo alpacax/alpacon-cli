@@ -128,6 +128,10 @@ Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
 Exit code 4 indicates the sudo command is pending human approval; approve it in
 the Alpacon console (web), then re-run—or use 'alpacon exec --wait' to block.
+The server rejects a command whose command line carries a credential—a
+-p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
+user:pass@host connection string—before it runs, with exit code 1. Pass the
+secret with --env="KEY" instead.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server

@@ -147,6 +147,8 @@ $ alpacon exec --env="PGPASSWORD" <server> -- psql -h localhost -U app -c 'SELEC
 
 Flags go before the server name; everything after is the remote command.
 
+The server rejects a command whose command line carries a credential—a `-p`/`--password` flag, a `KEY=VALUE` secret such as `PGPASSWORD=...`, or a `user:pass@host` connection string—before it runs. Pass the secret with `--env="KEY"` as shown above. The same applies to `alpacon websh` when it runs a command.
+
 ### File transfer
 ```bash
 $ alpacon cp ./local.txt <server>:/home/user/
@@ -292,7 +294,7 @@ What each refusal code means and what to do next:
 | Code | Meaning |
 |------|---------|
 | `0`  | Success |
-| `1`  | General error (network failure, server error, etc.) |
+| `1`  | General error (network failure, server error, etc.). Also returned when the server rejects a command whose command line carries a credential (`command_inline_credential`)—a permanent refusal that fails the same way on retry, so move the secret to `--env="KEY"` rather than retrying |
 | `2`  | Usage error (invalid flags or arguments) |
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
 | `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. For `exec`, re-run the command after approval (or pass `--wait` on the original command to block; `--wait-approval <duration>` raises the wait timeout, default 5m); `websh` command mode has no `--wait`, so re-run via `alpacon exec --wait` to block; for `work-session create` the session already exists—after approval attach it with `alpacon work-session use <id>` (or pass `--wait` on the original create to block; `--wait-approval <duration>` raises the wait timeout, default 5m). Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` (and `websh` when running a command) on a `SUDO_APPROVAL_REQUIRED` sudo denial and by `work-session create` when the session lands pending or when its `--wait` times out with the outcome still open. Also returned by `alpacon event wait` when the wait times out or is interrupted—the outcome is still open |
