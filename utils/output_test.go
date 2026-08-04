@@ -84,6 +84,73 @@ func TestPrintTable_JSONOutput_KeepsControlSequencesEscaped(t *testing.T) {
 	}
 }
 
+func TestPrintTable_TableOutput(t *testing.T) {
+	items := []outputTestItem{{Name: "alpha", ID: 1}}
+	var got string
+	withFormat("table", func() {
+		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
+	})
+	assert.Contains(t, got, "NAME")
+	assert.Contains(t, got, "ID")
+	assert.Contains(t, got, "alpha")
+	assert.Contains(t, got, "1")
+}
+
+func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
+	// Each payload hides the second command behind a control sequence.
+	// cell pins the join: the separator drops, it does not become a space.
+	tests := []struct {
+		name    string
+		payload string
+		cell    string
+	}{
+		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
+		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql", "reboot db-012Krm -rf /var/lib/postgresql"}, // ansiEscapeRE matches ESC only; rests on StripControlChars
+		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
+		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			withFormat("table", func() {
+				got = testutil.CaptureStdout(t, func() { PrintTable([]outputTestItem{{Name: tt.payload, ID: 1}}) })
+			})
+			assert.NotContains(t, got, "\x1b")
+			assert.NotContains(t, got, "\r")
+			assert.NotContains(t, got, "\u009b")
+			assert.NotContains(t, got, "\x7f")
+			assert.Contains(t, got, tt.cell)
+			lines := strings.Split(strings.TrimSpace(got), "\n")
+			assert.Len(t, lines, 2, "header plus a single row")
+		})
+	}
+}
+
+func TestPrintTable_TableOutput_StripsFormatChars(t *testing.T) {
+	// Every table command reaches the terminal through here, and a bidi override
+	// rewrites the cell without carrying a control byte for the other passes to find.
+	var got string
+	withFormat("table", func() {
+		got = testutil.CaptureStdout(t, func() {
+			PrintTable([]outputTestItem{{Name: "denied\u202e\u2066 approved", ID: 1}})
+		})
+	})
+	assert.NotContains(t, got, "\u202e")
+	assert.NotContains(t, got, "\u2066")
+	assert.Contains(t, got, "denied approved")
+}
+
+func TestPrintJson_JSONOutput(t *testing.T) {
+	compact := []byte(`{"name":"alpha","id":1}`)
+	var got string
+	withFormat("json", func() {
+		got = testutil.CaptureStdout(t, func() { PrintJson(compact) })
+	})
+	assert.JSONEq(t, `{"name":"alpha","id":1}`, got)
+	assert.Contains(t, got, "\n  \"name\": \"alpha\"")
+	assert.Contains(t, got, "\n  \"id\": 1")
+}
+
 func TestPrintJson_JSONOutput_EscapesRawControlBytes(t *testing.T) {
 	// A server may send these unescaped: JSON only requires escaping below U+0020.
 	body := []byte("{\"name\":\"a\u009b2K\x7fb\"}")
@@ -155,73 +222,6 @@ func TestPrintJson_JSONOutput_EscapesFormatChars(t *testing.T) {
 			assert.Equal(t, tt.raw, decoded["name"])
 		})
 	}
-}
-
-func TestPrintTable_TableOutput(t *testing.T) {
-	items := []outputTestItem{{Name: "alpha", ID: 1}}
-	var got string
-	withFormat("table", func() {
-		got = testutil.CaptureStdout(t, func() { PrintTable(items) })
-	})
-	assert.Contains(t, got, "NAME")
-	assert.Contains(t, got, "ID")
-	assert.Contains(t, got, "alpha")
-	assert.Contains(t, got, "1")
-}
-
-func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
-	// Each payload hides the second command behind a control sequence.
-	// cell pins the join: the separator drops, it does not become a space.
-	tests := []struct {
-		name    string
-		payload string
-		cell    string
-	}{
-		{"7-bit CSI and CR", "reboot db-01\x1b[2K\rrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
-		{"8-bit CSI", "reboot db-01\u009b2Krm -rf /var/lib/postgresql", "reboot db-012Krm -rf /var/lib/postgresql"}, // ansiEscapeRE matches ESC only; rests on StripControlChars
-		{"bare LF", "reboot db-01\nrm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
-		{"DEL", "reboot db-01\x7frm -rf /var/lib/postgresql", "reboot db-01rm -rf /var/lib/postgresql"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got string
-			withFormat("table", func() {
-				got = testutil.CaptureStdout(t, func() { PrintTable([]outputTestItem{{Name: tt.payload, ID: 1}}) })
-			})
-			assert.NotContains(t, got, "\x1b")
-			assert.NotContains(t, got, "\r")
-			assert.NotContains(t, got, "\u009b")
-			assert.NotContains(t, got, "\x7f")
-			assert.Contains(t, got, tt.cell)
-			lines := strings.Split(strings.TrimSpace(got), "\n")
-			assert.Len(t, lines, 2, "header plus a single row")
-		})
-	}
-}
-
-func TestPrintTable_TableOutput_StripsFormatChars(t *testing.T) {
-	// Every table command reaches the terminal through here, and a bidi override
-	// rewrites the cell without carrying a control byte for the other passes to find.
-	var got string
-	withFormat("table", func() {
-		got = testutil.CaptureStdout(t, func() {
-			PrintTable([]outputTestItem{{Name: "denied\u202e\u2066 approved", ID: 1}})
-		})
-	})
-	assert.NotContains(t, got, "\u202e")
-	assert.NotContains(t, got, "\u2066")
-	assert.Contains(t, got, "denied approved")
-}
-
-func TestPrintJson_JSONOutput(t *testing.T) {
-	compact := []byte(`{"name":"alpha","id":1}`)
-	var got string
-	withFormat("json", func() {
-		got = testutil.CaptureStdout(t, func() { PrintJson(compact) })
-	})
-	assert.JSONEq(t, `{"name":"alpha","id":1}`, got)
-	assert.Contains(t, got, "\n  \"name\": \"alpha\"")
-	assert.Contains(t, got, "\n  \"id\": 1")
 }
 
 func TestPrintJson_TableOutput(t *testing.T) {
