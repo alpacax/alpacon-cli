@@ -6,7 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const opWait = "wait"
+const (
+	opWait  = "wait"
+	opWatch = "watch"
+)
 
 var EventCmd = &cobra.Command{
 	Use:     "event",

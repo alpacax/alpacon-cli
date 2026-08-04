@@ -51,12 +51,12 @@ func runWatch(cmd *cobra.Command, _ []string) {
 	target, _ := cmd.Flags().GetString("target")
 
 	if eventType == "" {
-		utils.CliErrorWithExit("--type is required.")
+		utils.CliUsageErrorEnvelopeWithExit(opWatch, "--type is required.")
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorEnvelopeWithExit(opWatch, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	watcher := eventapi.NewWatcher(alpaconClient, eventapi.EventType(eventType), target)
@@ -67,9 +67,9 @@ func runWatch(cmd *cobra.Command, _ []string) {
 		// A rejected subscription is not retried, so its message is the useful one.
 		// Stripped because the server wrote it and it lands in a terminal.
 		if subErr := watcher.Err(); subErr != nil {
-			utils.CliErrorWithExit("%s.", strip(subErr.Error()))
+			utils.CliErrorEnvelopeWithExit(opWatch, subErr, "%s.", strip(subErr.Error()))
 		}
-		utils.CliErrorWithExit("Timed out connecting to the event channel after %s.", watchConnectTimeout)
+		utils.CliErrorEnvelopeWithExit(opWatch, nil, "Timed out connecting to the event channel after %s.", watchConnectTimeout)
 	}
 
 	utils.CliInfo("Watching %s events. Press Ctrl+C to stop.", strip(eventType))
