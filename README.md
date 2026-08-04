@@ -138,7 +138,11 @@ $ alpacon websh join --url <SHARED_URL> --password <PASSWORD>
 $ alpacon exec <server> "<cmd>"
 $ alpacon exec root@<server> "docker ps"
 $ alpacon exec -u admin -g developers <server> "..."
-$ alpacon exec --env="KEY=VALUE" <server> "echo $KEY"
+
+# Pass a secret with --env="KEY": the value is read from your shell, so it never
+# reaches the alpacon command line, your shell history, ps output, or CI job logs.
+$ export PGPASSWORD=...
+$ alpacon exec --env="PGPASSWORD" <server> -- psql -h localhost -U app -c 'SELECT 1'
 ```
 
 Flags go before the server name; everything after is the remote command.
