@@ -23,6 +23,10 @@ import (
 // whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 
+// commandInlineCredentialMessage is the exec-facing error line for the
+// alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
+const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential, which would land in the audit log in plaintext"
+
 // approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
 var approvalWaitPollInterval = 5 * time.Second
 
@@ -82,6 +86,28 @@ func sudoDenialHint(output string) string {
 		}
 	}
 	return ""
+}
+
+// isCommandInlineCredentialError reports whether err carries the alpacon-server
+// inline-credential gate code (utils.CommandInlineCredential, ADR 0037): the
+// submitted command line itself contained a credential (e.g. a -p/--password
+// flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
+// connection string), so the server refused the command before it ever ran
+// rather than record it in the audit log in plaintext.
+func isCommandInlineCredentialError(err error) bool {
+	code, _ := utils.ParseErrorResponse(err)
+	return code == utils.CommandInlineCredential
+}
+
+// credentialInlineHint returns the actionable guidance printed alongside
+// commandInlineCredentialMessage. It never echoes the rejected command
+// line—only fixed guidance naming --env—so it cannot leak the credential it is
+// warning about.
+func credentialInlineHint() string {
+	return fmt.Sprintf(
+		"%s move the secret to --env instead (its value is read from your shell, not the command line, and is never recorded):\n"+
+			"  alpacon exec --env=SECRET_NAME db-server -- <command>\n",
+		utils.Yellow("Hint:"))
 }
 
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
@@ -318,6 +344,15 @@ func HandleCommandResult(err error) {
 		var clientTimeout *event.ClientTimeoutError
 		if errors.As(err, &clientTimeout) {
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
+			os.Exit(1)
+		}
+		if isCommandInlineCredentialError(err) {
+			if utils.OutputFormat == utils.OutputFormatJSON {
+				utils.CliErrorEnvelopeWithExit("command", err, "%s.", commandInlineCredentialMessage)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), commandInlineCredentialMessage)
+			fmt.Fprint(os.Stderr, credentialInlineHint())
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)
