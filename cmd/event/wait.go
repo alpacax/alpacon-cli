@@ -83,7 +83,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {
-		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		utils.CliErrorEnvelopeWithExit(opWait, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
 
 	opts, err := resolveWaitOptions(alpaconClient, eventapi.EventType(eventType), target, until, timeout)
@@ -119,7 +119,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 	frame, outcome, err := waiter.Wait()
 	if err != nil {
 		// Stripped because the server wrote it and it lands in a terminal.
-		utils.CliErrorWithExit("%s.", strip(err.Error()))
+		utils.CliErrorEnvelopeWithExit(opWait, err, "%s.", strip(err.Error()))
 	}
 
 	// PrintPendingApproval, not CliError: exit 4 owes a machine consumer the
