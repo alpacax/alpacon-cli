@@ -16,12 +16,16 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
-	Env           map[string]string
-	WaitApproval  time.Duration
-	Detach        bool
-	Wait          bool
-	ShowHelp      bool
-	Err           string
+	// InvokedAs is the command the user typed, ExecInvocation or
+	// WebshInvocation, so hints can show an example in their own syntax. Empty
+	// means exec.
+	InvokedAs    string
+	Env          map[string]string
+	WaitApproval time.Duration
+	Detach       bool
+	Wait         bool
+	ShowHelp     bool
+	Err          string
 }
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.

@@ -236,6 +236,7 @@ Note: All flags must be placed before the server name.
 				Groupname:     groupname,
 				WorkSessionID: parsed.WorkSessionID,
 				OutputFormat:  parsed.OutputFormat,
+				InvokedAs:     execCmd.WebshInvocation,
 				Server:        serverName,
 				Command:       execCmd.ShellJoin(commandArgs),
 				Env:           env,

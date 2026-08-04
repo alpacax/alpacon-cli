@@ -38,14 +38,29 @@ func TestIsCommandInlineCredentialError(t *testing.T) {
 	})
 }
 
-// TestCredentialInlineHint asserts the hint points at --env and never echoes a
-// credential value (there is nothing to echo—it's a fixed string—but this
-// guards against a future edit that starts interpolating the rejected line).
+// TestCredentialInlineHint asserts the hint points at --env, quotes the command
+// the caller actually ran, and never echoes a credential value (there is nothing
+// to echo—the example is fixed—but this guards against a future edit that starts
+// interpolating the rejected line).
 func TestCredentialInlineHint(t *testing.T) {
-	hint := credentialInlineHint()
-	assert.Contains(t, hint, "--env")
-	assert.Contains(t, hint, "Hint:")
-	assert.NotContains(t, hint, "hunter2", "hint must never echo a credential value")
+	tests := []struct {
+		name      string
+		invokedAs string
+		want      string
+	}{
+		{"exec", ExecInvocation, "alpacon exec --env=SECRET_NAME db-server -- <command>"},
+		{"websh takes the command as one quoted argument", WebshInvocation, "alpacon websh --env=SECRET_NAME db-server '<command>'"},
+		{"unset falls back to exec", "", "alpacon exec --env=SECRET_NAME db-server -- <command>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hint := credentialInlineHint(tt.invokedAs)
+			assert.Contains(t, hint, "--env")
+			assert.Contains(t, hint, "Hint:")
+			assert.Contains(t, hint, tt.want)
+			assert.NotContains(t, hint, "hunter2", "hint must never echo a credential value")
+		})
+	}
 }
 
 // newInlineCredentialDenialServer returns a test server that resolves one

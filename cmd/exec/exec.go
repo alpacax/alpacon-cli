@@ -213,7 +213,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if buf != nil {
 		_, _ = os.Stdout.Write(buf.Bytes())
 	}
-	HandleCommandResult(err)
+	HandleCommandResult(err, parsed.InvokedAs)
 }
 
 // reRunHint reconstructs the exec invocation (server, command, and any
@@ -224,8 +224,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // caveat rides in Description, since the rerun re-reads each value from the
 // shell and a machine consumer replaying Command verbatim would otherwise
 // submit without those keys.
+// It names exec even when InvokedAs is websh: websh has no --wait, so the rerun
+// genuinely has to go through exec (README "Exit codes", row 4).
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
-	parts := []string{"alpacon exec"}
+	parts := []string{ExecInvocation}
 	if parsed.Username != "" {
 		parts = append(parts, "-u "+parsed.Username)
 	}

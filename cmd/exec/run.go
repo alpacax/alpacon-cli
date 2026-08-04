@@ -27,6 +27,15 @@ const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 // alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential, which would land in the audit log in plaintext"
 
+// ExecInvocation and WebshInvocation name the command the user ran, so a hint
+// can show an example they can copy without translating it first. Both reach
+// this package through RemoteExecArgs.InvokedAs, since websh command mode runs
+// on the exec path.
+const (
+	ExecInvocation  = "alpacon exec"
+	WebshInvocation = "alpacon websh"
+)
+
 // approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
 var approvalWaitPollInterval = 5 * time.Second
 
@@ -99,15 +108,25 @@ func isCommandInlineCredentialError(err error) bool {
 	return code == utils.CommandInlineCredential
 }
 
+// credentialInlineExample renders the --env line for invokedAs. The two commands
+// take the remote command differently: only exec has the -- separator
+// (cmd/exec/parse.go), while websh takes it as one quoted argument.
+func credentialInlineExample(invokedAs string) string {
+	if invokedAs == WebshInvocation {
+		return WebshInvocation + " --env=SECRET_NAME db-server '<command>'"
+	}
+	return ExecInvocation + " --env=SECRET_NAME db-server -- <command>"
+}
+
 // credentialInlineHint returns the actionable guidance printed alongside
 // commandInlineCredentialMessage. It never echoes the rejected command
 // line—only fixed guidance naming --env—so it cannot leak the credential it is
-// warning about.
-func credentialInlineHint() string {
+// warning about. invokedAs picks the example; empty falls back to exec.
+func credentialInlineHint(invokedAs string) string {
 	return fmt.Sprintf(
 		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
-			"  alpacon exec --env=SECRET_NAME db-server -- <command>\n",
-		utils.Yellow("Hint:"))
+			"  %s\n",
+		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
@@ -327,8 +346,9 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 
 // HandleCommandResult exits appropriately on error. Output is streamed to stdout
 // during execution; on a remote failure the error carries that output, used here
-// only to surface the sudo-denial hint (not re-printed).
-func HandleCommandResult(err error) {
+// only to surface the sudo-denial hint (not re-printed). invokedAs names the
+// command the user ran so a hint can quote it; empty falls back to exec.
+func HandleCommandResult(err error, invokedAs string) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
@@ -352,7 +372,7 @@ func HandleCommandResult(err error) {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), commandInlineCredentialMessage)
-			fmt.Fprint(os.Stderr, credentialInlineHint())
+			fmt.Fprint(os.Stderr, credentialInlineHint(invokedAs))
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)
