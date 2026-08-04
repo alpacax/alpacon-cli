@@ -147,10 +147,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh my-server "ls -la /var/log"
   alpacon websh root@my-server "systemctl status nginx"
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line,
-  # so it never reaches shell history, ps output, or CI job logs. psql reads
-  # PGPASSWORD directly from the env.
-  export PGPASSWORD=hunter2
+  # Pass a secret via the shell env; the value stays off the alpacon command line.
+  # Read it in rather than typing it inline, so it stays out of shell history too.
+  # psql reads PGPASSWORD directly from the env.
+  read -rs PGPASSWORD && export PGPASSWORD
   alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
   # Share terminal session

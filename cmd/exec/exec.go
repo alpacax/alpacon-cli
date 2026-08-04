@@ -85,11 +85,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec -u root prod-docker systemctl status nginx
   alpacon exec -g docker user@server docker images
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line,
-  # so it never reaches shell history, ps output, or CI job logs. psql reads
-  # PGPASSWORD from the environment, so it never lands in the remote process's
-  # argv either.
-  export PGPASSWORD=hunter2
+  # Pass a secret via the shell env; the value stays off the alpacon command line.
+  # Read it in rather than typing it inline, so it stays out of shell history too.
+  # psql reads PGPASSWORD from the environment, so it never reaches the remote argv.
+  read -rs PGPASSWORD && export PGPASSWORD
   alpacon exec --env="PGPASSWORD" db-server -- psql -h localhost -U app -c 'SELECT 1'
 
   # Submit a command asynchronously and retrieve the result later

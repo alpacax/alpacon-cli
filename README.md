@@ -139,9 +139,10 @@ $ alpacon exec <server> "<cmd>"
 $ alpacon exec root@<server> "docker ps"
 $ alpacon exec -u admin -g developers <server> "..."
 
-# Pass a secret with --env="KEY": the value is read from your shell, so it never
-# reaches the alpacon command line, your shell history, ps output, or CI job logs.
-$ export PGPASSWORD=...
+# Pass a secret with --env="KEY": the value is read from your shell, so it stays off
+# the alpacon command line. Read it in rather than typing it inline, so it stays out
+# of shell history too.
+$ read -rs PGPASSWORD && export PGPASSWORD
 $ alpacon exec --env="PGPASSWORD" <server> -- psql -h localhost -U app -c 'SELECT 1'
 ```
 
