@@ -10,7 +10,7 @@ import (
 )
 
 type WebsocketClient struct {
-	Header     http.Header
+	header     http.Header
 	conn       *websocket.Conn
 	done       chan struct{} // closed once the first outcome is recorded
 	err        error

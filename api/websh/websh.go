@@ -200,27 +200,32 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 
 func newWebsocketClient(header http.Header) *WebsocketClient {
 	return &WebsocketClient{
-		Header: header,
+		header: header,
 		done:   make(chan struct{}),
 	}
 }
 
-func (wsClient *WebsocketClient) dial(websocketURL string) {
-	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.Header)
+func (wsClient *WebsocketClient) dial(websocketURL string) error {
+	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
 	if err != nil {
 		// The handshake response carries the reason a bad handshake alone never names.
-		status := ""
-		if resp != nil {
-			status = fmt.Sprintf(" (status %s)", utils.SanitizeTerminalText(resp.Status))
+		if resp == nil {
+			return fmt.Errorf("websocket connection failed: %w", err)
 		}
-		utils.CliErrorWithExit("websocket connection failed: %v%s", err, status)
+		return fmt.Errorf("websocket connection failed: %w (status %s)", err, utils.SanitizeTerminalText(resp.Status))
 	}
 	wsClient.conn = conn
+
+	return nil
 }
 
 // finish keeps the first outcome. err is written before done closes, so anyone
-// who saw done can read it.
+// who saw done can read it. A normal remote close is how a session ends rather
+// than a failure; every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		err = nil
+	}
 	wsClient.finishOnce.Do(func() {
 		wsClient.err = err
 		close(wsClient.done)
@@ -229,39 +234,31 @@ func (wsClient *WebsocketClient) finish(err error) {
 
 // OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.
 // Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
-// Exits cleanly on Ctrl+C or SIGTERM.
+// Ends cleanly on the remote close, on Ctrl+C, or on a signal.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
-	wsClient.dial(sessionResponse.WebsocketURL)
+	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
+		return err
+	}
 	defer func() { _ = wsClient.conn.Close() }()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// Registered before the term.Restore defer so LIFO runs it after: a signal
+	// Registered before the raw-mode restore so LIFO runs it after: a signal
 	// arriving mid-teardown lands in the buffered channel instead of killing the
 	// process with the terminal still in raw mode.
 	defer signal.Stop(sigChan)
 	go wsClient.watchInterrupt(sigChan)
 
-	oldState, err := checkTerminal()
+	restore, err := enterRawMode()
 	if err != nil {
-		utils.CliErrorWithExit("failed to set up terminal: %v", err)
+		return err
 	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	defer restore()
 
-	// Raw mode suppresses SIGINT, so Ctrl+C only ever arrives as a byte
-	go func() {
-		buf := make([]byte, 1)
-		for {
-			_, err := os.Stdin.Read(buf)
-			if err != nil || buf[0] == ctrlC {
-				wsClient.finish(nil)
-				return
-			}
-		}
-	}()
-
+	go wsClient.readCtrlC()
 	go wsClient.readFromServer()
+
 	<-wsClient.done
 	return wsClient.err
 }
@@ -275,22 +272,44 @@ func (wsClient *WebsocketClient) watchInterrupt(sigChan <-chan os.Signal) {
 	}
 }
 
+// readCtrlC ends the session on Ctrl+C — raw mode suppresses SIGINT, so it only
+// ever arrives as a byte. Once anything else has ended the session it stops
+// consuming stdin, though not before the read it is already parked in returns.
+func (wsClient *WebsocketClient) readCtrlC() {
+	buf := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil || (n > 0 && buf[0] == ctrlC) {
+			wsClient.finish(nil)
+			return
+		}
+		select {
+		case <-wsClient.done:
+			return
+		default:
+		}
+	}
+}
+
 // OpenNewTerminal opens an interactive terminal on the session.
-// A failed dial or terminal setup exits the process instead of returning.
+// Input is forwarded to the server. Terminal echo is suppressed via raw mode.
+// Ends cleanly on the remote close or on Ctrl+D.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
-	wsClient.dial(sessionResponse.WebsocketURL)
+	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
+		return err
+	}
 	defer func() { _ = wsClient.conn.Close() }()
 
 	return wsClient.runWsClient()
 }
 
 func (wsClient *WebsocketClient) runWsClient() error {
-	oldState, err := checkTerminal()
+	restore, err := enterRawMode()
 	if err != nil {
-		utils.CliErrorWithExit("failed to set up terminal: %v", err)
+		return err
 	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
+	defer restore()
 
 	inputChan := make(chan string, 1)
 
@@ -302,16 +321,17 @@ func (wsClient *WebsocketClient) runWsClient() error {
 	return wsClient.err
 }
 
-func checkTerminal() (*term.State, error) {
+// enterRawMode returns the restore for the caller to defer.
+func enterRawMode() (func(), error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil, errors.New("stdin is not a terminal")
+		return nil, errors.New("failed to set up terminal: stdin is not a terminal")
 	}
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to set up terminal: %w", err)
 	}
 
-	return oldState, nil
+	return func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }, nil
 }
 
 func (wsClient *WebsocketClient) readFromServer() {

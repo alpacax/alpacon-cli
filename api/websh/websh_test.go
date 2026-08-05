@@ -1,13 +1,11 @@
 package websh
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -285,45 +283,87 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	assert.Len(t, records, 1)
 }
 
-func TestReadUserInputReturnsWhenOutcomeAlreadyReported(t *testing.T) {
-	pipeWrite := pipeStdin(t)
-	require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
+// Each of these can still be running once the outcome is taken, and each has to
+// notice and leave. readFromServer is absent: it ends on its own failing read,
+// covered separately.
+func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(t *testing.T, wsClient *WebsocketClient) func()
+	}{
+		{
+			name: "readUserInput reporting EOF",
+			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				pipeWrite := pipeStdin(t)
+				require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
 
-	wsClient := newWebsocketClient(nil)
-	wsClient.finish(errors.New("teardown already reported")) // the outcome is already recorded
+				return func() { wsClient.readUserInput(make(chan string, 1)) }
+			},
+		},
+		{
+			name: "readUserInput sending to inputChan",
+			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				pipeWrite := pipeStdin(t)
+				_, err := pipeWrite.WriteString("x")
+				require.NoError(t, err)
 
-	awaitReturn(t, "readUserInput parked reporting EOF after the outcome was taken", func() {
-		wsClient.readUserInput(make(chan string, 1))
-	})
+				inputChan := make(chan string, 1)
+				inputChan <- "buffered" // writeToServer has returned, so nothing drains this
+
+				return func() { wsClient.readUserInput(inputChan) }
+			},
+		},
+		{
+			name: "writeToServer waiting to flush",
+			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				// Empty, so only the done branch can end the loop: nothing is ever flushed.
+				return func() { wsClient.writeToServer(make(chan string)) }
+			},
+		},
+		{
+			name: "watchInterrupt waiting for a signal",
+			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				// No signal ever arrives, so only the done branch can release the watcher.
+				return func() { wsClient.watchInterrupt(make(chan os.Signal)) }
+			},
+		},
+		{
+			name: "readCtrlC waiting for the next byte",
+			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				pipeWrite := pipeStdin(t)
+				_, err := pipeWrite.WriteString("x") // not Ctrl+C, so the loop goes around
+				require.NoError(t, err)
+
+				return func() { wsClient.readCtrlC() }
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsClient := newWebsocketClient(nil)
+			wsClient.finish(errors.New("teardown already reported"))
+
+			awaitReturn(t, tt.name+" parked after the outcome was taken", tt.start(t, wsClient))
+		})
+	}
 }
 
-func TestReadUserInputReturnsWhenWriterIsGone(t *testing.T) {
+func TestReadCtrlC_EndsTheSessionOnCtrlC(t *testing.T) {
 	pipeWrite := pipeStdin(t)
-	_, err := pipeWrite.WriteString("x")
+	// The leading byte proves the loop goes around rather than ending on any input.
+	_, err := pipeWrite.Write([]byte{'a', ctrlC})
 	require.NoError(t, err)
 
 	wsClient := newWebsocketClient(nil)
-	wsClient.finish(errors.New("teardown already reported"))
 
-	inputChan := make(chan string, 1)
-	inputChan <- "buffered" // writeToServer has returned, so nothing drains this
+	awaitReturn(t, "readCtrlC parked on the Ctrl+C byte", wsClient.readCtrlC)
 
-	awaitReturn(t, "readUserInput parked sending to inputChan after teardown", func() {
-		wsClient.readUserInput(inputChan)
-	})
+	assertReported(t, wsClient)
+	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
 }
 
-func TestWriteToServerReturnsWhenDoneIsClosed(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-	wsClient.finish(errors.New("teardown already reported"))
-
-	// Empty, so only the done branch can end the loop: nothing is ever flushed.
-	awaitReturn(t, "writeToServer parked after the outcome was taken", func() {
-		wsClient.writeToServer(make(chan string))
-	})
-}
-
-func TestWriteToServerReportsWriteFailure(t *testing.T) {
+func TestWriteToServer_ReportsWriteFailure(t *testing.T) {
 	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later WriteMessage fails
 
@@ -441,7 +481,7 @@ func TestWatchInterrupt_ReturnsWhenOutcomeAlreadyReported(t *testing.T) {
 	})
 }
 
-func TestFinishKeepsTheFirstOutcome(t *testing.T) {
+func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
 	first := errors.New("remote closed the session")
@@ -452,53 +492,71 @@ func TestFinishKeepsTheFirstOutcome(t *testing.T) {
 	assert.Equal(t, first, wsClient.err)
 }
 
-func TestRunWsClientReportsTerminalSetupFailure(t *testing.T) {
-	helper := exec.Command(os.Args[0], "-test.run=TestRunWsClientTerminalHelperProcess")
-	helper.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
-
-	var stderr bytes.Buffer
-	helper.Stderr = &stderr
-	require.Error(t, helper.Run())
-
-	assert.Contains(t, stderr.String(), "failed to set up terminal: stdin is not a terminal")
-	assert.NotContains(t, stderr.String(), "websocket connection failed")
-}
-
-func TestRunWsClientTerminalHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
+func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
+	tests := []struct {
+		name      string
+		reported  error
+		keepAsErr bool
+	}{
+		{
+			name:     "normal closure",
+			reported: &websocket.CloseError{Code: websocket.CloseNormalClosure, Text: "session ended"},
+		},
+		{
+			name:     "going away",
+			reported: &websocket.CloseError{Code: websocket.CloseGoingAway},
+		},
+		{
+			name:      "abnormal closure",
+			reported:  &websocket.CloseError{Code: websocket.CloseAbnormalClosure},
+			keepAsErr: true,
+		},
+		{
+			name:      "transport failure",
+			reported:  errors.New("connection reset by peer"),
+			keepAsErr: true,
+		},
 	}
-	// stdin is not a tty here, so checkTerminal fails before the connection is used.
-	_ = newWebsocketClient(nil).runWsClient()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsClient := newWebsocketClient(nil)
+			wsClient.finish(tt.reported)
+
+			assertReported(t, wsClient)
+			if tt.keepAsErr {
+				assert.Equal(t, tt.reported, wsClient.err)
+				return
+			}
+			// Typing exit is not a failure, and every caller exits non-zero on one.
+			assert.NoError(t, wsClient.err)
+		})
+	}
 }
 
-func TestDialReportsTheHandshakeStatus(t *testing.T) {
+func TestRunWsClient_ReportsTerminalSetupFailure(t *testing.T) {
+	pipeStdin(t) // a pipe is not a tty, so raw mode cannot be entered
+
+	err := newWebsocketClient(nil).runWsClient()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to set up terminal: stdin is not a terminal")
+	assert.NotContains(t, err.Error(), "websocket connection failed")
+}
+
+func TestDial_ReportsTheHandshakeStatus(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "denied", http.StatusUnauthorized)
 	}))
 	t.Cleanup(ts.Close)
 
-	helper := exec.Command(os.Args[0], "-test.run=TestDialHelperProcess")
-	helper.Env = append(os.Environ(),
-		"GO_WANT_HELPER_PROCESS=1",
-		"WEBSH_TEST_URL=ws"+strings.TrimPrefix(ts.URL, "http"),
-	)
-
-	var stderr bytes.Buffer
-	helper.Stderr = &stderr
-	require.Error(t, helper.Run())
+	err := newWebsocketClient(nil).dial("ws" + strings.TrimPrefix(ts.URL, "http"))
 
 	// gorilla reports every rejected upgrade as "bad handshake", so only the
 	// status tells the user which one this was.
-	assert.Contains(t, stderr.String(), "websocket connection failed:")
-	assert.Contains(t, stderr.String(), "(status 401 Unauthorized)")
-}
-
-func TestDialHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
-		return
-	}
-	newWebsocketClient(nil).dial(os.Getenv("WEBSH_TEST_URL"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "websocket connection failed:")
+	assert.Contains(t, err.Error(), "(status 401 Unauthorized)")
 }
 
 // dialTestServer returns a live connection, so closing it produces genuine write
