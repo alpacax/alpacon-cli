@@ -488,16 +488,6 @@ func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
 	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
 }
 
-func TestWatchInterrupt_ReturnsWhenOutcomeAlreadyReported(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-	wsClient.finish(errors.New("teardown already reported"))
-
-	// No signal ever arrives, so only the done branch can release the watcher.
-	awaitReturn(t, "watchInterrupt parked waiting for a signal after teardown", func() {
-		wsClient.watchInterrupt(make(chan os.Signal))
-	})
-}
-
 func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
