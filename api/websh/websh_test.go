@@ -406,6 +406,35 @@ func TestRunWsClientTerminalHelperProcess(t *testing.T) {
 	_ = newWebsocketClient(nil).runWsClient()
 }
 
+func TestDialReportsTheHandshakeStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "denied", http.StatusUnauthorized)
+	}))
+	t.Cleanup(ts.Close)
+
+	helper := exec.Command(os.Args[0], "-test.run=TestDialHelperProcess")
+	helper.Env = append(os.Environ(),
+		"GO_WANT_HELPER_PROCESS=1",
+		"WEBSH_TEST_URL=ws"+strings.TrimPrefix(ts.URL, "http"),
+	)
+
+	var stderr bytes.Buffer
+	helper.Stderr = &stderr
+	require.Error(t, helper.Run())
+
+	// gorilla reports every rejected upgrade as "bad handshake", so only the
+	// status tells the user which one this was.
+	assert.Contains(t, stderr.String(), "websocket connection failed:")
+	assert.Contains(t, stderr.String(), "(status 401 Unauthorized)")
+}
+
+func TestDialHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	newWebsocketClient(nil).dial(os.Getenv("WEBSH_TEST_URL"))
+}
+
 // dialTestServer returns a live connection, so closing it produces genuine write failures.
 func dialTestServer(t *testing.T) *websocket.Conn {
 	t.Helper()
