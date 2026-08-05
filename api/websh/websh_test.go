@@ -341,7 +341,7 @@ func TestWriteToServerReportsWriteFailure(t *testing.T) {
 	assert.Error(t, wsClient.err)
 }
 
-func TestReadFromServerReportsReadFailure(t *testing.T) {
+func TestReadFromServer_ReportsReadFailure(t *testing.T) {
 	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later ReadMessage fails
 
@@ -356,7 +356,7 @@ func TestReadFromServerReportsReadFailure(t *testing.T) {
 	assert.Error(t, wsClient.err)
 }
 
-func TestReadFromServerPrintsEveryMessage(t *testing.T) {
+func TestReadFromServer_PrintsEveryMessage(t *testing.T) {
 	conn, _ := dialTestServer(t, "hi ", "there")
 
 	wsClient := newWebsocketClient(nil)
@@ -373,7 +373,7 @@ func TestReadFromServerPrintsEveryMessage(t *testing.T) {
 	assert.Error(t, wsClient.err)
 }
 
-func TestReadUserInputForwardsToTheWriter(t *testing.T) {
+func TestReadUserInput_ForwardsToTheWriter(t *testing.T) {
 	pipeWrite := pipeStdin(t)
 	_, err := pipeWrite.WriteString("l")
 	require.NoError(t, err)
@@ -392,7 +392,7 @@ func TestReadUserInputForwardsToTheWriter(t *testing.T) {
 	}
 }
 
-func TestWriteToServerFlushesBufferedInput(t *testing.T) {
+func TestWriteToServer_FlushesBufferedInput(t *testing.T) {
 	conn, received := dialTestServer(t)
 
 	wsClient := newWebsocketClient(nil)
@@ -417,7 +417,7 @@ func TestWriteToServerFlushesBufferedInput(t *testing.T) {
 	}
 }
 
-func TestWatchInterruptEndsTheSessionOnSignal(t *testing.T) {
+func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
 	sigChan := make(chan os.Signal, 1)
@@ -431,7 +431,7 @@ func TestWatchInterruptEndsTheSessionOnSignal(t *testing.T) {
 	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
 }
 
-func TestWatchInterruptReturnsWhenOutcomeAlreadyReported(t *testing.T) {
+func TestWatchInterrupt_ReturnsWhenOutcomeAlreadyReported(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 	wsClient.finish(errors.New("teardown already reported"))
 
