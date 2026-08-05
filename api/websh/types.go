@@ -2,6 +2,7 @@ package websh
 
 import (
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -9,9 +10,11 @@ import (
 )
 
 type WebsocketClient struct {
-	Header http.Header
-	conn   *websocket.Conn
-	Done   chan error
+	Header    http.Header
+	conn      *websocket.Conn
+	Done      chan error
+	quit      chan struct{} // closed once the first outcome is reported
+	closeOnce sync.Once
 }
 
 type SessionRequest struct {

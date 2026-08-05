@@ -3,16 +3,19 @@ package websh
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -274,6 +277,130 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	assert.Len(t, records, 1)
 }
 
+// teardownWait bounds how long a goroutine may take to return once its exit
+// condition is met. A blocked send never returns, so any value proves the point.
+const teardownWait = 2 * time.Second
+
+// dialTestServer opens a real websocket connection to a server that reads until
+// the peer goes away, so a closed connection produces genuine write failures.
+func dialTestServer(t *testing.T) *websocket.Conn {
+	t.Helper()
+
+	upgrader := websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+// pipeStdin points os.Stdin at a pipe and returns its write end. Closing that end
+// yields EOF, which is how a real session ends its input.
+func pipeStdin(t *testing.T) *os.File {
+	t.Helper()
+
+	pipeRead, pipeWrite, err := os.Pipe()
+	require.NoError(t, err)
+
+	realStdin := os.Stdin
+	os.Stdin = pipeRead
+	t.Cleanup(func() {
+		os.Stdin = realStdin
+		_ = pipeRead.Close()
+		_ = pipeWrite.Close()
+	})
+
+	return pipeWrite
+}
+
+// awaitReturn runs fn and fails the test if it has not returned in time.
+func awaitReturn(t *testing.T, msg string, fn func()) {
+	t.Helper()
+
+	returned := make(chan struct{})
+	go func() {
+		fn()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(teardownWait):
+		t.Fatal(msg)
+	}
+}
+
+func TestReadUserInputReturnsWhenOutcomeAlreadyReported(t *testing.T) {
+	pipeWrite := pipeStdin(t)
+	require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.finish(errors.New("teardown already reported")) // the lone receiver has returned
+
+	awaitReturn(t, "readUserInput parked reporting EOF after the outcome was taken", func() {
+		wsClient.readUserInput(make(chan string, 1))
+	})
+}
+
+func TestReadUserInputReturnsWhenWriterIsGone(t *testing.T) {
+	pipeWrite := pipeStdin(t)
+	_, err := pipeWrite.WriteString("x")
+	require.NoError(t, err)
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.finish(errors.New("teardown already reported"))
+
+	inputChan := make(chan string, 1)
+	inputChan <- "buffered" // writeToServer has returned, so nothing drains this
+
+	awaitReturn(t, "readUserInput parked sending to inputChan after teardown", func() {
+		wsClient.readUserInput(inputChan)
+	})
+}
+
+func TestWriteToServerReturnsWhenOutcomeAlreadyReported(t *testing.T) {
+	conn := dialTestServer(t)
+	require.NoError(t, conn.Close()) // every later WriteMessage fails
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.conn = conn
+	wsClient.finish(errors.New("teardown already reported"))
+
+	inputChan := make(chan string, 1)
+	inputChan <- "x" // buffered input forces the failing write
+
+	awaitReturn(t, "writeToServer parked reporting a write failure after the outcome was taken", func() {
+		wsClient.writeToServer(inputChan)
+	})
+}
+
+func TestFinishKeepsTheFirstOutcome(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+
+	first := errors.New("remote closed the session")
+	wsClient.finish(first)
+	wsClient.finish(errors.New("write failed on the closed connection"))
+
+	assert.Equal(t, first, <-wsClient.Done)
+
+	_, open := <-wsClient.quit
+	assert.False(t, open, "quit must be closed so the remaining goroutines can leave")
+}
+
 func TestRunWsClientReportsTerminalSetupFailure(t *testing.T) {
 	helper := exec.Command(os.Args[0], "-test.run=TestRunWsClientTerminalHelperProcess")
 	helper.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
@@ -291,6 +418,5 @@ func TestRunWsClientTerminalHelperProcess(t *testing.T) {
 		return
 	}
 	// stdin is not a tty here, so checkTerminal fails before the connection is used.
-	wsClient := &WebsocketClient{Done: make(chan error, 1)}
-	_ = wsClient.runWsClient()
+	_ = newWebsocketClient(nil).runWsClient()
 }

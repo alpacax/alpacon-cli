@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -194,14 +195,29 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	return response, nil
 }
 
+func newWebsocketClient(header http.Header) *WebsocketClient {
+	return &WebsocketClient{
+		Header: header,
+		Done:   make(chan error, 1),
+		quit:   make(chan struct{}),
+	}
+}
+
+// finish reports the first outcome of the session and signals teardown to every
+// goroutine. Later calls are dropped: Done holds one value and is received once,
+// so a second send would park its goroutine for good.
+func (wsClient *WebsocketClient) finish(err error) {
+	wsClient.closeOnce.Do(func() {
+		wsClient.Done <- err
+		close(wsClient.quit)
+	})
+}
+
 // OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.
 // Input is not forwarded to the server. Terminal echo is suppressed via raw mode.
 // Exits cleanly on Ctrl+C or SIGTERM.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := &WebsocketClient{
-		Header: ac.SetWebsocketHeader(),
-		Done:   make(chan error, 1),
-	}
+	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
 
 	var err error
 	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
@@ -218,10 +234,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	defer signal.Stop(sigChan)
 	go func() {
 		<-sigChan
-		select {
-		case wsClient.Done <- nil:
-		default:
-		}
+		wsClient.finish(nil)
 	}()
 
 	oldState, err := checkTerminal()
@@ -236,10 +249,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		for {
 			_, err := os.Stdin.Read(buf)
 			if err != nil || buf[0] == 0x03 {
-				select {
-				case wsClient.Done <- nil:
-				default:
-				}
+				wsClient.finish(nil)
 				return
 			}
 		}
@@ -252,10 +262,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 // Handles graceful termination of the websh terminal.
 // Exits on error without further error handling.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := &WebsocketClient{
-		Header: ac.SetWebsocketHeader(),
-		Done:   make(chan error, 1),
-	}
+	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
 
 	var err error
 	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
@@ -304,10 +311,7 @@ func (wsClient *WebsocketClient) readFromServer() {
 	for {
 		_, message, err := wsClient.conn.ReadMessage()
 		if err != nil {
-			select {
-			case wsClient.Done <- err:
-			default:
-			}
+			wsClient.finish(err)
 			return
 		}
 		fmt.Print(string(message))
@@ -320,13 +324,18 @@ func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 		char, _, err := reader.ReadRune()
 		if err != nil {
 			if err == io.EOF {
-				wsClient.Done <- nil
+				wsClient.finish(nil)
 				return
 			}
-			wsClient.Done <- err
+			wsClient.finish(err)
 			return
 		}
-		inputChan <- string(char)
+		// After teardown writeToServer is gone, so an unguarded send would park here.
+		select {
+		case inputChan <- string(char):
+		case <-wsClient.quit:
+			return
+		}
 	}
 }
 
@@ -334,13 +343,15 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 	var inputBuffer []rune
 	for {
 		select {
+		case <-wsClient.quit:
+			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
 		case <-time.After(time.Millisecond * 5):
 			if len(inputBuffer) > 0 {
 				err := wsClient.conn.WriteMessage(websocket.BinaryMessage, []byte(string(inputBuffer)))
 				if err != nil {
-					wsClient.Done <- err
+					wsClient.finish(err)
 					return
 				}
 				inputBuffer = []rune{}
