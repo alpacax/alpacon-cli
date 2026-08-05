@@ -321,16 +321,18 @@ func (wsClient *WebsocketClient) readFromServer() {
 			wsClient.finish(err)
 			return
 		}
-		fmt.Print(string(message))
+		_, _ = os.Stdout.Write(message)
 	}
 }
 
+// Teardown cannot release this one mid-read: a goroutine parked in ReadRune
+// stays there until the next keystroke, and only closing stdin would change that.
 func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		char, _, err := reader.ReadRune()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				wsClient.finish(nil)
 				return
 			}
@@ -347,6 +349,11 @@ func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 }
 
 func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
+	// A ticker rather than time.After, which restarts on every arriving rune and
+	// so defers the flush for as long as input keeps coming.
+	ticker := time.NewTicker(writeFlushInterval)
+	defer ticker.Stop()
+
 	var inputBuffer []rune
 	for {
 		select {
@@ -354,7 +361,7 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
-		case <-time.After(writeFlushInterval):
+		case <-ticker.C:
 			if len(inputBuffer) > 0 {
 				err := wsClient.conn.WriteMessage(websocket.BinaryMessage, []byte(string(inputBuffer)))
 				if err != nil {
