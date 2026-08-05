@@ -409,7 +409,7 @@ func TestRunWsClientReportsTerminalSetupFailure(t *testing.T) {
 	helper.Stderr = &stderr
 	require.Error(t, helper.Run())
 
-	assert.Contains(t, stderr.String(), "failed to set up terminal: websh command should be a terminal")
+	assert.Contains(t, stderr.String(), "failed to set up terminal: stdin is not a terminal")
 	assert.NotContains(t, stderr.String(), "websocket connection failed")
 }
 

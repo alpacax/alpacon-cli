@@ -222,7 +222,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	var err error
 	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
 	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed %v", err)
+		utils.CliErrorWithExit("websocket connection failed: %v", err)
 	}
 	defer func() { _ = wsClient.conn.Close() }()
 
@@ -270,7 +270,7 @@ func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) 
 	var err error
 	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
 	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed %v", err)
+		utils.CliErrorWithExit("websocket connection failed: %v", err)
 	}
 	defer func() { _ = wsClient.conn.Close() }()
 
@@ -300,7 +300,7 @@ func (wsClient *WebsocketClient) runWsClient() error {
 
 func checkTerminal() (*term.State, error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil, errors.New("websh command should be a terminal")
+		return nil, errors.New("stdin is not a terminal")
 	}
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
