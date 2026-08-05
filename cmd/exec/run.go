@@ -25,7 +25,14 @@ const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
 // alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
-const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential, which would land in the audit log in plaintext"
+const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
+
+// ExecInvocation and WebshInvocation are the two Invocation values (see the
+// Invocation type below).
+const (
+	ExecInvocation  Invocation = "alpacon exec"
+	WebshInvocation Invocation = "alpacon websh"
+)
 
 // approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
 var approvalWaitPollInterval = 5 * time.Second
@@ -35,6 +42,13 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 )
+
+// Invocation names the command the user ran, so a hint can show an example
+// they can copy without translating it first. A defined type rather than a
+// bare string, so a stray value cannot be assigned by accident. Websh command
+// mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
+// renders as exec.
+type Invocation string
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
@@ -93,21 +107,31 @@ func sudoDenialHint(output string) string {
 // submitted command line itself contained a credential (e.g. a -p/--password
 // flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
 // connection string), so the server refused the command before it ever ran
-// rather than record it in the audit log in plaintext.
+// rather than persist that line.
 func isCommandInlineCredentialError(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.CommandInlineCredential
 }
 
+// credentialInlineExample renders the --env line for invokedAs. The two commands
+// take the remote command differently: only exec has the -- separator
+// (cmd/exec/parse.go), while websh takes it as one quoted argument.
+func credentialInlineExample(invokedAs Invocation) string {
+	if invokedAs == WebshInvocation {
+		return string(WebshInvocation) + ` --env="SECRET_NAME" db-server '<command>'`
+	}
+	return string(ExecInvocation) + ` --env="SECRET_NAME" db-server -- <command>`
+}
+
 // credentialInlineHint returns the actionable guidance printed alongside
 // commandInlineCredentialMessage. It never echoes the rejected command
 // line—only fixed guidance naming --env—so it cannot leak the credential it is
-// warning about.
-func credentialInlineHint() string {
+// warning about. invokedAs picks the example; empty falls back to exec.
+func credentialInlineHint(invokedAs Invocation) string {
 	return fmt.Sprintf(
-		"%s move the secret to --env instead (its value is read from your shell, not the command line, and is never recorded):\n"+
-			"  alpacon exec --env=SECRET_NAME db-server -- <command>\n",
-		utils.Yellow("Hint:"))
+		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
+			"  %s\n",
+		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
@@ -327,8 +351,9 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 
 // HandleCommandResult exits appropriately on error. Output is streamed to stdout
 // during execution; on a remote failure the error carries that output, used here
-// only to surface the sudo-denial hint (not re-printed).
-func HandleCommandResult(err error) {
+// only to surface the sudo-denial hint (not re-printed). invokedAs names the
+// command the user ran so a hint can quote it; empty falls back to exec.
+func HandleCommandResult(err error, invokedAs Invocation) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
@@ -352,7 +377,7 @@ func HandleCommandResult(err error) {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), commandInlineCredentialMessage)
-			fmt.Fprint(os.Stderr, credentialInlineHint())
+			fmt.Fprint(os.Stderr, credentialInlineHint(invokedAs))
 			os.Exit(1)
 		}
 		utils.CliErrorWithExit("%s", err)

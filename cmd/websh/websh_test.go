@@ -9,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/api/websh"
+	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -408,4 +409,29 @@ func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
 	assert.Equal(t, 8, strings.Count(got, "\n"), "a newline must not forge an identity line")
 	assert.Contains(t, got, "Server:   web-01db-prod\n")
 	assert.Contains(t, got, "Username: alice\n")
+}
+
+// TestBuildRemoteExecArgsPinsWebshInvocation pins InvokedAs to WebshInvocation:
+// the one line that makes a refusal hint render websh syntax instead of exec's.
+// Without it every field still flows and the whole suite stays green, so this
+// is the only guard against a refactor dropping the field.
+func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
+	parsed := WebshArgs{
+		Groupname:     "devs",
+		WorkSessionID: "ws-1",
+		OutputFormat:  "json",
+		CommandArgs:   []string{"psql", "-h", "localhost"},
+		Env:           map[string]string{"PGPASSWORD": "x"},
+	}
+
+	args := buildRemoteExecArgs(parsed, "root", "prod")
+
+	assert.Equal(t, execCmd.WebshInvocation, args.InvokedAs)
+	assert.Equal(t, "root", args.Username)
+	assert.Equal(t, "devs", args.Groupname)
+	assert.Equal(t, "ws-1", args.WorkSessionID)
+	assert.Equal(t, "json", args.OutputFormat)
+	assert.Equal(t, "prod", args.Server)
+	assert.Equal(t, "psql -h localhost", args.Command)
+	assert.Equal(t, parsed.Env, args.Env)
 }

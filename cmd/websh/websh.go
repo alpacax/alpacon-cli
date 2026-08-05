@@ -108,6 +108,23 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 	return res, nil
 }
 
+// buildRemoteExecArgs assembles the shared-runner args for websh command mode.
+// username and serverName come in separately because Run resolves user@host
+// after parsing. InvokedAs is pinned to WebshInvocation so a refusal hint
+// renders websh syntax.
+func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.RemoteExecArgs {
+	return execCmd.RemoteExecArgs{
+		Username:      username,
+		Groupname:     parsed.Groupname,
+		WorkSessionID: parsed.WorkSessionID,
+		OutputFormat:  parsed.OutputFormat,
+		InvokedAs:     execCmd.WebshInvocation,
+		Server:        serverName,
+		Command:       execCmd.ShellJoin(parsed.CommandArgs),
+		Env:           parsed.Env,
+	}
+}
+
 var WebshCmd = &cobra.Command{
 	Use:   "websh [flags] [USER@]SERVER [COMMAND]",
 	Short: "Open a websh terminal or execute a command on a server",
@@ -128,6 +145,11 @@ Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
 Exit code 4 indicates the sudo command is pending human approval; approve it in
 the Alpacon console (web), then re-run—or use 'alpacon exec --wait' to block.
+When websh runs a command, the server rejects it before it runs if its command
+line carries a credential—a -p/--password flag, a KEY=VALUE secret such as
+PGPASSWORD=..., or a user:pass@host connection string—with exit code 1. Pass
+the secret with --env="KEY" instead; --output json emits an error envelope on
+stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
@@ -143,9 +165,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh my-server "ls -la /var/log"
   alpacon websh root@my-server "systemctl status nginx"
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line
-  # and out of the session recording. psql reads PGPASSWORD directly from the env.
-  export PGPASSWORD=hunter2
+  # Pass a secret via the shell env; the value stays off the alpacon command line.
+  # Read it in rather than typing it inline, so it stays out of shell history too.
+  # psql reads PGPASSWORD directly from the env.
+  printf 'PGPASSWORD: ' && read -rs PGPASSWORD && export PGPASSWORD
   alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
   # Share terminal session
@@ -168,12 +191,12 @@ Flags:
   -g, --groupname [GROUP_NAME]       Specify the group name for command execution.
   --env="KEY"                        Pass an environment variable, reading its value
                                      from the current shell. This keeps the value off
-                                     the alpacon command line and out of the audit
-                                     log—use it for secrets such as passwords or tokens.
+                                     your local alpacon command line—use it for
+                                     secrets such as passwords or tokens.
   --env="KEY=VALUE"                  Set 'KEY' to a literal value. Discouraged: the
-                                     value is written on the command line and recorded
-                                     verbatim in the audit log. Never pass credentials
-                                     this way.
+                                     value stays on your local alpacon command line,
+                                     so it lands in shell history, ps output, and CI
+                                     job logs. Never pass credentials this way.
   -s, --share                        Share the terminal via a temporary link.
   --read-only=[true|false]           Set shared session to read-only (default: false).
   --work-session [UUID]              Attach this session to a work-session.
@@ -226,15 +249,7 @@ Note: All flags must be placed before the server name.
 		// pending-approval exit code, sudo-denial hints, and JSON buffering match
 		// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
 		if len(commandArgs) > 0 {
-			execCmd.RunRemoteExec(execCmd.RemoteExecArgs{
-				Username:      username,
-				Groupname:     groupname,
-				WorkSessionID: parsed.WorkSessionID,
-				OutputFormat:  parsed.OutputFormat,
-				Server:        serverName,
-				Command:       execCmd.ShellJoin(commandArgs),
-				Env:           env,
-			})
+			execCmd.RunRemoteExec(buildRemoteExecArgs(parsed, username, serverName))
 			return
 		}
 

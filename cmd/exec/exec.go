@@ -44,11 +44,12 @@ Flags:
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
   --env="KEY"                   Pass an environment variable to the remote command,
                                 reading its value from the current shell. This keeps
-                                the value off the alpacon command line and out of the
-                                audit log—use it for secrets such as passwords or tokens.
+                                the value off your local alpacon command line—use it
+                                for secrets such as passwords or tokens.
   --env="KEY=VALUE"             Set 'KEY' to a literal value. Discouraged: the value
-                                is written on the command line and recorded verbatim
-                                in the audit log. Never pass credentials this way.
+                                stays on your local alpacon command line, so it lands
+                                in shell history, ps output, and CI job logs. Never
+                                pass credentials this way.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -67,6 +68,11 @@ Exit code 4 indicates the sudo command is pending human approval (approve it in
 the Alpacon console, then re-run, or pass --wait to block—--wait-approval
 DURATION to block with a longer timeout); --output json emits
 {"status":"pending_approval", ...} on stdout.
+The server rejects a command whose command line carries a credential—a
+-p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
+user:pass@host connection string—before it runs, with exit code 1. Pass the
+secret with --env="KEY" instead; --output json emits an error envelope on
+stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
@@ -80,10 +86,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec -u root prod-docker systemctl status nginx
   alpacon exec -g docker user@server docker images
 
-  # Pass a secret via the shell env; the value stays off the alpacon command line
-  # and out of the audit log. psql reads PGPASSWORD from the environment, so it
-  # never lands in the remote process's argv either.
-  export PGPASSWORD=hunter2
+  # Pass a secret via the shell env; the value stays off the alpacon command line.
+  # Read it in rather than typing it inline, so it stays out of shell history too.
+  # psql reads PGPASSWORD from the environment, so it never reaches the remote argv.
+  printf 'PGPASSWORD: ' && read -rs PGPASSWORD && export PGPASSWORD
   alpacon exec --env="PGPASSWORD" db-server -- psql -h localhost -U app -c 'SELECT 1'
 
   # Submit a command asynchronously and retrieve the result later
@@ -207,7 +213,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if buf != nil {
 		_, _ = os.Stdout.Write(buf.Bytes())
 	}
-	HandleCommandResult(err)
+	HandleCommandResult(err, parsed.InvokedAs)
 }
 
 // reRunHint reconstructs the exec invocation (server, command, and any
@@ -218,8 +224,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // caveat rides in Description, since the rerun re-reads each value from the
 // shell and a machine consumer replaying Command verbatim would otherwise
 // submit without those keys.
+// It names exec even when InvokedAs is websh: websh has no --wait, so the rerun
+// genuinely has to go through exec (README "Exit codes", row 4).
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
-	parts := []string{"alpacon exec"}
+	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {
 		parts = append(parts, "-u "+parsed.Username)
 	}

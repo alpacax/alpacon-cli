@@ -138,10 +138,17 @@ $ alpacon websh join --url <SHARED_URL> --password <PASSWORD>
 $ alpacon exec <server> "<cmd>"
 $ alpacon exec root@<server> "docker ps"
 $ alpacon exec -u admin -g developers <server> "..."
-$ alpacon exec --env="KEY=VALUE" <server> "echo $KEY"
+
+# Pass a secret with --env="KEY": the value is read from your shell, so it stays off
+# the alpacon command line. Read it in rather than typing it inline, so it stays out
+# of shell history too.
+$ printf 'PGPASSWORD: ' && read -rs PGPASSWORD && export PGPASSWORD
+$ alpacon exec --env="PGPASSWORD" <server> -- psql -h localhost -U app -c 'SELECT 1'
 ```
 
 Flags go before the server name; everything after is the remote command.
+
+Never put a secret on the command line: the server refuses the recognizable forms before the command runs. Pass it with `--env="KEY"` as shown above. The same applies to `alpacon websh` when it runs a command. See [When a command is denied](#when-a-command-is-denied) for the exact forms the server rejects and the machine-readable refusal.
 
 ### File transfer
 ```bash
@@ -281,14 +288,18 @@ What each refusal code means and what to do next:
 | `work_session_assignee_mismatch` | session assigned to another principal | `work-session use <ID>` with your own session |
 | `work_session_not_usable` | session is no longer usable | `work-session create --use` |
 
-`work-session` subcommand failures (`create`, `use`, `extend`, ...) and `event wait` / `event watch` failures also emit a JSON error envelope under `--output json`, with exit code `1` and `error_code` carrying the server code when available (`usage_error` for local flag/argument errors). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.
+`work-session` subcommand failures (`create`, `use`, `extend`, ...), `event wait` / `event watch` failures, and the inline-credential refusal below also emit a JSON error envelope under `--output json`, with exit code `1` and `error_code` carrying the server code when available (`usage_error` for local flag/argument errors). These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.
+
+Separately from the work session gate, `exec` (and `websh` when running a command) is refused before the command runs if the command line itself carries a credential—a `-p`/`--password` flag, a `KEY=VALUE` secret such as `PGPASSWORD=...`, or a `user:pass@host` connection string. Pass the secret with `--env="KEY"` instead: its value is read from your shell, so it never lands on the command line the server stores. The refusal is permanent—a retry submits the same command line—so rewrite rather than retry.
+
+Exit code is `1`, and under `--output json` the refusal is an error envelope on stderr with `error_code` `command_inline_credential`. That envelope currently carries no `next_actions`—rewrite the command with `--env="KEY"` as described above (`exec` takes the remote command after `--`, `websh` takes it as one quoted argument).
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | `0`  | Success |
-| `1`  | General error (network failure, server error, etc.) |
+| `1`  | General error (network failure, server error, etc.), and permanent refusals such as a credential on the command line (`command_inline_credential`)—see "When a command is denied" |
 | `2`  | Usage error (invalid flags or arguments) |
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
 | `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. For `exec`, re-run the command after approval (or pass `--wait` on the original command to block; `--wait-approval <duration>` raises the wait timeout, default 5m); `websh` command mode has no `--wait`, so re-run via `alpacon exec --wait` to block; for `work-session create` the session already exists—after approval attach it with `alpacon work-session use <id>` (or pass `--wait` on the original create to block; `--wait-approval <duration>` raises the wait timeout, default 5m). Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` (and `websh` when running a command) on a `SUDO_APPROVAL_REQUIRED` sudo denial and by `work-session create` when the session lands pending or when its `--wait` times out with the outcome still open. Also returned by `alpacon event wait` when the wait times out or is interrupted—the outcome is still open |
