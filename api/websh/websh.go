@@ -25,6 +25,9 @@ import (
 const (
 	sessionsBaseURL     = "/api/websh/sessions/"
 	userChannelsBaseURL = "/api/websh/user-channels/"
+
+	ctrlC              = 0x03
+	writeFlushInterval = 5 * time.Millisecond
 )
 
 func GetSessionList(ac *client.AlpaconClient) ([]SessionListItem, error) {
@@ -203,9 +206,8 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 	}
 }
 
-// finish reports the first outcome of the session and signals teardown to every
-// goroutine. Later calls are dropped: Done holds one value and is received once,
-// so a second send would park its goroutine for good.
+// finish takes effect only once: Done holds one value and is received once, so a
+// second send would park its goroutine for good.
 func (wsClient *WebsocketClient) finish(err error) {
 	wsClient.closeOnce.Do(func() {
 		wsClient.Done <- err
@@ -246,12 +248,12 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 
-	// In raw mode Ctrl+C is 0x03 — detect it to exit
+	// Raw mode suppresses SIGINT, so Ctrl+C only ever arrives as a byte
 	go func() {
 		buf := make([]byte, 1)
 		for {
 			_, err := os.Stdin.Read(buf)
-			if err != nil || buf[0] == 0x03 {
+			if err != nil || buf[0] == ctrlC {
 				wsClient.finish(nil)
 				return
 			}
@@ -350,7 +352,7 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
-		case <-time.After(time.Millisecond * 5):
+		case <-time.After(writeFlushInterval):
 			if len(inputBuffer) > 0 {
 				err := wsClient.conn.WriteMessage(websocket.BinaryMessage, []byte(string(inputBuffer)))
 				if err != nil {

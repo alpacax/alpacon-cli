@@ -20,6 +20,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// A blocked goroutine never returns, so any bound proves the point.
+const teardownWait = 2 * time.Second
+
 func TestGetSessionList(t *testing.T) {
 	closedTime := "2026-03-01T00:00:00Z"
 
@@ -277,12 +280,7 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	assert.Len(t, records, 1)
 }
 
-// teardownWait bounds how long a goroutine may take to return once its exit
-// condition is met. A blocked send never returns, so any value proves the point.
-const teardownWait = 2 * time.Second
-
-// dialTestServer opens a real websocket connection to a server that reads until
-// the peer goes away, so a closed connection produces genuine write failures.
+// dialTestServer returns a live connection, so closing it produces genuine write failures.
 func dialTestServer(t *testing.T) *websocket.Conn {
 	t.Helper()
 
@@ -327,7 +325,6 @@ func pipeStdin(t *testing.T) *os.File {
 	return pipeWrite
 }
 
-// awaitReturn runs fn and fails the test if it has not returned in time.
 func awaitReturn(t *testing.T, msg string, fn func()) {
 	t.Helper()
 
