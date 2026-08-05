@@ -247,10 +247,6 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		return err
 	}
 	defer func() { _ = wsClient.conn.Close() }()
-	// Whatever this returns through, the goroutines below have to be released.
-	// The sync.Once makes it a no-op once an outcome is already recorded.
-	defer wsClient.finish(nil)
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	// Registered before the raw-mode restore so LIFO runs it after: a signal
