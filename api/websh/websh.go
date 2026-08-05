@@ -206,6 +206,14 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 	}
 }
 
+func (wsClient *WebsocketClient) dial(websocketURL string) {
+	conn, _, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.Header)
+	if err != nil {
+		utils.CliErrorWithExit("websocket connection failed: %v", err)
+	}
+	wsClient.conn = conn
+}
+
 // finish takes effect only once: Done holds one value and is received once, so a
 // second send would park its goroutine for good.
 func (wsClient *WebsocketClient) finish(err error) {
@@ -220,12 +228,7 @@ func (wsClient *WebsocketClient) finish(err error) {
 // Exits cleanly on Ctrl+C or SIGTERM.
 func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
-
-	var err error
-	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
-	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed: %v", err)
-	}
+	wsClient.dial(sessionResponse.WebsocketURL)
 	defer func() { _ = wsClient.conn.Close() }()
 
 	sigChan := make(chan os.Signal, 1)
@@ -268,20 +271,10 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 // Exits on error without further error handling.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
-
-	var err error
-	wsClient.conn, _, err = websocket.DefaultDialer.Dial(sessionResponse.WebsocketURL, wsClient.Header)
-	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed: %v", err)
-	}
+	wsClient.dial(sessionResponse.WebsocketURL)
 	defer func() { _ = wsClient.conn.Close() }()
 
-	err = wsClient.runWsClient()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return wsClient.runWsClient()
 }
 
 func (wsClient *WebsocketClient) runWsClient() error {

@@ -280,67 +280,6 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	assert.Len(t, records, 1)
 }
 
-// dialTestServer returns a live connection, so closing it produces genuine write failures.
-func dialTestServer(t *testing.T) *websocket.Conn {
-	t.Helper()
-
-	upgrader := websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer func() { _ = conn.Close() }()
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}))
-	t.Cleanup(ts.Close)
-
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-
-	return conn
-}
-
-// pipeStdin points os.Stdin at a pipe and returns its write end. Closing that end
-// yields EOF, which is how a real session ends its input.
-func pipeStdin(t *testing.T) *os.File {
-	t.Helper()
-
-	pipeRead, pipeWrite, err := os.Pipe()
-	require.NoError(t, err)
-
-	realStdin := os.Stdin
-	os.Stdin = pipeRead
-	t.Cleanup(func() {
-		os.Stdin = realStdin
-		_ = pipeRead.Close()
-		_ = pipeWrite.Close()
-	})
-
-	return pipeWrite
-}
-
-func awaitReturn(t *testing.T, msg string, fn func()) {
-	t.Helper()
-
-	returned := make(chan struct{})
-	go func() {
-		fn()
-		close(returned)
-	}()
-
-	select {
-	case <-returned:
-	case <-time.After(teardownWait):
-		t.Fatal(msg)
-	}
-}
-
 func TestReadUserInputReturnsWhenOutcomeAlreadyReported(t *testing.T) {
 	pipeWrite := pipeStdin(t)
 	require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
@@ -416,4 +355,65 @@ func TestRunWsClientTerminalHelperProcess(t *testing.T) {
 	}
 	// stdin is not a tty here, so checkTerminal fails before the connection is used.
 	_ = newWebsocketClient(nil).runWsClient()
+}
+
+// dialTestServer returns a live connection, so closing it produces genuine write failures.
+func dialTestServer(t *testing.T) *websocket.Conn {
+	t.Helper()
+
+	upgrader := websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return conn
+}
+
+// pipeStdin points os.Stdin at a pipe and returns its write end. Closing that end
+// yields EOF, which is how a real session ends its input.
+func pipeStdin(t *testing.T) *os.File {
+	t.Helper()
+
+	pipeRead, pipeWrite, err := os.Pipe()
+	require.NoError(t, err)
+
+	realStdin := os.Stdin
+	os.Stdin = pipeRead
+	t.Cleanup(func() {
+		os.Stdin = realStdin
+		_ = pipeRead.Close()
+		_ = pipeWrite.Close()
+	})
+
+	return pipeWrite
+}
+
+func awaitReturn(t *testing.T, msg string, fn func()) {
+	t.Helper()
+
+	returned := make(chan struct{})
+	go func() {
+		fn()
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(teardownWait):
+		require.Fail(t, msg)
+	}
 }
