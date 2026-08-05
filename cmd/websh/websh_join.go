@@ -29,7 +29,7 @@ var webshJoinCmd = &cobra.Command{
 		}
 
 		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
-			utils.CliErrorWithExitCode(1, "Websh session terminated with error: %s.", err)
+			utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
 		}
 	},
 }
