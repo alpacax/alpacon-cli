@@ -28,6 +28,12 @@ const (
 
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
+
+	// sessionEndCloseCode is what the proxy closes a user channel with when the
+	// session ends normally—see sendCloseFrame in proxy-server internal/ws/channel.go.
+	// alpamon spends the same 4000 on the same meaning. A websh session never ends
+	// with 1000, so leaving this out would leave every normal end reported as a failure.
+	sessionEndCloseCode = 4000
 )
 
 func GetSessionList(ac *client.AlpaconClient) ([]SessionListItem, error) {
@@ -223,7 +229,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 // who saw done can read it. A normal remote close is how a session ends rather
 // than a failure; every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
-	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+	if websocket.IsCloseError(err, sessionEndCloseCode, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 		err = nil
 	}
 	wsClient.finishOnce.Do(func() {

@@ -502,6 +502,12 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 		keepAsErr bool
 	}{
 		{
+			// What the proxy actually sends: every other case here is a contract
+			// the CLI honors but never meets in production.
+			name:     "session end",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode},
+		},
+		{
 			name:     "normal closure",
 			reported: &websocket.CloseError{Code: websocket.CloseNormalClosure, Text: "session ended"},
 		},
