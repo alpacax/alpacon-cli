@@ -108,6 +108,23 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 	return res, nil
 }
 
+// buildRemoteExecArgs assembles the shared-runner args for websh command mode.
+// username and serverName come in separately because Run resolves user@host
+// after parsing. InvokedAs is pinned to WebshInvocation so a refusal hint
+// renders websh syntax.
+func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.RemoteExecArgs {
+	return execCmd.RemoteExecArgs{
+		Username:      username,
+		Groupname:     parsed.Groupname,
+		WorkSessionID: parsed.WorkSessionID,
+		OutputFormat:  parsed.OutputFormat,
+		InvokedAs:     execCmd.WebshInvocation,
+		Server:        serverName,
+		Command:       execCmd.ShellJoin(parsed.CommandArgs),
+		Env:           parsed.Env,
+	}
+}
+
 var WebshCmd = &cobra.Command{
 	Use:   "websh [flags] [USER@]SERVER [COMMAND]",
 	Short: "Open a websh terminal or execute a command on a server",
@@ -232,16 +249,7 @@ Note: All flags must be placed before the server name.
 		// pending-approval exit code, sudo-denial hints, and JSON buffering match
 		// exec. Wait is left false—websh has no --wait, so the blocking wait never runs.
 		if len(commandArgs) > 0 {
-			execCmd.RunRemoteExec(execCmd.RemoteExecArgs{
-				Username:      username,
-				Groupname:     groupname,
-				WorkSessionID: parsed.WorkSessionID,
-				OutputFormat:  parsed.OutputFormat,
-				InvokedAs:     execCmd.WebshInvocation,
-				Server:        serverName,
-				Command:       execCmd.ShellJoin(commandArgs),
-				Env:           env,
-			})
+			execCmd.RunRemoteExec(buildRemoteExecArgs(parsed, username, serverName))
 			return
 		}
 
