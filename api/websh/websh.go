@@ -211,7 +211,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) {
 		// The handshake response carries the reason a bad handshake alone never names.
 		status := ""
 		if resp != nil {
-			status = fmt.Sprintf(" (status %s)", resp.Status)
+			status = fmt.Sprintf(" (status %s)", utils.SanitizeTerminalText(resp.Status))
 		}
 		utils.CliErrorWithExit("websocket connection failed: %v%s", err, status)
 	}
