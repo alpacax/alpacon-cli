@@ -241,13 +241,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	// arriving mid-teardown lands in the buffered channel instead of killing the
 	// process with the terminal still in raw mode.
 	defer signal.Stop(sigChan)
-	go func() {
-		select {
-		case <-sigChan:
-			wsClient.finish(nil)
-		case <-wsClient.done:
-		}
-	}()
+	go wsClient.watchInterrupt(sigChan)
 
 	oldState, err := checkTerminal()
 	if err != nil {
@@ -270,6 +264,15 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	go wsClient.readFromServer()
 	<-wsClient.done
 	return wsClient.err
+}
+
+// watchInterrupt ends the session on a signal, and leaves once anything else has ended it.
+func (wsClient *WebsocketClient) watchInterrupt(sigChan <-chan os.Signal) {
+	select {
+	case <-sigChan:
+		wsClient.finish(nil)
+	case <-wsClient.done:
+	}
 }
 
 // OpenNewTerminal opens an interactive terminal on the session.

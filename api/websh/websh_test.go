@@ -336,6 +336,45 @@ func TestWriteToServerReportsWriteFailure(t *testing.T) {
 	assert.Error(t, wsClient.err)
 }
 
+func TestReadFromServerReportsReadFailure(t *testing.T) {
+	conn := dialTestServer(t)
+	require.NoError(t, conn.Close()) // every later ReadMessage fails
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.conn = conn
+
+	awaitReturn(t, "readFromServer parked on the failing read", func() {
+		wsClient.readFromServer()
+	})
+
+	assertReported(t, wsClient)
+	assert.Error(t, wsClient.err)
+}
+
+func TestWatchInterruptEndsTheSessionOnSignal(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+
+	sigChan := make(chan os.Signal, 1)
+	sigChan <- os.Interrupt
+
+	awaitReturn(t, "watchInterrupt parked on the signal", func() {
+		wsClient.watchInterrupt(sigChan)
+	})
+
+	assertReported(t, wsClient)
+	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
+}
+
+func TestWatchInterruptReturnsWhenOutcomeAlreadyReported(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+	wsClient.finish(errors.New("teardown already reported"))
+
+	// No signal ever arrives, so only the done branch can release the watcher.
+	awaitReturn(t, "watchInterrupt parked waiting for a signal after teardown", func() {
+		wsClient.watchInterrupt(make(chan os.Signal))
+	})
+}
+
 func TestFinishKeepsTheFirstOutcome(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
