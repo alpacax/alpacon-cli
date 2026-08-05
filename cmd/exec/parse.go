@@ -19,7 +19,7 @@ type RemoteExecArgs struct {
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
 	// WebshInvocation, and exec leaves it empty, which the hint reads as exec.
-	InvokedAs    string
+	InvokedAs    Invocation
 	Env          map[string]string
 	WaitApproval time.Duration
 	Detach       bool

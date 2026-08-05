@@ -227,7 +227,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // It names exec even when InvokedAs is websh: websh has no --wait, so the rerun
 // genuinely has to go through exec (README "Exit codes", row 4).
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
-	parts := []string{ExecInvocation}
+	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {
 		parts = append(parts, "-u "+parsed.Username)
 	}

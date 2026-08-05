@@ -27,13 +27,11 @@ const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 // alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
 
-// ExecInvocation and WebshInvocation name the command the user ran, so a hint
-// can show an example they can copy without translating it first. Both reach
-// this package through RemoteExecArgs.InvokedAs, since websh command mode runs
-// on the exec path.
+// ExecInvocation and WebshInvocation are the two Invocation values (see the
+// Invocation type below).
 const (
-	ExecInvocation  = "alpacon exec"
-	WebshInvocation = "alpacon websh"
+	ExecInvocation  Invocation = "alpacon exec"
+	WebshInvocation Invocation = "alpacon websh"
 )
 
 // approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
@@ -44,6 +42,13 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 )
+
+// Invocation names the command the user ran, so a hint can show an example
+// they can copy without translating it first. A defined type rather than a
+// bare string, so a stray value cannot be assigned by accident. Websh command
+// mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
+// renders as exec.
+type Invocation string
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
@@ -111,18 +116,18 @@ func isCommandInlineCredentialError(err error) bool {
 // credentialInlineExample renders the --env line for invokedAs. The two commands
 // take the remote command differently: only exec has the -- separator
 // (cmd/exec/parse.go), while websh takes it as one quoted argument.
-func credentialInlineExample(invokedAs string) string {
+func credentialInlineExample(invokedAs Invocation) string {
 	if invokedAs == WebshInvocation {
-		return WebshInvocation + " --env=SECRET_NAME db-server '<command>'"
+		return string(WebshInvocation) + ` --env="SECRET_NAME" db-server '<command>'`
 	}
-	return ExecInvocation + " --env=SECRET_NAME db-server -- <command>"
+	return string(ExecInvocation) + ` --env="SECRET_NAME" db-server -- <command>`
 }
 
 // credentialInlineHint returns the actionable guidance printed alongside
 // commandInlineCredentialMessage. It never echoes the rejected command
 // line—only fixed guidance naming --env—so it cannot leak the credential it is
 // warning about. invokedAs picks the example; empty falls back to exec.
-func credentialInlineHint(invokedAs string) string {
+func credentialInlineHint(invokedAs Invocation) string {
 	return fmt.Sprintf(
 		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
 			"  %s\n",
@@ -348,7 +353,7 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 // during execution; on a remote failure the error carries that output, used here
 // only to surface the sudo-denial hint (not re-printed). invokedAs names the
 // command the user ran so a hint can quote it; empty falls back to exec.
-func HandleCommandResult(err error, invokedAs string) {
+func HandleCommandResult(err error, invokedAs Invocation) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {

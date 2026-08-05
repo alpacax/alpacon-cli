@@ -45,12 +45,12 @@ func TestIsCommandInlineCredentialError(t *testing.T) {
 func TestCredentialInlineHint(t *testing.T) {
 	tests := []struct {
 		name      string
-		invokedAs string
+		invokedAs Invocation
 		want      string
 	}{
-		{"exec", ExecInvocation, "alpacon exec --env=SECRET_NAME db-server -- <command>"},
-		{"websh takes the command as one quoted argument", WebshInvocation, "alpacon websh --env=SECRET_NAME db-server '<command>'"},
-		{"unset falls back to exec", "", "alpacon exec --env=SECRET_NAME db-server -- <command>"},
+		{"exec", ExecInvocation, `alpacon exec --env="SECRET_NAME" db-server -- <command>`},
+		{"websh takes the command as one quoted argument", WebshInvocation, `alpacon websh --env="SECRET_NAME" db-server '<command>'`},
+		{"unset falls back to exec", "", `alpacon exec --env="SECRET_NAME" db-server -- <command>`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
