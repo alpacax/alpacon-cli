@@ -276,7 +276,7 @@ func (wsClient *WebsocketClient) watchInterrupt(sigChan <-chan os.Signal) {
 }
 
 // OpenNewTerminal opens an interactive terminal on the session.
-// A failed dial exits the process instead of returning.
+// A failed dial or terminal setup exits the process instead of returning.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
 	wsClient.dial(sessionResponse.WebsocketURL)
