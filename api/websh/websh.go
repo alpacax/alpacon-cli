@@ -201,8 +201,7 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 func newWebsocketClient(header http.Header) *WebsocketClient {
 	return &WebsocketClient{
 		Header: header,
-		Done:   make(chan error, 1),
-		quit:   make(chan struct{}),
+		done:   make(chan struct{}),
 	}
 }
 
@@ -214,12 +213,12 @@ func (wsClient *WebsocketClient) dial(websocketURL string) {
 	wsClient.conn = conn
 }
 
-// finish takes effect only once: Done holds one value and is received once, so a
-// second send would park its goroutine for good.
+// finish keeps the first outcome. err is written before done closes, so anyone
+// who saw done can read it.
 func (wsClient *WebsocketClient) finish(err error) {
-	wsClient.closeOnce.Do(func() {
-		wsClient.Done <- err
-		close(wsClient.quit)
+	wsClient.finishOnce.Do(func() {
+		wsClient.err = err
+		close(wsClient.done)
 	})
 }
 
@@ -241,7 +240,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		select {
 		case <-sigChan:
 			wsClient.finish(nil)
-		case <-wsClient.quit:
+		case <-wsClient.done:
 		}
 	}()
 
@@ -264,7 +263,8 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}()
 
 	go wsClient.readFromServer()
-	return <-wsClient.Done
+	<-wsClient.done
+	return wsClient.err
 }
 
 // Handles graceful termination of the websh terminal.
@@ -290,7 +290,8 @@ func (wsClient *WebsocketClient) runWsClient() error {
 	go wsClient.readUserInput(inputChan)
 	go wsClient.writeToServer(inputChan)
 
-	return <-wsClient.Done
+	<-wsClient.done
+	return wsClient.err
 }
 
 func checkTerminal() (*term.State, error) {
@@ -331,7 +332,7 @@ func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 		// After teardown writeToServer is gone, so an unguarded send would park here.
 		select {
 		case inputChan <- string(char):
-		case <-wsClient.quit:
+		case <-wsClient.done:
 			return
 		}
 	}
@@ -341,7 +342,7 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 	var inputBuffer []rune
 	for {
 		select {
-		case <-wsClient.quit:
+		case <-wsClient.done:
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)

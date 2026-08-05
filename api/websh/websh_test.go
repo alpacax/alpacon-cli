@@ -285,7 +285,7 @@ func TestReadUserInputReturnsWhenOutcomeAlreadyReported(t *testing.T) {
 	require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
 
 	wsClient := newWebsocketClient(nil)
-	wsClient.finish(errors.New("teardown already reported")) // the lone receiver has returned
+	wsClient.finish(errors.New("teardown already reported")) // the outcome is already recorded
 
 	awaitReturn(t, "readUserInput parked reporting EOF after the outcome was taken", func() {
 		wsClient.readUserInput(make(chan string, 1))
@@ -308,20 +308,32 @@ func TestReadUserInputReturnsWhenWriterIsGone(t *testing.T) {
 	})
 }
 
-func TestWriteToServerReturnsWhenOutcomeAlreadyReported(t *testing.T) {
+func TestWriteToServerReturnsWhenDoneIsClosed(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+	wsClient.finish(errors.New("teardown already reported"))
+
+	// Empty, so only the done branch can end the loop: nothing is ever flushed.
+	awaitReturn(t, "writeToServer parked after the outcome was taken", func() {
+		wsClient.writeToServer(make(chan string))
+	})
+}
+
+func TestWriteToServerReportsWriteFailure(t *testing.T) {
 	conn := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later WriteMessage fails
 
 	wsClient := newWebsocketClient(nil)
 	wsClient.conn = conn
-	wsClient.finish(errors.New("teardown already reported"))
 
 	inputChan := make(chan string, 1)
 	inputChan <- "x" // buffered input forces the failing write
 
-	awaitReturn(t, "writeToServer parked reporting a write failure after the outcome was taken", func() {
+	awaitReturn(t, "writeToServer parked on the failing write", func() {
 		wsClient.writeToServer(inputChan)
 	})
+
+	assertReported(t, wsClient)
+	assert.Error(t, wsClient.err)
 }
 
 func TestFinishKeepsTheFirstOutcome(t *testing.T) {
@@ -331,10 +343,8 @@ func TestFinishKeepsTheFirstOutcome(t *testing.T) {
 	wsClient.finish(first)
 	wsClient.finish(errors.New("write failed on the closed connection"))
 
-	assert.Equal(t, first, <-wsClient.Done)
-
-	_, open := <-wsClient.quit
-	assert.False(t, open, "quit must be closed so the remaining goroutines can leave")
+	assertReported(t, wsClient)
+	assert.Equal(t, first, wsClient.err)
 }
 
 func TestRunWsClientReportsTerminalSetupFailure(t *testing.T) {
@@ -400,6 +410,16 @@ func pipeStdin(t *testing.T) *os.File {
 	})
 
 	return pipeWrite
+}
+
+func assertReported(t *testing.T, wsClient *WebsocketClient) {
+	t.Helper()
+
+	select {
+	case <-wsClient.done:
+	default:
+		require.Fail(t, "done must be closed so the remaining goroutines can leave")
+	}
 }
 
 func awaitReturn(t *testing.T, msg string, fn func()) {

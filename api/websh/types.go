@@ -10,11 +10,11 @@ import (
 )
 
 type WebsocketClient struct {
-	Header    http.Header
-	conn      *websocket.Conn
-	Done      chan error
-	quit      chan struct{} // closed once the first outcome is reported
-	closeOnce sync.Once
+	Header     http.Header
+	conn       *websocket.Conn
+	done       chan struct{} // closed once the first outcome is recorded
+	err        error
+	finishOnce sync.Once
 }
 
 type SessionRequest struct {
