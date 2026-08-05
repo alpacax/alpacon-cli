@@ -29,10 +29,10 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode is what the proxy closes a user channel with when the
-	// session ends normally—see sendCloseFrame in proxy-server internal/ws/channel.go.
-	// alpamon spends the same 4000 on the same meaning. A websh session never ends
-	// with 1000, so leaving this out would leave every normal end reported as a failure.
+	// sessionEndCloseCode is how the proxy closes a user channel at the end of a
+	// session (sendCloseFrame in proxy-server internal/ws/channel.go); alpamon spends
+	// the same 4000 on the same meaning. A websh session never ends with 1000, so
+	// without this every normal end would be reported as a failure.
 	sessionEndCloseCode = 4000
 )
 
@@ -225,9 +225,9 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	return nil
 }
 
-// finish keeps the first outcome. err is written before done closes, so anyone
-// who saw done can read it. A normal remote close is how a session ends rather
-// than a failure; every other close code stays an error.
+// finish keeps the first outcome. err is written before done closes, so anyone who
+// saw done can read it. A deliberate close ends the session rather than failing it;
+// every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
 	if websocket.IsCloseError(err, sessionEndCloseCode, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 		err = nil
@@ -247,6 +247,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		return err
 	}
 	defer func() { _ = wsClient.conn.Close() }()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	// Registered before the raw-mode restore so LIFO runs it after: a signal
@@ -350,8 +351,8 @@ func (wsClient *WebsocketClient) readFromServer() {
 	}
 }
 
-// Teardown cannot release this one mid-read: a goroutine parked in ReadRune
-// stays there until the next keystroke, and only closing stdin would change that.
+// readUserInput cannot be released mid-read: a goroutine parked in ReadRune stays
+// there until the next keystroke, and only closing stdin would change that.
 func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {

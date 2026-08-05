@@ -547,8 +547,8 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	}
 }
 
-// The dial succeeds and raw mode then fails, so this is the one path that returns
-// with goroutines already started and no outcome recorded by any of them.
+// The dial succeeds and raw mode then fails, which is the return no goroutine may
+// outlive: nothing here calls finish, so anything already started waits forever.
 func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
 	// as cross-origin against the httptest host.
@@ -614,8 +614,8 @@ func TestDial_ReportsTheHandshakeStatus(t *testing.T) {
 }
 
 // dialTestServer returns a live connection, so closing it produces genuine write
-// failures, along with the messages the server received. The server sends each of
-// send and then goes away, which is how a real session ends.
+// failures, along with the messages the server received. The server writes send and
+// then goes away, which is how a real session ends.
 func dialTestServer(t *testing.T, send ...string) (*websocket.Conn, <-chan string) {
 	t.Helper()
 
