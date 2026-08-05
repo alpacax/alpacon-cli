@@ -233,8 +233,11 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	// process with the terminal still in raw mode.
 	defer signal.Stop(sigChan)
 	go func() {
-		<-sigChan
-		wsClient.finish(nil)
+		select {
+		case <-sigChan:
+			wsClient.finish(nil)
+		case <-wsClient.quit:
+		}
 	}()
 
 	oldState, err := checkTerminal()
