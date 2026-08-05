@@ -241,6 +241,9 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 		return err
 	}
 	defer func() { _ = wsClient.conn.Close() }()
+	// Whatever this returns through, the goroutines below have to be released.
+	// The sync.Once makes it a no-op once an outcome is already recorded.
+	defer wsClient.finish(nil)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -248,7 +251,6 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	// arriving mid-teardown lands in the buffered channel instead of killing the
 	// process with the terminal still in raw mode.
 	defer signal.Stop(sigChan)
-	go wsClient.watchInterrupt(sigChan)
 
 	restore, err := enterRawMode()
 	if err != nil {
@@ -256,6 +258,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}
 	defer restore()
 
+	go wsClient.watchInterrupt(sigChan)
 	go wsClient.readCtrlC()
 	go wsClient.readFromServer()
 

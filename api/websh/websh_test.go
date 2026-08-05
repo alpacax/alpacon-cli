@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/signal"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -532,6 +535,47 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 			assert.NoError(t, wsClient.err)
 		})
 	}
+}
+
+// The dial succeeds and raw mode then fails, so this is the one path that returns
+// with goroutines already started and no outcome recorded by any of them.
+func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
+	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
+	// as cross-origin against the httptest host.
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		_ = conn.Close() // the handler must not outlive the assertion below
+	}))
+	t.Cleanup(ts.Close)
+
+	pipeStdin(t) // a pipe is not a tty, so raw mode fails after the dial succeeds
+
+	// signal.Notify starts one process-wide goroutine on first use anywhere, and
+	// it never exits. Priming it keeps that out of the baseline below.
+	warmUp := make(chan os.Signal, 1)
+	signal.Notify(warmUp, syscall.SIGTERM)
+	signal.Stop(warmUp)
+
+	before := runtime.NumGoroutine()
+	err := OpenReadOnlyTerminal(&client.AlpaconClient{}, SessionResponse{
+		WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http"),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stdin is not a terminal")
+
+	// Polled inline rather than with assert.Eventually, which runs its condition
+	// in a goroutine of its own and so can never see the count come back down.
+	deadline := time.Now().Add(teardownWait)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assert.LessOrEqual(t, runtime.NumGoroutine(), before,
+		"a goroutine outlived OpenReadOnlyTerminal: signal.Stop disarms sigChan without closing it, so only done can release the watcher")
 }
 
 func TestRunWsClient_ReportsTerminalSetupFailure(t *testing.T) {
