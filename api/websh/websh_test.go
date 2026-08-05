@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -358,16 +358,17 @@ func TestReadFromServerReportsReadFailure(t *testing.T) {
 
 func TestReadFromServerPrintsEveryMessage(t *testing.T) {
 	conn, _ := dialTestServer(t, "hi ", "there")
-	stdout := captureStdout(t)
 
 	wsClient := newWebsocketClient(nil)
 	wsClient.conn = conn
 
-	awaitReturn(t, "readFromServer parked after the server went away", func() {
-		wsClient.readFromServer()
+	stdout := testutil.CaptureStdout(t, func() {
+		awaitReturn(t, "readFromServer parked after the server went away", func() {
+			wsClient.readFromServer()
+		})
 	})
 
-	assert.Equal(t, "hi there", stdout()) // the loop must survive a successful read
+	assert.Equal(t, "hi there", stdout) // the loop must survive a successful read
 	assertReported(t, wsClient)
 	assert.Error(t, wsClient.err)
 }
@@ -540,29 +541,6 @@ func dialTestServer(t *testing.T, send ...string) (*websocket.Conn, <-chan strin
 	t.Cleanup(func() { _ = conn.Close() })
 
 	return conn, received
-}
-
-// captureStdout points os.Stdout at a pipe. The returned function closes the write
-// end and yields everything written to it.
-func captureStdout(t *testing.T) func() string {
-	t.Helper()
-
-	pipeRead, pipeWrite, err := os.Pipe()
-	require.NoError(t, err)
-
-	realStdout := os.Stdout
-	os.Stdout = pipeWrite
-	t.Cleanup(func() {
-		os.Stdout = realStdout
-		_ = pipeRead.Close()
-	})
-
-	return func() string {
-		require.NoError(t, pipeWrite.Close())
-		out, err := io.ReadAll(pipeRead)
-		require.NoError(t, err)
-		return string(out)
-	}
 }
 
 // pipeStdin points os.Stdin at a pipe and returns its write end. Closing that end
