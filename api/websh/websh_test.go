@@ -547,8 +547,9 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	}
 }
 
-// The dial succeeds and raw mode then fails, which is the return no goroutine may
-// outlive: nothing here calls finish, so anything already started waits forever.
+// The dial succeeds and raw mode then fails, and nothing on that return calls
+// finish. Today every go statement sits below enterRawMode, so none has started
+// and the count holds; this fails if one is ever moved back above it.
 func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
 	// as cross-origin against the httptest host.
@@ -585,7 +586,7 @@ func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	assert.LessOrEqual(t, runtime.NumGoroutine(), before,
-		"a goroutine outlived OpenReadOnlyTerminal: signal.Stop disarms sigChan without closing it, so only done can release the watcher")
+		"a goroutine was started before enterRawMode and outlived OpenReadOnlyTerminal: on this return nothing closes done, and signal.Stop disarms sigChan without closing it, so the watcher would have no way out")
 }
 
 func TestRunWsClient_ReportsTerminalSetupFailure(t *testing.T) {

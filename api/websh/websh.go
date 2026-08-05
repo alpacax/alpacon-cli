@@ -30,8 +30,8 @@ const (
 	writeFlushInterval = 5 * time.Millisecond
 
 	// sessionEndCloseCode is how the proxy closes a user channel at the end of a
-	// session (sendCloseFrame in proxy-server internal/ws/channel.go); alpamon spends
-	// the same 4000 on the same meaning. A websh session never ends with 1000, so
+	// session (sendCloseFrame in proxy-server internal/ws/channel.go); alpamon sends
+	// the same 4000 for the same meaning. A websh session never ends with 1000, so
 	// without this every normal end would be reported as a failure.
 	sessionEndCloseCode = 4000
 )
