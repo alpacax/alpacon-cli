@@ -272,8 +272,8 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	return wsClient.err
 }
 
-// Handles graceful termination of the websh terminal.
-// Exits on error without further error handling.
+// OpenNewTerminal opens an interactive terminal on the session.
+// A failed dial exits the process instead of returning.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
 	wsClient.dial(sessionResponse.WebsocketURL)
