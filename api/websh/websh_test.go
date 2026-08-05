@@ -352,6 +352,20 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 	}
 }
 
+func TestReadUserInput_ReportsEOFAsACleanEnd(t *testing.T) {
+	pipeWrite := pipeStdin(t)
+	require.NoError(t, pipeWrite.Close()) // what Ctrl+D leaves behind
+
+	wsClient := newWebsocketClient(nil)
+
+	awaitReturn(t, "readUserInput parked on EOF", func() {
+		wsClient.readUserInput(make(chan string, 1))
+	})
+
+	assertReported(t, wsClient)
+	assert.NoError(t, wsClient.err) // Ctrl+D is how a session is meant to end
+}
+
 func TestReadCtrlC_EndsTheSessionOnCtrlC(t *testing.T) {
 	pipeWrite := pipeStdin(t)
 	// The leading byte proves the loop goes around rather than ending on any input.

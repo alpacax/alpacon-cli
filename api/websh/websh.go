@@ -358,8 +358,7 @@ func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 		char, _, err := reader.ReadRune()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				wsClient.finish(nil)
-				return
+				err = nil // the user closing stdin ends the session rather than failing it
 			}
 			wsClient.finish(err)
 			return
