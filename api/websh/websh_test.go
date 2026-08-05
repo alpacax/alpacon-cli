@@ -1,9 +1,12 @@
 package websh
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -269,4 +272,25 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "docker", gotQuery)
 	assert.Len(t, records, 1)
+}
+
+func TestRunWsClientReportsTerminalSetupFailure(t *testing.T) {
+	helper := exec.Command(os.Args[0], "-test.run=TestRunWsClientTerminalHelperProcess")
+	helper.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+
+	var stderr bytes.Buffer
+	helper.Stderr = &stderr
+	require.Error(t, helper.Run())
+
+	assert.Contains(t, stderr.String(), "failed to set up terminal: websh command should be a terminal")
+	assert.NotContains(t, stderr.String(), "websocket connection failed")
+}
+
+func TestRunWsClientTerminalHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	// stdin is not a tty here, so checkTerminal fails before the connection is used.
+	wsClient := &WebsocketClient{Done: make(chan error, 1)}
+	_ = wsClient.runWsClient()
 }

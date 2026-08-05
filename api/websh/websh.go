@@ -275,7 +275,7 @@ func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) 
 func (wsClient *WebsocketClient) runWsClient() error {
 	oldState, err := checkTerminal()
 	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed %v", err)
+		utils.CliErrorWithExit("failed to set up terminal: %v", err)
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
 
