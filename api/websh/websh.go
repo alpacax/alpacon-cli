@@ -206,9 +206,14 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 }
 
 func (wsClient *WebsocketClient) dial(websocketURL string) {
-	conn, _, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.Header)
+	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.Header)
 	if err != nil {
-		utils.CliErrorWithExit("websocket connection failed: %v", err)
+		// The handshake response carries the reason a bad handshake alone never names.
+		status := ""
+		if resp != nil {
+			status = fmt.Sprintf(" (status %s)", resp.Status)
+		}
+		utils.CliErrorWithExit("websocket connection failed: %v%s", err, status)
 	}
 	wsClient.conn = conn
 }
