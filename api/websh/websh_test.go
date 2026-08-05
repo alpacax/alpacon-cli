@@ -590,7 +590,7 @@ func TestRunWsClient_ReportsTerminalSetupFailure(t *testing.T) {
 	err := newWebsocketClient(nil).runWsClient()
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to set up terminal: stdin is not a terminal")
+	assert.Contains(t, err.Error(), "stdin is not a terminal")
 	assert.NotContains(t, err.Error(), "websocket connection failed")
 }
 

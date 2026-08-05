@@ -333,11 +333,11 @@ func (wsClient *WebsocketClient) runWsClient() error {
 // enterRawMode returns the restore for the caller to defer.
 func enterRawMode() (func(), error) {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return nil, errors.New("failed to set up terminal: stdin is not a terminal")
+		return nil, errors.New("stdin is not a terminal")
 	}
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		return nil, fmt.Errorf("failed to set up terminal: %w", err)
+		return nil, fmt.Errorf("failed to enter raw mode: %w", err)
 	}
 
 	return func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }, nil
