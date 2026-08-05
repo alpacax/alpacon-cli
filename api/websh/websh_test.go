@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,8 +21,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A blocked goroutine never returns, so any bound proves the point.
-const teardownWait = 2 * time.Second
+const (
+	// A blocked goroutine never returns, so any bound proves the point.
+	teardownWait = 2 * time.Second
+
+	receivedBufferSize = 8
+)
 
 func TestGetSessionList(t *testing.T) {
 	closedTime := "2026-03-01T00:00:00Z"
@@ -319,7 +324,7 @@ func TestWriteToServerReturnsWhenDoneIsClosed(t *testing.T) {
 }
 
 func TestWriteToServerReportsWriteFailure(t *testing.T) {
-	conn := dialTestServer(t)
+	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later WriteMessage fails
 
 	wsClient := newWebsocketClient(nil)
@@ -337,7 +342,7 @@ func TestWriteToServerReportsWriteFailure(t *testing.T) {
 }
 
 func TestReadFromServerReportsReadFailure(t *testing.T) {
-	conn := dialTestServer(t)
+	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later ReadMessage fails
 
 	wsClient := newWebsocketClient(nil)
@@ -349,6 +354,66 @@ func TestReadFromServerReportsReadFailure(t *testing.T) {
 
 	assertReported(t, wsClient)
 	assert.Error(t, wsClient.err)
+}
+
+func TestReadFromServerPrintsEveryMessage(t *testing.T) {
+	conn, _ := dialTestServer(t, "hi ", "there")
+	stdout := captureStdout(t)
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.conn = conn
+
+	awaitReturn(t, "readFromServer parked after the server went away", func() {
+		wsClient.readFromServer()
+	})
+
+	assert.Equal(t, "hi there", stdout()) // the loop must survive a successful read
+	assertReported(t, wsClient)
+	assert.Error(t, wsClient.err)
+}
+
+func TestReadUserInputForwardsToTheWriter(t *testing.T) {
+	pipeWrite := pipeStdin(t)
+	_, err := pipeWrite.WriteString("l")
+	require.NoError(t, err)
+
+	wsClient := newWebsocketClient(nil)
+	t.Cleanup(func() { wsClient.finish(nil) })
+
+	inputChan := make(chan string, 1)
+	go wsClient.readUserInput(inputChan)
+
+	select {
+	case got := <-inputChan:
+		assert.Equal(t, "l", got)
+	case <-time.After(teardownWait):
+		require.Fail(t, "readUserInput never forwarded the rune it read")
+	}
+}
+
+func TestWriteToServerFlushesBufferedInput(t *testing.T) {
+	conn, received := dialTestServer(t)
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.conn = conn
+	t.Cleanup(func() { wsClient.finish(nil) })
+
+	inputChan := make(chan string, 2)
+	inputChan <- "l"
+	inputChan <- "s"
+	go wsClient.writeToServer(inputChan)
+
+	// The two runes may land in one flush or two, but every byte has to arrive.
+	var got string
+	deadline := time.After(teardownWait)
+	for got != "ls" {
+		select {
+		case message := <-received:
+			got += message
+		case <-deadline:
+			require.Fail(t, "writeToServer never flushed the buffered input", "received %q", got)
+		}
+	}
 }
 
 func TestWatchInterruptEndsTheSessionOnSignal(t *testing.T) {
@@ -435,10 +500,13 @@ func TestDialHelperProcess(t *testing.T) {
 	newWebsocketClient(nil).dial(os.Getenv("WEBSH_TEST_URL"))
 }
 
-// dialTestServer returns a live connection, so closing it produces genuine write failures.
-func dialTestServer(t *testing.T) *websocket.Conn {
+// dialTestServer returns a live connection, so closing it produces genuine write
+// failures, along with the messages the server received. The server sends each of
+// send and then goes away, which is how a real session ends.
+func dialTestServer(t *testing.T, send ...string) (*websocket.Conn, <-chan string) {
 	t.Helper()
 
+	received := make(chan string, receivedBufferSize)
 	upgrader := websocket.Upgrader{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -446,9 +514,22 @@ func dialTestServer(t *testing.T) *websocket.Conn {
 			return
 		}
 		defer func() { _ = conn.Close() }()
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+		for _, message := range send {
+			if err := conn.WriteMessage(websocket.BinaryMessage, []byte(message)); err != nil {
 				return
+			}
+		}
+		if len(send) > 0 {
+			return
+		}
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			select {
+			case received <- string(message):
+			default: // an unread message must not park the server past the test
 			}
 		}
 	}))
@@ -458,7 +539,30 @@ func dialTestServer(t *testing.T) *websocket.Conn {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	return conn
+	return conn, received
+}
+
+// captureStdout points os.Stdout at a pipe. The returned function closes the write
+// end and yields everything written to it.
+func captureStdout(t *testing.T) func() string {
+	t.Helper()
+
+	pipeRead, pipeWrite, err := os.Pipe()
+	require.NoError(t, err)
+
+	realStdout := os.Stdout
+	os.Stdout = pipeWrite
+	t.Cleanup(func() {
+		os.Stdout = realStdout
+		_ = pipeRead.Close()
+	})
+
+	return func() string {
+		require.NoError(t, pipeWrite.Close())
+		out, err := io.ReadAll(pipeRead)
+		require.NoError(t, err)
+		return string(out)
+	}
 }
 
 // pipeStdin points os.Stdin at a pipe and returns its write end. Closing that end
