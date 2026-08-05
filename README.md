@@ -142,13 +142,13 @@ $ alpacon exec -u admin -g developers <server> "..."
 # Pass a secret with --env="KEY": the value is read from your shell, so it stays off
 # the alpacon command line. Read it in rather than typing it inline, so it stays out
 # of shell history too.
-$ read -rs PGPASSWORD && export PGPASSWORD
+$ printf 'PGPASSWORD: ' && read -rs PGPASSWORD && export PGPASSWORD
 $ alpacon exec --env="PGPASSWORD" <server> -- psql -h localhost -U app -c 'SELECT 1'
 ```
 
 Flags go before the server name; everything after is the remote command.
 
-Never put a secret on the command line: the server refuses such a command before it runs. Pass it with `--env="KEY"` as shown above. The same applies to `alpacon websh` when it runs a command. See [When a command is denied](#when-a-command-is-denied) for the exact forms the server rejects and the machine-readable refusal.
+Never put a secret on the command line: the server refuses the recognizable forms before the command runs. Pass it with `--env="KEY"` as shown above. The same applies to `alpacon websh` when it runs a command. See [When a command is denied](#when-a-command-is-denied) for the exact forms the server rejects and the machine-readable refusal.
 
 ### File transfer
 ```bash
@@ -292,7 +292,7 @@ What each refusal code means and what to do next:
 
 Separately from the work session gate, `exec` (and `websh` when running a command) is refused before the command runs if the command line itself carries a credential—a `-p`/`--password` flag, a `KEY=VALUE` secret such as `PGPASSWORD=...`, or a `user:pass@host` connection string. Pass the secret with `--env="KEY"` instead: its value is read from your shell, so it never lands on the command line the server stores. The refusal is permanent—a retry submits the same command line—so rewrite rather than retry.
 
-Exit code is `1`, and under `--output json` the refusal is an error envelope on stderr with `error_code` `command_inline_credential`. That envelope carries no `next_actions`, because the fix is always the same `--env="KEY"` rewrite.
+Exit code is `1`, and under `--output json` the refusal is an error envelope on stderr with `error_code` `command_inline_credential`. That envelope currently carries no `next_actions`—rewrite the command with `--env="KEY"` as described above (`exec` takes the remote command after `--`, `websh` takes it as one quoted argument).
 
 ## Exit codes
 

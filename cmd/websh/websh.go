@@ -168,7 +168,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # Pass a secret via the shell env; the value stays off the alpacon command line.
   # Read it in rather than typing it inline, so it stays out of shell history too.
   # psql reads PGPASSWORD directly from the env.
-  read -rs PGPASSWORD && export PGPASSWORD
+  printf 'PGPASSWORD: ' && read -rs PGPASSWORD && export PGPASSWORD
   alpacon websh --env="PGPASSWORD" my-server 'psql -h localhost -U app -c "SELECT 1"'
 
   # Share terminal session

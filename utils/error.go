@@ -19,6 +19,9 @@ const (
 	// as PGPASSWORD=..., or a user:pass@host connection string), which the server
 	// would otherwise persist in the stored command line. Move the secret to
 	// --env instead. See alpacon-server ADR 0037 (Refs alpacax/alpacon-server#2745).
+	// The rejected-forms list above is repeated in the exec and websh help text
+	// and the README's "When a command is denied" section—when the server-side
+	// gate changes, update all of them together.
 	CommandInlineCredential = "command_inline_credential"
 
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
