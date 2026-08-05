@@ -248,12 +248,8 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}
 	defer func() { _ = wsClient.conn.Close() }()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	// Registered before the raw-mode restore so LIFO runs it after: a signal
-	// arriving mid-teardown lands in the buffered channel instead of killing the
-	// process with the terminal still in raw mode.
-	defer signal.Stop(sigChan)
+	sigChan, stopSignals := notifySignals()
+	defer stopSignals()
 
 	restore, err := enterRawMode()
 	if err != nil {
@@ -299,7 +295,7 @@ func (wsClient *WebsocketClient) readCtrlC() {
 
 // OpenNewTerminal opens an interactive terminal on the session.
 // Input is forwarded to the server. Terminal echo is suppressed via raw mode.
-// Ends cleanly on the remote close or on Ctrl+D.
+// Ends cleanly on the remote close, on Ctrl+D, or on a signal.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
 	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
@@ -311,6 +307,9 @@ func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) 
 }
 
 func (wsClient *WebsocketClient) runWsClient() error {
+	sigChan, stopSignals := notifySignals()
+	defer stopSignals()
+
 	restore, err := enterRawMode()
 	if err != nil {
 		return err
@@ -319,12 +318,24 @@ func (wsClient *WebsocketClient) runWsClient() error {
 
 	inputChan := make(chan string, 1)
 
+	go wsClient.watchInterrupt(sigChan)
 	go wsClient.readFromServer()
 	go wsClient.readUserInput(inputChan)
 	go wsClient.writeToServer(inputChan)
 
 	<-wsClient.done
 	return wsClient.err
+}
+
+// notifySignals returns the signal channel and the stop for the caller to defer.
+// Defer the stop before the raw-mode restore so LIFO runs it after: a signal
+// arriving mid-teardown lands in the buffered channel instead of killing the
+// process with the terminal still in raw mode.
+func notifySignals() (chan os.Signal, func()) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	return sigChan, func() { signal.Stop(sigChan) }
 }
 
 // enterRawMode returns the restore for the caller to defer.
