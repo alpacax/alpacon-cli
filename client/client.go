@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -460,7 +461,9 @@ func withRetryAfter(err error, header http.Header) error {
 		return nil
 	}
 	seconds, convErr := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	if convErr != nil || seconds <= 0 {
+	// The upper bound is what a time.Duration can hold: past it the multiplication
+	// below wraps, and a wrapped delay is worse than no hint at all.
+	if convErr != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
 		return err
 	}
 	return &retryAfterError{err: err, retryAfter: time.Duration(seconds) * time.Second}

@@ -137,6 +137,8 @@ func TestSendRequest_429ExposesRetryAfter(t *testing.T) {
 		{name: "zero is no hint", retryAfter: "0", want: 0},
 		// The poll loop's own backoff covers this; guessing a date would stall it.
 		{name: "HTTP-date is not parsed", retryAfter: "Wed, 21 Oct 2015 07:28:00 GMT", want: 0},
+		// Parses fine, but seconds*time.Second would wrap past a Duration's range.
+		{name: "too large for a Duration", retryAfter: "99999999999", want: 0},
 	}
 
 	for _, tt := range tests {
