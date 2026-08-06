@@ -32,6 +32,11 @@ const (
 	pollMaxBackoffTick = 60
 )
 
+// streamPollTick is the base gap for the status poll behind a live stream, the
+// one the pacing above multiplies. Passed in rather than read here so a test can
+// widen it away and leave the fin event as the only thing that can end a run.
+const streamPollTick = 1 * time.Second
+
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
 // hostile server can't spin the CLI or grow the skipped/missing slices without bound.
 // var, not const, so tests can lower it.
@@ -384,7 +389,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	}
 	listener.setCommandID(cmdResp.ID)
 
-	return streamSubscribed(ac, session, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), false)
+	return streamSubscribed(ac, session, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -409,13 +414,13 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	if details, derr := GetCommandByID(ac, cmdID); derr == nil {
 		serverID = details.Server.ID
 	}
-	return streamSubscribed(ac, session, listener, cmdID, serverID, out, timeout, true)
+	return streamSubscribed(ac, session, listener, cmdID, serverID, out, timeout, streamPollTick, true)
 }
 
 // streamSubscribed subscribes to cmdID's output channel, warm-fires persisted
 // chunks, then writes live chunks to out until the command reaches a terminal
 // state. Shared by the fresh-submit and approval-resume paths.
-func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout time.Duration, waitApproval bool) error {
+func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout, tick time.Duration, waitApproval bool) error {
 	if err := SubscribeEvent(ac, session.ChannelID, EventTypeCommandOutput, cmdID); err != nil {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, waitApproval, err)
@@ -448,7 +453,7 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 	pollResult := make(chan EventDetails, 1)
 	pollErr := make(chan error, 1)
 	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, 1*time.Second, waitApproval)
+		details, err := pollCommandExecution(ac, cmdID, timeout, tick, waitApproval)
 		if err != nil {
 			pollErr <- err
 			return
