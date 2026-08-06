@@ -545,6 +545,38 @@ func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
 	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 300 * time.Millisecond}, delays())
 }
 
+// Reported progress refreshes the deadline, and the throttle allowance goes back
+// with it: a throttle late in a long command must not be refused an extension
+// because an unrelated one early on spent the budget.
+func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch reqCount.Add(1) {
+		case 1, 3:
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+		case 2:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+		default:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+		}
+	}))
+	defer ts.Close()
+
+	delays := fakePollClock(t)
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, int32(4), reqCount.Load())
+	assert.Equal(t, []time.Duration{
+		5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
+	}, delays())
+}
+
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
