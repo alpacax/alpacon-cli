@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -122,6 +123,46 @@ func TestSendRequest_401ExposesStatusCode(t *testing.T) {
 func TestHTTPStatusCode_NonAPIErrorIsZero(t *testing.T) {
 	assert.Equal(t, 0, utils.HTTPStatusCode(errors.New("boom")))
 	assert.Equal(t, 0, utils.HTTPStatusCode(nil))
+}
+
+func TestSendRequest_429ExposesRetryAfter(t *testing.T) {
+	tests := []struct {
+		name       string
+		retryAfter string
+		want       time.Duration
+	}{
+		{name: "delta-seconds", retryAfter: "29", want: 29 * time.Second},
+		{name: "padded delta-seconds", retryAfter: " 29 ", want: 29 * time.Second},
+		{name: "no header", retryAfter: "", want: 0},
+		{name: "zero is no hint", retryAfter: "0", want: 0},
+		// The poll loop's own backoff covers this; guessing a date would stall it.
+		{name: "HTTP-date is not parsed", retryAfter: "Wed, 21 Oct 2015 07:28:00 GMT", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if tt.retryAfter != "" {
+					w.Header().Set("Retry-After", tt.retryAfter)
+				}
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, http.StatusTooManyRequests, utils.HTTPStatusCode(err))
+			assert.Equal(t, tt.want, utils.RetryAfter(err))
+		})
+	}
+}
+
+func TestRetryAfter_ErrorWithoutHintIsZero(t *testing.T) {
+	assert.Equal(t, time.Duration(0), utils.RetryAfter(errors.New("boom")))
+	assert.Equal(t, time.Duration(0), utils.RetryAfter(nil))
 }
 
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
