@@ -287,8 +287,8 @@ func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) 
 }
 
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
-// the hold never resets and only a throttled wait extends—so an approved job
-// resumes streaming. Without it the hold is terminal (PendingApprovalError).
+// the hold never resets and throttled waits extend by at most one more timeout—so
+// an approved job resumes streaming. Without it the hold is terminal (PendingApprovalError).
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool) (EventDetails, error) {
 	var response EventDetails
 
@@ -296,6 +296,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	deadline := started.Add(timeout)
 	delay := tick
 	failures := 0
+	throttledWait := time.Duration(0)
 
 	for {
 		pollSleep(delay)
@@ -307,9 +308,12 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 		if err != nil {
 			delay = nextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
-			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests && throttledWait < timeout {
 				// The server is alive: the command may be done, only its result GET refused.
+				// Capped at one more timeout, so a token stuck over quota still gives up:
+				// extending by exactly the wait would otherwise keep the deadline ahead forever.
 				deadline = deadline.Add(delay)
+				throttledWait += delay
 			}
 			continue
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -371,8 +372,8 @@ func strPtr(s string) *string { return &s }
 
 func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Always fail GETs so SendGetRequest returns an error and the poll
-		// loop never resets its timer.
+		// Always fail GETs so SendGetRequest returns an error, and with a status
+		// that is not 429 so the poll loop never extends its deadline.
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer ts.Close()
@@ -383,7 +384,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 
 	var clientTimeout *ClientTimeoutError
 	require.True(t, errors.As(err, &clientTimeout),
-		"timer expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
+		"deadline expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
 }
 
 func TestNextPollTick(t *testing.T) {
@@ -523,6 +524,25 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 	assert.Equal(t, int32(2), reqCount.Load(),
 		"the result must come from the retry after the throttled wait, not from retrying through it")
 	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond}, delays())
+}
+
+// Extending the deadline by exactly the wait keeps it ahead of the clock forever,
+// so the extension is capped: a token stuck over quota has to give up.
+func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
+	ts, reqCount := throttleServer(t, math.MaxInt, "1")
+	defer ts.Close()
+
+	delays := fakePollClock(t)
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	// One 300ms extension spends the 100ms budget; the second wait runs past the deadline.
+	assert.Equal(t, int32(2), reqCount.Load())
+	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 300 * time.Millisecond}, delays())
 }
 
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
