@@ -297,6 +297,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	delay := tick
 	failures := 0
 	throttledWait := time.Duration(0)
+	throttleWarned := false
 
 	for {
 		pollSleep(delay)
@@ -308,12 +309,20 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 		if err != nil {
 			delay = nextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
-			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests && throttledWait < timeout {
+			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+				if !throttleWarned {
+					// The wait can reach two timeouts, and nothing else on this path
+					// prints while it lasts.
+					throttleWarned = true
+					utils.CliWarning("rate limited by the server, retrying in %s", delay)
+				}
 				// The server is alive: the command may be done, only its result GET refused.
 				// Capped at one more timeout, so a token stuck over quota still gives up:
 				// extending by exactly the wait would otherwise keep the deadline ahead forever.
-				deadline = deadline.Add(delay)
-				throttledWait += delay
+				if throttledWait < timeout {
+					deadline = deadline.Add(delay)
+					throttledWait += delay
+				}
 			}
 			continue
 		}
