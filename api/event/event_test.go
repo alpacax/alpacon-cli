@@ -842,7 +842,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 		cmdID:    "cmd-uuid",
 		serverID: "srv-uuid",
 		wsFinFor: "cmd-uuid",
-		onDetail: func(int) { details.Add(1) },
+		onDetail: func() { details.Add(1) },
 		// The fin arrives before the first poll, so this "running" is the read the
 		// fin triggers; the terminal one goes to the poll.
 		runningPolls: 1,
@@ -864,7 +864,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		cmdID:       "cmd-uuid",
 		serverID:    "srv-uuid",
 		wsFinFor:    "cmd-uuid",
-		onDetail:    func(int) { details.Add(1) },
+		onDetail:    func() { details.Add(1) },
 		detailFails: 1,
 		terminal:    EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
@@ -888,7 +888,7 @@ func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
 				cmdID:      "cmd-uuid",
 				serverID:   "srv-uuid",
 				wsFinFor:   "cmd-uuid",
-				onDetail:   func(int) { details.Add(1) },
+				onDetail:   func() { details.Add(1) },
 				heldPolls:  1,
 				heldStatus: status,
 				terminal:   EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
@@ -1249,8 +1249,8 @@ type streamingServerConfig struct {
 	wsFinFor    string            // command id of a command_fin frame sent after the chunks; none when empty
 	chunksFor   func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
 	onSubscribe func(eventType, targetID string)
-	onDetail    func(n int) // every detail-endpoint request, failing ones included
-	detailFails int         // leading detail GETs answered 500, before the held/running sequence starts
+	onDetail    func() // every detail-endpoint request, failing ones included
+	detailFails int    // leading detail GETs answered 500, before the held/running sequence starts
 	// Detail-endpoint responses in order: heldPolls "awaiting_approval", then
 	// runningPolls "running", then terminal. The approval-resume path spends the
 	// first one on its server-id lookup, so its poll loop sees one held fewer.
@@ -1331,7 +1331,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
 			if cfg.onDetail != nil {
-				cfg.onDetail(1)
+				cfg.onDetail()
 			}
 			mu.Lock()
 			failing := failCount < cfg.detailFails
