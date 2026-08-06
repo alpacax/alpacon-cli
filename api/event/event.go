@@ -353,8 +353,10 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 		if IsRunningStatus(response.Status) {
 			deadline = pollNow().Add(timeout)
 			// The refreshed deadline gets its throttle allowance back with it, so a
-			// throttle late in a long command is not paid for by an earlier one.
+			// throttle late in a long command is not paid for by an earlier one—and
+			// the warning with it, so a later stretch is not silent.
 			throttledWait = 0
+			throttleWarned = false
 			delay = nextPollTick(tick, pollNow().Sub(started))
 			continue
 		}
