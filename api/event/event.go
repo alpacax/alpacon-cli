@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path"
 	"time"
@@ -18,6 +19,17 @@ import (
 
 const (
 	getEventURL = "/api/events/commands/"
+
+	// Poll pacing, in multiples of the caller's base tick, widening as the command
+	// ages and again once the server pushes back. A fixed 1s tick burns alpacon-server's
+	// default 1000/hour service-token throttle in ~17 minutes, then starves itself—each
+	// freed slot goes to a request that is throttled again.
+	pollFastWindow     = 10
+	pollMediumWindow   = 60
+	pollMediumTick     = 5
+	pollSlowTick       = 10
+	pollBackoffFactor  = 2
+	pollMaxBackoffTick = 60
 )
 
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
@@ -37,6 +49,12 @@ var (
 
 // gapFillNow is a seam so tests drive backoff timing deterministically.
 var gapFillNow = time.Now
+
+// pollNow and pollSleep are seams so tests run the loop on a fake clock.
+var (
+	pollNow   = time.Now
+	pollSleep = time.Sleep
+)
 
 // gapFillState throttles gap-fill re-fetches while lastSeq is not advancing and
 // records seqs given up on so they can be retried once at command end.
@@ -239,48 +257,79 @@ func execTimeout() time.Duration {
 	return 30 * time.Minute
 }
 
-// waitApproval keeps polling through the awaiting_approval hold (bounded by
-// timeout, no reset) so an approved job resumes streaming; otherwise that hold
-// is terminal and surfaces as a PendingApprovalError via errorFromDetails.
+func nextPollTick(tick, elapsed time.Duration) time.Duration {
+	switch {
+	case elapsed < time.Duration(pollFastWindow)*tick:
+		return tick
+	case elapsed < time.Duration(pollMediumWindow)*tick:
+		return time.Duration(pollMediumTick) * tick
+	default:
+		return time.Duration(pollSlowTick) * tick
+	}
+}
+
+// nextPollBackoff returns the gap after a failed poll; attempt is the failure
+// count so far, 0 for the first. A server-sent retryAfter wins but shares the
+// cap, so a hostile value cannot park the loop until the deadline.
+func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) time.Duration {
+	maxDelay := time.Duration(pollMaxBackoffTick) * tick
+	if retryAfter > 0 {
+		return min(retryAfter, maxDelay)
+	}
+	delay := tick
+	for range attempt {
+		delay *= time.Duration(pollBackoffFactor)
+		if delay >= maxDelay {
+			return maxDelay
+		}
+	}
+	return delay
+}
+
+// waitApproval polls through the awaiting_approval hold—bounded by timeout, which
+// the hold never resets and only a throttled wait extends—so an approved job
+// resumes streaming. Without it the hold is terminal (PendingApprovalError).
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool) (EventDetails, error) {
 	var response EventDetails
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(tick)
-	defer ticker.Stop()
+	started := pollNow()
+	deadline := started.Add(timeout)
+	delay := tick
+	failures := 0
 
 	for {
-		select {
-		case <-timer.C:
+		pollSleep(delay)
+		if pollNow().After(deadline) {
 			return response, &ClientTimeoutError{}
-		case <-ticker.C:
-			responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdId, nil))
-			if err != nil {
-				continue
-			}
-			if err = json.Unmarshal(responseBody, &response); err != nil {
-				return response, err
-			}
-
-			if IsRunningStatus(response.Status) {
-				// Drain timer.C before Reset to prevent a spurious ClientTimeoutError if the timer fires between Stop and Reset.
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				timer.Reset(timeout)
-				continue
-			}
-			// Approval-resume keeps polling through the hold and the transient
-			// "error" compute_status the server emits in the approve→deliver window.
-			if waitApproval && (IsAwaitingApprovalStatus(response.Status) || response.Status == "error") {
-				continue
-			}
-			return response, nil
 		}
+
+		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdId, nil))
+		if err != nil {
+			delay = nextPollBackoff(tick, failures, utils.RetryAfter(err))
+			failures++
+			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+				// The server is alive: the command may be done, only its result GET refused.
+				deadline = deadline.Add(delay)
+			}
+			continue
+		}
+		failures = 0
+		if err = json.Unmarshal(responseBody, &response); err != nil {
+			return response, err
+		}
+
+		if IsRunningStatus(response.Status) {
+			deadline = pollNow().Add(timeout)
+			delay = nextPollTick(tick, pollNow().Sub(started))
+			continue
+		}
+		// Approval-resume keeps polling through the hold and the transient
+		// "error" compute_status the server emits in the approve→deliver window.
+		if waitApproval && (IsAwaitingApprovalStatus(response.Status) || response.Status == "error") {
+			delay = nextPollTick(tick, pollNow().Sub(started))
+			continue
+		}
+		return response, nil
 	}
 }
 
