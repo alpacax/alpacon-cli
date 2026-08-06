@@ -30,12 +30,12 @@ const (
 	pollSlowTick       = 10
 	pollBackoffFactor  = 2
 	pollMaxBackoffTick = 60
-)
 
-// streamPollTick is the base gap for the status poll behind a live stream, the
-// one the pacing above multiplies. Passed in rather than read here so a test can
-// widen it away and leave the fin event as the only thing that can end a run.
-const streamPollTick = 1 * time.Second
+	// Base gap the pacing above multiplies, for the poll running behind a live
+	// stream. Passed to streamSubscribed rather than read there, so a test can
+	// widen it away and leave the fin event as the only thing that ends a run.
+	streamPollTick = time.Second
+)
 
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
 // hostile server can't spin the CLI or grow the skipped/missing slices without bound.
@@ -293,7 +293,8 @@ func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) 
 
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
 // the hold never resets and throttled waits extend by at most one timeout plus one
-// backoff wait—so an approved job resumes streaming. Without it the hold is terminal (PendingApprovalError).
+// backoff wait—so an approved job resumes streaming. Without it the hold is
+// terminal (PendingApprovalError).
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool) (EventDetails, error) {
 	var response EventDetails
 
@@ -305,10 +306,9 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	throttleWarned := false
 
 	for {
-		// Never sleep past the deadline: at the slow tick that would report the
-		// timeout up to 10 ticks—up to one backoff wait, 60, once throttled—after
-		// the deadline it names. A throttle-extended deadline always leaves the
-		// whole wait, so the retry the wait was for still happens.
+		// Never sleep past the deadline, or the timeout lands a whole gap late—10
+		// ticks at the slow pace, 60 once throttled. An extended deadline always
+		// leaves the whole wait, so a throttled retry still gets its poll.
 		if wait := min(delay, deadline.Sub(pollNow())); wait > 0 {
 			pollSleep(wait)
 		}
@@ -328,11 +328,10 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 					utils.CliWarning("rate limited by the server, retrying in %s", delay)
 				}
 				// The server is alive: the command may be done, only its result GET refused.
-				// Budgeted so a token stuck over quota gives up: extending by exactly the
-				// wait would keep the deadline ahead of the clock forever. The extension
-				// that exhausts the budget is granted whole rather than trimmed to what is
-				// left, so every wait the server mandates still buys the poll it waited
-				// for—the ceiling is one timeout plus one backoff wait.
+				// Budgeted so a token stuck over quota gives up—extending by exactly the
+				// wait would keep the deadline ahead forever. The last extension is granted
+				// whole rather than trimmed, so every mandated wait still buys its poll:
+				// the ceiling is one timeout plus one backoff wait.
 				if throttledWait < timeout {
 					deadline = deadline.Add(delay)
 					throttledWait += delay
@@ -410,24 +409,25 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
-	serverID := ""
-	if details, derr := GetCommandByID(ac, cmdID); derr == nil {
+	var serverID string
+	if details, err := GetCommandByID(ac, cmdID); err == nil {
 		serverID = details.Server.ID
 	}
 	return streamSubscribed(ac, session, listener, cmdID, serverID, out, timeout, streamPollTick, true)
 }
 
-// streamSubscribed subscribes to cmdID's output channel, warm-fires persisted
-// chunks, then writes live chunks to out until the command reaches a terminal
-// state. Shared by the fresh-submit and approval-resume paths.
+// streamSubscribed subscribes to cmdID's output channel and to serverID's fin
+// channel, warm-fires persisted chunks, then writes live chunks to out until the
+// fin event or the poll reports a terminal state. Shared by the fresh-submit and
+// approval-resume paths.
 func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout, tick time.Duration, waitApproval bool) error {
 	if err := SubscribeEvent(ac, session.ChannelID, EventTypeCommandOutput, cmdID); err != nil {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, waitApproval, err)
 	}
 	// Chunks carry no end marker, so without this the exit waits for the poll below
-	// to notice—a widening gap, up to 10 ticks once the command is a minute old.
-	// Best effort: on failure that poll stays the only terminal signal, as before.
+	// to notice—up to 10 ticks once the command is a minute old. Best effort: on
+	// failure that poll stays the only terminal signal, as before.
 	if serverID != "" {
 		_ = SubscribeEvent(ac, session.ChannelID, EventTypeCommandFin, serverID)
 	}
@@ -482,9 +482,9 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
 		case <-listener.Finished():
-			// fin says only that it is over; the exit code lives on the command
-			// itself. A failed read, or one racing a state not yet written, leaves
-			// the poll as the net rather than reporting a half-finished run.
+			// fin says only that it is over; the exit code lives on the command. A
+			// failed read, or one racing a state not yet written, leaves the poll as
+			// the net rather than reporting a half-finished run.
 			details, err := GetCommandByID(ac, cmdID)
 			if err != nil || IsRunningStatus(details.Status) {
 				continue

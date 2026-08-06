@@ -35,8 +35,8 @@ type CommandOutputListener struct {
 	finished  chan struct{}
 }
 
-// commandOutputEnvelope is the WS message format emitted by alpacon-server. Both
-// payload shapes share the struct: command_output names the command in command_id,
+// commandOutputEnvelope is the WS message format emitted by alpacon-server. One
+// struct for both payloads: command_output names the command in command_id,
 // command_fin in id.
 type commandOutputEnvelope struct {
 	EventType EventType `json:"event_type"`
@@ -64,8 +64,8 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 // Chunks returns a receive-only channel of parsed chunk events.
 func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
 
-// Finished fires once the command reaches a terminal state, which chunks alone
-// never tell: they carry no end marker. Buffered for one—a repeat says nothing new.
+// Finished fires when the command reaches a terminal state, which the chunks
+// never say: they carry no end marker.
 func (l *CommandOutputListener) Finished() <-chan struct{} { return l.finished }
 
 // handleMessage parses one WS frame and routes it: a chunk onto chunks, a fin onto

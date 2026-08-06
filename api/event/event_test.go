@@ -369,8 +369,7 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 }
 
 // The fin subscription needs the server the command ran on, which only a read of
-// the command itself names. A failed read costs the run its fin event—the poll
-// ends it as it did before—but must not cost it the run.
+// the command names. A failed read costs the run its fin event, not the run.
 func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	var mu sync.Mutex
@@ -804,9 +803,8 @@ func awaitStream(t *testing.T, done <-chan error) error {
 }
 
 // Chunks carry no end marker, so the poll is otherwise the only thing that notices
-// a finished command—a tick away at best, ten once the command is a minute old. The
-// fin event ends the run as soon as the server reports it. The poll tick here is
-// longer than the test can possibly run, so nothing but the fin can end this.
+// a finished command—a tick away at best, ten once it is a minute old. The tick here
+// is longer than the test can run, so nothing but the fin event can end this one.
 func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	var mu sync.Mutex
