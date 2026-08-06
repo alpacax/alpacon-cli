@@ -354,10 +354,11 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
-		cmdID:        "cmd-uuid",
-		serverID:     "srv-uuid",
-		wsChunks:     []ChunkEvent{{Seq: 0, Content: "approved\n"}},
-		heldPolls:    2,
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		// One for StreamApprovedCommand's server-id lookup, two for the poll loop.
+		heldPolls:    3,
 		runningPolls: 1,
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
@@ -777,6 +778,47 @@ func TestRunCommandStreaming_FinEventEndsRunBeforeNextPoll(t *testing.T) {
 		"fin is published against the server, so that is what the subscription targets")
 }
 
+// A fin racing a status the server has not written yet must not end the run on a
+// half-finished read: the poll picks it up a tick later instead.
+func TestRunCommandStreaming_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		// The fin arrives before the first poll, so this "running" is the read the
+		// fin triggers; the terminal one goes to the poll.
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	started := time.Now()
+	err := runCommandStreamingWithWriter(ac, "srv", "manage.py migrate", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+	assert.GreaterOrEqual(t, time.Since(started), time.Second,
+		"the run must have ended on the poll, one tick later, not on the running read")
+}
+
+// Same fallback when the read the fin triggers fails outright.
+func TestRunCommandStreaming_FinWithFailedReadWaitsForPoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:       "cmd-uuid",
+		serverID:    "srv-uuid",
+		wsFinFor:    "cmd-uuid",
+		detailFails: 1,
+		terminal:    EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	started := time.Now()
+	err := runCommandStreamingWithWriter(ac, "srv", "manage.py migrate", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+	assert.GreaterOrEqual(t, time.Since(started), time.Second,
+		"a failed read must leave the poll to end the run, not surface as the result")
+}
+
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -1117,14 +1159,18 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 // streamingServerConfig configures the fake event servers for streaming tests.
 type streamingServerConfig struct {
-	cmdID        string
-	serverID     string
-	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
-	wsFinFor     string            // command id of a command_fin frame sent after the chunks; none when empty
-	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
-	onSubscribe  func(eventType, targetID string)
-	heldPolls    int          // number of "awaiting_approval" detail polls before running
-	runningPolls int          // number of "running" detail polls before the terminal one
+	cmdID       string
+	serverID    string
+	wsChunks    []ChunkEvent      // emitted over the WS once subscribed
+	wsFinFor    string            // command id of a command_fin frame sent after the chunks; none when empty
+	chunksFor   func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
+	onSubscribe func(eventType, targetID string)
+	detailFails int // leading detail GETs answered 500, before the held/running sequence starts
+	// Detail-endpoint responses in order: heldPolls "awaiting_approval", then
+	// runningPolls "running", then terminal. The approval-resume path spends the
+	// first one on its server-id lookup, so its poll loop sees one held fewer.
+	heldPolls    int
+	runningPolls int
 	terminal     EventDetails // returned by the detail poll once held+running elapse
 }
 
@@ -1170,7 +1216,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	t.Cleanup(wsServer.Close)
 	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
 
-	var pollCount int
+	var pollCount, failCount int
 	var mu sync.Mutex
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1199,9 +1245,18 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
 			mu.Lock()
-			pollCount++
+			failing := failCount < cfg.detailFails
+			if failing {
+				failCount++
+			} else {
+				pollCount++
+			}
 			n := pollCount
 			mu.Unlock()
+			if failing {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
 			if n <= cfg.heldPolls {
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval","server":{"id":"` + cfg.serverID + `"}}`))
 				return
