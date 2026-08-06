@@ -368,6 +368,37 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 }
 
+// The fin subscription needs the server the command ran on, which only a read of
+// the command itself names. A failed read costs the run its fin event—the poll
+// ends it as it did before—but must not cost it the run.
+func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		// The lookup is the first read of the command, so this is the one that fails.
+		detailFails: 1,
+		terminal:    EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, "approved\n", stdoutBuf.String())
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, [][2]string{{EventTypeCommandOutput, "cmd-uuid"}}, subscriptions,
+		"with no server to target, the fin subscription must be skipped rather than sent empty")
+}
+
 func boolPtr(b bool) *bool    { return &b }
 func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
