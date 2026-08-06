@@ -741,6 +741,42 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
 
+// Chunks carry no end marker, so the poll is otherwise the only thing that notices
+// a finished command—a tick away at best, ten once the command is a minute old. The
+// fin event ends the run as soon as the server reports it.
+func TestRunCommandStreaming_FinEventEndsRunBeforeNextPoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		// A command that prints nothing—the case that started #309—so the run can
+		// only end on a terminal signal, never on output.
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	started := time.Now()
+	err := runCommandStreamingWithWriter(ac, "srv", "manage.py migrate", "", "", nil, "", stdoutBuf)
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+	// The poll sleeps a tick before its first request, so a run that took one ended
+	// on the poll and the fin event bought nothing.
+	assert.Less(t, time.Since(started), 500*time.Millisecond,
+		"the fin event must end the run without waiting for the poll tick")
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, subscriptions, [2]string{EventTypeCommandFin, "srv-uuid"},
+		"fin is published against the server, so that is what the subscription targets")
+}
+
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -1084,10 +1120,12 @@ type streamingServerConfig struct {
 	cmdID        string
 	serverID     string
 	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
+	wsFinFor     string            // command id of a command_fin frame sent after the chunks; none when empty
 	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
-	heldPolls    int               // number of "awaiting_approval" detail polls before running
-	runningPolls int               // number of "running" detail polls before the terminal one
-	terminal     EventDetails      // returned by the detail poll once held+running elapse
+	onSubscribe  func(eventType, targetID string)
+	heldPolls    int          // number of "awaiting_approval" detail polls before running
+	runningPolls int          // number of "running" detail polls before the terminal one
+	terminal     EventDetails // returned by the detail poll once held+running elapse
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -1116,6 +1154,13 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			b, _ := json.Marshal(env)
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
+		if cfg.wsFinFor != "" {
+			b, _ := json.Marshal(map[string]any{
+				"event_type": "command_fin",
+				"payload":    map[string]any{"type": "event", "id": cfg.wsFinFor},
+			})
+			_ = conn.WriteMessage(websocket.TextMessage, b)
+		}
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -1135,8 +1180,13 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
 		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `"}]`))
+			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `","server":{"id":"` + cfg.serverID + `"}}]`))
 		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
+			if cfg.onSubscribe != nil {
+				var req EventSubscriptionRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				cfg.onSubscribe(string(req.EventType), req.TargetID)
+			}
 			subOnce.Do(func() { close(subscribed) })
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
@@ -1153,15 +1203,16 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			n := pollCount
 			mu.Unlock()
 			if n <= cfg.heldPolls {
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval"}`))
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
 			if n <= cfg.heldPolls+cfg.runningPolls {
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running"}`))
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
 			term := cfg.terminal
 			term.ID = cfg.cmdID
+			term.Server.ID = cfg.serverID
 			_ = json.NewEncoder(w).Encode(term)
 		default:
 			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)

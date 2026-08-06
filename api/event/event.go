@@ -384,7 +384,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	}
 	listener.setCommandID(cmdResp.ID)
 
-	return streamSubscribed(ac, session, listener, cmdResp.ID, out, execTimeout(), false)
+	return streamSubscribed(ac, session, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -403,16 +403,28 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, true, fmt.Errorf("event websocket connect timeout"))
 	}
-	return streamSubscribed(ac, session, listener, cmdID, out, timeout, true)
+	// The fin event targets the server, which only the command itself names here.
+	// A failed read just skips the subscription; the poll still ends the run.
+	serverID := ""
+	if details, derr := GetCommandByID(ac, cmdID); derr == nil {
+		serverID = details.Server.ID
+	}
+	return streamSubscribed(ac, session, listener, cmdID, serverID, out, timeout, true)
 }
 
 // streamSubscribed subscribes to cmdID's output channel, warm-fires persisted
 // chunks, then writes live chunks to out until the command reaches a terminal
 // state. Shared by the fresh-submit and approval-resume paths.
-func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID string, out io.Writer, timeout time.Duration, waitApproval bool) error {
+func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout time.Duration, waitApproval bool) error {
 	if err := SubscribeEvent(ac, session.ChannelID, EventTypeCommandOutput, cmdID); err != nil {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, waitApproval, err)
+	}
+	// Chunks carry no end marker, so without this the exit waits for the poll below
+	// to notice—a widening gap, up to 10 ticks once the command is a minute old.
+	// Best effort: on failure that poll stays the only terminal signal, as before.
+	if serverID != "" {
+		_ = SubscribeEvent(ac, session.ChannelID, EventTypeCommandFin, serverID)
 	}
 
 	// Warm-fire: drain any chunks already persisted. Advance lastSeq only over
@@ -444,23 +456,37 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 		pollResult <- details
 	}()
 
+	// Runs on whichever terminal signal arrives first, the fin event or the poll.
+	finish := func(details EventDetails) error {
+		lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
+		gap.recoverSkipped(ac, cmdID, out)
+		listener.Stop()
+		// If nothing was ever streamed (no WS chunks, none persisted), fall back
+		// to the buffered Result so output is never silently dropped. On a normal
+		// streamed run lastSeq has advanced and this is skipped.
+		if lastSeq < 0 && details.Result != "" {
+			_, _ = fmt.Fprint(out, details.Result)
+		}
+		// Output is already streamed; errorFromDetails keeps it on the error
+		// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
+		return errorFromDetails(details)
+	}
+
 	for {
 		select {
 		case chunk := <-listener.Chunks():
 			lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
-		case details := <-pollResult:
-			lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
-			gap.recoverSkipped(ac, cmdID, out)
-			listener.Stop()
-			// If nothing was ever streamed (no WS chunks, none persisted), fall back
-			// to the buffered Result so output is never silently dropped. On a normal
-			// streamed run lastSeq has advanced and this is skipped.
-			if lastSeq < 0 && details.Result != "" {
-				_, _ = fmt.Fprint(out, details.Result)
+		case <-listener.Finished():
+			// fin says only that it is over; the exit code lives on the command
+			// itself. A failed read, or one racing a state not yet written, leaves
+			// the poll as the net rather than reporting a half-finished run.
+			details, err := GetCommandByID(ac, cmdID)
+			if err != nil || IsRunningStatus(details.Status) {
+				continue
 			}
-			// Output is already streamed; errorFromDetails keeps it on the error
-			// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
-			return errorFromDetails(details)
+			return finish(details)
+		case details := <-pollResult:
+			return finish(details)
 		case err := <-pollErr:
 			listener.Stop()
 			// --wait elapsed while still parked: keep the exit-4 pending contract
