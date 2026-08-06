@@ -353,10 +353,17 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
 		serverID: "srv-uuid",
 		wsChunks: []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
 		// One for StreamApprovedCommand's server-id lookup, two for the poll loop.
 		heldPolls:    3,
 		runningPolls: 1,
@@ -366,6 +373,14 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
+
+	mu.Lock()
+	defer mu.Unlock()
+	// The server comes from the lookup, the only thing on this path that names it.
+	assert.Equal(t, [][2]string{
+		{EventTypeCommandOutput, "cmd-uuid"},
+		{EventTypeCommandFin, "srv-uuid"},
+	}, subscriptions)
 }
 
 // The fin subscription needs the server the command ran on, which only a read of
@@ -855,6 +870,34 @@ func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
 	atEnd := details.Load()
 	time.Sleep(5 * tick)
 	assert.Equal(t, atEnd, details.Load(), "the poll must stop with the run, not keep requesting")
+}
+
+// The fin channel is the command's server, which on this path only the submit
+// response names—the command's own id would subscribe to nothing that fires.
+func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.T) {
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", &bytes.Buffer{})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, [][2]string{
+		{EventTypeCommandOutput, "cmd-uuid"},
+		{EventTypeCommandFin, "srv-uuid"},
+	}, subscriptions)
 }
 
 // A fin racing a status the server has not written yet must not end the run on a
