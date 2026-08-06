@@ -287,8 +287,8 @@ func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) 
 }
 
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
-// the hold never resets and throttled waits extend by at most one more timeout—so
-// an approved job resumes streaming. Without it the hold is terminal (PendingApprovalError).
+// the hold never resets and throttled waits extend by at most one timeout plus one
+// backoff wait—so an approved job resumes streaming. Without it the hold is terminal (PendingApprovalError).
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool) (EventDetails, error) {
 	var response EventDetails
 
@@ -317,8 +317,11 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 					utils.CliWarning("rate limited by the server, retrying in %s", delay)
 				}
 				// The server is alive: the command may be done, only its result GET refused.
-				// Capped at one more timeout, so a token stuck over quota still gives up:
-				// extending by exactly the wait would otherwise keep the deadline ahead forever.
+				// Budgeted so a token stuck over quota gives up: extending by exactly the
+				// wait would keep the deadline ahead of the clock forever. The extension
+				// that exhausts the budget is granted whole rather than trimmed to what is
+				// left, so every wait the server mandates still buys the poll it waited
+				// for—the ceiling is one timeout plus one backoff wait.
 				if throttledWait < timeout {
 					deadline = deadline.Add(delay)
 					throttledWait += delay

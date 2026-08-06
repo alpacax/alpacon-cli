@@ -541,7 +541,8 @@ func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
 	var clientTimeout *ClientTimeoutError
 	require.True(t, errors.As(err, &clientTimeout),
 		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
-	// One 300ms extension spends the 100ms budget; the second wait runs past the deadline.
+	// One 300ms extension spends the 100ms budget whole—the ceiling is the timeout plus
+	// one backoff wait, not the timeout—and the second wait then runs past the deadline.
 	assert.Equal(t, int32(2), reqCount.Load())
 	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 300 * time.Millisecond}, delays())
 }
