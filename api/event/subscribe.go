@@ -15,6 +15,9 @@ const (
 	// comparable to EventType.
 	EventTypeSudo          = "sudo"
 	EventTypeCommandOutput = "command_output"
+	// Targets the server, not the command: that is what the server publishes it
+	// against (Command.notify_command_event).
+	EventTypeCommandFin = "command_fin"
 )
 
 // EventType is a server event channel type, marshalled as a plain string. The server
