@@ -32,8 +32,7 @@ const (
 	pollMaxBackoffTick = 60
 
 	// Base gap the pacing above multiplies, for the poll running behind a live
-	// stream. Passed to streamSubscribed rather than read there, so a test can
-	// widen it away and leave the fin event as the only thing that ends a run.
+	// stream.
 	streamPollTick = time.Second
 )
 
@@ -338,8 +337,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 				// The server is alive: the command may be done, only its result GET refused.
 				// Budgeted so a token stuck over quota gives up—extending by exactly the
 				// wait would keep the deadline ahead forever. The last extension is granted
-				// whole rather than trimmed, so every mandated wait still buys its poll:
-				// the ceiling is one timeout plus one backoff wait.
+				// whole rather than trimmed, so every mandated wait still buys its poll.
 				if throttledWait < timeout {
 					deadline = deadline.Add(delay)
 					throttledWait += delay
