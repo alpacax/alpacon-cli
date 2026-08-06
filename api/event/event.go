@@ -54,11 +54,36 @@ var (
 // gapFillNow is a seam so tests drive backoff timing deterministically.
 var gapFillNow = time.Now
 
-// pollNow and pollSleep are seams so tests run the loop on a fake clock.
-var (
-	pollNow   = time.Now
-	pollSleep = time.Sleep
-)
+// errPollCancelled ends a poll whose caller has already finished—a stream that
+// exited on the fin event—so it stops instead of spending another request of the
+// throttle budget this pacing exists to protect.
+var errPollCancelled = errors.New("poll cancelled")
+
+// pollSeams are the hooks only a stream or a test supplies: cancellation, and a
+// clock in place of real time. The zero value polls uncancellably on the real one.
+// Passed rather than kept in package vars—a poll outlives the stream that started
+// it by an in-flight request, and a test swapping a var would swap it under a
+// loop still running.
+type pollSeams struct {
+	cancel <-chan struct{}
+	now    func() time.Time
+	after  func(time.Duration) <-chan time.Time
+}
+
+func (s pollSeams) Now() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
+}
+
+// After hands back a channel rather than blocking, so a wait can lose to cancel.
+func (s pollSeams) After(d time.Duration) <-chan time.Time {
+	if s.after == nil {
+		return time.After(d)
+	}
+	return s.after(d)
+}
 
 // gapFillState throttles gap-fill re-fetches while lastSeq is not advancing and
 // records seqs given up on so they can be retried once at command end.
@@ -248,7 +273,7 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
 func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second, false)
+	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second, false, pollSeams{})
 }
 
 func execTimeout() time.Duration {
@@ -301,11 +326,12 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
 // the hold never resets and throttled waits extend by at most one timeout plus one
 // backoff wait—so an approved job resumes streaming. Without it the hold is
-// terminal (PendingApprovalError).
-func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool) (EventDetails, error) {
+// terminal (PendingApprovalError). A closed seams.cancel ends the poll with
+// errPollCancelled.
+func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
 
-	started := pollNow()
+	started := seams.Now()
 	deadline := started.Add(timeout)
 	delay := tick
 	failures := 0
@@ -313,13 +339,22 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	throttleWarned := false
 
 	for {
+		select {
+		case <-seams.cancel:
+			return response, errPollCancelled
+		default:
+		}
 		// Never sleep past the deadline, or the timeout lands a whole gap late—10
 		// ticks at the slow pace, 60 once throttled. An extended deadline always
 		// leaves the whole wait, so a throttled retry still gets its poll.
-		if wait := min(delay, deadline.Sub(pollNow())); wait > 0 {
-			pollSleep(wait)
+		if wait := min(delay, deadline.Sub(seams.Now())); wait > 0 {
+			select {
+			case <-seams.After(wait):
+			case <-seams.cancel:
+				return response, errPollCancelled
+			}
 		}
-		if !pollNow().Before(deadline) {
+		if !seams.Now().Before(deadline) {
 			return response, &ClientTimeoutError{}
 		}
 
@@ -351,18 +386,18 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 		}
 
 		if IsRunningStatus(response.Status) {
-			deadline = pollNow().Add(timeout)
+			deadline = seams.Now().Add(timeout)
 			// The refreshed deadline gets its throttle allowance back with it, so a
 			// throttle late in a long command is not paid for by an earlier one—and
 			// the warning with it, so a later stretch is not silent.
 			throttledWait = 0
 			throttleWarned = false
-			delay = nextPollTick(tick, pollNow().Sub(started))
+			delay = nextPollTick(tick, seams.Now().Sub(started))
 			continue
 		}
 		// Running is handled above, so what is left here is the approval hold.
 		if isPollWaitStatus(response.Status, waitApproval) {
-			delay = nextPollTick(tick, pollNow().Sub(started))
+			delay = nextPollTick(tick, seams.Now().Sub(started))
 			continue
 		}
 		return response, nil
@@ -459,13 +494,19 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 
 	pollResult := make(chan EventDetails, 1)
 	pollErr := make(chan error, 1)
+	// The poll ends when this function does: an exit on the fin event would
+	// otherwise leave it polling a command that is already over.
+	pollCancel := make(chan struct{})
+	defer close(pollCancel)
 	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, tick, waitApproval)
-		if err != nil {
+		details, err := pollCommandExecution(ac, cmdID, timeout, tick, waitApproval, pollSeams{cancel: pollCancel})
+		switch {
+		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
+		case err != nil:
 			pollErr <- err
-			return
+		default:
+			pollResult <- details
 		}
-		pollResult <- details
 	}()
 
 	// Runs on whichever terminal signal arrives first, the fin event or the poll.
@@ -673,7 +714,7 @@ func runCommandFallback(ac *client.AlpaconClient, serverName, command, username,
 // blocking through an awaiting_approval hold so --wait is honored on this path.
 func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, waitApproval bool, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
-	details, err := pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, waitApproval)
+	details, err := pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, waitApproval, pollSeams{})
 	if err != nil {
 		return err
 	}

@@ -156,7 +156,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false)
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false, pollSeams{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -346,7 +346,7 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true)
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -411,7 +411,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false)
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{})
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
@@ -486,22 +486,24 @@ func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.S
 	return ts, reqCount
 }
 
-// fakePollClock runs the poll loop on a clock only its own delays advance, and
-// returns the delays it chose. Timing the loop instead would be flaky: a slow
-// machine stretches every wait, which makes a loop without backoff look
+// fakePollClock returns seams that run the poll loop on a clock only its own
+// delays advance, and the delays it chose. Timing the loop instead would be flaky:
+// a slow machine stretches every wait, which makes a loop without backoff look
 // better-behaved than it is and can expire a deadline the loop meant to extend.
-func fakePollClock(t *testing.T) func() []time.Duration {
-	t.Helper()
+func fakePollClock() (pollSeams, func() []time.Duration) {
 	now := time.Now()
 	var delays []time.Duration
-	restoreNow, restoreSleep := pollNow, pollSleep
-	pollNow = func() time.Time { return now }
-	pollSleep = func(d time.Duration) {
-		delays = append(delays, d)
-		now = now.Add(d)
+	seams := pollSeams{
+		now: func() time.Time { return now },
+		after: func(d time.Duration) <-chan time.Time {
+			delays = append(delays, d)
+			now = now.Add(d)
+			ch := make(chan time.Time, 1)
+			ch <- now
+			return ch
+		},
 	}
-	t.Cleanup(func() { pollNow, pollSleep = restoreNow, restoreSleep })
-	return func() []time.Duration { return delays }
+	return seams, func() []time.Duration { return delays }
 }
 
 // A throttled poll must space its requests out instead of spending one per tick.
@@ -528,10 +530,10 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 			ts, _ := throttleServer(t, 4, tt.retryAfter)
 			defer ts.Close()
 
-			delays := fakePollClock(t)
+			seams, delays := fakePollClock()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false)
+			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false, seams)
 			require.NoError(t, err)
 			assert.Equal(t, "completed", resp.Status)
 			assert.Equal(t, tt.want, delays())
@@ -547,10 +549,10 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 
 	// The Retry-After wait (1s, capped to 60 ticks = 300ms) outlasts the 100ms
 	// deadline: reachable only if throttled time is not charged to it.
-	delays := fakePollClock(t)
+	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(2), reqCount.Load(),
@@ -564,10 +566,10 @@ func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
 	ts, reqCount := throttleServer(t, math.MaxInt, "1")
 	defer ts.Close()
 
-	delays := fakePollClock(t)
+	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.True(t, errors.As(err, &clientTimeout),
@@ -599,10 +601,10 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	delays := fakePollClock(t)
+	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(4), reqCount.Load())
@@ -630,10 +632,10 @@ func TestPollCommandExecution_PacingWidensWithCommandAge(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	delays := fakePollClock(t)
+	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false)
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, slices.Concat(
@@ -651,7 +653,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false)
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -831,6 +833,28 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 	defer mu.Unlock()
 	assert.Contains(t, subscriptions, [2]string{EventTypeCommandFin, "srv-uuid"},
 		"fin is published against the server, so that is what the subscription targets")
+}
+
+// A run that ended on the fin must take its poll with it. Left alive, the poll goes
+// on requesting a command that is already over—spending the throttle budget this
+// pacing exists to protect, and outliving the process's other streams.
+func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
+	tick := 20 * time.Millisecond
+	details := &atomic.Int32{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onDetail: func() { details.Add(1) },
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, tick, false))
+	require.NoError(t, err)
+
+	atEnd := details.Load()
+	time.Sleep(5 * tick)
+	assert.Equal(t, atEnd, details.Load(), "the poll must stop with the run, not keep requesting")
 }
 
 // A fin racing a status the server has not written yet must not end the run on a
