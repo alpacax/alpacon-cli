@@ -319,7 +319,9 @@ Note: All flags must be placed before the server name.
 			}
 		}()
 
-		_ = websh.OpenNewTerminal(alpaconClient, session)
+		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
+			utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
+		}
 	},
 }
 

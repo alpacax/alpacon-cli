@@ -33,6 +33,11 @@ const (
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
 
+	// ExitCodeGeneralError is the process exit code for an ordinary failure—what
+	// CliErrorWithExit already exits with. Name it when calling CliErrorWithExitCode
+	// so the general case reads like the specific ones beside it.
+	ExitCodeGeneralError = 1
+
 	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.
 	ExitCodeWorkSessionDenied = 3
 
