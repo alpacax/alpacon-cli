@@ -300,8 +300,14 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	throttleWarned := false
 
 	for {
-		pollSleep(delay)
-		if pollNow().After(deadline) {
+		// Never sleep past the deadline: at the slow tick that would report the
+		// timeout up to 10 ticks—up to one backoff wait, 60, once throttled—after
+		// the deadline it names. A throttle-extended deadline always leaves the
+		// whole wait, so the retry the wait was for still happens.
+		if wait := min(delay, deadline.Sub(pollNow())); wait > 0 {
+			pollSleep(wait)
+		}
+		if !pollNow().Before(deadline) {
 			return response, &ClientTimeoutError{}
 		}
 
