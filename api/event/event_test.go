@@ -1499,7 +1499,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	out := &bytes.Buffer{}
 	last := 0
 	stderr := captureStderr(t, func() {
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
 			last = g.giveUpGap(last, next, nil, out)
 		}
