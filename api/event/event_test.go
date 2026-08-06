@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -575,6 +576,38 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	assert.Equal(t, []time.Duration{
 		5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
 	}, delays())
+}
+
+// The loop paces by how long the poll has been running, not by the gap since the
+// last poll—measured the latter way a command never leaves the fast window.
+func TestPollCommandExecution_PacingWidensWithCommandAge(t *testing.T) {
+	tick := 10 * time.Millisecond
+	// The 21st request answers terminal, so the reply that earns the slow tick is
+	// still polled for.
+	const running = 20
+
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := "completed"
+		if int(reqCount.Add(1)) <= running {
+			status = "running"
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
+	}))
+	defer ts.Close()
+
+	delays := fakePollClock(t)
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, slices.Concat(
+		slices.Repeat([]time.Duration{tick}, 10),
+		slices.Repeat([]time.Duration{5 * tick}, 10),
+		[]time.Duration{10 * tick},
+	), delays())
 }
 
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
