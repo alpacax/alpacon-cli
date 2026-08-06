@@ -235,7 +235,8 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 
 	// Empty content type is allowed for responses without content (e.g. PATCH).
 	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
-		return nil, withStatus(fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct), resp.StatusCode)
+		err := fmt.Errorf("unexpected response from server (HTTP %d, Content-Type: %s)", resp.StatusCode, ct)
+		return nil, withRetryAfter(withStatus(err, resp.StatusCode), resp.Header)
 	}
 	return body, nil
 }
@@ -334,7 +335,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
+		return nil, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
 	}
 
 	return respBody, nil

@@ -160,6 +160,40 @@ func TestSendRequest_429ExposesRetryAfter(t *testing.T) {
 	}
 }
 
+// A proxy-level throttle answers with its own HTML, which readJSONResponse rejects
+// before the status check ever runs. The hint has to survive that path too.
+func TestSendRequest_429WithNonJSONBodyExposesRetryAfter(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Retry-After", "29")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("<html>rate limited</html>"))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, utils.HTTPStatusCode(err))
+	assert.Equal(t, 29*time.Second, utils.RetryAfter(err))
+}
+
+// Upload shares the throttle, so it must tag the hint the same way sendRequest does.
+func TestSendMultipartStreamRequest_429ExposesRetryAfter(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "29")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"detail": "Request was throttled."}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendMultipartStreamRequest("/api/test/", "multipart/form-data", bytes.NewReader([]byte("x")), -1)
+	require.Error(t, err)
+	assert.Equal(t, 29*time.Second, utils.RetryAfter(err))
+}
+
 func TestRetryAfter_ErrorWithoutHintIsZero(t *testing.T) {
 	assert.Equal(t, time.Duration(0), utils.RetryAfter(errors.New("boom")))
 	assert.Equal(t, time.Duration(0), utils.RetryAfter(nil))
