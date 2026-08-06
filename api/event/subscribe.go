@@ -15,8 +15,8 @@ const (
 	// comparable to EventType.
 	EventTypeSudo          = "sudo"
 	EventTypeCommandOutput = "command_output"
-	// Targets the server, not the command: that is what the server publishes it
-	// against (Command.notify_command_event).
+	// Subscribed with a server id, not a command id: that is the channel
+	// alpacon-server publishes it on.
 	EventTypeCommandFin = "command_fin"
 )
 
