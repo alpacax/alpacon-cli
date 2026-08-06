@@ -774,7 +774,7 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 
 // startStream wires a session and listener the way the streaming entry points do,
 // so a test can hand streamSubscribed a poll tick of its own choosing.
-func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string, out io.Writer, tick time.Duration) <-chan error {
+func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string, out io.Writer, tick time.Duration, waitApproval bool) <-chan error {
 	t.Helper()
 	session, err := CreateEventSession(ac)
 	require.NoError(t, err)
@@ -784,7 +784,7 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, session, listener, cmdID, serverID, out, 30*time.Second, tick, false)
+		done <- streamSubscribed(ac, session, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
 	}()
 	return done
 }
@@ -823,7 +823,7 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, time.Hour))
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, time.Hour, false))
 	require.NoError(t, err)
 	assert.Equal(t, "done\n", stdoutBuf.String())
 
@@ -849,7 +849,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond))
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
 	require.NoError(t, err)
 	assert.Equal(t, "done\n", stdoutBuf.String())
 	assert.GreaterOrEqual(t, details.Load(), int32(2),
@@ -869,11 +869,38 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		terminal:    EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond))
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
 	require.NoError(t, err)
 	assert.Equal(t, "done\n", stdoutBuf.String())
 	assert.GreaterOrEqual(t, details.Load(), int32(2),
 		"a failed read must not surface as the result: a second read, the poll's, ended the run")
+}
+
+// Resuming through an approval hold, the poll waits out the hold and the transient
+// "error" the approve→deliver window emits. The fin path reads the same command, so
+// it has to wait on the same statuses or it reports a run that has not started.
+func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
+	for _, status := range []string{"awaiting_approval", "error"} {
+		t.Run(status, func(t *testing.T) {
+			stdoutBuf := &bytes.Buffer{}
+			details := &atomic.Int32{}
+			ac := newStreamingServers(t, streamingServerConfig{
+				cmdID:      "cmd-uuid",
+				serverID:   "srv-uuid",
+				wsFinFor:   "cmd-uuid",
+				onDetail:   func(int) { details.Add(1) },
+				heldPolls:  1,
+				heldStatus: status,
+				terminal:   EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+			})
+
+			err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, true))
+			require.NoError(t, err)
+			assert.Equal(t, "done\n", stdoutBuf.String())
+			assert.GreaterOrEqual(t, details.Load(), int32(2),
+				"the held read must not have ended the run: the poll's second read did")
+		})
+	}
 }
 
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
@@ -1228,6 +1255,7 @@ type streamingServerConfig struct {
 	// runningPolls "running", then terminal. The approval-resume path spends the
 	// first one on its server-id lookup, so its poll loop sees one held fewer.
 	heldPolls    int
+	heldStatus   string // status the held responses carry; "awaiting_approval" when empty
 	runningPolls int
 	terminal     EventDetails // returned by the detail poll once held+running elapse
 }
@@ -1319,7 +1347,11 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				return
 			}
 			if n <= cfg.heldPolls {
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval","server":{"id":"` + cfg.serverID + `"}}`))
+				held := cfg.heldStatus
+				if held == "" {
+					held = "awaiting_approval"
+				}
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"` + held + `","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
 			if n <= cfg.heldPolls+cfg.runningPolls {

@@ -291,6 +291,14 @@ func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) 
 	return delay
 }
 
+// isPollWaitStatus reports a status the poll keeps waiting on: running, or—when
+// resuming through an approval hold—the hold itself and the transient "error"
+// compute_status the server emits in the approve→deliver window.
+func isPollWaitStatus(status string, waitApproval bool) bool {
+	return IsRunningStatus(status) ||
+		(waitApproval && (IsAwaitingApprovalStatus(status) || status == "error"))
+}
+
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
 // the hold never resets and throttled waits extend by at most one timeout plus one
 // backoff wait—so an approved job resumes streaming. Without it the hold is
@@ -352,9 +360,8 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 			delay = nextPollTick(tick, pollNow().Sub(started))
 			continue
 		}
-		// Approval-resume keeps polling through the hold and the transient
-		// "error" compute_status the server emits in the approve→deliver window.
-		if waitApproval && (IsAwaitingApprovalStatus(response.Status) || response.Status == "error") {
+		// Running is handled above, so what is left here is the approval hold.
+		if isPollWaitStatus(response.Status, waitApproval) {
 			delay = nextPollTick(tick, pollNow().Sub(started))
 			continue
 		}
@@ -486,7 +493,7 @@ func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, l
 			// failed read, or one racing a state not yet written, leaves the poll as
 			// the net rather than reporting a half-finished run.
 			details, err := GetCommandByID(ac, cmdID)
-			if err != nil || IsRunningStatus(details.Status) {
+			if err != nil || isPollWaitStatus(details.Status, waitApproval) {
 				continue
 			}
 			return finish(details)
