@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,17 @@ type statusError struct {
 func (e *statusError) Error() string       { return e.err.Error() }
 func (e *statusError) Unwrap() error       { return e.err }
 func (e *statusError) HTTPStatusCode() int { return e.statusCode }
+
+// retryAfterError carries the server's Retry-After hint so a retrying caller
+// (the exec/websh poll loop) waits as long as it asked instead of guessing.
+type retryAfterError struct {
+	err        error
+	retryAfter time.Duration
+}
+
+func (e *retryAfterError) Error() string             { return e.err.Error() }
+func (e *retryAfterError) Unwrap() error             { return e.err }
+func (e *retryAfterError) RetryAfter() time.Duration { return e.retryAfter }
 
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
@@ -241,7 +253,7 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, withStatus(parseAPIError(respBody), resp.StatusCode)
+		return nil, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
 	}
 
 	return respBody, nil
@@ -438,6 +450,19 @@ func withStatus(err error, statusCode int) error {
 		return err
 	}
 	return &statusError{err: err, statusCode: statusCode}
+}
+
+// withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
+// that is what DRF throttling sends, and misreading an HTTP-date would stall a poll.
+func withRetryAfter(err error, header http.Header) error {
+	if err == nil {
+		return nil
+	}
+	seconds, convErr := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	if convErr != nil || seconds <= 0 {
+		return err
+	}
+	return &retryAfterError{err: err, retryAfter: time.Duration(seconds) * time.Second}
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
