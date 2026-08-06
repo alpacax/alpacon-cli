@@ -386,6 +386,145 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 		"timer expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
 }
 
+func TestNextPollTick(t *testing.T) {
+	base := time.Second
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{name: "base tick while the command is young", elapsed: 0, want: base},
+		{name: "still base at the end of the fast window", elapsed: 9 * base, want: base},
+		{name: "widens once the fast window closes", elapsed: 10 * base, want: 5 * base},
+		{name: "holds through the medium window", elapsed: 59 * base, want: 5 * base},
+		{name: "widest once the medium window closes", elapsed: 60 * base, want: 10 * base},
+		{name: "stays widest", elapsed: 3000 * base, want: 10 * base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextPollTick(base, tt.elapsed))
+		})
+	}
+}
+
+func TestNextPollBackoff(t *testing.T) {
+	base := time.Second
+	tests := []struct {
+		name       string
+		attempt    int
+		retryAfter time.Duration
+		want       time.Duration
+	}{
+		{name: "first failure keeps the base tick", attempt: 0, want: base},
+		{name: "doubles per consecutive failure", attempt: 1, want: 2 * base},
+		{name: "still doubling", attempt: 3, want: 8 * base},
+		{name: "capped once doubling passes the cap", attempt: 6, want: 60 * base},
+		{name: "stays capped", attempt: 20, want: 60 * base},
+		{name: "server's Retry-After wins over the schedule", attempt: 0, retryAfter: 3 * base, want: 3 * base},
+		{name: "Retry-After wins even when it is shorter", attempt: 5, retryAfter: 3 * base, want: 3 * base},
+		{name: "Retry-After is capped too", attempt: 0, retryAfter: 3000 * base, want: 60 * base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextPollBackoff(base, tt.attempt, tt.retryAfter))
+		})
+	}
+}
+
+// throttleServer replies 429 to the first throttled requests, then serves a
+// terminal status. The returned counter holds the requests it has seen.
+func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if int(reqCount.Add(1)) <= throttled {
+			if retryAfter != "" {
+				w.Header().Set("Retry-After", retryAfter)
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed", Result: "done"})
+	}))
+	return ts, reqCount
+}
+
+// fakePollClock runs the poll loop on a clock only its own delays advance, and
+// returns the delays it chose. Timing the loop instead would be flaky: a slow
+// machine stretches every wait, which makes a loop without backoff look
+// better-behaved than it is and can expire a deadline the loop meant to extend.
+func fakePollClock(t *testing.T) func() []time.Duration {
+	t.Helper()
+	now := time.Now()
+	var delays []time.Duration
+	restoreNow, restoreSleep := pollNow, pollSleep
+	pollNow = func() time.Time { return now }
+	pollSleep = func(d time.Duration) {
+		delays = append(delays, d)
+		now = now.Add(d)
+	}
+	t.Cleanup(func() { pollNow, pollSleep = restoreNow, restoreSleep })
+	return func() []time.Duration { return delays }
+}
+
+// A throttled poll must space its requests out instead of spending one per tick.
+func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
+	tick := 10 * time.Millisecond
+	tests := []struct {
+		name       string
+		retryAfter string
+		want       []time.Duration
+	}{
+		{
+			name: "no Retry-After: exponential backoff",
+			want: []time.Duration{tick, tick, 2 * tick, 4 * tick, 8 * tick},
+		},
+		{
+			name:       "Retry-After honored, capped",
+			retryAfter: "1",
+			want:       []time.Duration{tick, 60 * tick, 60 * tick, 60 * tick, 60 * tick},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _ := throttleServer(t, 4, tt.retryAfter)
+			defer ts.Close()
+
+			delays := fakePollClock(t)
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false)
+			require.NoError(t, err)
+			assert.Equal(t, "completed", resp.Status)
+			assert.Equal(t, tt.want, delays())
+		})
+	}
+}
+
+// A 429 must not starve the deadline: the command may already have finished,
+// with only its result GET throttled.
+func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
+	ts, reqCount := throttleServer(t, 1, "1")
+	defer ts.Close()
+
+	// The Retry-After wait (1s, capped to 60 ticks = 300ms) outlasts the 100ms
+	// deadline: reachable only if throttled time is not charged to it.
+	delays := fakePollClock(t)
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, int32(2), reqCount.Load(),
+		"the result must come from the retry after the throttled wait, not from retrying through it")
+	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond}, delays())
+}
+
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
