@@ -25,6 +25,15 @@ const (
 	// gate changes, update all of them together.
 	CommandInlineCredential = "command_inline_credential"
 
+	// APITokenACLNotAllowed: alpacon-server refused the request because the token's
+	// access control rules do not cover it—the command, the server, or the file path
+	// falls outside the envelope an admin granted this token. The refusal is
+	// permanent for the same request: a retry submits the same thing. Widen the
+	// rules with 'alpacon token acl' instead. The server sends this on a 403 with no
+	// human detail, so authStatusCodeMessage in client/client.go renders the message
+	// (Refs alpacax/alpacon-server#2804).
+	APITokenACLNotAllowed = "api_token_acl_not_allowed"
+
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
 	WorkSessionRequired         = "work_session_required"
 	WorkSessionNotUsable        = "work_session_not_usable"
