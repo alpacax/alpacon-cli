@@ -31,6 +31,14 @@ const (
 	pollBackoffFactor  = 2
 	pollMaxBackoffTick = 60
 
+	// Grants of extra deadline for time lost to 429s, bounded by count as well as by
+	// duration. A duration budget alone is spent at whatever pace the server asks
+	// for, so a flat Retry-After: 1 would buy a second full window of one-second
+	// polls—double the requests this pacing exists to cut. 60 grants covers an entire
+	// quota window at the capped 60-tick wait, so only a throttle asking for waits
+	// far shorter than it needs reaches this bound.
+	pollMaxThrottleExtensions = 60
+
 	// Base gap the pacing above multiplies, for the poll running behind a live
 	// stream.
 	streamPollTick = time.Second
@@ -324,8 +332,9 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 }
 
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
-// the hold never resets and throttled waits extend by at most one timeout plus one
-// backoff wait—so an approved job resumes streaming. Without it the hold is
+// the hold never resets and throttled waits extend by at most one timeout or
+// pollMaxThrottleExtensions grants, whichever binds first, plus one backoff
+// wait—so an approved job resumes streaming. Without it the hold is
 // terminal (PendingApprovalError). A closed seams.cancel ends the poll with
 // errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
@@ -336,6 +345,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 	delay := tick
 	failures := 0
 	throttledWait := time.Duration(0)
+	throttleExtensions := 0
 	throttleWarned := false
 
 	for {
@@ -371,11 +381,15 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 				}
 				// The server is alive: the command may be done, only its result GET refused.
 				// Budgeted so a token stuck over quota gives up—extending by exactly the
-				// wait would keep the deadline ahead forever. The last extension is granted
-				// whole rather than trimmed, so every mandated wait still buys its poll.
-				if throttledWait < timeout {
+				// wait would keep the deadline ahead forever. Bounded on the number of
+				// grants too, since the duration budget alone lets a server that asks for
+				// short waits trade the whole extension for a request storm. The last
+				// extension is granted whole rather than trimmed, so every mandated wait
+				// still buys its poll.
+				if throttledWait < timeout && throttleExtensions < pollMaxThrottleExtensions {
 					deadline = deadline.Add(delay)
 					throttledWait += delay
+					throttleExtensions++
 				}
 			}
 			continue
@@ -391,6 +405,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 			// throttle late in a long command is not paid for by an earlier one—and
 			// the warning with it, so a later stretch is not silent.
 			throttledWait = 0
+			throttleExtensions = 0
 			throttleWarned = false
 			delay = nextPollTick(tick, seams.Now().Sub(started))
 			continue

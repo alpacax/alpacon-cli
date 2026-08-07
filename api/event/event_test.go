@@ -577,7 +577,7 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 
 // Extending the deadline by exactly the wait keeps it ahead of the clock forever,
 // so the extension is capped: a token stuck over quota has to give up.
-func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
+func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T) {
 	ts, reqCount := throttleServer(t, math.MaxInt, "1")
 	defer ts.Close()
 
@@ -594,6 +594,36 @@ func TestPollCommandExecution_ThrottleExtensionIsBounded(t *testing.T) {
 	// to the 95ms left, so the timeout is reported at the deadline, not 300ms past it.
 	assert.Equal(t, int32(2), reqCount.Load())
 	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 95 * time.Millisecond}, delays())
+}
+
+// The duration budget alone is spent at whatever pace the server asks for, so a
+// throttle sending waits far shorter than the quota window would trade the whole
+// extension for a request storm—the pattern this pacing exists to stop.
+func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
+	ts, _ := throttleServer(t, math.MaxInt, "1")
+	defer ts.Close()
+
+	// Retry-After 1s capped to 60 ticks = 6ms a wait, against a timeout worth 120 of
+	// them: the duration budget would grant twice what the count bound does.
+	const tick = 100 * time.Microsecond
+	const timeout = 720 * time.Millisecond
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	var elapsed time.Duration
+	for _, d := range delays() {
+		elapsed += d
+	}
+	// The loop never waits past its deadline, so the waits sum to exactly the timeout
+	// plus what the extensions added.
+	assert.Equal(t, timeout+pollMaxThrottleExtensions*(pollMaxBackoffTick*tick), elapsed,
+		"the deadline must grow by the capped number of grants, not by the whole duration budget")
 }
 
 // Reported progress refreshes the deadline, and the throttle allowance goes back
@@ -626,6 +656,47 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	assert.Equal(t, []time.Duration{
 		5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
 	}, delays())
+}
+
+// The count bound belongs to the deadline it protects, so progress hands it back
+// along with the duration budget. Kept alone, one early stretch would leave a long
+// command with no grants left for the next.
+func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
+	const tick = 100 * time.Microsecond
+	// One timeout is worth exactly one full round of capped grants, so a second round
+	// is only reachable through the reset.
+	const timeout = pollMaxThrottleExtensions * (pollMaxBackoffTick * tick)
+
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Progress lands on the request after the grants run out.
+		if reqCount.Add(1) == pollMaxThrottleExtensions+1 {
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+			return
+		}
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+	}))
+	defer ts.Close()
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	var elapsed time.Duration
+	for _, d := range delays() {
+		elapsed += d
+	}
+	// The first tick, then a round of grants, then the deadline progress refreshed and
+	// the round it made room for: three timeouts. Without the reset it stops at two.
+	assert.Equal(t, tick+3*timeout, elapsed,
+		"the second throttled stretch must get its own grants back with the refreshed deadline")
 }
 
 // The loop paces by how long the poll has been running, not by the gap since the
