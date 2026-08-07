@@ -596,15 +596,14 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T)
 	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 95 * time.Millisecond}, delays())
 }
 
-// The duration budget alone is spent at whatever pace the server asks for, so a
-// throttle sending waits far shorter than the quota window would trade the whole
-// extension for a request storm—the pattern this pacing exists to stop.
+// A duration budget alone is spent at the server's pace, so short mandated waits
+// would trade the whole extension for a request storm.
 func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	ts, _ := throttleServer(t, math.MaxInt, "1")
 	defer ts.Close()
 
-	// Retry-After 1s capped to 60 ticks = 6ms a wait, against a timeout worth 120 of
-	// them: the duration budget would grant twice what the count bound does.
+	// Retry-After 1s capped to 60 ticks = a 6ms wait, and a timeout worth 120 of them:
+	// the duration budget would grant twice what the count bound does.
 	const tick = 100 * time.Microsecond
 	const timeout = 720 * time.Millisecond
 
@@ -620,8 +619,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	for _, d := range delays() {
 		elapsed += d
 	}
-	// The loop never waits past its deadline, so the waits sum to exactly the timeout
-	// plus what the extensions added.
+	// The loop never waits past its deadline, so the waits sum to it exactly.
 	assert.Equal(t, timeout+pollMaxThrottleExtensions*(pollMaxBackoffTick*tick), elapsed,
 		"the deadline must grow by the capped number of grants, not by the whole duration budget")
 }
@@ -658,19 +656,17 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	}, delays())
 }
 
-// The count bound belongs to the deadline it protects, so progress hands it back
-// along with the duration budget. Kept alone, one early stretch would leave a long
-// command with no grants left for the next.
+// The count belongs to the deadline it protects: held across a refresh, one early
+// stretch would leave a long command no grants for the next.
 func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	const tick = 100 * time.Microsecond
-	// One timeout is worth exactly one full round of capped grants, so a second round
-	// is only reachable through the reset.
+	// One timeout is worth exactly one round of capped grants, so a second round is
+	// only reachable through the reset.
 	const timeout = pollMaxThrottleExtensions * (pollMaxBackoffTick * tick)
 
 	reqCount := &atomic.Int32{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// Progress lands on the request after the grants run out.
 		if reqCount.Add(1) == pollMaxThrottleExtensions+1 {
 			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
 			return
@@ -693,8 +689,8 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	for _, d := range delays() {
 		elapsed += d
 	}
-	// The first tick, then a round of grants, then the deadline progress refreshed and
-	// the round it made room for: three timeouts. Without the reset it stops at two.
+	// One round of grants, then the refreshed deadline and the round it made room for:
+	// three timeouts on top of the first tick. Without the reset, two.
 	assert.Equal(t, tick+3*timeout, elapsed,
 		"the second throttled stretch must get its own grants back with the refreshed deadline")
 }
