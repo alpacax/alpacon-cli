@@ -98,7 +98,8 @@ func HTTPStatusCode(err error) int {
 	return 0
 }
 
-// RetryAfter returns the delay the server asked for on err, or 0 if it sent none.
+// RetryAfter returns the delay the server asked for on err, or 0 when it sent none
+// the client could use (absent, malformed, or out of a Duration's range).
 func RetryAfter(err error) time.Duration {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if ra, ok := e.(retryAfterCarrier); ok {
