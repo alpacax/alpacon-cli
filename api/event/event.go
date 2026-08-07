@@ -20,8 +20,8 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Poll pacing, in multiples of the caller's base tick, widening as the command
-	// ages and again once the server pushes back. A fixed 1s tick burns alpacon-server's
+	// Poll pacing, in multiples of the caller's base tick, widening as the poll ages
+	// and again once the server pushes back. A fixed 1s tick burns alpacon-server's
 	// default 1000/hour service-token throttle in ~17 minutes, then starves itself—each
 	// freed slot goes to a request that is throttled again.
 	pollFastWindow     = 10
@@ -35,8 +35,9 @@ const (
 	// duration: a duration budget is spent at whatever pace the server asks for, so a
 	// flat Retry-After: 1 buys a second window of one-second polls. 60 grants at the
 	// capped 60-tick wait is 3,600 ticks—a whole quota window at the default
-	// one-second tick—so the duration budget binds first at the cap and this bound
-	// only catches a throttle asking for less.
+	// one-second tick—so at the default timeout the duration budget binds first at the
+	// cap and this bound only catches a throttle asking for less. Past an hour's
+	// timeout the count binds at the cap too.
 	pollMaxThrottleExtensions = 60
 
 	// Base gap the pacing above multiplies, for the poll running behind a live
