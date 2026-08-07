@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Repository instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the repository's guidance for AI coding agents working in this codebase. `AGENTS.md` is a symlink to it, and `.github/copilot-instructions.md` points here.
 
 ## Project overview
 
