@@ -280,8 +280,8 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 }
 
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
-func PollCommandExecution(ac *client.AlpaconClient, cmdId string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdId, execTimeout(), 1*time.Second, false, pollSeams{})
+func PollCommandExecution(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
+	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{})
 }
 
 func execTimeout() time.Duration {
@@ -336,7 +336,7 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // pollMaxThrottleExtensions grants, whichever binds first, plus one backoff wait—so
 // an approved job resumes streaming. Without it the hold is terminal
 // (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
-func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
+func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
 
 	started := seams.Now()
@@ -367,7 +367,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdId string, timeout, tick 
 			return response, &ClientTimeoutError{}
 		}
 
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdId, nil))
+		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 		if err != nil {
 			delay = nextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
