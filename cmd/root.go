@@ -76,95 +76,38 @@ func Execute() {
 }
 
 func init() {
-	// Global output format flag
 	RootCmd.PersistentFlags().StringVar(
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",
 	)
-
-	// version
 	RootCmd.AddCommand(versionCmd)
-
-	// login
 	RootCmd.AddCommand(loginCmd)
-
-	// logout
 	RootCmd.AddCommand(logoutCmd)
-
-	// iam
 	RootCmd.AddCommand(iam.UserCmd)
 	RootCmd.AddCommand(iam.GroupCmd)
-
-	// server
 	RootCmd.AddCommand(server.ServerCmd)
-
-	// agent
 	RootCmd.AddCommand(agent.AgentCmd)
-
-	// websh
 	RootCmd.AddCommand(websh.WebshCmd)
-
-	// exec
 	RootCmd.AddCommand(exec.ExecCmd)
-
-	// ftp
 	RootCmd.AddCommand(ftp.CpCmd)
-
-	// edit
 	RootCmd.AddCommand(edit.EditCmd)
-
-	// packages
 	RootCmd.AddCommand(packages.PackagesCmd)
-
-	// log
 	RootCmd.AddCommand(log.LogCmd)
-
-	// event
 	RootCmd.AddCommand(event.EventCmd)
-
-	// note
 	RootCmd.AddCommand(note.NoteCmd)
-
-	// authority
 	RootCmd.AddCommand(authority.AuthorityCmd)
-
-	// csr
 	RootCmd.AddCommand(csr.CsrCmd)
-
-	// certificate
 	RootCmd.AddCommand(cert.CertCmd)
-
-	// token
 	RootCmd.AddCommand(token.TokenCmd)
-
-	// tunnel
 	RootCmd.AddCommand(tunnel.TunnelCmd)
-
-	// username
 	RootCmd.AddCommand(username.UsernameCmd)
-
-	// workspace
 	RootCmd.AddCommand(workspace.WorkspaceCmd)
-
-	// revoke
 	RootCmd.AddCommand(revoke.RevokeCmd)
-
-	// audit
 	RootCmd.AddCommand(audit.AuditCmd)
-
-	// webhook
 	RootCmd.AddCommand(webhook.WebhookCmd)
-
-	// webftp
 	RootCmd.AddCommand(webftp.WebFTPCmd)
-
-	// work-session
 	RootCmd.AddCommand(worksession.WorkSessionCmd)
-
-	// approval
 	RootCmd.AddCommand(approval.ApprovalCmd)
-
-	// whoami
 	RootCmd.AddCommand(whoamiCmd)
 }
 
