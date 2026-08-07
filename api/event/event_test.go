@@ -697,7 +697,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 
 // The loop paces by how long the poll has been running, not by the gap since the
 // last poll—measured the latter way a command never leaves the fast window.
-func TestPollCommandExecution_PacingWidensWithCommandAge(t *testing.T) {
+func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
 	tick := 10 * time.Millisecond
 	// The 21st request answers terminal, so the reply that earns the slow tick is
 	// still polled for.
