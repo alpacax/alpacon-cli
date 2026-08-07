@@ -35,51 +35,8 @@ go vet ./...
 
 ## Architecture
 
-### Project structure
-
-```
-main.go              # Entry point
-cmd/                 # Cobra command definitions
-  root.go            # Root command, registers all subcommands
-  login.go           # Login command
-  logout.go          # Logout command
-  version.go         # Version command
-  whoami.go          # Whoami command
-  agent/             # alpacon agent
-  approval/          # alpacon approval
-  audit/             # alpacon audit
-  authority/         # alpacon authority
-  cert/              # alpacon cert
-  csr/               # alpacon csr
-  edit/              # alpacon edit
-  event/             # alpacon event
-  exec/              # alpacon exec
-  ftp/               # alpacon cp (file transfer)
-  iam/               # alpacon user, alpacon group
-  log/               # alpacon log
-  note/              # alpacon note
-  packages/          # alpacon package
-  revoke/            # alpacon revoke
-  server/            # alpacon server
-  token/             # alpacon token
-  tunnel/            # alpacon tunnel
-  username/          # alpacon username
-  webftp/            # alpacon webftp
-  webhook/           # alpacon webhook
-  websh/             # alpacon websh
-  worksession/       # alpacon work-session
-  workspace/         # alpacon workspace
-api/                 # API client functions per domain
-client/              # HTTP client wrapper for Alpacon API
-config/              # Configuration management (credentials, workspace)
-pkg/                 # Internal packages (cert, testutil, tunnel)
-utils/               # Shared utilities (output, prompts, errors, SSH parsing)
-```
-
 ### Key patterns
 
-- **Command registration**: All commands are registered in `cmd/root.go` via `RootCmd.AddCommand()`
-- **API layer**: Each `cmd/` package calls corresponding `api/` package for HTTP requests
 - **SSH-like syntax**: `websh`, `exec`, `cp` support `user@host` syntax via `utils.ParseSSHTarget()`
 - **Error handling**: Common errors (MFA required, username required) are handled via `utils.HandleCommonErrors()` with retry callbacks
 - **Custom flag parsing**: `websh` and `exec` use `DisableFlagParsing: true` and parse flags manually. `exec` supports `--` separator for remote command flags
@@ -136,27 +93,7 @@ Top-level declarations within a file must follow: `const → var → type → fu
 
 ### Error handling
 
-- golangci-lint `errcheck` is enabled—all error returns must be explicitly handled
-- For deferred close calls, use the named discard pattern:
-
-```go
-// Good—errcheck satisfied
-defer func() { _ = resp.Body.Close() }()
-defer func() { _ = file.Close() }()
-
-// Bad—errcheck violation
-defer resp.Body.Close()
-defer file.Close()
-```
-
-- For write calls where the error is intentionally ignored:
-
-```go
-_, _ = stdout.Write(output)
-_ = json.NewEncoder(w).Encode(resp)
-```
-
-- Error strings should be lowercase and not end with punctuation (per Go convention / staticcheck ST1005)
+- `errcheck` is on. Discard an ignored error explicitly rather than dropping the call's result: `defer func() { _ = f.Close() }()`, `_, _ = stdout.Write(output)`
 
 ### Test patterns
 
@@ -191,6 +128,4 @@ _ = json.NewEncoder(w).Encode(resp)
 - **Linter**: golangci-lint v2 with errcheck, govet, ineffassign, staticcheck, unused (see `.golangci.yml`)
 - **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`)
 - **Alias**: `alpacon` can also be invoked as `ac`
-- **File transfer**: The `cp` command lives in `cmd/ftp/` (package name `ftp`)
 - **Exit codes**: `0` success, `1` general error, `2` usage error, `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
-- **IAM**: `user` and `group` commands both live in `cmd/iam/`
