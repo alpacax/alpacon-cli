@@ -40,7 +40,6 @@ func NewSpinner(message string) *Spinner {
 	}
 }
 
-// Start begins the spinner animation
 func (s *Spinner) Start() {
 	s.mu.Lock()
 	if s.running {
@@ -64,7 +63,6 @@ func (s *Spinner) Start() {
 		for {
 			select {
 			case <-s.stopCh:
-				// Clear the spinner line
 				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
 			default:
@@ -74,7 +72,6 @@ func (s *Spinner) Start() {
 
 				frame := s.frames[frameIdx%len(s.frames)]
 
-				// Animate dots if message ends with "..."
 				displayMsg := msg
 				if strings.HasSuffix(msg, "...") {
 					baseMsg := strings.TrimSuffix(msg, "...")
@@ -97,7 +94,6 @@ func (s *Spinner) Start() {
 	}()
 }
 
-// Stop stops the spinner animation
 func (s *Spinner) Stop() {
 	s.mu.Lock()
 	if !s.running {

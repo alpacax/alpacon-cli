@@ -458,13 +458,11 @@ func TestDownloadBulk(t *testing.T) {
 	err := downloadBulk(ac, []string{"/path/file1.txt", "/path/file2.txt"}, dest, "server-id", "admin", "developers", "")
 	require.NoError(t, err)
 
-	// Verify request body
 	assert.Equal(t, []string{"/path/file1.txt", "/path/file2.txt"}, bulkReq.Path)
 	assert.Equal(t, "server-id", bulkReq.Server)
 	assert.Equal(t, "admin", bulkReq.Username)
 	assert.Equal(t, "developers", bulkReq.Groupname)
 
-	// Verify extracted files exist
 	content1, err := os.ReadFile(filepath.Join(dest, "file1.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "hello", string(content1))
@@ -473,7 +471,6 @@ func TestDownloadBulk(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "world", string(content2))
 
-	// Verify temp zip was cleaned up
 	_, err = os.Stat(filepath.Join(dest, "archive.zip"))
 	assert.True(t, os.IsNotExist(err))
 }

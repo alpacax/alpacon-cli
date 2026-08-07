@@ -152,7 +152,6 @@ func ExtractBaseDomain(workspaceURL string) string {
 	return strings.Join(parts[len(parts)-2:], ".")
 }
 
-// ExtractWorkspaceName extracts workspace name from workspace URL
 func ExtractWorkspaceName(workspaceURL string) string {
 	parsedURL, err := url.Parse(workspaceURL)
 	if err != nil {
@@ -583,7 +582,6 @@ func SplitPath(path string) (string, string) {
 	return parts[0], parts[1]
 }
 
-// IsInteractiveShell checks if the current program is running in an interactive terminal.
 func IsInteractiveShell() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }

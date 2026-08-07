@@ -16,7 +16,6 @@ const (
 	commandOutputConnectTimeout = 5 * time.Second
 )
 
-// ChunkEvent is a single command_output chunk emitted by the listener.
 type ChunkEvent struct {
 	Seq     int
 	Content string
@@ -62,7 +61,6 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 	return l
 }
 
-// Chunks returns a receive-only channel of parsed chunk events.
 func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
 
 // Finished fires when the command reaches a terminal state, which the chunks

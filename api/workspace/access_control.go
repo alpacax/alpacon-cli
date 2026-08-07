@@ -11,7 +11,6 @@ const (
 	accessControlURL = "/api/workspaces/access-control/-/"
 )
 
-// GetAccessControl retrieves the workspace access control settings.
 func GetAccessControl(ac *client.AlpaconClient) ([]byte, error) {
 	responseBody, err := ac.SendGetRequest(accessControlURL)
 	if err != nil {

@@ -77,7 +77,6 @@ func PromptForRequiredInput(promptText string) string {
 	}
 }
 
-// PromptForInputWithDefault prompts for input and returns the default if empty.
 func PromptForInputWithDefault(promptText, defaultValue string) string {
 	input := PromptForInput(promptText)
 	if input == "" {

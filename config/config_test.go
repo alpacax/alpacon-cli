@@ -138,7 +138,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 func TestSwitchWorkspace(t *testing.T) {
 	setupTestConfig(t)
 
-	// Create initial config
 	err := CreateConfig(
 		"https://ws1.us1.alpacon.io", "ws1",
 		"", "", "access-token", "refresh-token",
@@ -146,7 +145,6 @@ func TestSwitchWorkspace(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	// Switch workspace
 	err = SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
 	assert.NoError(t, err)
 

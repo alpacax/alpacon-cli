@@ -25,7 +25,6 @@ const (
 	codeUsernameApproval   = "approval_superuser_approve_required"
 )
 
-// UsernameSetSuccessFmt is the confirmation format shown after a username is set.
 const UsernameSetSuccessFmt = "Username set to %q"
 
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.

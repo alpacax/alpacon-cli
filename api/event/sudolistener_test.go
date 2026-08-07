@@ -100,7 +100,6 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 	sl := NewSudoListener(nil, wsURL, "")
 	sl.Start()
 
-	// Wait for connection to establish by polling sl.conn
 	require.Eventually(t, func() bool {
 		sl.mu.Lock()
 		defer sl.mu.Unlock()
@@ -109,7 +108,6 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 
 	sl.Stop()
 
-	// Wait for listenLoop goroutine to exit via stopped channel
 	select {
 	case <-sl.stopped:
 		// goroutine exited and cleanup ran
@@ -152,7 +150,6 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 		_ = sl.connectAndListen()
 	}()
 
-	// Wait for connection, then signal server to close
 	require.Eventually(t, func() bool {
 		sl.mu.Lock()
 		defer sl.mu.Unlock()

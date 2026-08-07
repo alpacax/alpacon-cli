@@ -309,7 +309,6 @@ func TestGetRegistrationTokenAttributes_MapsGroupNames(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
-		// registration tokens
 		resp := api.ListResponse[RegistrationTokenDetails]{
 			Count: 1,
 			Results: []RegistrationTokenDetails{
@@ -483,7 +482,6 @@ func TestDeleteServer(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "name=") {
-			// GetServerIDByName
 			resp := api.ListResponse[ServerDetails]{
 				Count:   1,
 				Results: []ServerDetails{{ID: serverID, Name: "target-server"}},

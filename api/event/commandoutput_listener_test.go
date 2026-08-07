@@ -115,7 +115,6 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 		}
 		defer func() { _ = conn.Close() }()
 
-		// Emit two chunks
 		for _, c := range []ChunkEvent{{Seq: 0, Content: "a"}, {Seq: 1, Content: "b"}} {
 			env := map[string]any{
 				"event_type": "command_output",
@@ -129,7 +128,6 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
 
-		// Block until client disconnects
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -173,13 +171,11 @@ func TestCommandOutputListener_Reconnects(t *testing.T) {
 		n := connectionCount.Add(1)
 
 		if n == 1 {
-			// First connection: emit one chunk and drop
 			env := `{"event_type":"command_output","payload":{"command_id":"` + cmdID + `","seq":0,"content":"first"}}`
 			_ = conn.WriteMessage(websocket.TextMessage, []byte(env))
 			_ = conn.Close()
 			return
 		}
-		// Second connection: emit second chunk and block
 		env := `{"event_type":"command_output","payload":{"command_id":"` + cmdID + `","seq":1,"content":"second"}}`
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(env))
 		for {

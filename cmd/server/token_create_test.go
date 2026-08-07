@@ -10,7 +10,6 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 )
 
-// groupListResponse is a minimal helper type for mock IAM group responses.
 type groupListItem struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

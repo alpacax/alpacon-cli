@@ -81,7 +81,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				if username == "" && sshTarget.User != "" {
 					username = sshTarget.User
 				}
-				// Reconstruct the argument without the user part
 				if sshTarget.Path != "" {
 					args[i] = sshTarget.Host + ":" + sshTarget.Path
 				} else {
@@ -93,7 +92,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
 
-		// Validate source and destination paths
 		if err := validatePaths(sources, dest); err != nil {
 			utils.CliErrorWithExit("%s", err.Error())
 			return
@@ -194,12 +192,10 @@ func init() {
 	CpCmd.Flags().String("work-session", "", "Attach this transfer to a work-session (overrides 'work-session use')")
 }
 
-// isRemotePath determines if the given path is a remote server path.
 func isRemotePath(path string) bool {
 	return utils.IsRemoteTarget(path)
 }
 
-// isLocalPath determines if the given path is a local file system path.
 func isLocalPath(path string) bool {
 	return utils.IsLocalTarget(path)
 }
@@ -214,7 +210,6 @@ func isLocalPaths(paths []string) bool {
 }
 
 func validatePaths(sources []string, dest string) error {
-	// Check for mixed local and remote sources (not allowed)
 	hasLocal := false
 	hasRemote := false
 
@@ -234,7 +229,6 @@ func validatePaths(sources []string, dest string) error {
 			"  • Cannot mix: alpacon cp file1.txt server:/file2.txt /dest/  ❌")
 	}
 
-	// Check for invalid remote path format
 	allPaths := make([]string, 0, len(sources)+1)
 	allPaths = append(allPaths, sources...)
 	allPaths = append(allPaths, dest)
@@ -265,7 +259,6 @@ func validatePaths(sources []string, dest string) error {
 func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool, workSessionID string) error {
 	var err error
 
-	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(dest)
 
 	if recursive {
@@ -274,7 +267,6 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 		err = ftp.UploadFile(client, src, dest, username, groupname, allowOverwrite, workSessionID)
 	}
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") {
 			utils.CliErrorWithExit("Source file(s) not found: %s\n\n"+
@@ -304,13 +296,11 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 }
 
 func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) error {
-	// Extract server name for better error messages
 	serverName, remotePath := utils.SplitPath(sources[0])
 	srcDisplay := strings.Join(sources, ", ")
 
 	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
 	if err != nil {
-		// Parse error and provide specific guidance
 		errStr := err.Error()
 		if strings.Contains(errStr, "no such file or directory") || strings.Contains(errStr, "file not found") {
 			utils.CliErrorWithExit("Source file not found: '%s' on server '%s'.\n\n"+

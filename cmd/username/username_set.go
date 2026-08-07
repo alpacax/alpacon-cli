@@ -31,7 +31,6 @@ var usernameSetCmd = &cobra.Command{
 	},
 }
 
-// setUsernameErrorText maps a SetUsername error to the message shown to the user.
 func setUsernameErrorText(err error) string {
 	code, _ := utils.ParseErrorResponse(err)
 	if msg, ok := iam.UsernameErrorMessage(code); ok {

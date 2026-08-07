@@ -6,8 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestExecCommandParsing validates backward compatibility with the original
-// parsing behavior using the new ParseRemoteExecArgs implementation.
 func TestExecCommandParsing(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -117,7 +115,6 @@ func TestExecCommandParsingWithFlags(t *testing.T) {
 	}
 }
 
-// TestRequiredExecPattern validates the exact pattern from the issue description.
 func TestRequiredExecPattern(t *testing.T) {
 	args := []string{"root@prod-docker", "docker", "ps"}
 	result := ParseRemoteExecArgs(args)

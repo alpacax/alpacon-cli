@@ -19,7 +19,6 @@ func TestGetNoteList_NoExtraPagination(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// note list endpoint
 		if strings.HasPrefix(r.URL.Path, "/api/servers/notes") {
 			count := noteRequestCount.Add(1)
 			if count > 1 {

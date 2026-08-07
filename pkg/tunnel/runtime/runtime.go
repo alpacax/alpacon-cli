@@ -19,7 +19,6 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
 	ServerName    string
 	LocalPort     string // Use "0" to auto-assign the local port.
@@ -185,7 +184,6 @@ func (r *Runtime) Cause() error {
 	return r.cause
 }
 
-// Close initiates runtime shutdown.
 func (r *Runtime) Close(cause error) {
 	r.shutdown(cause)
 }

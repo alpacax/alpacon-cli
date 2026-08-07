@@ -11,7 +11,6 @@ const (
 	preferencesURL = "/api/workspaces/preferences/-/"
 )
 
-// GetPreferences retrieves the workspace preferences.
 func GetPreferences(ac *client.AlpaconClient) ([]byte, error) {
 	responseBody, err := ac.SendGetRequest(preferencesURL)
 	if err != nil {

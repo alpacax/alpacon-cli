@@ -11,7 +11,6 @@ import (
 // no --work-session flag is given. Resolution order: flag > env var > config.
 const WorkSessionEnvVar = "ALPACON_WORK_SESSION"
 
-// Resolve returns the effective work-session UUID using flag > env var > config priority.
 func Resolve(flagValue string) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
@@ -22,7 +21,6 @@ func Resolve(flagValue string) (string, error) {
 	return config.GetActiveWorkSession()
 }
 
-// ResolveOrExit resolves the work-session UUID and exits on error.
 func ResolveOrExit(flagValue string) string {
 	uuid, err := Resolve(flagValue)
 	if err != nil {

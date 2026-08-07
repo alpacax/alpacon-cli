@@ -11,7 +11,6 @@ const (
 	notificationsURL = "/api/workspaces/notifications/"
 )
 
-// GetNotifications retrieves the workspace notification settings.
 func GetNotifications(ac *client.AlpaconClient) ([]byte, error) {
 	responseBody, err := ac.SendGetRequest(notificationsURL)
 	if err != nil {

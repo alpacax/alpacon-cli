@@ -236,7 +236,6 @@ Note: All flags must be placed before the server name.
 			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
-		// Parse SSH-like syntax for user@host
 		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
 			sshTarget := utils.ParseSSHTarget(serverName)
 			if username == "" && sshTarget.User != "" {

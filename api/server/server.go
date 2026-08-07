@@ -212,7 +212,6 @@ func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
 	return m
 }
 
-// DeleteRegistrationToken resolves a token name to its ID and sends a DELETE request.
 func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
 	token, err := GetRegistrationTokenByName(ac, tokenName)
 	if err != nil {

@@ -80,7 +80,6 @@ func ResolveWorkspaceURL(accessToken, targetName, baseDomain string) (newURL, ne
 	return "", "", fmt.Errorf("workspace %q not found in your account", targetName)
 }
 
-// ValidateAndBuildWorkspaceURL finds the target workspace in the JWT and builds its full URL.
 func ValidateAndBuildWorkspaceURL(cfg config.Config, targetName string) (newURL, newName string, err error) {
 	return ResolveWorkspaceURL(cfg.AccessToken, targetName, cfg.BaseDomain)
 }

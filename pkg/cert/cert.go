@@ -17,7 +17,6 @@ import (
 )
 
 func generateKey(keyPath string) (*rsa.PrivateKey, error) {
-	// 1. First, check if a key already exists at the provided path.
 	if _, err := os.Stat(keyPath); err == nil {
 		key, err := readPrivateKey(keyPath)
 		if err != nil {
@@ -27,13 +26,11 @@ func generateKey(keyPath string) (*rsa.PrivateKey, error) {
 		return key, nil
 	}
 
-	// 2. If no key exists at the path, generate a new one.
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. After generation, save the key at the specified path.
 	err = savePrivateKey(keyPath, key)
 	if err != nil {
 		return nil, err

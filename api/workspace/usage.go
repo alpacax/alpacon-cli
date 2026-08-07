@@ -74,20 +74,17 @@ func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName stri
 	return "", fmt.Errorf("workspace %q not found in payment API", workspaceName)
 }
 
-// BillingPeriod represents the billing period for a workspace.
 type BillingPeriod struct {
 	Start     string `json:"start"`
 	End       string `json:"end"`
 	TotalDays int    `json:"total_days"`
 }
 
-// SubscriptionPeriod represents the subscription period.
 type SubscriptionPeriod struct {
 	Start string `json:"start"`
 	End   string `json:"end"`
 }
 
-// Subscription represents the subscription details.
 type Subscription struct {
 	ProductName  string             `json:"product_name"`
 	PlanName     string             `json:"plan_name"`
@@ -99,7 +96,6 @@ type Subscription struct {
 	Period       SubscriptionPeriod `json:"period"`
 }
 
-// ServiceUsage represents usage details for a single service.
 type ServiceUsage struct {
 	Name         string   `json:"name"`
 	Unit         string   `json:"unit"`
@@ -109,7 +105,6 @@ type ServiceUsage struct {
 	OverageCost  *string  `json:"overage_cost"`
 }
 
-// UsageMetadata holds account-level metadata for a workspace.
 type UsageMetadata struct {
 	Plan            string `json:"plan"`
 	IsSubscribed    bool   `json:"is_subscribed"`
@@ -118,7 +113,6 @@ type UsageMetadata struct {
 	AvailableCredit string `json:"available_credit"`
 }
 
-// UsageEstimate represents the full usage estimate response.
 type UsageEstimate struct {
 	BillingPeriod BillingPeriod           `json:"billing_period"`
 	Currency      string                  `json:"currency"`

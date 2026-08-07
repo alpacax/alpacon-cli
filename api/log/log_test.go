@@ -20,7 +20,6 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// server ID lookup
 		if strings.HasPrefix(r.URL.Path, "/api/servers/servers") {
 			resp := api.ListResponse[server.ServerDetails]{
 				Count:   1,
@@ -30,7 +29,6 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 			return
 		}
 
-		// log endpoint
 		if strings.HasPrefix(r.URL.Path, "/api/history/logs") {
 			count := logRequestCount.Add(1)
 			if count > 1 {

@@ -54,7 +54,6 @@ type RegistrationTokenAttributes struct {
 	Enabled       bool   `json:"enabled"`
 }
 
-// RegistrationMethodGuideRequest is the request body for the guide API.
 type RegistrationMethodGuideRequest struct {
 	Platform          string `json:"platform"`
 	ServerName        string `json:"server_name,omitempty"`
@@ -73,7 +72,6 @@ type RegistrationGuideMeta struct {
 	AllowSudoWithMFA bool    `json:"allow_sudo_with_mfa"`
 }
 
-// RegistrationMethodGuideJsonResponse is the structured JSON response from the guide API.
 type RegistrationMethodGuideJsonResponse struct {
 	RegistrationGuideMeta
 	TokenKey        string   `json:"token_key"`
@@ -81,7 +79,6 @@ type RegistrationMethodGuideJsonResponse struct {
 	RegisterCommand string   `json:"register_command"`
 }
 
-// AnsibleGuideJsonResponse is the structured JSON response from the Ansible registration method guide API.
 type AnsibleGuideJsonResponse struct {
 	RegistrationGuideMeta
 	RegistrationToken string `json:"registration_token"`

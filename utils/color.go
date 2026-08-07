@@ -21,7 +21,6 @@ const (
 // stderr avoids ANSI artifacts when logs are piped or redirected.
 var colorEnabled = term.IsTerminal(int(os.Stderr.Fd()))
 
-// Green returns a bold green string for terminal output.
 func Green(value string) string {
 	if !colorEnabled {
 		return value
@@ -29,7 +28,6 @@ func Green(value string) string {
 	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiGreen, value, ansiReset)
 }
 
-// Yellow returns a bold yellow string for terminal output.
 func Yellow(value string) string {
 	if !colorEnabled {
 		return value
@@ -37,7 +35,6 @@ func Yellow(value string) string {
 	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiYellow, value, ansiReset)
 }
 
-// Blue returns a bold blue string for terminal output.
 func Blue(value string) string {
 	if !colorEnabled {
 		return value
@@ -45,7 +42,6 @@ func Blue(value string) string {
 	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiBlue, value, ansiReset)
 }
 
-// Red returns a bold red string for terminal output.
 func Red(value string) string {
 	if !colorEnabled {
 		return value
@@ -53,7 +49,6 @@ func Red(value string) string {
 	return fmt.Sprintf("%s%s%s%s", ansiBold, ansiRed, value, ansiReset)
 }
 
-// Bold returns a bold string for terminal output.
 func Bold(value string) string {
 	if !colorEnabled {
 		return value

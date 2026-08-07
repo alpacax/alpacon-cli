@@ -187,7 +187,6 @@ func getExpiresAt(cfg config.Config) string {
 	return ""
 }
 
-// applyApplicationPrincipal fills out's application fields from an application-principal whoami response.
 func applyApplicationPrincipal(out whoamiOutput, who *auth.WhoamiResponse) whoamiOutput {
 	out.PrincipalType = auth.PrincipalTypeApplication
 	if who.Application != nil {

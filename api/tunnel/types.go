@@ -3,9 +3,9 @@ package tunnel
 import "github.com/alpacax/alpacon-cli/api/types"
 
 type TunnelSessionRequest struct {
-	Server      string `json:"server"`      // Server UUID
-	TargetPort  int    `json:"target_port"` // Target port on the remote server
-	Username    string `json:"username"`    // Username for the tunnel
+	Server      string `json:"server"` // Server UUID
+	TargetPort  int    `json:"target_port"`
+	Username    string `json:"username"`
 	Groupname   string `json:"groupname"`
 	ClientType  string `json:"client_type"`            // cli, web, proxy (default: cli)
 	WorkSession string `json:"work_session,omitempty"` // Optional work-session UUID; omitted when empty

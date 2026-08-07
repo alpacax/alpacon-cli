@@ -261,7 +261,6 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	return respBody, nil
 }
 
-// Get Request to Alpacon Server
 func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -270,7 +269,6 @@ func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
-// POST Request to Alpacon Server
 func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {

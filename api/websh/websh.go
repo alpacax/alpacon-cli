@@ -159,7 +159,6 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 	}
 }
 
-// Create new websh session
 func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -411,7 +410,6 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 }
 
 func sharingInfo(response ShareResponse) {
-	// Sanitize credentials display based on environment
 	displayPassword := response.Password
 	hideCredentials := os.Getenv("ALPACON_HIDE_CREDENTIALS") == "true"
 	if hideCredentials {

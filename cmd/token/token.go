@@ -25,6 +25,5 @@ func init() {
 	TokenCmd.AddCommand(tokenDuplicateCmd)
 	TokenCmd.AddCommand(tokenScopesCmd)
 
-	// ACL
 	TokenCmd.AddCommand(AclCmd)
 }

@@ -95,7 +95,6 @@ func TestLoginAndSaveCredentialsPasswordPreservesTargetMetadata(t *testing.T) {
 	}
 }
 
-// assertSavedTarget loads the persisted config and verifies the saved target metadata.
 func assertSavedTarget(t *testing.T, wantURL, wantName, wantBaseDomain, wantToken string) configpkg.Config {
 	t.Helper()
 

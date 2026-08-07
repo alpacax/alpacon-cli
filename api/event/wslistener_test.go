@@ -36,7 +36,6 @@ func TestWSListener_StopIsIdempotent(t *testing.T) {
 func TestWSListener_WaitConnected_Success(t *testing.T) {
 	w := newWSListener(nil, "", 0)
 
-	// Simulate connection after short delay
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		close(w.connected)

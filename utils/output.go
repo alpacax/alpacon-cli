@@ -209,7 +209,6 @@ func camelToWords(s string) string {
 
 	for i := 1; i < len(runes); i++ {
 		if unicode.IsUpper(runes[i]) {
-			// Check if this is start of a new word
 			if unicode.IsLower(runes[i-1]) {
 				// "requestedAt" → split before "A"
 				words = append(words, string(runes[start:i]))

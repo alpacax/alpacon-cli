@@ -2,7 +2,6 @@ package utils
 
 import "strings"
 
-// SSHTarget represents a parsed SSH-like target with user, host, and path components
 type SSHTarget struct {
 	User string // Username (empty if not specified)
 	Host string // Hostname/server name
@@ -22,7 +21,6 @@ func ParseSSHTarget(target string) SSHTarget {
 
 	result.User, target = splitUserPrefix(target)
 
-	// Now check if there's a :path suffix
 	if strings.Contains(target, ":") {
 		parts := strings.SplitN(target, ":", 2)
 		result.Host = parts[0]
@@ -34,8 +32,7 @@ func ParseSSHTarget(target string) SSHTarget {
 	return result
 }
 
-// IsRemoteTarget checks if a target string represents a remote location
-// A target is considered remote if it contains a colon (:)
+// IsRemoteTarget reports whether target contains a colon, which marks it remote.
 func IsRemoteTarget(target string) bool {
 	_, target = splitUserPrefix(target)
 	return strings.Contains(target, ":")
@@ -51,7 +48,6 @@ func splitUserPrefix(target string) (string, string) {
 	return "", target
 }
 
-// IsLocalTarget checks if a target string represents a local location
 func IsLocalTarget(target string) bool {
 	return !IsRemoteTarget(target)
 }

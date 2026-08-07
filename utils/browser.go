@@ -54,19 +54,15 @@ func OpenBrowser(url string) {
 	}
 }
 
-// shouldOpenBrowser checks whether it makes sense to attempt opening a browser.
 func shouldOpenBrowser(url string) bool {
-	// Only open http/https URLs
 	if !strings.HasPrefix(url, "https://") && !strings.HasPrefix(url, "http://") {
 		return false
 	}
 
-	// Respect explicit opt-out via environment variable
 	if v, ok := os.LookupEnv("ALPACON_NO_BROWSER"); ok && !strings.EqualFold(v, "0") && !strings.EqualFold(v, "false") {
 		return false
 	}
 
-	// Skip on SSH sessions
 	if _, ok := os.LookupEnv("SSH_CONNECTION"); ok {
 		return false
 	}
@@ -101,11 +97,9 @@ func acquireBrowserLock() bool {
 
 	info, err := os.Stat(lockPath)
 	if err == nil && time.Since(info.ModTime()) < browserDebounce {
-		// Another process opened the browser recently
 		return false
 	}
 
-	// Touch the lock file
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0700); err != nil {
 		return true
 	}
@@ -125,7 +119,6 @@ func releaseBrowserLock() {
 	}
 }
 
-// browserLockPath returns the path to the browser debounce lock file.
 func browserLockPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

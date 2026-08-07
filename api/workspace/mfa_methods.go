@@ -12,7 +12,6 @@ const (
 	mfaMethodsURL = "/api/workspaces/security/-/mfa-methods/"
 )
 
-// GetMFAMethods retrieves the available MFA methods for the workspace.
 func GetMFAMethods(ac *client.AlpaconClient) ([]byte, error) {
 	responseBody, err := ac.SendGetRequest(mfaMethodsURL)
 	if err != nil {

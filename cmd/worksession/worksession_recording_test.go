@@ -12,8 +12,6 @@ func makeRecording(id, sessionID string) wsapi.TimelineItem {
 	return wsapi.TimelineItem{Type: "websh_record", ID: id, SessionID: sessionID}
 }
 
-// findRecording
-
 func TestFindRecording_DefaultFirst(t *testing.T) {
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1"), makeRecording("r2", "s1")}
 	target, idx := findRecording(recs, 1)
@@ -49,8 +47,6 @@ func TestFindRecording_NegativeIndex(t *testing.T) {
 	assert.Equal(t, -1, idx)
 }
 
-// buildRecordingIndex
-
 func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
 	items := []wsapi.TimelineItem{
 		{Type: "websh_session", ID: "s1"},
@@ -83,8 +79,6 @@ func TestBuildRecordingIndex_Empty(t *testing.T) {
 	assert.Empty(t, flat)
 }
 
-// recordingBadge
-
 func TestRecordingBadge_Single(t *testing.T) {
 	assert.Equal(t, "• 1 recording", recordingBadge(1))
 }
@@ -92,8 +86,6 @@ func TestRecordingBadge_Single(t *testing.T) {
 func TestRecordingBadge_Multiple(t *testing.T) {
 	assert.Equal(t, "• 3 recordings", recordingBadge(3))
 }
-
-// recordingPreview
 
 func TestRecordingPreview_StripsANSI(t *testing.T) {
 	raw := "\x1b]0;user@host:~\x07\x1b[?2004h[user@host:~]$ ls -la"

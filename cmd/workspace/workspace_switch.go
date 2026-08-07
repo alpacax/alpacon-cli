@@ -47,10 +47,8 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to update config: %s", err)
 		}
 
-		// Verify connectivity to the new workspace
 		_, err = client.NewAlpaconAPIClient()
 		if err != nil {
-			// Revert to the original workspace
 			if revertErr := config.SwitchWorkspace(origURL, origName); revertErr != nil {
 				utils.CliErrorWithExit("Failed to connect to %q and could not revert config: %s (original error: %s)", newName, revertErr, err)
 			}

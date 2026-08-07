@@ -13,7 +13,6 @@ const (
 	authenticationURL = "/api/workspaces/security/-/"
 )
 
-// GetAuthentication retrieves the workspace authentication settings.
 func GetAuthentication(ac *client.AlpaconClient) ([]byte, error) {
 	responseBody, err := ac.SendGetRequest(authenticationURL)
 	if err != nil {

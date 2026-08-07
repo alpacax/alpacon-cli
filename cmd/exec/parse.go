@@ -8,7 +8,6 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
 	Username      string
 	Groupname     string
@@ -149,7 +148,6 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		}
 	}
 
-	// Parse SSH-like user@host syntax
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
 		sshTarget := utils.ParseSSHTarget(server)
 		if username == "" && sshTarget.User != "" {
@@ -269,16 +267,13 @@ func matchShortOrLongFlag(arg, short, long string) bool {
 // Returns the value, updated index, and an error message if no value was found.
 func extractFlagValue(args []string, i int, short string) (string, int, string) {
 	arg := args[i]
-	// --flag=value
 	if strings.Contains(arg, "=") {
 		parts := strings.SplitN(arg, "=", 2)
 		return parts[1], i, ""
 	}
-	// -uroot (short flag with attached value, no space)
 	if strings.HasPrefix(arg, short) && len(arg) > len(short) {
 		return arg[len(short):], i, ""
 	}
-	// -u root (next arg is the value)
 	if i+1 < len(args) {
 		return args[i+1], i + 1, ""
 	}

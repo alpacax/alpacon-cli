@@ -8,12 +8,10 @@ import (
 )
 
 func TestUnzip_ValidFiles(t *testing.T) {
-	// Create a temporary zip file with valid content
 	tmpDir := t.TempDir()
 	zipPath := filepath.Join(tmpDir, "test.zip")
 	extractDir := filepath.Join(tmpDir, "extract")
 
-	// Create test zip file
 	zf, err := os.Create(zipPath)
 	if err != nil {
 		t.Fatal(err)
@@ -23,7 +21,6 @@ func TestUnzip_ValidFiles(t *testing.T) {
 	zw := zip.NewWriter(zf)
 	defer func() { _ = zw.Close() }()
 
-	// Add a valid file
 	fw, err := zw.Create("test.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +30,6 @@ func TestUnzip_ValidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add a file in subdirectory
 	fw, err = zw.Create("subdir/nested.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -46,13 +42,11 @@ func TestUnzip_ValidFiles(t *testing.T) {
 	_ = zw.Close()
 	_ = zf.Close()
 
-	// Test extraction
 	err = Unzip(zipPath, extractDir)
 	if err != nil {
 		t.Errorf("Unzip failed for valid archive: %v", err)
 	}
 
-	// Verify files were extracted
 	if _, err := os.Stat(filepath.Join(extractDir, "test.txt")); os.IsNotExist(err) {
 		t.Error("Expected file test.txt was not extracted")
 	}
@@ -110,7 +104,6 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 			zipPath := filepath.Join(tmpDir, "test.zip")
 			extractDir := filepath.Join(tmpDir, "extract")
 
-			// Create malicious zip file
 			zf, err := os.Create(zipPath)
 			if err != nil {
 				t.Fatal(err)
@@ -136,7 +129,6 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 			_ = zw.Close()
 			_ = zf.Close()
 
-			// Test extraction
 			err = Unzip(zipPath, extractDir)
 			if tt.wantErr && err == nil {
 				t.Errorf("Expected error for malicious path %q, but got none", tt.filename)
@@ -145,9 +137,7 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 				t.Errorf("Unexpected error for valid path %q: %v", tt.filename, err)
 			}
 
-			// Verify malicious file was not created outside extract directory
 			if tt.wantErr {
-				// Check that no files were created outside extractDir
 				parentDir := filepath.Dir(extractDir)
 				entries, _ := os.ReadDir(parentDir)
 				for _, entry := range entries {
@@ -165,7 +155,6 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 	zipPath := filepath.Join(tmpDir, "test.zip")
 	extractDir := filepath.Join(tmpDir, "extract")
 
-	// Create zip with directory traversal
 	zf, err := os.Create(zipPath)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +163,6 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 
 	zw := zip.NewWriter(zf)
 
-	// Add a directory with parent path
 	header := &zip.FileHeader{
 		Name:   "../evil-dir/",
 		Method: zip.Deflate,
@@ -188,7 +176,6 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 	_ = zw.Close()
 	_ = zf.Close()
 
-	// Test extraction should fail
 	err = Unzip(zipPath, extractDir)
 	if err == nil {
 		t.Error("Expected error for directory with path traversal, but got none")

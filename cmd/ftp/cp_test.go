@@ -146,7 +146,6 @@ func TestIsLocalPaths(t *testing.T) {
 	}
 }
 
-// Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -215,12 +214,10 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the parsing logic from the cp command
 			args := make([]string, len(tt.args))
 			copy(args, tt.args)
 			username := ""
 
-			// Apply the same parsing logic as in cp.go
 			for i, arg := range args {
 				if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
 					sshTarget := utils.ParseSSHTarget(arg)
@@ -241,7 +238,6 @@ func TestCpCommandSSHParsing(t *testing.T) {
 	}
 }
 
-// Test scenarios covering the required patterns from the issue
 func TestRequiredCpPatterns(t *testing.T) {
 	patterns := []struct {
 		description    string
@@ -286,7 +282,6 @@ func TestRequiredCpPatterns(t *testing.T) {
 				sources := pattern.args[:len(pattern.args)-1]
 				dest := pattern.args[len(pattern.args)-1]
 
-				// Test the logic that determines upload vs download
 				isUpload := isLocalPaths(sources) && isRemotePath(dest)
 				isDownload := isRemotePath(sources[0]) && isLocalPath(dest)
 

@@ -120,15 +120,12 @@ func TestAcquireBrowserLock(t *testing.T) {
 	alpaconDir := filepath.Join(tmpDir, ".alpacon")
 	lockFile := filepath.Join(alpaconDir, ".browser_lock")
 
-	// Patch browserLockPath for this test
 	origFunc := browserLockPathFunc
 	browserLockPathFunc = func() string { return lockFile }
 	t.Cleanup(func() { browserLockPathFunc = origFunc })
 
-	// First call should succeed
 	assert.True(t, acquireBrowserLock(), "first acquire should succeed")
 
-	// Lock file should exist
 	_, err := os.Stat(lockFile)
 	assert.NoError(t, err, "lock file should exist after acquire")
 
@@ -139,6 +136,5 @@ func TestAcquireBrowserLock(t *testing.T) {
 	expired := time.Now().Add(-browserDebounce - time.Second)
 	assert.NoError(t, os.Chtimes(lockFile, expired, expired))
 
-	// Now acquire should succeed again
 	assert.True(t, acquireBrowserLock(), "acquire after debounce expiry should succeed")
 }

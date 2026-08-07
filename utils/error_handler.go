@@ -9,13 +9,9 @@ var maxRetryDuration = 3 * time.Minute
 
 var retryInterval = 1 * time.Second
 
-// ErrorHandlerCallbacks defines callback functions for handling different error types
 type ErrorHandlerCallbacks struct {
-	// OnMFARequired is called when MFA authentication is required
-	// serverName: the name of the server requiring MFA
 	OnMFARequired func(serverName string) error
 
-	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
 
 	// CheckMFACompleted is called to poll for MFA completion via a lightweight endpoint.
@@ -42,7 +38,6 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			return err
 		}
 
-		// Handle MFA error
 		if err := callbacks.OnMFARequired(serverName); err != nil {
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
@@ -125,19 +120,16 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			return err
 		}
 
-		// Handle username required error
 		if err := callbacks.OnUsernameRequired(); err != nil {
 			return err
 		}
 
-		// Retry the operation if callback is provided
 		if callbacks.RetryOperation != nil {
 			return callbacks.RetryOperation()
 		}
 		return nil
 
 	default:
-		// Unknown error code, return original error
 		return err
 	}
 

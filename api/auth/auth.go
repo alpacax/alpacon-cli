@@ -84,7 +84,6 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 		return err
 	}
 
-	// Log in to Alpacon server
 	httpReq, err := http.NewRequest(http.MethodPost, utils.BuildURL(workspaceURL, loginURL, nil), bytes.NewBuffer(reqBody))
 	if err != nil {
 		return err

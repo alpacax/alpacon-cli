@@ -98,10 +98,8 @@ func alignedPollDelay(attempt int, elapsed time.Duration) time.Duration {
 	return backoff
 }
 
-// PollTransferStatus polls the transfer status API until success/failure or timeout.
-// transferType should be "upload" or "download", id is the transfer ID.
-// timeout controls how long to poll before giving up.
-// Returns true if transfer succeeded, false if failed, and error if polling timed out or failed.
+// PollTransferStatus polls until the transfer settles or timeout elapses.
+// transferType is "upload" or "download"; the bool reports whether it succeeded.
 func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout time.Duration) (bool, string, error) {
 	var statusURL string
 	if transferType == "upload" {
@@ -300,13 +298,11 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(uploadFailures), strings.Join(uploadFailures, "\n  "))
 	}
 
-	// Trigger server-side processing
 	triggerRequest := &BulkUploadTriggerRequest{IDs: ids}
 	if _, err := ac.SendPostRequest(uploadBulkTriggerURL, triggerRequest); err != nil {
 		return err
 	}
 
-	// Poll transfer status for each upload
 	var totalBytes int64
 	for _, s := range sizes {
 		totalBytes += s
@@ -785,7 +781,6 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 
 	serverName, firstPath := utils.SplitPath(sources[0])
 
-	// Extract remote paths and validate all sources are on the same server
 	remotePaths := make([]string, 0, len(sources))
 	remotePaths = append(remotePaths, strings.Trim(firstPath, "\""))
 	for _, src := range sources[1:] {

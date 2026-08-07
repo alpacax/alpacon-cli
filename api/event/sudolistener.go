@@ -18,7 +18,6 @@ const (
 	// substituted into the path. Replaces the removed self-approve route.
 	sudoVerifyURLFmt = "/api/sudo/grants/%s/verify/"
 
-	// mfaPollingInterval is how often we check if MFA is completed.
 	mfaPollingInterval = 500 * time.Millisecond
 
 	// mfaPollingTimeout is the maximum time to wait for MFA completion.
@@ -133,7 +132,6 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
-	// Poll for MFA completion
 	completed := sl.pollMFACompletion()
 	if !completed {
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")

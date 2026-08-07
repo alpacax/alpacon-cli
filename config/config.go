@@ -42,7 +42,6 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	return saveConfig(&config)
 }
 
-// SwitchWorkspace updates the workspace URL and name in the existing config.
 func SwitchWorkspace(newURL, newName string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -227,7 +226,6 @@ func ResolveAuthMethod() string {
 	return GetAuthMethod(cfg)
 }
 
-// GetSmuxConfig returns a ready-to-use smux configuration.
 func GetSmuxConfig() *smux.Config {
 	config := smux.DefaultConfig()
 	config.KeepAliveInterval = 10 * time.Second // connection health check
