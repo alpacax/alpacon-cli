@@ -22,7 +22,7 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 
 ## Subcommand alias convention
 
-- list → `Aliases: []string{"list", "all"}`
+- list → `Aliases: []string{"list"}`
 - delete → `Aliases: []string{"rm"}`
 - describe → `Aliases: []string{"desc"}`
 - Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)

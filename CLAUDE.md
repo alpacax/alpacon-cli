@@ -44,10 +44,14 @@ cmd/                 # Cobra command definitions
   login.go           # Login command
   logout.go          # Logout command
   version.go         # Version command
+  whoami.go          # Whoami command
   agent/             # alpacon agent
+  approval/          # alpacon approval
+  audit/             # alpacon audit
   authority/         # alpacon authority
   cert/              # alpacon cert
   csr/               # alpacon csr
+  edit/              # alpacon edit
   event/             # alpacon event
   exec/              # alpacon exec
   ftp/               # alpacon cp (file transfer)
@@ -55,15 +59,20 @@ cmd/                 # Cobra command definitions
   log/               # alpacon log
   note/              # alpacon note
   packages/          # alpacon package
+  revoke/            # alpacon revoke
   server/            # alpacon server
   token/             # alpacon token
   tunnel/            # alpacon tunnel
+  username/          # alpacon username
+  webftp/            # alpacon webftp
+  webhook/           # alpacon webhook
   websh/             # alpacon websh
+  worksession/       # alpacon work-session
   workspace/         # alpacon workspace
 api/                 # API client functions per domain
 client/              # HTTP client wrapper for Alpacon API
 config/              # Configuration management (credentials, workspace)
-pkg/                 # Internal packages (cert, tunnel)
+pkg/                 # Internal packages (cert, testutil, tunnel)
 utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 ```
 
@@ -74,7 +83,7 @@ utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 - **SSH-like syntax**: `websh`, `exec`, `cp` support `user@host` syntax via `utils.ParseSSHTarget()`
 - **Error handling**: Common errors (MFA required, username required) are handled via `utils.HandleCommonErrors()` with retry callbacks
 - **Custom flag parsing**: `websh` and `exec` use `DisableFlagParsing: true` and parse flags manually. `exec` supports `--` separator for remote command flags
-- **Shared command execution**: `exec.RunCommandWithRetry()` wraps `event.RunCommand()` + `HandleCommonErrors()` with MFA/retry logic. Used by both `exec` and `websh`
+- **Shared command execution**: `exec.RunCommandWithRetry()` wraps `event.RunCommandStreaming()` + `HandleCommonErrors()` with MFA/retry logic. Used by both `exec` and `websh`
 - **Browser auto-open**: `utils.OpenBrowser()` opens auth URLs with SSH/headless detection, cross-process debounce (`~/.alpacon/.browser_lock`), and `ALPACON_NO_BROWSER` env var opt-out
 - **Output format flag**: `--output` persistent flag on `RootCmd` (`table` | `json`, default `table`), bound to `utils.OutputFormat` global in `cmd/root.go`. No short form—`-o` is reserved for subcommand-local `--out` flags (e.g., `cert download -o path`). `--output json` produces pretty-printed JSON (2-space indent) on stdout via `utils.PrintTable()` / `utils.PrintJson()`; default preserves existing behavior (table for list commands, pretty JSON for detail commands). Empty/nil slices emit `[]`
 - **Table output**: API response → `*Attributes` struct projection → `utils.PrintTable()`. All list commands follow this pattern
@@ -153,7 +162,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 - Table-driven tests with `testify/assert`
 - API tests use `httptest.NewServer` with a minimal `*client.AlpaconClient` pointing at `ts.URL`
-- Command logic is extracted to unexported helpers (e.g., `parseExecArgs`) for direct unit testing
+- Command logic is extracted to helpers (e.g., `ParseRemoteExecArgs`) for direct unit testing
 
 ### Comments
 
