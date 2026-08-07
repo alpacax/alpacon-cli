@@ -168,6 +168,8 @@ func authStatusCodeMessage(code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
 		return "multi-factor authentication required—complete MFA to continue", true
+	case utils.APITokenACLNotAllowed:
+		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
 	}
 	return "", false
 }
