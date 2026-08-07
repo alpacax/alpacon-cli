@@ -63,6 +63,47 @@ func TestCommandOutputListener_HandleMessage_FiltersAndEmits(t *testing.T) {
 	}
 }
 
+// The fin subscription targets the server, so every command on it reports here.
+func TestCommandOutputListener_HandleMessage_FinishedIsPerCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		payload      string
+		wantFinished bool
+	}{
+		{
+			name:         "fin for this command",
+			payload:      `{"event_type":"command_fin","payload":{"type":"event","id":"cmd-1"}}`,
+			wantFinished: true,
+		},
+		{
+			name:    "fin for another command on the same server",
+			payload: `{"event_type":"command_fin","payload":{"type":"event","id":"cmd-OTHER"}}`,
+		},
+		{
+			name:    "chunk does not finish the command",
+			payload: `{"event_type":"command_output","payload":{"command_id":"cmd-1","seq":0,"content":"hi"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := NewCommandOutputListener(nil, "", "cmd-1")
+			l.handleMessage([]byte(tt.payload))
+
+			select {
+			case <-l.Finished():
+				if !tt.wantFinished {
+					t.Fatal("expected no finish signal")
+				}
+			case <-time.After(50 * time.Millisecond):
+				if tt.wantFinished {
+					t.Fatal("expected a finish signal but got nothing")
+				}
+			}
+		})
+	}
+}
+
 func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	cmdID := "cmd-uuid"

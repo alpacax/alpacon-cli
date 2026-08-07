@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,7 +156,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false)
+			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false, pollSeams{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -344,18 +346,26 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true)
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
 
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
 	ac := newStreamingServers(t, streamingServerConfig{
-		cmdID:        "cmd-uuid",
-		serverID:     "srv-uuid",
-		wsChunks:     []ChunkEvent{{Seq: 0, Content: "approved\n"}},
-		heldPolls:    2,
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		// One for StreamApprovedCommand's server-id lookup, two for the poll loop.
+		heldPolls:    3,
 		runningPolls: 1,
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
@@ -363,6 +373,44 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
+
+	mu.Lock()
+	defer mu.Unlock()
+	// The server comes from the lookup, the only thing on this path that names it.
+	assert.Equal(t, [][2]string{
+		{EventTypeCommandOutput, "cmd-uuid"},
+		{EventTypeCommandFin, "srv-uuid"},
+	}, subscriptions)
+}
+
+// The fin subscription needs the server the command ran on, which only a read of
+// the command names. A failed read costs the run its fin event, not the run.
+func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsChunks: []ChunkEvent{{Seq: 0, Content: "approved\n"}},
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		// The lookup is the first read of the command, so this is the one that fails.
+		detailFails: 1,
+		terminal:    EventDetails{Status: "completed", Success: boolPtr(true)},
+	})
+
+	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	require.NoError(t, err)
+	assert.Equal(t, "approved\n", stdoutBuf.String())
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, [][2]string{{EventTypeCommandOutput, "cmd-uuid"}}, subscriptions,
+		"with no server to target, the fin subscription must be skipped rather than sent empty")
 }
 
 func boolPtr(b bool) *bool    { return &b }
@@ -371,19 +419,312 @@ func strPtr(s string) *string { return &s }
 
 func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Always fail GETs so SendGetRequest returns an error and the poll
-		// loop never resets its timer.
+		// Always fail GETs so SendGetRequest returns an error, and with a status
+		// that is not 429 so the poll loop never extends its deadline.
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false)
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{})
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
 	require.True(t, errors.As(err, &clientTimeout),
-		"timer expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
+		"deadline expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
+}
+
+func TestNextPollTick(t *testing.T) {
+	base := time.Second
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    time.Duration
+	}{
+		{name: "base tick while the command is young", elapsed: 0, want: base},
+		{name: "still base at the end of the fast window", elapsed: 9 * base, want: base},
+		{name: "widens once the fast window closes", elapsed: 10 * base, want: 5 * base},
+		{name: "holds through the medium window", elapsed: 59 * base, want: 5 * base},
+		{name: "widest once the medium window closes", elapsed: 60 * base, want: 10 * base},
+		{name: "stays widest", elapsed: 3000 * base, want: 10 * base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextPollTick(base, tt.elapsed))
+		})
+	}
+}
+
+func TestNextPollBackoff(t *testing.T) {
+	base := time.Second
+	tests := []struct {
+		name       string
+		attempt    int
+		retryAfter time.Duration
+		want       time.Duration
+	}{
+		{name: "first failure keeps the base tick", attempt: 0, want: base},
+		{name: "doubles per consecutive failure", attempt: 1, want: 2 * base},
+		{name: "still doubling", attempt: 3, want: 8 * base},
+		{name: "capped once doubling passes the cap", attempt: 6, want: 60 * base},
+		{name: "stays capped", attempt: 20, want: 60 * base},
+		{name: "server's Retry-After wins over the schedule", attempt: 0, retryAfter: 3 * base, want: 3 * base},
+		{name: "Retry-After wins even when it is shorter", attempt: 5, retryAfter: 3 * base, want: 3 * base},
+		{name: "Retry-After is capped too", attempt: 0, retryAfter: 3000 * base, want: 60 * base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, nextPollBackoff(base, tt.attempt, tt.retryAfter))
+		})
+	}
+}
+
+// throttleServer replies 429 to the first throttled requests, then serves a
+// terminal status. The returned counter holds the requests it has seen.
+func throttleServer(t *testing.T, throttled int, retryAfter string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if int(reqCount.Add(1)) <= throttled {
+			if retryAfter != "" {
+				w.Header().Set("Retry-After", retryAfter)
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed", Result: "done"})
+	}))
+	return ts, reqCount
+}
+
+// fakePollClock returns seams that run the poll loop on a clock only its own
+// delays advance, and the delays it chose. Timing the loop instead would be flaky:
+// a slow machine stretches every wait, which makes a loop without backoff look
+// better-behaved than it is and can expire a deadline the loop meant to extend.
+func fakePollClock() (pollSeams, func() []time.Duration) {
+	now := time.Now()
+	var delays []time.Duration
+	seams := pollSeams{
+		now: func() time.Time { return now },
+		after: func(d time.Duration) <-chan time.Time {
+			delays = append(delays, d)
+			now = now.Add(d)
+			ch := make(chan time.Time, 1)
+			ch <- now
+			return ch
+		},
+	}
+	return seams, func() []time.Duration { return delays }
+}
+
+// A throttled poll must space its requests out instead of spending one per tick.
+func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
+	tick := 10 * time.Millisecond
+	tests := []struct {
+		name       string
+		retryAfter string
+		want       []time.Duration
+	}{
+		{
+			name: "no Retry-After: exponential backoff",
+			want: []time.Duration{tick, tick, 2 * tick, 4 * tick, 8 * tick},
+		},
+		{
+			name:       "Retry-After honored, capped",
+			retryAfter: "1",
+			want:       []time.Duration{tick, 60 * tick, 60 * tick, 60 * tick, 60 * tick},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _ := throttleServer(t, 4, tt.retryAfter)
+			defer ts.Close()
+
+			seams, delays := fakePollClock()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false, seams)
+			require.NoError(t, err)
+			assert.Equal(t, "completed", resp.Status)
+			assert.Equal(t, tt.want, delays())
+		})
+	}
+}
+
+// A 429 must not starve the deadline: the command may already have finished,
+// with only its result GET throttled.
+func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
+	ts, reqCount := throttleServer(t, 1, "1")
+	defer ts.Close()
+
+	// The Retry-After wait (1s, capped to 60 ticks = 300ms) outlasts the 100ms
+	// deadline: reachable only if throttled time is not charged to it.
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, int32(2), reqCount.Load(),
+		"the result must come from the retry after the throttled wait, not from retrying through it")
+	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond}, delays())
+}
+
+// Extending the deadline by exactly the wait keeps it ahead of the clock forever,
+// so the extension is capped: a token stuck over quota has to give up.
+func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T) {
+	ts, reqCount := throttleServer(t, math.MaxInt, "1")
+	defer ts.Close()
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	// One 300ms extension spends the 100ms budget whole—the ceiling is the timeout plus
+	// one backoff wait, not the timeout. The second wait gets no extension and is cut
+	// to the 95ms left, so the timeout is reported at the deadline, not 300ms past it.
+	assert.Equal(t, int32(2), reqCount.Load())
+	assert.Equal(t, []time.Duration{5 * time.Millisecond, 300 * time.Millisecond, 95 * time.Millisecond}, delays())
+}
+
+// A duration budget alone is spent at the server's pace, so short mandated waits
+// would trade the whole extension for a request storm.
+func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
+	ts, _ := throttleServer(t, math.MaxInt, "1")
+	defer ts.Close()
+
+	// Retry-After 1s capped to 60 ticks = a 6ms wait, and a timeout worth 120 of them:
+	// the duration budget would grant twice what the count bound does.
+	const tick = 100 * time.Microsecond
+	const timeout = 720 * time.Millisecond
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	var elapsed time.Duration
+	for _, d := range delays() {
+		elapsed += d
+	}
+	// The loop never waits past its deadline, so the waits sum to it exactly.
+	assert.Equal(t, timeout+pollMaxThrottleExtensions*(pollMaxBackoffTick*tick), elapsed,
+		"the deadline must grow by the capped number of grants, not by the whole duration budget")
+}
+
+// Reported progress refreshes the deadline, and the throttle allowance goes back
+// with it: a throttle late in a long command must not be refused an extension
+// because an unrelated one early on spent the budget.
+func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch reqCount.Add(1) {
+		case 1, 3:
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+		case 2:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+		default:
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
+		}
+	}))
+	defer ts.Close()
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, int32(4), reqCount.Load())
+	assert.Equal(t, []time.Duration{
+		5 * time.Millisecond, 300 * time.Millisecond, 50 * time.Millisecond, 300 * time.Millisecond,
+	}, delays())
+}
+
+// The count belongs to the deadline it protects: held across a refresh, one early
+// stretch would leave a long command no grants for the next.
+func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
+	const tick = 100 * time.Microsecond
+	// One timeout is worth exactly one round of capped grants, so a second round is
+	// only reachable through the reset.
+	const timeout = pollMaxThrottleExtensions * (pollMaxBackoffTick * tick)
+
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if reqCount.Add(1) == pollMaxThrottleExtensions+1 {
+			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
+			return
+		}
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "Request was throttled."})
+	}))
+	defer ts.Close()
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+
+	var clientTimeout *ClientTimeoutError
+	require.True(t, errors.As(err, &clientTimeout),
+		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	var elapsed time.Duration
+	for _, d := range delays() {
+		elapsed += d
+	}
+	// One round of grants, then the refreshed deadline and the round it made room for:
+	// three timeouts on top of the first tick. Without the reset, two.
+	assert.Equal(t, tick+3*timeout, elapsed,
+		"the second throttled stretch must get its own grants back with the refreshed deadline")
+}
+
+// The loop paces by how long the poll has been running, not by the gap since the
+// last poll—measured the latter way a command never leaves the fast window.
+func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
+	tick := 10 * time.Millisecond
+	// The 21st request answers terminal, so the reply that earns the slow tick is
+	// still polled for.
+	const running = 20
+
+	reqCount := &atomic.Int32{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := "completed"
+		if int(reqCount.Add(1)) <= running {
+			status = "running"
+		}
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: status})
+	}))
+	defer ts.Close()
+
+	seams, delays := fakePollClock()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false, seams)
+	require.NoError(t, err)
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, slices.Concat(
+		slices.Repeat([]time.Duration{tick}, 10),
+		slices.Repeat([]time.Duration{5 * tick}, 10),
+		[]time.Duration{10 * tick},
+	), delays())
 }
 
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
@@ -394,7 +735,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false)
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -513,6 +854,187 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
+}
+
+// startStream wires a session and listener the way the streaming entry points do,
+// so a test can hand streamSubscribed a poll tick of its own choosing.
+func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string, out io.Writer, tick time.Duration, waitApproval bool) <-chan error {
+	t.Helper()
+	session, err := CreateEventSession(ac)
+	require.NoError(t, err)
+	listener := NewCommandOutputListener(ac, session.WebsocketURL, cmdID)
+	listener.Start()
+	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
+
+	done := make(chan error, 1)
+	go func() {
+		done <- streamSubscribed(ac, session, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
+	}()
+	return done
+}
+
+// awaitStream fails the test rather than letting a run that never ends hang until
+// the package timeout.
+func awaitStream(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("the run never ended")
+		return nil
+	}
+}
+
+// Chunks carry no end marker, so the poll is otherwise the only thing that notices
+// a finished command—a tick away at best, ten once it is a minute old. The tick here
+// is longer than the test can run, so nothing but the fin event can end this one.
+func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		// A command that prints nothing—the case that started #309—so the run can
+		// only end on a terminal signal, never on output.
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, time.Hour, false))
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Contains(t, subscriptions, [2]string{EventTypeCommandFin, "srv-uuid"},
+		"fin is published against the server, so that is what the subscription targets")
+}
+
+// A run that ended on the fin must take its poll with it. Left alive, the poll goes
+// on requesting a command that is already over—spending the throttle budget this
+// pacing exists to protect, and outliving the process's other streams.
+func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
+	tick := 20 * time.Millisecond
+	details := &atomic.Int32{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onDetail: func() { details.Add(1) },
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, tick, false))
+	require.NoError(t, err)
+
+	atEnd := details.Load()
+	time.Sleep(5 * tick)
+	assert.Equal(t, atEnd, details.Load(), "the poll must stop with the run, not keep requesting")
+}
+
+// The fin channel is the command's server, which on this path only the submit
+// response names—the command's own id would subscribe to nothing that fires.
+func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.T) {
+	var mu sync.Mutex
+	var subscriptions [][2]string
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onSubscribe: func(eventType, targetID string) {
+			mu.Lock()
+			defer mu.Unlock()
+			subscriptions = append(subscriptions, [2]string{eventType, targetID})
+		},
+		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", &bytes.Buffer{})
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, [][2]string{
+		{EventTypeCommandOutput, "cmd-uuid"},
+		{EventTypeCommandFin, "srv-uuid"},
+	}, subscriptions)
+}
+
+// A fin racing a status the server has not written yet must not end the run on a
+// half-finished read: the poll picks it up on its next tick instead.
+func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	details := &atomic.Int32{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:    "cmd-uuid",
+		serverID: "srv-uuid",
+		wsFinFor: "cmd-uuid",
+		onDetail: func() { details.Add(1) },
+		// The fin arrives before the first poll, so this "running" is the read the
+		// fin triggers; the terminal one goes to the poll.
+		runningPolls: 1,
+		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+	assert.GreaterOrEqual(t, details.Load(), int32(2),
+		"the running read must not have ended the run: a second read, the poll's, did")
+}
+
+// Same fallback when the read the fin triggers fails outright.
+func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
+	stdoutBuf := &bytes.Buffer{}
+	details := &atomic.Int32{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:       "cmd-uuid",
+		serverID:    "srv-uuid",
+		wsFinFor:    "cmd-uuid",
+		onDetail:    func() { details.Add(1) },
+		detailFails: 1,
+		terminal:    EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+	})
+
+	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", stdoutBuf.String())
+	assert.GreaterOrEqual(t, details.Load(), int32(2),
+		"a failed read must not surface as the result: a second read, the poll's, ended the run")
+}
+
+// Resuming through an approval hold, the poll waits out the hold and the transient
+// "error" the approve→deliver window emits. The fin path reads the same command, so
+// it has to wait on the same statuses or it reports a run that has not started.
+func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
+	for _, status := range []string{"awaiting_approval", "error"} {
+		t.Run(status, func(t *testing.T) {
+			stdoutBuf := &bytes.Buffer{}
+			details := &atomic.Int32{}
+			ac := newStreamingServers(t, streamingServerConfig{
+				cmdID:      "cmd-uuid",
+				serverID:   "srv-uuid",
+				wsFinFor:   "cmd-uuid",
+				onDetail:   func() { details.Add(1) },
+				heldPolls:  1,
+				heldStatus: status,
+				terminal:   EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+			})
+
+			err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, true))
+			require.NoError(t, err)
+			assert.Equal(t, "done\n", stdoutBuf.String())
+			assert.GreaterOrEqual(t, details.Load(), int32(2),
+				"the held read must not have ended the run: the poll's second read did")
+		})
+	}
 }
 
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
@@ -855,13 +1377,21 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 // streamingServerConfig configures the fake event servers for streaming tests.
 type streamingServerConfig struct {
-	cmdID        string
-	serverID     string
-	wsChunks     []ChunkEvent      // emitted over the WS once subscribed
-	chunksFor    func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
-	heldPolls    int               // number of "awaiting_approval" detail polls before running
-	runningPolls int               // number of "running" detail polls before the terminal one
-	terminal     EventDetails      // returned by the detail poll once held+running elapse
+	cmdID       string
+	serverID    string
+	wsChunks    []ChunkEvent      // emitted over the WS once subscribed
+	wsFinFor    string            // command id of a command_fin frame sent after the chunks; none when empty
+	chunksFor   func(int) []Chunk // REST chunk endpoint, keyed by seq__gte (warm-fire / gap-fill / drain)
+	onSubscribe func(eventType, targetID string)
+	onDetail    func() // every detail-endpoint request, failing ones included
+	detailFails int    // leading detail GETs answered 500, before the held/running sequence starts
+	// Detail-endpoint responses in order: heldPolls "awaiting_approval", then
+	// runningPolls "running", then terminal. The approval-resume path spends the
+	// first one on its server-id lookup, so its poll loop sees one held fewer.
+	heldPolls    int
+	heldStatus   string // status the held responses carry; "awaiting_approval" when empty
+	runningPolls int
+	terminal     EventDetails // returned by the detail poll once held+running elapse
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -890,6 +1420,13 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			b, _ := json.Marshal(env)
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
+		if cfg.wsFinFor != "" {
+			b, _ := json.Marshal(map[string]any{
+				"event_type": "command_fin",
+				"payload":    map[string]any{"type": "event", "id": cfg.wsFinFor},
+			})
+			_ = conn.WriteMessage(websocket.TextMessage, b)
+		}
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -899,7 +1436,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	t.Cleanup(wsServer.Close)
 	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
 
-	var pollCount int
+	var pollCount, failCount int
 	var mu sync.Mutex
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -909,8 +1446,13 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
 			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
 		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `"}]`))
+			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `","server":{"id":"` + cfg.serverID + `"}}]`))
 		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
+			if cfg.onSubscribe != nil {
+				var req EventSubscriptionRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				cfg.onSubscribe(string(req.EventType), req.TargetID)
+			}
 			subOnce.Do(func() { close(subscribed) })
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
@@ -922,20 +1464,37 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			}
 			_ = json.NewEncoder(w).Encode(api.ListResponse[Chunk]{Count: len(results), Results: results})
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/" && r.Method == http.MethodGet:
+			if cfg.onDetail != nil {
+				cfg.onDetail()
+			}
 			mu.Lock()
-			pollCount++
+			failing := failCount < cfg.detailFails
+			if failing {
+				failCount++
+			} else {
+				pollCount++
+			}
 			n := pollCount
 			mu.Unlock()
+			if failing {
+				http.Error(w, "boom", http.StatusInternalServerError)
+				return
+			}
 			if n <= cfg.heldPolls {
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"awaiting_approval"}`))
+				held := cfg.heldStatus
+				if held == "" {
+					held = "awaiting_approval"
+				}
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"` + held + `","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
 			if n <= cfg.heldPolls+cfg.runningPolls {
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running"}`))
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
 			term := cfg.terminal
 			term.ID = cfg.cmdID
+			term.Server.ID = cfg.serverID
 			_ = json.NewEncoder(w).Encode(term)
 		default:
 			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -1360,7 +1919,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 	out := &bytes.Buffer{}
 	last := 0
 	stderr := captureStderr(t, func() {
-		for i := 0; i < 4; i++ {
+		for range 4 {
 			next := last + 3 + 1 // gap of 3 seqs, each under maxGapWidth=4
 			last = g.giveUpGap(last, next, nil, out)
 		}

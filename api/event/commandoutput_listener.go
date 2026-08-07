@@ -22,8 +22,9 @@ type ChunkEvent struct {
 	Content string
 }
 
-// CommandOutputListener subscribes to a single command's chunk stream over
-// the event WebSocket and exposes received chunks via the Chunks() channel.
+// CommandOutputListener subscribes to a single command's chunk stream over the
+// event WebSocket, exposing chunks on Chunks() and the command's fin on
+// Finished().
 //
 // Lifecycle: NewCommandOutputListener -> Start -> (consume Chunks) -> Stop.
 // Stop is idempotent and safe to call from any goroutine.
@@ -32,15 +33,19 @@ type CommandOutputListener struct {
 	cmdMu     sync.Mutex // guards commandID
 	commandID string
 	chunks    chan ChunkEvent
+	finished  chan struct{}
 }
 
-// commandOutputEnvelope is the WS message format emitted by alpacon-server.
+// commandOutputEnvelope is the WS message format emitted by alpacon-server. One
+// struct for both payloads: command_output names the command in command_id,
+// command_fin in id.
 type commandOutputEnvelope struct {
 	EventType EventType `json:"event_type"`
 	Payload   struct {
 		CommandID string `json:"command_id"`
 		Seq       int    `json:"seq"`
 		Content   string `json:"content"`
+		ID        string `json:"id"`
 	} `json:"payload"`
 }
 
@@ -51,6 +56,7 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 		wsListener: newWSListener(ac, wsURL, commandOutputConnectTimeout),
 		commandID:  commandID,
 		chunks:     make(chan ChunkEvent, commandOutputChunkBuffer),
+		finished:   make(chan struct{}, 1),
 	}
 	l.handleFrame = l.handleMessage
 	return l
@@ -59,27 +65,40 @@ func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string)
 // Chunks returns a receive-only channel of parsed chunk events.
 func (l *CommandOutputListener) Chunks() <-chan ChunkEvent { return l.chunks }
 
-// handleMessage parses one WS frame and pushes a matching chunk onto chunks.
-// Non-matching frames (wrong event_type, wrong command_id, parse failure) are
-// silently dropped.
+// Finished fires when the command reaches a terminal state, which the chunks
+// never say: they carry no end marker.
+func (l *CommandOutputListener) Finished() <-chan struct{} { return l.finished }
+
+// handleMessage parses one WS frame and routes it: a chunk onto chunks, a fin onto
+// finished. Non-matching frames (other event types, another command's id, parse
+// failure) are silently dropped.
 func (l *CommandOutputListener) handleMessage(raw []byte) {
 	var env commandOutputEnvelope
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return
 	}
-	if env.EventType != EventTypeCommandOutput {
-		return
-	}
 	l.cmdMu.Lock()
 	cid := l.commandID
 	l.cmdMu.Unlock()
-	if env.Payload.CommandID != cid {
-		return
-	}
 
-	select {
-	case l.chunks <- ChunkEvent{Seq: env.Payload.Seq, Content: env.Payload.Content}:
-	case <-l.done:
+	switch env.EventType {
+	case EventTypeCommandOutput:
+		if env.Payload.CommandID != cid {
+			return
+		}
+		select {
+		case l.chunks <- ChunkEvent{Seq: env.Payload.Seq, Content: env.Payload.Content}:
+		case <-l.done:
+		}
+	case EventTypeCommandFin:
+		// Subscribed per server, so every other command on it lands here too.
+		if env.Payload.ID != cid {
+			return
+		}
+		select {
+		case l.finished <- struct{}{}:
+		default:
+		}
 	}
 }
 

@@ -15,6 +15,9 @@ const (
 	// comparable to EventType.
 	EventTypeSudo          = "sudo"
 	EventTypeCommandOutput = "command_output"
+	// Subscribed with a server id, not a command id: that is the channel
+	// alpacon-server publishes it on.
+	EventTypeCommandFin = "command_fin"
 )
 
 // EventType is a server event channel type, marshalled as a plain string. The server

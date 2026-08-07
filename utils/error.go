@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -83,11 +84,25 @@ type statusCoder interface {
 	HTTPStatusCode() int
 }
 
+type retryAfterCarrier interface {
+	RetryAfter() time.Duration
+}
+
 // HTTPStatusCode returns the HTTP status carried by err, or 0 if none—lets callers tell 404 from 401.
 func HTTPStatusCode(err error) int {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if sc, ok := e.(statusCoder); ok {
 			return sc.HTTPStatusCode()
+		}
+	}
+	return 0
+}
+
+// RetryAfter returns the delay the server asked for on err, or 0 if it sent none.
+func RetryAfter(err error) time.Duration {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if ra, ok := e.(retryAfterCarrier); ok {
+			return ra.RetryAfter()
 		}
 	}
 	return 0
