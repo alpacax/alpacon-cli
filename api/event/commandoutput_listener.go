@@ -22,8 +22,9 @@ type ChunkEvent struct {
 	Content string
 }
 
-// CommandOutputListener subscribes to a single command's chunk stream over
-// the event WebSocket and exposes received chunks via the Chunks() channel.
+// CommandOutputListener subscribes to a single command's chunk stream over the
+// event WebSocket, exposing chunks on Chunks() and the command's fin on
+// Finished().
 //
 // Lifecycle: NewCommandOutputListener -> Start -> (consume Chunks) -> Stop.
 // Stop is idempotent and safe to call from any goroutine.
