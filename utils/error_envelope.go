@@ -24,6 +24,14 @@ func buildCliErrorEnvelope(operation, errorCode, message string) JSONErrorEnvelo
 	}
 }
 
+// buildCliUsageErrorEnvelope overrides the exit code buildCliErrorEnvelope
+// hardcodes (1), so the envelope agrees with the process.
+func buildCliUsageErrorEnvelope(operation, message string) JSONErrorEnvelope[cliErrorCtx] {
+	envelope := buildCliErrorEnvelope(operation, UsageErrorCode, message)
+	envelope.ExitCode = ExitCodeUsageError
+	return envelope
+}
+
 // buildCliErrorEnvelopeFromErr builds the envelope with the server error code extracted from err, if any.
 func buildCliErrorEnvelopeFromErr(operation string, err error, message string) JSONErrorEnvelope[cliErrorCtx] {
 	code := ""
