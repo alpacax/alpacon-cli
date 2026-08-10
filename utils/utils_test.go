@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -390,4 +391,22 @@ func TestSanitizeTerminalText(t *testing.T) {
 			assert.Equal(t, tt.want, SanitizeTerminalText(tt.input))
 		})
 	}
+}
+
+func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
+	helper := osexec.Command(os.Args[0], "-test.run=^TestRequirePositiveIntHelperProcess$")
+	helper.Env = append(os.Environ(), "GO_WANT_REQUIRE_POSITIVE_INT_HELPER=1")
+
+	err := helper.Run()
+
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
+}
+
+func TestRequirePositiveIntHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_REQUIRE_POSITIVE_INT_HELPER") != "1" {
+		return
+	}
+	RequirePositiveInt("tail", 0)
 }
