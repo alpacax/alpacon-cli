@@ -163,3 +163,13 @@ func TestExitCodeNotApproved_IsSixAndDistinct(t *testing.T) {
 	assert.NotEqual(t, ExitCodePendingApproval, ExitCodeNotApproved)
 	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeNotApproved)
 }
+
+func TestExitCodeUsageError_IsTwoAndDistinct(t *testing.T) {
+	// 2 is a public contract documented in README; scripts and agents branch on it.
+	assert.Equal(t, 2, ExitCodeUsageError)
+	assert.NotEqual(t, ExitCodeGeneralError, ExitCodeUsageError)
+	assert.NotEqual(t, ExitCodeWorkSessionDenied, ExitCodeUsageError)
+	assert.NotEqual(t, ExitCodePendingApproval, ExitCodeUsageError)
+	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeUsageError)
+	assert.NotEqual(t, ExitCodeNotApproved, ExitCodeUsageError)
+}
