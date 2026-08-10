@@ -278,6 +278,50 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
+	// An ACL refusal (exec, websh, cp) arrives as a bare {"code": ...} 403—the
+	// server's error handler emits nothing else. Without a mapping the user reads
+	// the generic privileges message and never learns a token rule caused it.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "api_token_acl_not_allowed"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	assert.ErrorContains(t, err, "token access control")
+	assert.ErrorContains(t, err, "alpacon token acl")
+	// The no-raw-code contract: callers read the code via ErrorCode(), not the message.
+	assert.NotContains(t, err.Error(), "api_token_acl_not_allowed")
+	// A token missing a rule is not a stale session—never suggest re-login.
+	assert.NotContains(t, err.Error(), "alpacon login")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.APITokenACLNotAllowed, code)
+}
+
+func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
+	// The server still returns 400 for an ACL denial until alpacax/alpacon-server#2804
+	// lands. checkAuthStatus only handles 401/403, so this body never reaches
+	// authStatusCodeMessage—the code must still survive for callers that route on it.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "api_token_acl_not_allowed"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.APITokenACLNotAllowed, code)
+	// The actionable message is the 403 mapping's job; a 400 must not borrow it,
+	// or widening the status condition would go unnoticed.
+	assert.NotContains(t, err.Error(), "token access control")
+}
+
 func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 	// Accessing root / a system account requires MFA: the server returns 401
 	// with {"code": "auth_mfa_required"} and no detail string. This must not be
