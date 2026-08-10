@@ -65,11 +65,11 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 	CliErrorWithExitCode(code, format, args...)
 }
 
-// CliUsageErrorEnvelopeWithExit is the local-validation variant; error_code is fixed to UsageErrorCode. Exits(1).
+// CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits(2); error_code is fixed to UsageErrorCode.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildCliErrorEnvelope(operation, UsageErrorCode, fmt.Sprintf(format, args...)))
-		os.Exit(1)
+		PrintJSONError(os.Stderr, buildCliUsageErrorEnvelope(operation, fmt.Sprintf(format, args...)))
+		os.Exit(ExitCodeUsageError)
 	}
-	CliErrorWithExit(format, args...)
+	CliErrorWithExitCode(ExitCodeUsageError, format, args...)
 }

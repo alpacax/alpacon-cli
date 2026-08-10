@@ -61,11 +61,13 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 	stdout, stderr, exitCode := runWorkSessionHelper(t, "http://127.0.0.1:1",
 		"extend", "ses-1")
 
-	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 	assert.Empty(t, stdout)
 
 	var env errorEnvelope
 	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
+	// The helper also exits 2 on a missing marker; the parsed envelope tells them apart.
+	assert.Equal(t, utils.ExitCodeUsageError, env.ExitCode)
 	assert.Equal(t, "usage_error", env.ErrorCode)
 	assert.Equal(t, "extend", env.Context.Operation)
 	assert.Contains(t, env.Message, "--expires-in or --expires-at")
