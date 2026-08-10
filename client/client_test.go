@@ -302,6 +302,26 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 	assert.Equal(t, utils.APITokenACLNotAllowed, code)
 }
 
+func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
+	// The server still returns 400 for an ACL denial until alpacax/alpacon-server#2804
+	// lands. checkAuthStatus only handles 401/403, so this body never reaches
+	// authStatusCodeMessage—the code must still survive for callers that route on it.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "api_token_acl_not_allowed"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.APITokenACLNotAllowed, code)
+	// The actionable message is the 403 mapping's job; a 400 must not borrow it,
+	// or widening the status condition would go unnoticed.
+	assert.NotContains(t, err.Error(), "token access control")
+}
+
 func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 	// Accessing root / a system account requires MFA: the server returns 401
 	// with {"code": "auth_mfa_required"} and no detail string. This must not be
