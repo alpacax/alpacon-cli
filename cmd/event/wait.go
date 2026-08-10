@@ -21,8 +21,9 @@ var waitCmd = &cobra.Command{
 The outcome is carried by the exit code, so a script never has to parse prose:
 
   0  an event in the success set arrived
-  1  the wait could not run: connection failed, the subscription was
-     rejected, or a usage error
+  1  the wait could not run: connection failed or the subscription was
+     rejected
+  2  a flag or argument was rejected
   4  timed out or interrupted—the outcome is still open
   6  an event in the failure set arrived. Only a type with a built-in end
      condition has a failure set (work_session's is rejected, expired,
