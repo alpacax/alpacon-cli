@@ -43,7 +43,7 @@ Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
 
 - `0` success
 - `1` general error
-- `2` usage error—a flag or argument a command rejected (`utils.ExitCodeUsageError`); Cobra parse errors exit `1`
+- `2` usage error—a flag or argument rejected by `work-session`, `event wait`/`watch`, or `utils.RequirePositiveInt` (`utils.ExitCodeUsageError`); every other command's own validation and Cobra parse errors exit `1`
 - `3` WorkSession gate denied (`utils.ExitCodeWorkSessionDenied`)
 - `4` Pending human approval, outcome still open (`utils.ExitCodePendingApproval`)
 - `5` Server busy with active user work (`utils.ExitCodeServerBusy`)
