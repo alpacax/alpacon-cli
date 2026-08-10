@@ -23,6 +23,12 @@ const (
 	// The rejected-forms list above is repeated in the exec and websh help text
 	// and the README's "When a command is denied" section—when the server-side
 	// gate changes, update all of them together.
+	//
+	// The server also accepts a per-command credential_exposure_acknowledged
+	// override, which the CLI deliberately does not expose: it records the
+	// exposure rather than preventing it (hygiene, not authorization—it carries
+	// no role gate), so exposing it would offer a one-flag way past the gate
+	// where rewriting with --env costs the same. --env stays the only path.
 	CommandInlineCredential = "command_inline_credential"
 
 	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
