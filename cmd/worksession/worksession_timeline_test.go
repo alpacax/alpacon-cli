@@ -252,6 +252,17 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 	assert.Contains(t, got, "web-01db-prod")
 }
 
+// A bidi override in a server name reaches the terminal through --output json
+// too, so the JSON goes out escaped rather than verbatim.
+func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
+	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
+	out := testutil.CaptureStdout(t, func() {
+		outputTimelineJSON(rows, nil, nil)
+	})
+	assert.NotContains(t, out, "\u202e")
+	assert.Contains(t, out, `\u202e`)
+}
+
 // outputTimelineJSON must emit recordings as [] not null when no recordings exist,
 // including when --no-records passes nil for recordings.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {

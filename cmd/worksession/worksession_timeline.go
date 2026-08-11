@@ -2,9 +2,9 @@ package worksession
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -214,11 +214,11 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.Time
 		"timeline":   rows,
 		"recordings": recEntries,
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
+	// Not a plain Marshal: the shared writer escapes the format and C1 runes that
+	// encoding/json leaves alone, and this output is read in a terminal too.
+	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
 		utils.CliErrorEnvelopeWithExit(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
-	fmt.Println(string(b))
 }
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
