@@ -497,9 +497,9 @@ func StripControlChars(s string) string {
 	}, s)
 }
 
-// StripFormatChars removes Unicode format characters. They carry no control byte,
-// so the control passes miss them, while a bidi override reorders what is rendered:
-// "denied" can reach the screen as "approved".
+// StripFormatChars removes the Unicode format (Cf) characters. No Cf rune is a
+// control byte, so IsControlRune misses them all, while the bidi controls among
+// them reorder what a terminal renders: "denied" can display as "approved".
 func StripFormatChars(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Cf, r) {
@@ -509,11 +509,16 @@ func StripFormatChars(s string) string {
 	}, s)
 }
 
+// StripFormatAndANSI removes format characters before escape sequences. Reversed,
+// one buried in a sequence would break the match and leave its tail on screen.
+func StripFormatAndANSI(s string) string {
+	return StripANSIEscapes(StripFormatChars(s))
+}
+
 // SanitizeTerminalText strips escape sequences before the standalone control
 // bytes; reversed, ESC alone would go and "[2K" would stay on screen as text.
-// Format characters go first, so one buried in a sequence cannot break the match.
 func SanitizeTerminalText(s string) string {
-	return StripControlChars(StripANSIEscapes(StripFormatChars(s)))
+	return StripControlChars(StripFormatAndANSI(s))
 }
 
 // ProcessEditedData facilitates user modifications to original data,
