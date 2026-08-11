@@ -24,6 +24,14 @@ func buildCliErrorEnvelope(operation, errorCode, message string) JSONErrorEnvelo
 	}
 }
 
+// buildCliUsageErrorEnvelope overrides the exit code buildCliErrorEnvelope
+// hardcodes (1), so the envelope agrees with the process.
+func buildCliUsageErrorEnvelope(operation, message string) JSONErrorEnvelope[cliErrorCtx] {
+	envelope := buildCliErrorEnvelope(operation, UsageErrorCode, message)
+	envelope.ExitCode = ExitCodeUsageError
+	return envelope
+}
+
 // buildCliErrorEnvelopeFromErr builds the envelope with the server error code extracted from err, if any.
 func buildCliErrorEnvelopeFromErr(operation string, err error, message string) JSONErrorEnvelope[cliErrorCtx] {
 	code := ""
@@ -57,11 +65,11 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 	CliErrorWithExitCode(code, format, args...)
 }
 
-// CliUsageErrorEnvelopeWithExit is the local-validation variant; error_code is fixed to UsageErrorCode. Exits(1).
+// CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits(2); error_code is fixed to UsageErrorCode.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildCliErrorEnvelope(operation, UsageErrorCode, fmt.Sprintf(format, args...)))
-		os.Exit(1)
+		PrintJSONError(os.Stderr, buildCliUsageErrorEnvelope(operation, fmt.Sprintf(format, args...)))
+		os.Exit(ExitCodeUsageError)
 	}
-	CliErrorWithExit(format, args...)
+	CliErrorWithExitCode(ExitCodeUsageError, format, args...)
 }

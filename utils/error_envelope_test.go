@@ -53,6 +53,16 @@ func TestUsageErrorCodeConstant(t *testing.T) {
 	assert.Equal(t, "usage_error", UsageErrorCode)
 }
 
+func TestBuildCliUsageErrorEnvelope_CarriesUsageCodeAndExitTwo(t *testing.T) {
+	env := buildCliUsageErrorEnvelope("extend", "Either --expires-in or --expires-at is required.")
+
+	assert.False(t, env.OK)
+	assert.Equal(t, ExitCodeUsageError, env.ExitCode)
+	assert.Equal(t, UsageErrorCode, env.ErrorCode)
+	assert.Equal(t, "Either --expires-in or --expires-at is required.", env.Message)
+	assert.Equal(t, "extend", env.Context.Operation)
+}
+
 func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
 	// Pins the default the new helper has to override; without the override the
 	// envelope would claim 1 while the process exits 6.

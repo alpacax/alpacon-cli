@@ -190,5 +190,5 @@ _ = json.NewEncoder(w).Encode(resp)
 - **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`)
 - **Alias**: `alpacon` can also be invoked as `ac`
 - **File transfer**: The `cp` command lives in `cmd/ftp/` (package name `ftp`)
-- **Exit codes**: `0` success, `1` general error, `2` usage error, `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
+- **Exit codes**: `0` success, `1` general error, `2` usage error (only `work-session`, `event wait`/`watch`, and `utils.RequirePositiveInt`; every other command's own validation and Cobra parse errors still exit `1`), `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
 - **IAM**: `user` and `group` commands both live in `cmd/iam/`

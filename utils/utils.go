@@ -621,7 +621,7 @@ func SplitAndTrim(s, sep string) []string {
 // RequirePositiveInt exits with a usage error when an integer flag is not positive.
 func RequirePositiveInt(flagName string, value int) {
 	if value <= 0 {
-		CliErrorWithExit("--%s must be a positive integer.", flagName)
+		CliErrorWithExitCode(ExitCodeUsageError, "--%s must be a positive integer.", flagName)
 	}
 }
 
