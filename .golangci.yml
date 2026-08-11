@@ -12,7 +12,7 @@ linters:
     testifylint:
       disable:
         # Pending cleanups tracked in issue #320; enable as each lands.
-        - require-error # 159 sites
+        - require-error # 149 sites
         - empty         # 29 sites, conversion still undecided
         - go-require    # 11 sites: require inside handlers/goroutines
     errcheck:
