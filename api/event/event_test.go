@@ -3,7 +3,6 @@ package event
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -309,7 +308,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 			require.Error(t, err)
 
 			var remoteErr *RemoteCommandError
-			require.True(t, errors.As(err, &remoteErr), "err must be *RemoteCommandError")
+			require.ErrorAs(t, err, &remoteErr)
 			assert.Equal(t, tt.wantOutput, remoteErr.Output)
 			assert.Equal(t, tt.wantExitCode, remoteErr.ExitCode)
 			assert.Equal(t, tt.wantErrorPhase, remoteErr.ErrorPhase)
@@ -320,7 +319,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
 	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "awaiting_approval"})
 	var pending *PendingApprovalError
-	require.True(t, errors.As(err, &pending), "err must be *PendingApprovalError")
+	require.ErrorAs(t, err, &pending)
 	assert.Equal(t, "cmd-9", pending.CommandID)
 }
 
@@ -430,8 +429,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
-	require.True(t, errors.As(err, &clientTimeout),
-		"deadline expiry must surface a *ClientTimeoutError, got %T: %v", err, err)
+	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
 }
 
 func TestNextPollTick(t *testing.T) {
@@ -587,8 +585,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T)
 	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
 
 	var clientTimeout *ClientTimeoutError
-	require.True(t, errors.As(err, &clientTimeout),
-		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
 	// One 300ms extension spends the 100ms budget whole—the ceiling is the timeout plus
 	// one backoff wait, not the timeout. The second wait gets no extension and is cut
 	// to the 95ms left, so the timeout is reported at the deadline, not 300ms past it.
@@ -613,8 +610,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
-	require.True(t, errors.As(err, &clientTimeout),
-		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
 	var elapsed time.Duration
 	for _, d := range delays() {
 		elapsed += d
@@ -683,8 +679,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
-	require.True(t, errors.As(err, &clientTimeout),
-		"a permanently throttled poll must surface a *ClientTimeoutError, got %T: %v", err, err)
+	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
 	var elapsed time.Duration
 	for _, d := range delays() {
 		elapsed += d
@@ -1127,7 +1122,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
-	require.True(t, errors.As(err, &remoteErr), "failed status must yield *RemoteCommandError")
+	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, 23, remoteErr.ExitCode)
 	assert.Equal(t, "before-exit\n", stdoutBuf.String())
 }
@@ -1925,7 +1920,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 		}
 	})
 
-	assert.Equal(t, maxGapWidth, len(g.skipped), "cumulative skipped capped at maxGapWidth")
+	assert.Len(t, g.skipped, maxGapWidth)
 	// Gap 1 is fully recorded (retryable), gap 2 fills the cap mid-gap (partial
 	// retry), and later gaps must not claim a retry they won't get.
 	assert.Contains(t, stderr, "will retry at command end")

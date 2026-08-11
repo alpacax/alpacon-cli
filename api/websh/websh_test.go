@@ -92,7 +92,7 @@ func TestGetSessionDetail(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.True(t, strings.Contains(r.URL.Path, "sess-abc"))
+		assert.Contains(t, r.URL.Path, "sess-abc")
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(detail)
@@ -168,7 +168,7 @@ func TestConnectToSession(t *testing.T) {
 func TestInviteToSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.Contains(r.URL.Path, "sess-abc/invite"))
+		assert.Contains(t, r.URL.Path, "sess-abc/invite")
 
 		var req InviteRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
@@ -187,7 +187,7 @@ func TestInviteToSession(t *testing.T) {
 func TestJoinWebshSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.Contains(r.URL.Path, "chan-id-123/join"))
+		assert.Contains(t, r.URL.Path, "chan-id-123/join")
 
 		var req JoinRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))

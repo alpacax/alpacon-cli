@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
@@ -37,7 +36,7 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 		assert.Contains(t, err.Error(), "ses-no-sudo")
 		assert.Contains(t, err.Error(), "'sudo' scope")
 		// Guidance must point at the create flag, not at a separate scope flag.
-		assert.True(t, strings.Contains(err.Error(), "--sudo"),
+		assert.Contains(t, err.Error(), "--sudo",
 			"guidance should reference --sudo so the user creates the right session next time")
 	})
 
