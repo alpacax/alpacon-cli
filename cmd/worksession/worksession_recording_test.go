@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -125,12 +126,28 @@ func TestRecordingPreview_OnlyANSI(t *testing.T) {
 func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
 	// A bidi override carries no control byte, so the control pass alone leaves
 	// it free to reorder the preview a reviewer reads back.
-	raw := "[user@host:~]$ echo ‮safe"
+	raw := "[user@host:~]$ echo \u202esafe"
 	assert.Equal(t, "[user@host:~]$ echo safe", recordingPreview(raw))
 }
 
 func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
 	// Format chars go before the escape strip, or the match breaks and the
 	// sequence's tail lands on screen as text.
-	assert.Equal(t, "ls", recordingPreview("\x1b[2‍Kls"))
+	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
+}
+
+// printRecordingContent
+
+func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "echo \u202esafe\n")
+	assert.Equal(t, "echo safe\n", buf.String())
+}
+
+func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
+	// The control pass is deliberately absent here: a recording shown as it was
+	// keeps \r and its line endings.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "a\rb")
+	assert.Equal(t, "a\rb\n", buf.String())
 }

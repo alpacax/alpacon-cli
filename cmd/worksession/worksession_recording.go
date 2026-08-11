@@ -77,7 +77,9 @@ func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total in
 }
 
 func printRecordingContent(w io.Writer, raw string) {
-	content := utils.StripANSIEscapes(raw)
+	// No control pass: this path shows the recording as it was, so \r and the
+	// line endings have to survive.
+	content := utils.StripFormatAndANSI(raw)
 	_, _ = fmt.Fprint(w, content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		_, _ = fmt.Fprintln(w)
