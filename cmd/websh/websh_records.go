@@ -55,7 +55,9 @@ Use --query to search records by command text (fuzzy match).`,
 }
 
 func sanitizeRecord(record string, width int) string {
-	record = utils.StripANSIEscapes(record)
+	// Format chars are deleted rather than spaced: they are zero-width, so a space
+	// in their place would widen the row beyond what was recorded.
+	record = utils.StripFormatAndANSI(record)
 	// Map control chars to spaces so they separate tokens instead of merging them.
 	record = strings.Map(func(r rune) rune {
 		if utils.IsControlRune(r) {

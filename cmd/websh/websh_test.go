@@ -391,6 +391,15 @@ func TestSanitizeRecord(t *testing.T) {
 
 	// C1 control (U+0085) separates tokens rather than leaking to the terminal.
 	assert.Equal(t, "foo bar", sanitizeRecord("foo"+string(rune(0x85))+"bar", 100))
+
+	// A bidi override (U+202E) carries no control byte, so IsControlRune alone
+	// leaves it free to reorder the record the reviewer reads. It is zero-width,
+	// so it goes without leaving a space behind.
+	assert.Equal(t, "foobar", sanitizeRecord("foo\u202ebar", 100))
+
+	// A format char buried in a sequence would break the escape match, leaving
+	// the sequence's tail on screen as text.
+	assert.Equal(t, "ls", sanitizeRecord("\x1b[2\u200dKls", 100))
 }
 
 func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
