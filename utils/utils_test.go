@@ -374,6 +374,18 @@ func TestStripFormatChars(t *testing.T) {
 	// Cf carries no control byte, so the control passes leave it behind.
 	assert.Equal(t, "denied approved", StripFormatChars("denied\u202e\u2066 approved"))
 	assert.Equal(t, "abé", StripFormatChars("a\u200dbé"))
+
+	// The bidi controls are the ones that matter: they reorder what a terminal
+	// renders without changing a byte. Every one of them goes.
+	for _, r := range []rune{
+		0x202a, 0x202b, 0x202c, 0x202d, 0x202e, // embedding and override
+		0x2066, 0x2067, 0x2068, 0x2069, // isolates
+	} {
+		assert.Equal(t, "ab", StripFormatChars("a"+string(r)+"b"), "U+%04X", r)
+	}
+
+	// Control bytes are StripControlChars' job; this pass leaves them alone.
+	assert.Equal(t, "a\x1bb", StripFormatChars("a\x1bb"))
 }
 
 func TestSanitizeTerminalText(t *testing.T) {
