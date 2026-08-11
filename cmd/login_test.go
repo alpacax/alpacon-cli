@@ -796,7 +796,7 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 	exitCode = 0
 	if err != nil {
 		var exitErr *osexec.ExitError
-		require.True(t, errors.As(err, &exitErr), "expected exit error, got %T: %v", err, err)
+		require.ErrorAs(t, err, &exitErr)
 		exitCode = exitErr.ExitCode()
 	}
 	return stdoutBuf.String(), stderrBuf.String(), exitCode

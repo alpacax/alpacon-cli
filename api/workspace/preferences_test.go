@@ -8,14 +8,15 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetPreferences(t *testing.T) {
 	expected := map[string]any{
 		"language":              "ko",
 		"timezone":              "Asia/Seoul",
-		"invite_ttl":            float64(172800),
-		"websh_session_timeout": float64(3600),
+		"invite_ttl":            172800,
+		"websh_session_timeout": 3600,
 		"auto_agent_upgrade":    true,
 		"package_proxy":         nil,
 		"front_url":             "https://example.alpacon.io",
@@ -33,17 +34,11 @@ func TestGetPreferences(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetPreferences(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	var got map[string]any
-	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
-	assert.Equal(t, "ko", got["language"])
-	assert.Equal(t, "Asia/Seoul", got["timezone"])
-	assert.Equal(t, float64(172800), got["invite_ttl"])
-	assert.Equal(t, float64(3600), got["websh_session_timeout"])
-	assert.Equal(t, true, got["auto_agent_upgrade"])
-	assert.Equal(t, "KR", got["country"])
+	expectedJSON, err := json.Marshal(expected)
+	require.NoError(t, err)
+	assert.JSONEq(t, string(expectedJSON), string(body))
 }
 
 func TestGetPreferences_ServerError(t *testing.T) {
@@ -67,7 +62,7 @@ func TestGetPreferences_EmptyResponse(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetPreferences(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)

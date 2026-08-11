@@ -3,7 +3,6 @@ package worksession
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -123,7 +122,7 @@ func runWorkSessionHelper(t *testing.T, serverURL string, args ...string) (strin
 	exitCode := 0
 	if err != nil {
 		var exitErr *osexec.ExitError
-		require.True(t, errors.As(err, &exitErr), "expected exit error, got %T: %v", err, err)
+		require.ErrorAs(t, err, &exitErr)
 		exitCode = exitErr.ExitCode()
 	}
 	return stdout.String(), stderr.String(), exitCode

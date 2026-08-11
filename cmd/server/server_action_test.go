@@ -1,7 +1,6 @@
 package server
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,7 +31,7 @@ func TestBusyGuardMessage(t *testing.T) {
 			msg := busyGuardMessage("my-server", tt.force)
 			assert.Contains(t, msg, "my-server")
 			assert.Contains(t, msg, tt.wantContain)
-			assert.False(t, strings.Contains(msg, tt.wantAbsent), "message should not contain %q", tt.wantAbsent)
+			assert.NotContains(t, msg, tt.wantAbsent)
 		})
 	}
 }

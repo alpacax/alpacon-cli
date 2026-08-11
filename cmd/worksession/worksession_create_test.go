@@ -2,11 +2,9 @@ package worksession
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -46,7 +44,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantMsg)
 
 			var terminal *terminalWaitError
-			assert.True(t, errors.As(err, &terminal), "a settled status must be typed so the caller can exit 6")
+			assert.ErrorAs(t, err, &terminal, "a settled status must be typed so the caller can exit 6")
 		})
 	}
 }
@@ -64,7 +62,7 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	require.Error(t, err)
 	var terminal *terminalWaitError
 	// A 500 is a transient failure, not a settled outcome—exit 1, not 6.
-	assert.False(t, errors.As(err, &terminal))
+	assert.NotErrorAs(t, err, &terminal)
 }
 
 func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
@@ -81,9 +79,9 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	require.Error(t, err)
 	// Still pending is exit 4's territory, not the settled-negative code.
 	var terminal *terminalWaitError
-	assert.False(t, errors.As(err, &terminal))
+	assert.NotErrorAs(t, err, &terminal)
 	var pending *pendingWaitError
-	assert.True(t, errors.As(err, &pending))
+	assert.ErrorAs(t, err, &pending)
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned
@@ -127,14 +125,14 @@ func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
 
 func TestParseExpiryFlag_BothProvided(t *testing.T) {
 	_, err := parseExpiryFlag("2h", "2026-12-31T23:59:59Z")
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "mutually exclusive"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 func TestParseExpiryFlag_NeitherProvided(t *testing.T) {
 	_, err := parseExpiryFlag("", "")
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "required"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "required")
 }
 
 func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
@@ -144,14 +142,14 @@ func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
 
 func TestParseExpiryFlag_ZeroDuration(t *testing.T) {
 	_, err := parseExpiryFlag("0s", "")
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestParseExpiryFlag_NegativeDuration(t *testing.T) {
 	_, err := parseExpiryFlag("-1h", "")
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestResolveWaitTimeout(t *testing.T) {
@@ -191,8 +189,8 @@ func TestResolveWaitTimeout(t *testing.T) {
 
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	err := validateAgentScopes("agent", []string{"command", "websh"})
-	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "\"websh\" is not allowed"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "\"websh\" is not allowed")
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
@@ -250,7 +248,7 @@ func TestValidateScopeEnum(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateScopeEnum(tt.scopes)
 			if tt.wantErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				for _, s := range tt.wantSubstrs {
 					assert.Contains(t, err.Error(), s)
 				}
