@@ -134,7 +134,9 @@ func recordingPreview(raw string) string {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for i := 0; i < 50 && scanner.Scan(); i++ {
-		line := utils.StripANSIEscapes(scanner.Text())
+		// Not SanitizeTerminalText: its control pass would take \r before the
+		// overwrite handling below gets to use it.
+		line := utils.StripFormatAndANSI(scanner.Text())
 		// Strip trailing CR from CRLF line endings before overwrite handling.
 		line = strings.TrimRight(line, "\r")
 		// \r moves cursor to line start; take only the last overwritten segment

@@ -121,3 +121,16 @@ func TestRecordingPreview_EmptyRaw(t *testing.T) {
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
 	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
 }
+
+func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
+	// A bidi override carries no control byte, so the control pass alone leaves
+	// it free to reorder the preview a reviewer reads back.
+	raw := "[user@host:~]$ echo ‮safe"
+	assert.Equal(t, "[user@host:~]$ echo safe", recordingPreview(raw))
+}
+
+func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
+	// Format chars go before the escape strip, or the match breaks and the
+	// sequence's tail lands on screen as text.
+	assert.Equal(t, "ls", recordingPreview("\x1b[2‍Kls"))
+}
