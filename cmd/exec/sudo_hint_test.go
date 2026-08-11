@@ -13,25 +13,21 @@ func TestSudoDenialHint(t *testing.T) {
 	t.Run("returns guidance when denial code present", func(t *testing.T) {
 		out := "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"
 		hint := sudoDenialHint(out)
-		assert.NotEmpty(t, hint)
 		assert.Contains(t, hint, "work-session update")
 	})
 
 	t.Run("presence-required points to a step-up", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n")
-		assert.NotEmpty(t, hint)
 		assert.Contains(t, hint, "step-up")
 	})
 
 	t.Run("approval-required points to re-running after approval", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n")
-		assert.NotEmpty(t, hint)
 		assert.Contains(t, hint, "approv")
 	})
 
 	t.Run("risk-denied is a terminal denial", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_RISK_DENIED).\n")
-		assert.NotEmpty(t, hint)
 		assert.Contains(t, hint, "risk")
 		// Disclosure: never echo a score/reasoning, only the category.
 		assert.NotContains(t, hint, "score")
