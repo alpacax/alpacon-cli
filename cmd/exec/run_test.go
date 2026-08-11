@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func TestClientTimeoutLine(t *testing.T) {
 	assert.Contains(t, line, "[client_timeout]", "stderr should carry the phase id in brackets")
 	assert.Contains(t, line, event.DescribePhase("client_timeout"),
 		"stderr should include the human-readable description")
-	assert.True(t, len(line) > 0 && line[len(line)-1] == '\n', "line should end with newline")
+	assert.True(t, strings.HasSuffix(line, "\n"), "line should end with newline")
 }
 
 func TestAsPhasedError(t *testing.T) {
@@ -108,7 +109,7 @@ func TestRemoteCommandOutcome(t *testing.T) {
 				"stderr should carry the phase identifier in brackets for CI/grep")
 			assert.Contains(t, stderrLine, event.DescribePhase(tt.wantStderrPhrase),
 				"stderr should include the human-readable phase description")
-			assert.True(t, len(stderrLine) > 0 && stderrLine[len(stderrLine)-1] == '\n',
+			assert.True(t, strings.HasSuffix(stderrLine, "\n"),
 				"stderr line should end with a newline")
 		})
 	}
