@@ -40,7 +40,7 @@ func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	stdout, stderr, exitCode := runWorkSessionHelper(t, ts.URL,
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL,
 		"extend", "ses-1", "--expires-in", "1h")
 
 	assert.Equal(t, 1, exitCode)
@@ -58,7 +58,7 @@ func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
 func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 	// Flag validation fails before any HTTP call; no live server needed.
 	// The subprocess has no TTY, so IsInteractiveShell() is false.
-	stdout, stderr, exitCode := runWorkSessionHelper(t, "http://127.0.0.1:1",
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, "http://127.0.0.1:1",
 		"extend", "ses-1")
 
 	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
@@ -71,6 +71,18 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 	assert.Equal(t, "usage_error", env.ErrorCode)
 	assert.Equal(t, "extend", env.Context.Operation)
 	assert.Contains(t, env.Message, "--expires-in or --expires-at")
+}
+
+func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
+	// Table is the default output mode, so this is the branch of
+	// CliUsageErrorEnvelopeWithExit most callers reach.
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1",
+		"extend", "ses-1")
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Empty(t, stdout)
+	assert.NotContains(t, stderr, `"error_code"`)
+	assert.Contains(t, stderr, "--expires-in or --expires-at")
 }
 
 func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
@@ -86,7 +98,7 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	stdout, stderr, exitCode := runWorkSessionHelper(t, ts.URL, "use", "ses-1")
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "use", "ses-1")
 
 	assert.Equal(t, 1, exitCode)
 	assert.Empty(t, stdout)
@@ -101,20 +113,21 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 }
 
 // runWorkSessionHelper re-runs the test binary as a subprocess executing the given
-// work-session subcommand in json output mode; returns (stdout, stderr, exitCode).
-func runWorkSessionHelper(t *testing.T, serverURL string, args ...string) (string, string, int) {
+// work-session subcommand in the given output mode; returns (stdout, stderr, exitCode).
+func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
 
 	home := t.TempDir()
 	writeWorkSessionTestConfig(t, home, serverURL)
 
 	helperArgs := append(
-		[]string{"-test.run=^TestWorkSessionJSONErrorHelperProcess$", "--", "worksession-json-helper"},
+		[]string{"-test.run=^TestWorkSessionErrorHelperProcess$", "--", "worksession-error-helper"},
 		args...,
 	)
 	helper := osexec.Command(os.Args[0], helperArgs...)
 	helper.Env = append(os.Environ(),
-		"GO_WANT_WORKSESSION_JSON_HELPER=1",
+		"GO_WANT_WORKSESSION_ERROR_HELPER=1",
+		"GO_WORKSESSION_HELPER_OUTPUT="+outputFormat,
 		"HOME="+home,
 	)
 	var stdout, stderr bytes.Buffer
@@ -131,16 +144,16 @@ func runWorkSessionHelper(t *testing.T, serverURL string, args ...string) (strin
 	return stdout.String(), stderr.String(), exitCode
 }
 
-func TestWorkSessionJSONErrorHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_WORKSESSION_JSON_HELPER") != "1" {
+func TestWorkSessionErrorHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_WORKSESSION_ERROR_HELPER") != "1" {
 		return
 	}
 	args, ok := workSessionHelperArgs(os.Args)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "missing worksession-json-helper marker")
+		fmt.Fprintln(os.Stderr, "missing worksession-error-helper marker")
 		os.Exit(2)
 	}
-	utils.OutputFormat = utils.OutputFormatJSON
+	utils.OutputFormat = os.Getenv("GO_WORKSESSION_HELPER_OUTPUT")
 	WorkSessionCmd.SetArgs(args)
 	if err := WorkSessionCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -150,7 +163,7 @@ func TestWorkSessionJSONErrorHelperProcess(t *testing.T) {
 
 func workSessionHelperArgs(args []string) ([]string, bool) {
 	for i := 0; i < len(args); i++ {
-		if args[i] == "worksession-json-helper" {
+		if args[i] == "worksession-error-helper" {
 			return args[i+1:], true
 		}
 	}
