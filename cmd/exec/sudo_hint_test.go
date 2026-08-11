@@ -3,7 +3,6 @@ package exec
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -15,31 +14,27 @@ func TestSudoDenialHint(t *testing.T) {
 		out := "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"
 		hint := sudoDenialHint(out)
 		assert.NotEmpty(t, hint)
-		assert.True(t, strings.Contains(hint, "work-session update"),
-			"hint should point to the work-session update command")
+		assert.Contains(t, hint, "work-session update")
 	})
 
 	t.Run("presence-required points to a step-up", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n")
 		assert.NotEmpty(t, hint)
-		assert.True(t, strings.Contains(hint, "step-up"),
-			"hint should tell the user to step up MFA")
+		assert.Contains(t, hint, "step-up")
 	})
 
 	t.Run("approval-required points to re-running after approval", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n")
 		assert.NotEmpty(t, hint)
-		assert.True(t, strings.Contains(hint, "approv"),
-			"hint should mention the approval request")
+		assert.Contains(t, hint, "approv")
 	})
 
 	t.Run("risk-denied is a terminal denial", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_RISK_DENIED).\n")
 		assert.NotEmpty(t, hint)
-		assert.True(t, strings.Contains(hint, "risk"),
-			"hint should name the risk assessment")
+		assert.Contains(t, hint, "risk")
 		// Disclosure: never echo a score/reasoning, only the category.
-		assert.False(t, strings.Contains(hint, "score"))
+		assert.NotContains(t, hint, "score")
 	})
 
 	t.Run("empty when no denial code", func(t *testing.T) {

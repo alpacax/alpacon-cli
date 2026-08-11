@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -128,13 +127,13 @@ func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
 func TestParseExpiryFlag_BothProvided(t *testing.T) {
 	_, err := parseExpiryFlag("2h", "2026-12-31T23:59:59Z")
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "mutually exclusive"))
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 func TestParseExpiryFlag_NeitherProvided(t *testing.T) {
 	_, err := parseExpiryFlag("", "")
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "required"))
+	assert.Contains(t, err.Error(), "required")
 }
 
 func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
@@ -145,13 +144,13 @@ func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
 func TestParseExpiryFlag_ZeroDuration(t *testing.T) {
 	_, err := parseExpiryFlag("0s", "")
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestParseExpiryFlag_NegativeDuration(t *testing.T) {
 	_, err := parseExpiryFlag("-1h", "")
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "positive duration"))
+	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestResolveWaitTimeout(t *testing.T) {
@@ -192,7 +191,7 @@ func TestResolveWaitTimeout(t *testing.T) {
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	err := validateAgentScopes("agent", []string{"command", "websh"})
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "\"websh\" is not allowed"))
+	assert.Contains(t, err.Error(), "\"websh\" is not allowed")
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
