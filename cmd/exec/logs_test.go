@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -180,9 +181,8 @@ func TestLogsCommandOutcome(t *testing.T) {
 				for _, sub := range tt.wantStderrContains {
 					assert.Contains(t, stderrLine, sub, "stderr should contain %q", sub)
 				}
-				if len(stderrLine) > 0 {
-					assert.Equal(t, '\n', rune(stderrLine[len(stderrLine)-1]), "stderr should end with newline")
-				}
+				assert.True(t, strings.HasSuffix(stderrLine, "\n"),
+					"stderr line should end with a newline")
 			}
 		})
 	}
