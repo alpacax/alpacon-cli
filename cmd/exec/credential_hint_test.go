@@ -116,7 +116,7 @@ func TestExecInlineCredentialDenialExits1WithJSONErrorCode(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 1, exitErr.ExitCode(), "inline-credential refusal uses the general failure exit code, not a dedicated one")
 	assert.Empty(t, stdout.String())
 
@@ -165,7 +165,7 @@ func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 1, exitErr.ExitCode())
 	assert.Empty(t, stdout.String())
 
@@ -218,7 +218,7 @@ func TestExecNonInlineCredentialErrorFallsThroughUnchanged(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 1, exitErr.ExitCode())
 
 	out := stderr.String()

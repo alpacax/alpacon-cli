@@ -3,7 +3,6 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +65,7 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitErr.ExitCode())
 	assert.Empty(t, stdout.String())
 	assert.True(t, sawCommandPost.Load(), "expected exec command to submit the remote command request")

@@ -3,7 +3,6 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -104,7 +103,7 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
 
 	var got struct {
@@ -152,7 +151,7 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
-	require.True(t, errors.As(err, &exitErr), "expected child process exit error, got %T", err)
+	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
 
 	var got struct {

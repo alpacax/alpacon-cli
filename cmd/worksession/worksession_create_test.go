@@ -2,7 +2,6 @@ package worksession
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +44,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.wantMsg)
 
 			var terminal *terminalWaitError
-			assert.True(t, errors.As(err, &terminal), "a settled status must be typed so the caller can exit 6")
+			assert.ErrorAs(t, err, &terminal, "a settled status must be typed so the caller can exit 6")
 		})
 	}
 }
@@ -63,7 +62,7 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	require.Error(t, err)
 	var terminal *terminalWaitError
 	// A 500 is a transient failure, not a settled outcome—exit 1, not 6.
-	assert.False(t, errors.As(err, &terminal))
+	assert.NotErrorAs(t, err, &terminal)
 }
 
 func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
@@ -80,9 +79,9 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	require.Error(t, err)
 	// Still pending is exit 4's territory, not the settled-negative code.
 	var terminal *terminalWaitError
-	assert.False(t, errors.As(err, &terminal))
+	assert.NotErrorAs(t, err, &terminal)
 	var pending *pendingWaitError
-	assert.True(t, errors.As(err, &pending))
+	assert.ErrorAs(t, err, &pending)
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned
