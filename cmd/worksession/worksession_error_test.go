@@ -18,6 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// helperSetupExitCode marks a helper that failed before reaching the command, so a
+// broken harness is never read as the command's own exit 2.
+const helperSetupExitCode = 99
+
 type errorEnvelope struct {
 	OK        bool   `json:"ok"`
 	ExitCode  int    `json:"exit_code"`
@@ -66,7 +70,6 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 
 	var env errorEnvelope
 	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
-	// The helper also exits 2 on a missing marker; the parsed envelope tells them apart.
 	assert.Equal(t, utils.ExitCodeUsageError, env.ExitCode)
 	assert.Equal(t, "usage_error", env.ErrorCode)
 	assert.Equal(t, "extend", env.Context.Operation)
@@ -116,6 +119,9 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 // work-session subcommand in the given output mode; returns (stdout, stderr, exitCode).
 func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
+	// outputFormat and serverURL are adjacent strings: a transposed call site
+	// still compiles.
+	require.Contains(t, []string{utils.OutputFormatTable, utils.OutputFormatJSON}, outputFormat)
 
 	home := t.TempDir()
 	writeWorkSessionTestConfig(t, home, serverURL)
@@ -151,9 +157,14 @@ func TestWorkSessionErrorHelperProcess(t *testing.T) {
 	args, ok := workSessionHelperArgs(os.Args)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "missing worksession-error-helper marker")
-		os.Exit(2)
+		os.Exit(helperSetupExitCode)
 	}
-	utils.OutputFormat = os.Getenv("GO_WORKSESSION_HELPER_OUTPUT")
+	outputFormat := os.Getenv("GO_WORKSESSION_HELPER_OUTPUT")
+	if outputFormat != utils.OutputFormatTable && outputFormat != utils.OutputFormatJSON {
+		fmt.Fprintf(os.Stderr, "unset or unknown GO_WORKSESSION_HELPER_OUTPUT: %q\n", outputFormat)
+		os.Exit(helperSetupExitCode)
+	}
+	utils.OutputFormat = outputFormat
 	WorkSessionCmd.SetArgs(args)
 	if err := WorkSessionCmd.Execute(); err != nil {
 		os.Exit(1)
