@@ -18,7 +18,7 @@ func TestClientTimeoutLine(t *testing.T) {
 	assert.Contains(t, line, "[client_timeout]", "stderr should carry the phase id in brackets")
 	assert.Contains(t, line, event.DescribePhase("client_timeout"),
 		"stderr should include the human-readable description")
-	assert.True(t, strings.HasSuffix(line, "\n"), "line should end with newline")
+	assert.True(t, strings.HasSuffix(line, "\n"), "line must end with a newline: %q", line)
 }
 
 func TestAsPhasedError(t *testing.T) {
@@ -110,7 +110,7 @@ func TestRemoteCommandOutcome(t *testing.T) {
 			assert.Contains(t, stderrLine, event.DescribePhase(tt.wantStderrPhrase),
 				"stderr should include the human-readable phase description")
 			assert.True(t, strings.HasSuffix(stderrLine, "\n"),
-				"stderr line should end with a newline")
+				"stderr line must end with a newline: %q", stderrLine)
 		})
 	}
 }

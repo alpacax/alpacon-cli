@@ -182,7 +182,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 					assert.Contains(t, stderrLine, sub, "stderr should contain %q", sub)
 				}
 				assert.True(t, strings.HasSuffix(stderrLine, "\n"),
-					"stderr line should end with a newline")
+					"stderr line must end with a newline: %q", stderrLine)
 			}
 		})
 	}

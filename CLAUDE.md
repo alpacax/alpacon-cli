@@ -159,7 +159,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 - Dedicated helper over a predicate wrapped in `True/False`: `Contains`/`NotContains`, `ErrorAs`/`NotErrorAs`, `Len`, `NoError`, `Empty`. The wrapper collapses both operands to one bool and failure output loses them. `testifylint` enforces all of these but `Empty`—its `empty` checker is still disabled in `.golangci.yml` (#320), so apply that one by hand. Suffix/prefix checks have no helper, so `assert.True(t, strings.HasSuffix(...))` stays
 - `require` when later lines depend on the assertion, `assert` when checks are independent. Never `require` inside an httptest handler or goroutine—`FailNow` off the test goroutine is undefined
-- No message that restates the assertion (helpers print operands and error chains themselves); keep only a reason the code cannot say
+- No message that restates the assertion (helpers print operands and error chains themselves); keep only a reason the code cannot say. `True`/`False` are the exception—they print `Should be true` and nothing else, so their message carries the operand: `"stderr line must end with a newline: %q", line`
 - JSON passthrough tests: one `JSONEq` over the whole body, not per-field asserts—field lists drift and silently drop fields
 
 ### Comments
