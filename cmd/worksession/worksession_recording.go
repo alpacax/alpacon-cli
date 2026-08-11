@@ -2,6 +2,8 @@ package worksession
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -49,8 +51,8 @@ var workSessionRecordingCmd = &cobra.Command{
 			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d recording(s)).", recordingIndex, len(recordings))
 		}
 
-		printRecordingHeader(target, idx, len(recordings))
-		printRecordingContent(target.MaskedRecord)
+		printRecordingHeader(os.Stdout, target, idx, len(recordings))
+		printRecordingContent(os.Stdout, target.MaskedRecord)
 	},
 }
 
@@ -65,19 +67,19 @@ func findRecording(recordings []wsapi.TimelineItem, index int) (*wsapi.TimelineI
 	return &recordings[index-1], index
 }
 
-func printRecordingHeader(target *wsapi.TimelineItem, idx int, total int) {
+func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total int) {
 	header := fmt.Sprintf("Recording %d/%d", idx, total)
 	if ts := resolveTimestamp(target.Timestamp); ts != "" {
 		header += " — " + ts
 	}
-	fmt.Println(header)
-	fmt.Println()
+	_, _ = fmt.Fprintln(w, header)
+	_, _ = fmt.Fprintln(w)
 }
 
-func printRecordingContent(raw string) {
+func printRecordingContent(w io.Writer, raw string) {
 	content := utils.StripANSIEscapes(raw)
-	fmt.Print(content)
+	_, _ = fmt.Fprint(w, content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
-		fmt.Println()
+		_, _ = fmt.Fprintln(w)
 	}
 }
