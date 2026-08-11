@@ -41,7 +41,7 @@ func TestAsPhasedError(t *testing.T) {
 			got, ok := asPhasedError(tt.err)
 			assert.Equal(t, tt.wantOk, ok)
 			if tt.wantNil {
-				assert.Nil(t, got)
+				assert.NoError(t, got)
 			}
 		})
 	}

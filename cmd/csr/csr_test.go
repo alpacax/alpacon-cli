@@ -76,7 +76,7 @@ func TestCsrSubcommands(t *testing.T) {
 		})
 	}
 
-	assert.Equal(t, 8, len(subCmds), "should have 8 subcommands")
+	assert.Len(t, subCmds, 8)
 }
 
 func TestSubcommandAliases(t *testing.T) {
