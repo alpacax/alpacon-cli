@@ -34,7 +34,7 @@ func TestGetPreferences(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetPreferences(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	expectedJSON, err := json.Marshal(expected)
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestGetPreferences_EmptyResponse(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetPreferences(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
