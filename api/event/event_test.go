@@ -1122,7 +1122,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
-	require.ErrorAs(t, err, &remoteErr, "failed status must yield a remote command error")
+	require.ErrorAs(t, err, &remoteErr)
 	assert.Equal(t, 23, remoteErr.ExitCode)
 	assert.Equal(t, "before-exit\n", stdoutBuf.String())
 }
@@ -1920,7 +1920,7 @@ func TestGiveUpGap_BoundsCumulativeSkipped(t *testing.T) {
 		}
 	})
 
-	assert.Len(t, g.skipped, maxGapWidth, "cumulative skipped capped at maxGapWidth")
+	assert.Len(t, g.skipped, maxGapWidth)
 	// Gap 1 is fully recorded (retryable), gap 2 fills the cap mid-gap (partial
 	// retry), and later gaps must not claim a retry they won't get.
 	assert.Contains(t, stderr, "will retry at command end")
