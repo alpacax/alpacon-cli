@@ -313,7 +313,10 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return detail
 
 	case "websh_record":
-		return utils.TruncateString(item.MaskedRecord, 60)
+		// Sanitize before truncating, as every case above does: otherwise the 60-char
+		// budget goes on escape bytes and the cell shows less of the command than the
+		// rows beside it.
+		return utils.TruncateString(utils.SanitizeTerminalText(item.MaskedRecord), 60)
 
 	default:
 		return ""

@@ -213,6 +213,13 @@ func TestFormatDetails_WebshRecord(t *testing.T) {
 	assert.Equal(t, "ls -la /home/user", formatDetails(&item))
 }
 
+func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
+	// The escape has to go before the 60-char cut, or it eats the budget the command
+	// text needs and the cell shows less than the rows beside it.
+	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "\x1b[2K\u202els -la"}
+	assert.Equal(t, "ls -la", formatDetails(&item))
+}
+
 func TestFormatDetails_Unknown(t *testing.T) {
 	item := wsapi.TimelineItem{Type: "unknown_event"}
 	assert.Equal(t, "", formatDetails(&item))
