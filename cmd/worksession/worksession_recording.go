@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -79,9 +80,16 @@ func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total in
 }
 
 func printRecordingContent(w io.Writer, raw string) {
-	// No control pass: this path shows the recording as it was, so \r and the
-	// line endings have to survive.
-	content := utils.StripFormatAndANSI(raw)
+	// No full control pass: this path shows the recording as it was, so \r and the
+	// line endings have to survive. DEL and the C1 block are the exception — U+009B
+	// is an 8-bit CSI, so it opens a control sequence on a terminal that decodes
+	// them, and no C1 code point is content a recording can carry.
+	content := strings.Map(func(r rune) rune {
+		if r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, utils.StripFormatAndANSI(raw))
 	_, _ = fmt.Fprint(w, content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		_, _ = fmt.Fprintln(w)

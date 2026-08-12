@@ -155,9 +155,17 @@ func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
 	assert.Equal(t, "echo safe\n", buf.String())
 }
 
+func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
+	// U+009B is an 8-bit CSI: left in, it erases the recorded line and the reviewer
+	// reads what follows instead.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "reboot\u009b2Krm -rf /\n")
+	assert.Equal(t, "reboot2Krm -rf /\n", buf.String())
+}
+
 func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
-	// The control pass is deliberately absent here: a recording shown as it was
-	// keeps \r and its line endings.
+	// The C0 pass is deliberately absent here: a recording shown as it was keeps
+	// \r and its line endings.
 	var buf bytes.Buffer
 	printRecordingContent(&buf, "a\rb")
 	assert.Equal(t, "a\rb\n", buf.String())
