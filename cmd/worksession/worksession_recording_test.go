@@ -136,6 +136,17 @@ func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
 	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
 }
 
+// printRecordingHeader
+
+func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
+	// formatTimestamp returns the server's string as-is when it does not parse, so
+	// the header is a sink for an escape sequence that clears the reviewer's screen.
+	ts := "\x1b[2J\x1b[H\u202eSPOOFED"
+	var buf bytes.Buffer
+	printRecordingHeader(&buf, &wsapi.TimelineItem{Timestamp: &ts}, 1, 1)
+	assert.Equal(t, "Recording 1/1 — SPOOFED\n\n", buf.String())
+}
+
 // printRecordingContent
 
 func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
