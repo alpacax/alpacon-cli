@@ -55,8 +55,10 @@ Use --query to search records by command text (fuzzy match).`,
 }
 
 func sanitizeRecord(record string, width int) string {
-	// Format chars are deleted rather than spaced: they are zero-width, so a space
-	// in their place would widen the row beyond what was recorded.
+	// Format chars are deleted rather than spaced: a space would be
+	// indistinguishable from whitespace that was actually recorded, and no Cf rune
+	// carries anything a reviewer needs. The tradeoff is that legitimate text
+	// changes shape — a ZWJ emoji splits into its parts, Arabic joining breaks.
 	record = utils.StripFormatAndANSI(record)
 	// Map control chars to spaces so they separate tokens instead of merging them.
 	record = strings.Map(func(r rune) rune {
