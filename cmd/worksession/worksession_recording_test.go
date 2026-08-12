@@ -163,6 +163,18 @@ func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
 	assert.Equal(t, "reboot2Krm -rf /\n", buf.String())
 }
 
+func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
+	// ansiEscapeRE ends an ESC-led form at \x40-\x7e, so these three get past it.
+	// Left in, "ESC ( 0" turns the rest of the reviewer's screen into line-drawing
+	// glyphs and "ESC 7"/"ESC 8" restore the cursor onto an earlier line, which lets
+	// the recording overwrite what was already read.
+	for _, raw := range []string{"ab\x1b(0", "ab\x1b7\x1b8", "ab\x1b#3"} {
+		var buf bytes.Buffer
+		printRecordingContent(&buf, raw)
+		assert.NotContains(t, buf.String(), "\x1b", "raw %q", raw)
+	}
+}
+
 func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
 	// The C0 pass is deliberately absent here: a recording shown as it was keeps
 	// \r and its line endings.

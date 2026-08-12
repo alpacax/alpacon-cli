@@ -81,11 +81,14 @@ func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total in
 
 func printRecordingContent(w io.Writer, raw string) {
 	// No full control pass: this path shows the recording as it was, so \r and the
-	// line endings have to survive. DEL and the C1 block are the exception — U+009B
-	// is an 8-bit CSI, so it opens a control sequence on a terminal that decodes
-	// them, and no C1 code point is content a recording can carry.
+	// line endings have to survive. DEL, the C1 block, and a bare ESC are the
+	// exception. ansiEscapeRE matches ESC-led forms ending in \x40-\x7e alone, so
+	// "ESC ( 0" and "ESC 7" get past it and still reach the reviewer's terminal,
+	// where they switch the charset and move the cursor off the line. Every matched
+	// sequence is already gone by here, so a leftover ESC is an introducer that
+	// failed to match and its tail belongs on screen as text.
 	content := strings.Map(func(r rune) rune {
-		if r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+		if r == 0x1b || utils.IsC1OrDEL(r) {
 			return -1
 		}
 		return r
