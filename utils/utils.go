@@ -488,6 +488,13 @@ func IsControlRune(r rune) bool {
 	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
+// IsC1OrDEL reports whether r is DEL or a C1 control. A terminal decodes U+009B as
+// an 8-bit CSI, so these open a control sequence that the escape pass never sees:
+// it matches ESC-led forms alone.
+func IsC1OrDEL(r rune) bool {
+	return r == 0x7f || (r >= 0x80 && r <= 0x9f)
+}
+
 func StripControlChars(s string) string {
 	return strings.Map(func(r rune) rune {
 		if IsControlRune(r) {
