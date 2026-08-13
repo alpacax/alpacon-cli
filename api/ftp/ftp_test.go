@@ -858,9 +858,11 @@ func TestFetchFromURLToFile_CreatesOwnerOnlyFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "private key material", string(content))
 
+	// The umask can narrow 0600 further, so pin the guarantee that holds: no
+	// group or other bits. The successful read above covers the owner side.
 	info, err := os.Stat(dest)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	assert.Zero(t, info.Mode().Perm()&0077)
 }
 
 func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
