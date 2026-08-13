@@ -207,8 +207,13 @@ func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 	dest := filepath.Join(t.TempDir(), "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
 
-	_, err := SaveStreamAtomic(dest, strings.NewReader("replacement"), 0666)
+	written, err := SaveStreamAtomic(dest, strings.NewReader("replacement"), 0666)
 	require.NoError(t, err)
+	assert.Equal(t, int64(len("replacement")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement", string(content))
 
 	info, err := os.Stat(dest)
 	require.NoError(t, err)
