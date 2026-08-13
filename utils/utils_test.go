@@ -376,10 +376,11 @@ func TestStripFormatChars(t *testing.T) {
 	assert.Equal(t, "abé", StripFormatChars("a\u200dbé"))
 
 	// The bidi controls are the ones that matter: they reorder what a terminal
-	// renders without changing a byte. Every one of them goes.
+	// renders without changing a byte. All twelve members of Bidi_Control go.
 	for _, r := range []rune{
 		0x202a, 0x202b, 0x202c, 0x202d, 0x202e, // embedding and override
 		0x2066, 0x2067, 0x2068, 0x2069, // isolates
+		0x061c, 0x200e, 0x200f, // marks
 	} {
 		assert.Equal(t, "ab", StripFormatChars("a"+string(r)+"b"), "U+%04X", r)
 	}
