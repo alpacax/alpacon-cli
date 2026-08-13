@@ -220,6 +220,52 @@ func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
+// tempModeReader records the mode of every temp file present in dir each time
+// the stream is read, so a test can see what the partial file was exposed as.
+type tempModeReader struct {
+	reader io.Reader
+	dir    string
+	modes  []os.FileMode
+}
+
+func (r *tempModeReader) Read(p []byte) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(r.dir, ".alpacon-*.tmp"))
+	if err != nil {
+		return 0, err
+	}
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			return 0, err
+		}
+		r.modes = append(r.modes, info.Mode().Perm())
+	}
+	return r.reader.Read(p)
+}
+
+func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes are not enforced on Windows")
+	}
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "file.txt")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+
+	reader := &tempModeReader{reader: strings.NewReader("replacement"), dir: dir}
+	_, err := SaveStreamAtomic(dest, reader, 0600)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, reader.modes)
+	for _, mode := range reader.modes {
+		assert.Zero(t, mode&0077)
+	}
+
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), info.Mode().Perm())
+}
+
 func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file modes are not enforced on Windows")

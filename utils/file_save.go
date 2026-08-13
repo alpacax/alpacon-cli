@@ -66,7 +66,15 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	file, err := createReplacementTempFile(dir, perm)
+	// A replacement is written owner-only and widened to the destination's mode
+	// only once the content is complete, so a download that dies mid-stream
+	// never leaves its partial content readable to anyone else.
+	createPerm := perm
+	if replacing {
+		createPerm = 0600
+	}
+
+	file, err := createReplacementTempFile(dir, createPerm)
 	if err != nil {
 		return 0, err
 	}
@@ -79,14 +87,6 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 		}
 	}()
 
-	// The umask strips bits from what O_CREATE requested, so an existing mode
-	// needs a chmod to survive the replacement intact.
-	if replacing {
-		if err := file.Chmod(perm); err != nil {
-			return 0, fmt.Errorf("failed to set temp file permissions: %w", err)
-		}
-	}
-
 	written, copyErr := io.Copy(file, r)
 	closeErr := file.Close()
 	if copyErr != nil {
@@ -94,6 +94,14 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	}
 	if closeErr != nil {
 		return written, fmt.Errorf("failed to close file: %w", closeErr)
+	}
+
+	// The umask stripped bits from what O_CREATE requested, so an existing mode
+	// needs a chmod to survive the replacement intact.
+	if replacing {
+		if err := os.Chmod(tempName, perm); err != nil {
+			return written, fmt.Errorf("failed to set temp file permissions: %w", err)
+		}
 	}
 
 	if err := replaceFile(tempName, targetName); err != nil {
