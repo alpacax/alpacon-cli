@@ -589,7 +589,8 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 
 	defer func() { _ = resp.Body.Close() }()
 
-	return utils.SaveStreamAtomic(filePath, resp.Body)
+	// Remote files routinely carry secrets, so a new download lands owner-only.
+	return utils.SaveStreamAtomic(filePath, resp.Body, 0600)
 }
 
 func downloadedFilePath(dest, remotePath string) (string, error) {

@@ -168,7 +168,8 @@ func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, pac
 	}
 
 	savePath := filepath.Join(dest, filepath.Base(fileName))
-	if _, err = utils.SaveStreamAtomic(savePath, resp.Body); err != nil {
+	// Packages are public artifacts—let the umask decide, as os.Create does.
+	if _, err = utils.SaveStreamAtomic(savePath, resp.Body, 0666); err != nil {
 		return err
 	}
 

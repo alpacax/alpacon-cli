@@ -38,7 +38,11 @@ func saveStream(fileName string, r io.Reader) (int64, error) {
 	return written, nil
 }
 
-func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
+// SaveStreamAtomic writes r to fileName through a temp file in the same
+// directory, then renames it into place. newFilePerm, minus the umask, applies
+// only when fileName does not exist yet; an existing file keeps its own mode so
+// a write never re-permissions a file the user set up.
+func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) {
 	targetName, err := resolveWritePath(fileName)
 	if err != nil {
 		return 0, err
@@ -49,14 +53,14 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 		return 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	perm := os.FileMode(0666)
-	var existingPerm os.FileMode
+	perm := newFilePerm
+	replacing := false
 	if info, err := os.Stat(targetName); err == nil {
 		if info.IsDir() {
 			return 0, fmt.Errorf("destination is a directory: %s", targetName)
 		}
-		existingPerm = info.Mode().Perm()
-		perm = existingPerm
+		perm = info.Mode().Perm()
+		replacing = true
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
@@ -74,8 +78,10 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 		}
 	}()
 
-	if existingPerm != 0 {
-		if err := file.Chmod(existingPerm); err != nil {
+	// The umask strips bits from what O_CREATE requested, so an existing mode
+	// needs a chmod to survive the replacement intact.
+	if replacing {
+		if err := file.Chmod(perm); err != nil {
 			return 0, fmt.Errorf("failed to set temp file permissions: %w", err)
 		}
 	}

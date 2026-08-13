@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -836,6 +837,30 @@ func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
 	matches, globErr := filepath.Glob(filepath.Join(filepath.Dir(dest), ".alpacon-*.tmp"))
 	require.NoError(t, globErr)
 	assert.Empty(t, matches)
+}
+
+func TestFetchFromURLToFile_CreatesOwnerOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes are not enforced on Windows")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("private key material"))
+	}))
+	defer ts.Close()
+
+	dest := filepath.Join(t.TempDir(), "id_rsa")
+	written, err := fetchFromURLToFile(ts.Client(), ts.URL, dest, 1)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("private key material")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "private key material", string(content))
+
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
 func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
