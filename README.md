@@ -158,7 +158,7 @@ $ alpacon cp -u admin -g developers <SOURCE> <DESTINATION>
 $ alpacon edit <server>:/etc/nginx/nginx.conf    # open a remote file in your local editor
 ```
 
-`<server>:<path>` denotes a remote target. A file `cp` downloads is created owner-only (`0600`), since remote files routinely carry secrets; a local file that already exists keeps its current mode. Recursive downloads and downloads of two or more sources arrive as an archive, and each file is extracted with whatever mode the archive records for it. Saving in `edit` overwrites the remote file; ownership and permissions may be reset by server policy. `edit` only opens existing remote files—it downloads first, so it won't create a new one. `--editor` is tokenized without a shell (the file path is appended as the last argument), so shell syntax such as pipes (`|`), redirections (`>>`), or `&&` won't work.
+`<server>:<path>` denotes a remote target. A file `cp` downloads is created owner-only—`0600` before the umask, which can only narrow it further—since remote files routinely carry secrets; a local file that already exists keeps its current mode. Recursive downloads and downloads of two or more sources arrive as an archive, and each file is extracted with whatever mode the archive records for it. Saving in `edit` overwrites the remote file; ownership and permissions may be reset by server policy. `edit` only opens existing remote files—it downloads first, so it won't create a new one. `--editor` is tokenized without a shell (the file path is appended as the last argument), so shell syntax such as pipes (`|`), redirections (`>>`), or `&&` won't work.
 
 ### TCP tunneling
 ```bash
