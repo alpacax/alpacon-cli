@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	osexec "os/exec"
@@ -365,7 +366,7 @@ func TestSplitPath(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "missing ':' separator")
-				assert.Contains(t, err.Error(), tt.input)
+				assert.Contains(t, err.Error(), fmt.Sprintf("%q", tt.input))
 			} else {
 				require.NoError(t, err)
 			}
