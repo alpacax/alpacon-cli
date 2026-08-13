@@ -7,7 +7,8 @@ import (
 )
 
 var (
-	pageSize   int
+	tail       int
+	pinnedOnly bool
 	serverName string
 )
 
