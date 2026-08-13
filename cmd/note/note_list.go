@@ -19,15 +19,19 @@ and --pinned to show only pinned notes.`,
   alpacon note ls --tail 100
   alpacon note ls --server my-server
   alpacon note ls --pinned`,
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
+		tail, _ := cmd.Flags().GetInt("tail")
+		serverName, _ := cmd.Flags().GetString("server")
+		pinnedOnly, _ := cmd.Flags().GetBool("pinned")
+
 		runNoteList(tail, serverName, pinnedOnly)
 	},
 }
 
 func init() {
-	noteListCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of notes to show, newest first")
-	noteListCmd.Flags().StringVarP(&serverName, "server", "s", "", "Specify server for notes")
-	noteListCmd.Flags().BoolVar(&pinnedOnly, "pinned", false, "Show only pinned notes")
+	noteListCmd.Flags().IntP("tail", "t", 25, "Number of notes to show, newest first")
+	noteListCmd.Flags().StringP("server", "s", "", "Specify server for notes")
+	noteListCmd.Flags().Bool("pinned", false, "Show only pinned notes")
 }
 
 func runNoteList(tail int, serverName string, pinnedOnly bool) {

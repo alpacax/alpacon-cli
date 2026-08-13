@@ -25,7 +25,7 @@ type NoteDetails struct {
 	Content string `json:"content"`
 	Private bool   `json:"private"`
 	Pinned  bool   `json:"pinned"`
-	AddedAt string `json:"added_at" table:"Added At"`
+	AddedAt string `json:"added_at"`
 }
 
 type NoteCreateRequest struct {

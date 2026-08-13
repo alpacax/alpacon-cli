@@ -6,12 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	tail       int
-	pinnedOnly bool
-	serverName string
-)
-
 var NoteCmd = &cobra.Command{
 	Use:     "note",
 	Aliases: []string{"notes"},
