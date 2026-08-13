@@ -66,6 +66,14 @@ var sudoDenialHints = []struct {
 	pendingApproval bool
 }{
 	{
+		// The exec branch's first rung: a Command with no requesting user, i.e.
+		// a service-token submission, which the token lane only resolves under
+		// EXEC_SUDO_MODE=enforce. Re-running it with the same token repeats it.
+		code: "SUDO_COMMAND_NOT_AUTHORIZED",
+		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
+			"Re-run it under a principal that carries a user (an interactive login, or a personal API token).\n",
+	},
+	{
 		code: "SUDO_NO_WORKSESSION_POLICY",
 		guidance: "sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
 			"Add it and re-run (omit SESSION_ID to use the active session):\n" +

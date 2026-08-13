@@ -45,6 +45,12 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.NotContains(t, hint, `--description "`, "a queued edit must not read as part of the reviewer-free command")
 	})
 
+	t.Run("command-not-authorized names the accountable-user requirement", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_COMMAND_NOT_AUTHORIZED).\n")
+		assert.Contains(t, hint, "accountable user")
+		assert.Contains(t, hint, "personal API token")
+	})
+
 	t.Run("risk-denied is a terminal denial", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_RISK_DENIED).\n")
 		assert.Contains(t, hint, "risk")
@@ -131,6 +137,8 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
 		assert.False(t, hasSudoApprovalDenial(
 			"Alpacon denied this sudo command (SUDO_POLICY_MFA_REQUIRED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_COMMAND_NOT_AUTHORIZED).\n"))
 	})
 
 	t.Run("forged parenthesized token does not trigger a pending signal", func(t *testing.T) {
