@@ -199,10 +199,15 @@ func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
 	assert.Empty(t, matches)
 }
 
-func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
+func requireUnixModes(t *testing.T) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file modes are not enforced on Windows")
 	}
+}
+
+func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
+	requireUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
@@ -244,22 +249,26 @@ func (r *tempModeReader) Read(p []byte) (int, error) {
 }
 
 func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix file modes are not enforced on Windows")
-	}
+	requireUnixModes(t)
 
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
 
-	reader := &tempModeReader{reader: strings.NewReader("replacement"), dir: dir}
+	// The stream dies after its first chunk, so the modes sampled below are the
+	// ones a partial replacement actually sat at.
+	reader := &tempModeReader{reader: &failingReader{reader: strings.NewReader("replacement")}, dir: dir}
 	_, err := SaveStreamAtomic(dest, reader, 0600)
-	require.NoError(t, err)
+	require.Error(t, err)
 
 	require.NotEmpty(t, reader.modes)
 	for _, mode := range reader.modes {
 		assert.Zero(t, mode&0077)
 	}
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "existing", string(content))
 
 	info, err := os.Stat(dest)
 	require.NoError(t, err)
@@ -267,9 +276,7 @@ func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix file modes are not enforced on Windows")
-	}
+	requireUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
 
