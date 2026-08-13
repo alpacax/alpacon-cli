@@ -77,7 +77,8 @@ var sudoDenialHints = []struct {
 		code: "SUDO_NO_WORKSESSION_POLICY",
 		guidance: "sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
 			"Add it and re-run (omit SESSION_ID to use the active session):\n" +
-			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
+			"The addition may require approval before it takes effect.\n",
 	},
 	{
 		// An MFA step-up does not resolve this one—only a policy that bypasses
@@ -85,7 +86,8 @@ var sudoDenialHints = []struct {
 		code: "SUDO_POLICY_MFA_REQUIRED",
 		guidance: "sudo was denied: a policy covers this command but requires MFA, which a non-interactive command cannot complete.\n" +
 			"Cover it with an MFA-bypass policy and re-run (omit SESSION_ID to use the active session):\n" +
-			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
+			"The addition may require approval before it takes effect.\n",
 	},
 	{
 		code:     sudoPresenceRequiredCode,
@@ -101,12 +103,14 @@ var sudoDenialHints = []struct {
 		// judge reads, but only the title is a way around the wait (ADR 0016
 		// §4-5): a description edit on an approved/active session is queued for
 		// an approval of its own (work_sessions/services.py
-		// compute_modification_split), which is the very wait this path skips.
+		// compute_modification_split), which is the very wait this path
+		// skips—only an approval-bypassing principal escapes it, which is the
+		// room the hint's wording leaves.
 		code: "SUDO_INTENT_DEVIATION",
 		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
 			"If the session's stated purpose is out of date, re-declare it and re-run instead of waiting for a reviewer (omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --title \"<what you are doing>\"\n" +
-			"Editing the description instead is not a way around the wait: on an approved or active session that edit queues its own approval.\n",
+			"Editing the description instead is not a way around the wait: on an approved or active session that edit may need an approval of its own.\n",
 		pendingApproval: true,
 	},
 	{

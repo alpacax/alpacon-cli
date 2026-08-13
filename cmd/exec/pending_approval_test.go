@@ -207,7 +207,7 @@ func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
 
 	assert.Contains(t, stderr.String(), "work-session update [SESSION_ID] --title")
-	assert.Contains(t, stderr.String(), "queues its own approval")
+	assert.Contains(t, stderr.String(), "may need an approval of its own")
 
 	// The hint rides on stderr, so the machine signal on stdout stays parseable.
 	var got struct {

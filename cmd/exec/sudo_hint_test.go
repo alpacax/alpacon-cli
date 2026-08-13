@@ -14,6 +14,10 @@ func TestSudoDenialHint(t *testing.T) {
 		out := "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"
 		hint := sudoDenialHint(out)
 		assert.Contains(t, hint, "work-session update")
+		// Adding a policy is an expansion, so the server queues it for approval
+		// (sudo/services.py classify_sudo_policies_split). "Add it and re-run"
+		// alone would read as immediate.
+		assert.Contains(t, hint, "may require approval")
 	})
 
 	t.Run("presence-required points to a step-up", func(t *testing.T) {
@@ -30,6 +34,7 @@ func TestSudoDenialHint(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_POLICY_MFA_REQUIRED).\n")
 		assert.Contains(t, hint, "MFA")
 		assert.Contains(t, hint, "work-session update")
+		assert.Contains(t, hint, "may require approval")
 		assert.NotEqual(t, sudoDenialHint("Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"), hint)
 	})
 
@@ -41,7 +46,7 @@ func TestSudoDenialHint(t *testing.T) {
 		// once: a description edit on an approved/active session is queued for an
 		// approval of its own, which is the wait this path exists to skip.
 		assert.Contains(t, hint, "work-session update [SESSION_ID] --title")
-		assert.Contains(t, hint, "queues its own approval")
+		assert.Contains(t, hint, "may need an approval of its own")
 		assert.NotContains(t, hint, `--description "`, "a queued edit must not read as part of the reviewer-free command")
 	})
 
