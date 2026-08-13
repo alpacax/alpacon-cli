@@ -163,6 +163,15 @@ func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
 	assert.Equal(t, "reboot2Krm -rf /\n", buf.String())
 }
 
+func TestPrintRecordingContent_StripsRawC1Byte(t *testing.T) {
+	// A recording of an 8-bit program carries CSI as the raw byte 0x9b, which is
+	// invalid UTF-8, so IsC1OrDEL never sees it. What keeps it off the terminal is
+	// strings.Map substituting U+FFFD, so a rewrite into a byte loop reopens this.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "reboot\x9b2Krm -rf /\n")
+	assert.Equal(t, "reboot�2Krm -rf /\n", buf.String())
+}
+
 func TestPrintRecordingContent_StripsShiftFunctions(t *testing.T) {
 	// SO invokes G1 into GL and holds until SI or a reset: the same charset switch
 	// as "ESC ( 0", reached without an ESC.
