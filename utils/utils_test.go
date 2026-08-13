@@ -351,22 +351,21 @@ func TestSplitPath(t *testing.T) {
 		input      string
 		wantServer string
 		wantPath   string
-		wantErr    bool
+		wantErrMsg string // empty means no error expected
 	}{
-		{"server and path", "myserver:/home/user/file.txt", "myserver", "/home/user/file.txt", false},
-		{"path with colon", "myserver:/tmp/a:b", "myserver", "/tmp/a:b", false},
-		{"empty path after colon", "myserver:", "myserver", "", false},
-		{"empty server before colon", ":/tmp/file", "", "/tmp/file", false},
-		{"no colon", "localfile.txt", "", "", true},
-		{"empty input", "", "", "", true},
+		{"server and path", "myserver:/home/user/file.txt", "myserver", "/home/user/file.txt", ""},
+		{"path with colon", "myserver:/tmp/a:b", "myserver", "/tmp/a:b", ""},
+		{"empty path after colon", "myserver:", "myserver", "", ""},
+		{"empty server before colon", ":/tmp/file", "", "", "missing server name"},
+		{"no colon", "localfile.txt", "", "", "missing ':' separator"},
+		{"empty input", "", "", "", "missing ':' separator"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			server, path, err := SplitPath(tt.input)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "missing ':' separator")
-				assert.Contains(t, err.Error(), fmt.Sprintf("%q", tt.input))
+			if tt.wantErrMsg != "" {
+				assert.ErrorContains(t, err, tt.wantErrMsg)
+				assert.ErrorContains(t, err, fmt.Sprintf("%q", tt.input))
 			} else {
 				require.NoError(t, err)
 			}
