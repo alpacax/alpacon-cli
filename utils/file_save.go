@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// stagingPerm is the mode a replacement is written under, never a final mode:
+// it hides partial content from other local accounts until the write completes.
+const stagingPerm = 0600
+
 func SaveFile(fileName string, data []byte) error {
 	_, err := saveStream(fileName, bytes.NewReader(data))
 	return err
@@ -54,24 +58,26 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 		return 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	perm := newFilePerm
+	finalPerm := newFilePerm
 	replacing := false
 	if info, err := os.Stat(targetName); err == nil {
 		if info.IsDir() {
 			return 0, fmt.Errorf("destination is a directory: %s", targetName)
 		}
-		perm = info.Mode().Perm()
+		finalPerm = info.Mode().Perm()
 		replacing = true
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	// A replacement is written owner-only and widened to the destination's mode
-	// only once the content is complete, so a download that dies mid-stream
-	// never leaves its partial content readable to anyone else.
-	createPerm := perm
+	// A replacement is staged narrow and widened once the content is complete, so
+	// a download that dies mid-stream never leaves its partial content readable
+	// to anyone else. A new file cannot be staged the same way: it would need a
+	// chmod that bypasses the umask, and a caller passing 0666 is asking for the
+	// umask to apply.
+	createPerm := finalPerm
 	if replacing {
-		createPerm = 0600
+		createPerm = stagingPerm
 	}
 
 	file, err := createReplacementTempFile(dir, createPerm)
@@ -88,20 +94,22 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	}()
 
 	written, copyErr := io.Copy(file, r)
+	// Staging cost the destination its own mode, so restore it before the rename.
+	// Through the handle: a path-based chmod here could be pointed at another
+	// file by anyone able to swap tempName for a symlink.
+	var chmodErr error
+	if copyErr == nil && replacing {
+		chmodErr = file.Chmod(finalPerm)
+	}
 	closeErr := file.Close()
 	if copyErr != nil {
 		return written, fmt.Errorf("failed to write file: %w", copyErr)
 	}
+	if chmodErr != nil {
+		return written, fmt.Errorf("failed to set temp file permissions: %w", chmodErr)
+	}
 	if closeErr != nil {
 		return written, fmt.Errorf("failed to close file: %w", closeErr)
-	}
-
-	// The umask stripped bits from what O_CREATE requested, so an existing mode
-	// needs a chmod to survive the replacement intact.
-	if replacing {
-		if err := os.Chmod(tempName, perm); err != nil {
-			return written, fmt.Errorf("failed to set temp file permissions: %w", err)
-		}
 	}
 
 	if err := replaceFile(tempName, targetName); err != nil {
