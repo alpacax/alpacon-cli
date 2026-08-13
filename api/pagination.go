@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"strconv"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// The server caps page_size at 100 for both paginators
+// (api.pagination.MyPageNumberPagination and history.pagination.ESCursorPagination).
+const maxPageSize = 100
 
 // copyParams returns a shallow copy so the pagination loop never mutates the caller's map.
 func copyParams(params map[string]string) map[string]string {
@@ -17,35 +22,46 @@ func copyParams(params map[string]string) map[string]string {
 	return out
 }
 
+// FetchAllPages walks every page. It is FetchPagesUpTo with no bound.
 func FetchAllPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string) ([]T, error) {
-	var result []T
-	page := 1
-	const pageSize = 100
+	return FetchPagesUpTo[T](ac, endpoint, params, math.MaxInt)
+}
+
+// FetchPagesUpTo walks PageNumber pages until it has limit items, so a caller asking for
+// more than one page's worth is not silently cut off at the server's page cap.
+func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map[string]string, limit int) ([]T, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
 
 	params = copyParams(params)
-	params["page"] = strconv.Itoa(page)
-	params["page_size"] = strconv.Itoa(pageSize)
+	// A PageNumber offset is (page-1)*page_size, so page_size has to stay fixed for the whole
+	// walk. Shrinking it on the last request would move that page back over an earlier offset.
+	params["page_size"] = strconv.Itoa(min(maxPageSize, limit))
 
-	for {
-		var response ListResponse[T]
+	result := make([]T, 0, min(limit, maxPageSize))
+	for page := 1; len(result) < limit; page++ {
+		params["page"] = strconv.Itoa(page)
+
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("fetching page %d from %s: %w", page, endpoint, err)
 		}
 
+		var response ListResponse[T]
 		if err = json.Unmarshal(responseBody, &response); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decoding page %d from %s: %w", page, endpoint, err)
 		}
 
 		result = append(result, response.Results...)
-
-		if response.Next == 0 {
+		if response.Next == 0 || len(response.Results) == 0 {
 			break
 		}
-		page++
-		params["page"] = strconv.Itoa(page)
 	}
 
+	if len(result) > limit {
+		result = result[:limit]
+	}
 	return result, nil
 }
 
@@ -54,9 +70,6 @@ func FetchCursorPages[T any](ac *client.AlpaconClient, endpoint string, params m
 	if limit <= 0 {
 		return nil, nil
 	}
-
-	// The server caps page_size at 100 (ESCursorPagination.max_page_size).
-	const maxPageSize = 100
 
 	params = copyParams(params)
 	// Drop any caller-supplied cursor so the first request starts from the first page.
