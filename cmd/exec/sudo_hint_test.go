@@ -33,13 +33,16 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.NotEqual(t, sudoDenialHint("Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"), hint)
 	})
 
-	t.Run("intent-deviation leads with re-declaring the session intent", func(t *testing.T) {
+	t.Run("intent-deviation offers only the edit that skips the wait", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n")
-		// The AI judges the command against the session title and description
-		// (WorkSessionRiskContext), so the self-service path names both.
-		assert.Contains(t, hint, "--title")
-		assert.Contains(t, hint, "--description")
 		assert.Contains(t, hint, "approval request")
+		// The AI judges the command against both the session title and its
+		// description (WorkSessionRiskContext), but only a title edit applies at
+		// once: a description edit on an approved/active session is queued for an
+		// approval of its own, which is the wait this path exists to skip.
+		assert.Contains(t, hint, "work-session update [SESSION_ID] --title")
+		assert.Contains(t, hint, "queues its own approval")
+		assert.NotContains(t, hint, `--description "`, "a queued edit must not read as part of the reviewer-free command")
 	})
 
 	t.Run("risk-denied is a terminal denial", func(t *testing.T) {

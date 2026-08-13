@@ -90,11 +90,15 @@ var sudoDenialHints = []struct {
 	},
 	{
 		// The session title and description both ride in the risk payload the
-		// judge reads, so the self-service path out (ADR 0016 §4-5) names both.
+		// judge reads, but only the title is a way around the wait (ADR 0016
+		// §4-5): a description edit on an approved/active session is queued for
+		// an approval of its own (work_sessions/services.py
+		// compute_modification_split), which is the very wait this path skips.
 		code: "SUDO_INTENT_DEVIATION",
 		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
 			"If the session's stated purpose is out of date, re-declare it and re-run instead of waiting for a reviewer (omit SESSION_ID to use the active session):\n" +
-			"  alpacon work-session update [SESSION_ID] --title \"<what you are doing>\" --description \"<why>\"\n",
+			"  alpacon work-session update [SESSION_ID] --title \"<what you are doing>\"\n" +
+			"Editing the description instead is not a way around the wait: on an approved or active session that edit queues its own approval.\n",
 		pendingApproval: true,
 	},
 	{
