@@ -23,6 +23,11 @@ import (
 // whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command"
 
+// sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
+// MFA step-up). The hint table and hasSudoPresenceDenial both name it from
+// here: editing one alone would silently stop the step-up.
+const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
+
 // commandInlineCredentialMessage is the exec-facing error line for the
 // alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
@@ -75,7 +80,7 @@ var sudoDenialHints = []struct {
 			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
 	},
 	{
-		code:     "SUDO_PRESENCE_REQUIRED",
+		code:     sudoPresenceRequiredCode,
 		guidance: "sudo needs a recent MFA: complete a step-up, then re-run the command.\n",
 	},
 	{
@@ -162,7 +167,7 @@ func credentialInlineHint(invokedAs Invocation) string {
 // presence denial (SUDO_PRESENCE_REQUIRED), the only denial the CLI can resolve
 // in-flow via an MFA step-up.
 func hasSudoPresenceDenial(output string) bool {
-	return denialCodePresent(output, "SUDO_PRESENCE_REQUIRED")
+	return denialCodePresent(output, sudoPresenceRequiredCode)
 }
 
 // hasSudoApprovalDenial reports whether output carries a denial that left an
