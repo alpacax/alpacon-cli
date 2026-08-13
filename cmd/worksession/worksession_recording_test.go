@@ -163,6 +163,14 @@ func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
 	assert.Equal(t, "reboot2Krm -rf /\n", buf.String())
 }
 
+func TestPrintRecordingContent_StripsShiftFunctions(t *testing.T) {
+	// SO invokes G1 into GL and holds until SI or a reset: the same charset switch
+	// as "ESC ( 0", reached without an ESC.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "a\x0eb\x0fc\n")
+	assert.Equal(t, "abc\n", buf.String())
+}
+
 func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
 	// ansiEscapeRE ends an ESC-led form at \x40-\x7e, so these three get past it.
 	// Left in, "ESC ( 0" turns the rest of the reviewer's screen into line-drawing
