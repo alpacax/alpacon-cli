@@ -43,13 +43,6 @@ var (
 	streamApprovedCommand = event.StreamApprovedCommand
 )
 
-// Invocation names the command the user ran, so a hint can show an example
-// they can copy without translating it first. A defined type rather than a
-// bare string, so a stray value cannot be assigned by accident. Websh command
-// mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
-// renders as exec.
-type Invocation string
-
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
 // guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
 //
@@ -57,36 +50,67 @@ type Invocation string
 // codes through its sanitizer into the user-facing denial line (lowercase
 // values are dropped). Each hint stays at the denial *category* level (what to
 // do)—the server never sends the risk score or reasoning to a client.
+//
+// pendingApproval marks the codes the server emits after creating an approval
+// grant: the sudo call still fails now (an interactive sudo cannot wait on an
+// out-of-band approval, ADR 0016 §3), but a reviewer can still approve it.
+// Flagging them here rather than in a second list is what keeps the hints and
+// that code set from drifting apart.
 var sudoDenialHints = []struct {
-	code, guidance string
+	code, guidance  string
+	pendingApproval bool
 }{
 	{
-		"SUDO_NO_WORKSESSION_POLICY",
-		"sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
+		code: "SUDO_NO_WORKSESSION_POLICY",
+		guidance: "sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
 			"Add it and re-run (omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
 	},
 	{
-		"SUDO_PRESENCE_REQUIRED",
-		"sudo needs a recent MFA: complete a step-up, then re-run the command.\n",
+		// An MFA step-up does not resolve this one—only a policy that bypasses
+		// MFA does—so it stays out of the step-up path.
+		code: "SUDO_POLICY_MFA_REQUIRED",
+		guidance: "sudo was denied: a policy covers this command but requires MFA, which a non-interactive command cannot complete.\n" +
+			"Cover it with an MFA-bypass policy and re-run (omit SESSION_ID to use the active session):\n" +
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n",
 	},
 	{
-		"SUDO_APPROVAL_REQUIRED",
-		"sudo needs approval: an approval request was created. Re-run after a reviewer approves it.\n",
+		code:     "SUDO_PRESENCE_REQUIRED",
+		guidance: "sudo needs a recent MFA: complete a step-up, then re-run the command.\n",
 	},
 	{
-		"SUDO_RISK_DENIED",
-		"sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
+		code:            "SUDO_APPROVAL_REQUIRED",
+		guidance:        "sudo needs approval: an approval request was created. Re-run after a reviewer approves it.\n",
+		pendingApproval: true,
+	},
+	{
+		// The session title and description both ride in the risk payload the
+		// judge reads, so the self-service path out (ADR 0016 §4-5) names both.
+		code: "SUDO_INTENT_DEVIATION",
+		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
+			"If the session's stated purpose is out of date, re-declare it and re-run instead of waiting for a reviewer (omit SESSION_ID to use the active session):\n" +
+			"  alpacon work-session update [SESSION_ID] --title \"<what you are doing>\" --description \"<why>\"\n",
+		pendingApproval: true,
+	},
+	{
+		code:     "SUDO_RISK_DENIED",
+		guidance: "sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
 	},
 }
+
+// Invocation names the command the user ran, so a hint can show an example
+// they can copy without translating it first. A defined type rather than a
+// bare string, so a stray value cannot be assigned by accident. Websh command
+// mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
+// renders as exec.
+type Invocation string
 
 // denialCodePresent reports whether output contains the plugin's terminal denial
 // line for the given code. It anchors on the full "Alpacon denied this sudo
 // command (CODE)." line—including the trailing period the plugin emits—never a
 // bare "(CODE)" token, so a command whose own output prints the token cannot
-// forge a match on a command that succeeded. Both sudoDenialHint and
-// hasSudoPresenceDenial route through here so the anchoring logic lives in one
-// place.
+// forge a match on a command that succeeded. Every detector routes through here
+// so the anchoring logic lives in one place.
 func denialCodePresent(output, code string) bool {
 	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+").")
 }
@@ -141,14 +165,20 @@ func hasSudoPresenceDenial(output string) bool {
 	return denialCodePresent(output, "SUDO_PRESENCE_REQUIRED")
 }
 
-// hasSudoApprovalDenial reports whether output carries the sudo approval-required
-// denial (SUDO_APPROVAL_REQUIRED): a human must approve the request out of band
-// in the Alpacon console before the command can run. Like the other detectors it
-// anchors on the plugin's exact terminal denial line via denialCodePresent, so a
-// command that merely prints the token in its own output cannot forge a pending
-// signal or wedge --wait into an indefinite re-run loop.
+// hasSudoApprovalDenial reports whether output carries a denial that left an
+// approval request in flight (the pendingApproval codes in sudoDenialHints): a
+// human must approve it out of band in the Alpacon console before the command
+// can run. Like the other detectors it anchors on the plugin's exact terminal
+// denial line via denialCodePresent, so a command that merely prints the token
+// in its own output cannot forge a pending signal or wedge --wait into an
+// indefinite re-run loop.
 func hasSudoApprovalDenial(output string) bool {
-	return denialCodePresent(output, "SUDO_APPROVAL_REQUIRED")
+	for _, h := range sudoDenialHints {
+		if h.pendingApproval && denialCodePresent(output, h.code) {
+			return true
+		}
+	}
+	return false
 }
 
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
@@ -190,25 +220,34 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
 }
 
-// isApprovalDenial reports whether err is a SUDO_APPROVAL_REQUIRED denial: the
-// command exited non-zero (a real denial always surfaces as a
-// RemoteCommandError) AND the plugin's exact approval denial line is present in
-// the error's captured output. Requiring both guards against a command that
-// merely prints the token but succeeds (err == nil) being mistaken for a
-// pending approval.
-func isApprovalDenial(err error) bool {
+// approvalDenialOutput returns the captured output of a denial that left an
+// approval request in flight: the command exited non-zero (a real denial always
+// surfaces as a RemoteCommandError) AND the plugin's exact denial line for a
+// pendingApproval code is in that output. Requiring both keeps a command that
+// merely prints the token but succeeds (err == nil) from being mistaken for a
+// pending approval. It hands back the output, not a bool, so a caller needing
+// the denial code does not restate the rule for what counts as one.
+func approvalDenialOutput(err error) (string, bool) {
 	var remoteErr *event.RemoteCommandError
-	return errors.As(err, &remoteErr) && hasSudoApprovalDenial(remoteErr.Output)
+	if !errors.As(err, &remoteErr) || !hasSudoApprovalDenial(remoteErr.Output) {
+		return "", false
+	}
+	return remoteErr.Output, true
+}
+
+// isApprovalDenial reports whether err is a denial with an approval request in flight.
+func isApprovalDenial(err error) bool {
+	_, ok := approvalDenialOutput(err)
+	return ok
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
-// it is denied pending human approval (SUDO_APPROVAL_REQUIRED) and waitTimeout is
-// positive, blocks and re-attempts the command on a fixed interval until a
-// reviewer approves it out of band (the re-run then succeeds or hits a
-// different, terminal denial), or the bounded timeout elapses. When
-// waitTimeout is zero or negative, or the denial is anything other than
-// SUDO_APPROVAL_REQUIRED, it returns the first err unchanged so the caller's
-// pending/denial handling runs.
+// it is denied with an approval request in flight (a pendingApproval code) and
+// waitTimeout is positive, blocks and re-attempts the command on a fixed
+// interval until a reviewer approves it out of band (the re-run then succeeds or
+// hits a different, terminal denial), or the bounded timeout elapses. When
+// waitTimeout is zero or negative, or the denial carries a terminal code, it
+// returns the first err unchanged so the caller's pending/denial handling runs.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
@@ -281,7 +320,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 }
 
 // HandlePendingApproval emits the structured pending-approval feedback for an
-// exec sudo command that was denied SUDO_APPROVAL_REQUIRED and not waited on,
+// exec sudo command denied with an approval request in flight and not waited on,
 // then exits with ExitCodePendingApproval. It reports true when it handled the
 // err; the caller skips its normal result handling on true. The exec denial line
 // carries no approval request id, so the machine signal omits it. reRunHint is
@@ -300,8 +339,15 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 		os.Exit(utils.ExitCodePendingApproval)
 		return true
 	}
-	if !isApprovalDenial(err) {
+	output, ok := approvalDenialOutput(err)
+	if !ok {
 		return false
+	}
+	// This exits before HandleCommandResult, the hint's only other caller. The
+	// pending message covers re-running after approval; only the hint carries
+	// the self-service path out (re-declaring a stale session intent).
+	if hint := sudoDenialHint(output); hint != "" {
+		fmt.Fprint(os.Stderr, hint)
 	}
 	utils.PrintPendingApproval(
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+

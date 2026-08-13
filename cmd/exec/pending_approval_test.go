@@ -20,9 +20,9 @@ import (
 const approvalDenialResult = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
 
 // newApprovalDenialServer returns a test server that resolves one server and
-// always answers an exec command with a SUDO_APPROVAL_REQUIRED denial
-// (success=false + the plugin denial line), so the command stays pending.
-func newApprovalDenialServer() *httptest.Server {
+// always answers an exec command with the given plugin denial line
+// (success=false), so the command stays pending.
+func newApprovalDenialServer(denialLine string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -36,7 +36,7 @@ func newApprovalDenialServer() *httptest.Server {
 				"status":      "completed",
 				"success":     false,
 				"exit_code":   1,
-				"result":      approvalDenialResult,
+				"result":      denialLine,
 				"error_phase": nil,
 			}
 			_ = json.NewEncoder(w).Encode(resp)
@@ -121,7 +121,7 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
-	ts := newApprovalDenialServer()
+	ts := newApprovalDenialServer(approvalDenialResult)
 	defer ts.Close()
 
 	home := t.TempDir()
@@ -166,4 +166,54 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
 	require.NotEmpty(t, got.NextActions)
 	assert.Equal(t, "alpacon exec prod -- sudo reboot", got.NextActions[0].Command, "re-run hint should reconstruct the invocation")
+}
+
+// TestExecIntentDeviationPrintsSelfServiceHint pins the denial-code hint to the
+// pending-approval path, which exits 4 before HandleCommandResult. Without an
+// explicit print, the reviewer-free way out of an intent deviation (re-declaring
+// the session intent) never reaches the user.
+func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
+	ts := newApprovalDenialServer("Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n")
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+
+	helper := osexec.Command(
+		os.Args[0],
+		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
+		"--",
+		"exec-worksession-helper",
+		"--output",
+		"json",
+		"prod",
+		"--",
+		"sudo",
+		"reboot",
+	)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var stdout, stderr bytes.Buffer
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
+
+	assert.Contains(t, stderr.String(), "work-session update")
+	assert.Contains(t, stderr.String(), "--title")
+	assert.Contains(t, stderr.String(), "--description")
+
+	// The hint rides on stderr, so the machine signal on stdout stays parseable.
+	var got struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
 }

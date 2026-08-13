@@ -121,20 +121,20 @@ func TestDetachResultLines(t *testing.T) {
 	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
 }
 
-// stubApprovalWaitSeams swaps the loop's seams/interval (restored on cleanup) and returns a denial carrying the plugin line the loop keys on.
-func stubApprovalWaitSeams(t *testing.T, interval time.Duration) *event.RemoteCommandError {
+// stubApprovalWaitSeams swaps the loop's seams/interval (restored on cleanup) and returns a denial carrying the plugin line the loop keys on for that code.
+func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *event.RemoteCommandError {
 	t.Helper()
 	origStepUp, origStream, origInterval := runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval
 	t.Cleanup(func() {
 		runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval = origStepUp, origStream, origInterval
 	})
 	approvalWaitPollInterval = interval
-	return &event.RemoteCommandError{Output: sudoDenialLinePrefix + " (SUDO_APPROVAL_REQUIRED).", ExitCode: 1}
+	return &event.RemoteCommandError{Output: sudoDenialLinePrefix + " (" + code + ").", ExitCode: 1}
 }
 
 func TestRunExecWithApprovalWait_ResumePassesRemainingNotFull(t *testing.T) {
 	const waitTimeout = 500 * time.Millisecond
-	denial := stubApprovalWaitSeams(t, 10*time.Millisecond)
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
 	calls := 0
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
@@ -159,9 +159,33 @@ func TestRunExecWithApprovalWait_ResumePassesRemainingNotFull(t *testing.T) {
 	assert.Less(t, gotTimeout, waitTimeout, "resume must pass the remaining time, not the full timeout")
 }
 
+func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
+	// An intent deviation is the same HITL branch server-side (sudo/services.py)
+	// with only the code swapped, so --wait must block on it too.
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_INTENT_DEVIATION")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		return nil // a reviewer approved it; the re-attempt runs
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait re-attempts the command; it never resumes a held job")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Second, io.Discard)
+
+	assert.NoError(t, err)
+	assert.Greater(t, calls, 1, "the wait loop must re-attempt, not return the first denial")
+}
+
 func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 	const waitTimeout = 60 * time.Millisecond
-	denial := stubApprovalWaitSeams(t, 10*time.Millisecond)
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
 		return denial
 	}

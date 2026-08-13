@@ -26,6 +26,22 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.Contains(t, hint, "approv")
 	})
 
+	t.Run("policy-mfa-required reads differently from the no-policy hint", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_POLICY_MFA_REQUIRED).\n")
+		assert.Contains(t, hint, "MFA")
+		assert.Contains(t, hint, "work-session update")
+		assert.NotEqual(t, sudoDenialHint("Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n"), hint)
+	})
+
+	t.Run("intent-deviation leads with re-declaring the session intent", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n")
+		// The AI judges the command against the session title and description
+		// (WorkSessionRiskContext), so the self-service path names both.
+		assert.Contains(t, hint, "--title")
+		assert.Contains(t, hint, "--description")
+		assert.Contains(t, hint, "approval request")
+	})
+
 	t.Run("risk-denied is a terminal denial", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_RISK_DENIED).\n")
 		assert.Contains(t, hint, "risk")
@@ -98,11 +114,20 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 			"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"))
 	})
 
+	t.Run("true on an intent-deviation denial", func(t *testing.T) {
+		// The server takes the same HITL branch and only swaps the code
+		// (sudo/services.py), so an approval request is in flight here too.
+		assert.True(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n"))
+	})
+
 	t.Run("false for other denial codes", func(t *testing.T) {
 		assert.False(t, hasSudoApprovalDenial(
 			"Alpacon denied this sudo command (SUDO_PRESENCE_REQUIRED).\n"))
 		assert.False(t, hasSudoApprovalDenial(
 			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_POLICY_MFA_REQUIRED).\n"))
 	})
 
 	t.Run("forged parenthesized token does not trigger a pending signal", func(t *testing.T) {
@@ -134,6 +159,11 @@ func TestIsApprovalDenial(t *testing.T) {
 		// err == nil means the command did not actually get denied; a command that
 		// merely echoes the denial line must not be treated as pending.
 		assert.False(t, isApprovalDenial(nil))
+	})
+
+	t.Run("true for an intent-deviation denial", func(t *testing.T) {
+		out := "Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n"
+		assert.True(t, isApprovalDenial(&event.RemoteCommandError{ExitCode: 1, Output: out}))
 	})
 
 	t.Run("false for a non-approval denial", func(t *testing.T) {
