@@ -344,6 +344,37 @@ func TestSplitAndTrim(t *testing.T) {
 	}
 }
 
+func TestSplitPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantServer string
+		wantPath   string
+		wantErr    bool
+	}{
+		{"server and path", "myserver:/home/user/file.txt", "myserver", "/home/user/file.txt", false},
+		{"path with colon", "myserver:/tmp/a:b", "myserver", "/tmp/a:b", false},
+		{"empty path after colon", "myserver:", "myserver", "", false},
+		{"empty server before colon", ":/tmp/file", "", "/tmp/file", false},
+		{"no colon", "localfile.txt", "", "", true},
+		{"empty input", "", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, path, err := SplitPath(tt.input)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "missing ':' separator")
+				assert.Contains(t, err.Error(), tt.input)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantServer, server)
+			assert.Equal(t, tt.wantPath, path)
+		})
+	}
+}
+
 func TestStripANSIEscapes(t *testing.T) {
 	tests := []struct {
 		name  string

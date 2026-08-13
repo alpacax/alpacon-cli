@@ -335,7 +335,10 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 // Uses the single upload API for one file, or the bulk API for multiple files.
 // workSessionID is optional; when non-empty it is attached to the request body.
 func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool, workSessionID string) error {
-	serverName, remotePath := utils.SplitPath(dest)
+	serverName, remotePath, err := utils.SplitPath(dest)
+	if err != nil {
+		return err
+	}
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -480,7 +483,10 @@ func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
 // Uses the single upload API for one folder, or the bulk API for multiple folders.
 // workSessionID is optional; when non-empty it is attached to the request body.
 func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupname string, allowOverwrite bool, workSessionID string) error {
-	serverName, remotePath := utils.SplitPath(dest)
+	serverName, remotePath, err := utils.SplitPath(dest)
+	if err != nil {
+		return err
+	}
 
 	// Folder uploads always target a directory; ensure trailing slash so the
 	// server recognises the path as a directory.
@@ -783,13 +789,19 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 		return fmt.Errorf("no source paths provided")
 	}
 
-	serverName, firstPath := utils.SplitPath(sources[0])
+	serverName, firstPath, err := utils.SplitPath(sources[0])
+	if err != nil {
+		return err
+	}
 
 	// Extract remote paths and validate all sources are on the same server
 	remotePaths := make([]string, 0, len(sources))
 	remotePaths = append(remotePaths, strings.Trim(firstPath, "\""))
 	for _, src := range sources[1:] {
-		name, p := utils.SplitPath(src)
+		name, p, err := utils.SplitPath(src)
+		if err != nil {
+			return err
+		}
 		if name != serverName {
 			return fmt.Errorf("all sources must be on the same server (got %q and %q)", serverName, name)
 		}
