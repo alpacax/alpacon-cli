@@ -71,7 +71,7 @@ func findRecording(recordings []wsapi.TimelineItem, index int) (*wsapi.TimelineI
 func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total int) {
 	header := fmt.Sprintf("Recording %d/%d", idx, total)
 	// formatTimestamp hands back the server's string whenever it fails to parse, so
-	// this line is a sink for whatever was stored, same as every other timeline cell.
+	// this line is a sink for whatever was stored.
 	if ts := utils.SanitizeTerminalText(resolveTimestamp(target.Timestamp)); ts != "" {
 		header += " — " + ts
 	}
