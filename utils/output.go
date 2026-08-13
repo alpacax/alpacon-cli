@@ -70,9 +70,9 @@ func escapeJSONControls(b []byte) []byte {
 	for i := 0; i < len(b); {
 		r, size := utf8.DecodeRune(b[i:])
 		switch {
-		case r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.Is(unicode.Cf, r):
+		case IsC1OrDEL(r) || unicode.Is(unicode.Cf, r):
 			out = appendUnicodeEscape(out, r)
-		case r == utf8.RuneError && size == 1 && b[i] >= 0x80 && b[i] <= 0x9f:
+		case r == utf8.RuneError && size == 1 && IsC1OrDEL(rune(b[i])):
 			out = appendUnicodeEscape(out, rune(b[i]))
 		default:
 			out = append(out, b[i:i+size]...)

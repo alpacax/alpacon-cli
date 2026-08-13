@@ -2,9 +2,9 @@ package worksession
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -134,7 +134,9 @@ func recordingPreview(raw string) string {
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for i := 0; i < 50 && scanner.Scan(); i++ {
-		line := utils.StripANSIEscapes(scanner.Text())
+		// Not SanitizeTerminalText: its control pass would take \r before the
+		// overwrite handling below gets to use it.
+		line := utils.StripFormatAndANSI(scanner.Text())
 		// Strip trailing CR from CRLF line endings before overwrite handling.
 		line = strings.TrimRight(line, "\r")
 		// \r moves cursor to line start; take only the last overwritten segment
@@ -212,11 +214,11 @@ func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.Time
 		"timeline":   rows,
 		"recordings": recEntries,
 	}
-	b, err := json.MarshalIndent(out, "", "  ")
-	if err != nil {
+	// Not a plain Marshal: the shared writer escapes the format and C1 runes that
+	// encoding/json leaves alone, and this output is read in a terminal too.
+	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
 		utils.CliErrorEnvelopeWithExit(opTimeline, err, "Failed to serialize timeline: %s.", err)
 	}
-	fmt.Println(string(b))
 }
 
 func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]string) wsapi.TimelineAttributes {
@@ -311,7 +313,10 @@ func formatDetails(item *wsapi.TimelineItem) string {
 		return detail
 
 	case "websh_record":
-		return utils.TruncateString(item.MaskedRecord, 60)
+		// Sanitize before truncating, as every case above does: otherwise the 60-char
+		// budget goes on escape bytes and the cell shows less of the command than the
+		// rows beside it.
+		return utils.TruncateString(utils.SanitizeTerminalText(item.MaskedRecord), 60)
 
 	default:
 		return ""

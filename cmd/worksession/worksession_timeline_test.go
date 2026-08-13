@@ -213,6 +213,13 @@ func TestFormatDetails_WebshRecord(t *testing.T) {
 	assert.Equal(t, "ls -la /home/user", formatDetails(&item))
 }
 
+func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
+	// The escape has to go before the 60-char cut, or it eats the budget the command
+	// text needs and the cell shows less than the rows beside it.
+	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "\x1b[2K\u202els -la"}
+	assert.Equal(t, "ls -la", formatDetails(&item))
+}
+
 func TestFormatDetails_Unknown(t *testing.T) {
 	item := wsapi.TimelineItem{Type: "unknown_event"}
 	assert.Equal(t, "", formatDetails(&item))
@@ -250,6 +257,17 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 	assert.NotContains(t, got, "\x1b")
 	assert.NotContains(t, got, "\r")
 	assert.Contains(t, got, "web-01db-prod")
+}
+
+// A bidi override in a server name reaches the terminal through --output json
+// too, so the JSON goes out escaped rather than verbatim.
+func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
+	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
+	out := testutil.CaptureStdout(t, func() {
+		outputTimelineJSON(rows, nil, nil)
+	})
+	assert.NotContains(t, out, "\u202e")
+	assert.Contains(t, out, `\u202e`)
 }
 
 // outputTimelineJSON must emit recordings as [] not null when no recordings exist,

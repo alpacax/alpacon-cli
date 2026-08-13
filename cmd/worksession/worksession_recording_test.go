@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -120,4 +121,80 @@ func TestRecordingPreview_EmptyRaw(t *testing.T) {
 
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
 	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
+}
+
+func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
+	// A bidi override carries no control byte, so the control pass alone leaves
+	// it free to reorder the preview a reviewer reads back.
+	raw := "[user@host:~]$ echo \u202esafe"
+	assert.Equal(t, "[user@host:~]$ echo safe", recordingPreview(raw))
+}
+
+func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
+	// Format chars go before the escape strip, or the match breaks and the
+	// sequence's tail lands on screen as text.
+	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
+}
+
+// printRecordingHeader
+
+func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
+	// formatTimestamp returns the server's string as-is when it does not parse, so
+	// the header is a sink for an escape sequence that clears the reviewer's screen.
+	ts := "\x1b[2J\x1b[H\u202eSPOOFED"
+	var buf bytes.Buffer
+	printRecordingHeader(&buf, &wsapi.TimelineItem{Timestamp: &ts}, 1, 1)
+	assert.Equal(t, "Recording 1/1 — SPOOFED\n\n", buf.String())
+}
+
+// printRecordingContent
+
+func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "echo \u202esafe\n")
+	assert.Equal(t, "echo safe\n", buf.String())
+}
+
+func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
+	// U+009B is an 8-bit CSI: left in, it erases the recorded line and the reviewer
+	// reads what follows instead.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "reboot\u009b2Krm -rf /\n")
+	assert.Equal(t, "reboot2Krm -rf /\n", buf.String())
+}
+
+func TestPrintRecordingContent_StripsRawC1Byte(t *testing.T) {
+	// A recording of an 8-bit program carries CSI as the raw byte 0x9b, which is
+	// invalid UTF-8, so IsC1OrDEL never sees it. What keeps it off the terminal is
+	// strings.Map substituting U+FFFD, so a rewrite into a byte loop reopens this.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "reboot\x9b2Krm -rf /\n")
+	assert.Equal(t, "reboot�2Krm -rf /\n", buf.String())
+}
+
+func TestPrintRecordingContent_StripsShiftFunctions(t *testing.T) {
+	// SO invokes G1 into GL and holds until SI or a reset: the same charset switch
+	// as "ESC ( 0", reached without an ESC.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "a\x0eb\x0fc\n")
+	assert.Equal(t, "abc\n", buf.String())
+}
+
+func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
+	// ansiEscapeRE ends an ESC-led form at \x40-\x7e, so these three get past it.
+	// "ESC 7"/"ESC 8" restore the cursor onto an earlier line, which lets the
+	// recording overwrite what the reviewer already read.
+	for _, raw := range []string{"ab\x1b(0", "ab\x1b7\x1b8", "ab\x1b#3"} {
+		var buf bytes.Buffer
+		printRecordingContent(&buf, raw)
+		assert.NotContains(t, buf.String(), "\x1b", "raw %q", raw)
+	}
+}
+
+func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
+	// The C0 pass is deliberately absent here: a recording shown as it was keeps
+	// \r and its line endings.
+	var buf bytes.Buffer
+	printRecordingContent(&buf, "a\rb")
+	assert.Equal(t, "a\rb\n", buf.String())
 }
