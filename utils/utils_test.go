@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	osexec "os/exec"
@@ -340,6 +341,36 @@ func TestSplitAndTrim(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, SplitAndTrim(tt.input, ","))
+		})
+	}
+}
+
+func TestSplitPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantServer string
+		wantPath   string
+		wantErrMsg string // empty means no error expected
+	}{
+		{"server and path", "myserver:/home/user/file.txt", "myserver", "/home/user/file.txt", ""},
+		{"path with colon", "myserver:/tmp/a:b", "myserver", "/tmp/a:b", ""},
+		{"empty path after colon", "myserver:", "myserver", "", ""},
+		{"empty server before colon", ":/tmp/file", "", "", "missing server name"},
+		{"no colon", "localfile.txt", "", "", "missing ':' separator"},
+		{"empty input", "", "", "", "missing ':' separator"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server, path, err := SplitPath(tt.input)
+			if tt.wantErrMsg != "" {
+				assert.ErrorContains(t, err, tt.wantErrMsg)
+				assert.ErrorContains(t, err, fmt.Sprintf("%q", tt.input))
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantServer, server)
+			assert.Equal(t, tt.wantPath, path)
 		})
 	}
 }

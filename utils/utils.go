@@ -590,9 +590,18 @@ func CreateAndEditTempFile(data []byte) (string, error) {
 	return tmpl.Name(), nil
 }
 
-func SplitPath(path string) (string, string) {
-	parts := strings.SplitN(path, ":", 2)
-	return parts[0], parts[1]
+// SplitPath splits a "server:/path" target into its server name and remote path.
+// It returns an error when path carries no ':' separator or no server name.
+// An empty remote path is accepted; callers decide whether it is meaningful.
+func SplitPath(path string) (string, string, error) {
+	server, remotePath, found := strings.Cut(path, ":")
+	if !found {
+		return "", "", fmt.Errorf("invalid remote path %q: missing ':' separator", path)
+	}
+	if server == "" {
+		return "", "", fmt.Errorf("invalid remote path %q: missing server name", path)
+	}
+	return server, remotePath, nil
 }
 
 // IsInteractiveShell checks if the current program is running in an interactive terminal.

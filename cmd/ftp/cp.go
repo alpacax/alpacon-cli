@@ -116,8 +116,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		}
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
-			serverName, _ := utils.SplitPath(dest)
-			err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -132,7 +131,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+						_, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+						return err
 					},
 				})
 
@@ -145,8 +145,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
-			serverName, _ := utils.SplitPath(sources[0])
-			err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+			serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 					OnMFARequired: func(srv string) error {
@@ -161,7 +160,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 					},
 					RefreshToken: alpaconClient.RefreshToken,
 					RetryOperation: func() error {
-						return downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+						_, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+						return err
 					},
 				})
 
@@ -262,11 +262,13 @@ func validatePaths(sources []string, dest string) error {
 	return nil
 }
 
-func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool, workSessionID string) error {
-	var err error
-
-	// Extract server name for better error messages
-	serverName, remotePath := utils.SplitPath(dest)
+// uploadObject returns the destination server name so the caller can report
+// errors against it without parsing dest a second time.
+func uploadObject(client *client.AlpaconClient, src []string, dest, username, groupname string, recursive, allowOverwrite bool, workSessionID string) (string, error) {
+	serverName, remotePath, err := utils.SplitPath(dest)
+	if err != nil {
+		return "", err
+	}
 
 	if recursive {
 		err = ftp.UploadFolder(client, src, dest, username, groupname, allowOverwrite, workSessionID)
@@ -298,17 +300,21 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
 		}
-		return err
+		return serverName, err
 	}
-	return nil
+	return serverName, nil
 }
 
-func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) error {
-	// Extract server name for better error messages
-	serverName, remotePath := utils.SplitPath(sources[0])
+// downloadObject returns the source server name so the caller can report errors
+// against it without parsing sources a second time.
+func downloadObject(client *client.AlpaconClient, sources []string, dest, username, groupname string, recursive bool, workSessionID string) (string, error) {
+	serverName, remotePath, err := utils.SplitPath(sources[0])
+	if err != nil {
+		return "", err
+	}
 	srcDisplay := strings.Join(sources, ", ")
 
-	err := ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
+	err = ftp.DownloadFile(client, sources, dest, username, groupname, recursive, workSessionID)
 	if err != nil {
 		// Parse error and provide specific guidance
 		errStr := err.Error()
@@ -342,7 +348,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • Server-side file access issues",
 				serverName, err)
 		}
-		return err
+		return serverName, err
 	}
-	return nil
+	return serverName, nil
 }
