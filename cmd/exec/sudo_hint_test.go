@@ -146,6 +146,26 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 	})
 }
 
+func TestPendingSudoDenialHint(t *testing.T) {
+	t.Run("answers with the pending code, not an earlier terminal one", func(t *testing.T) {
+		// One command line can run several sudo calls and carry a denial line for
+		// each. The pending path classifies on the pendingApproval codes alone, so
+		// its hint must come from the code that made it pending—here the intent
+		// deviation, not the terminal no-policy denial that sits earlier in the
+		// table and is what sudoDenialHint returns for the same output.
+		out := "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n" +
+			"Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n"
+		assert.Contains(t, pendingSudoDenialHint(out), "--title")
+		assert.Contains(t, sudoDenialHint(out), "--sudo")
+	})
+
+	t.Run("empty when the output carries no pending code", func(t *testing.T) {
+		assert.Empty(t, pendingSudoDenialHint(
+			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
+		assert.Empty(t, pendingSudoDenialHint(""))
+	})
+}
+
 func TestIsApprovalDenial(t *testing.T) {
 	const denialLine = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
 

@@ -124,12 +124,17 @@ func denialCodePresent(output, code string) bool {
 	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+").")
 }
 
+// denialHintLine renders one table entry's guidance as the user-facing hint.
+func denialHintLine(guidance string) string {
+	return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), guidance)
+}
+
 // sudoDenialHint returns actionable guidance when the command output shows a
 // non-interactive sudo denial. Returns "" when no such denial is present.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
-			return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), h.guidance)
+			return denialHintLine(h.guidance)
 		}
 	}
 	return ""
@@ -182,12 +187,23 @@ func hasSudoPresenceDenial(output string) bool {
 // in its own output cannot forge a pending signal or wedge --wait into an
 // indefinite re-run loop.
 func hasSudoApprovalDenial(output string) bool {
+	return pendingSudoDenialHint(output) != ""
+}
+
+// pendingSudoDenialHint returns the guidance for the pendingApproval code
+// present in output, or "" when it carries none. It scans the pendingApproval
+// codes alone rather than deferring to sudoDenialHint: one command line can run
+// several sudo calls (`sudo a; sudo b`) and carry a denial line for each, and
+// sudoDenialHint answers with whichever code sits earliest in the table—which
+// on that output may be a terminal code that had no part in the pending
+// classification.
+func pendingSudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if h.pendingApproval && denialCodePresent(output, h.code) {
-			return true
+			return denialHintLine(h.guidance)
 		}
 	}
-	return false
+	return ""
 }
 
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
@@ -355,7 +371,7 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	// This exits before HandleCommandResult, the hint's only other caller. The
 	// pending message covers re-running after approval; only the hint carries
 	// the self-service path out (re-declaring a stale session intent).
-	if hint := sudoDenialHint(output); hint != "" {
+	if hint := pendingSudoDenialHint(output); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
 	utils.PrintPendingApproval(
