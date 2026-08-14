@@ -1,6 +1,10 @@
 package note
 
-import "github.com/alpacax/alpacon-cli/api/types"
+import (
+	"time"
+
+	"github.com/alpacax/alpacon-cli/api/types"
+)
 
 // NoteResponse is the API response type where Server and Author are nested objects.
 type NoteResponse struct {
@@ -9,6 +13,8 @@ type NoteResponse struct {
 	Author  types.UserSummary   `json:"author"`
 	Content string              `json:"content"`
 	Private bool                `json:"private"`
+	Pinned  bool                `json:"pinned"`
+	AddedAt time.Time           `json:"added_at"`
 }
 
 // NoteDetails is the display type for PrintTable.
@@ -18,6 +24,8 @@ type NoteDetails struct {
 	Author  string `json:"author"`
 	Content string `json:"content"`
 	Private bool   `json:"private"`
+	Pinned  bool   `json:"pinned"`
+	AddedAt string `json:"added_at"`
 }
 
 type NoteCreateRequest struct {

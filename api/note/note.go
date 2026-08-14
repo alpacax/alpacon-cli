@@ -1,9 +1,6 @@
 package note
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
@@ -14,41 +11,38 @@ const (
 	noteURL = "/api/servers/notes/"
 )
 
-func GetNoteList(ac *client.AlpaconClient, serverName string, pageSize int) ([]NoteDetails, error) {
-	var noteList []NoteDetails
-	var serverID string
-	var err error
-
+func GetNoteList(ac *client.AlpaconClient, serverName string, tail int, pinnedOnly bool) ([]NoteDetails, error) {
+	// The server sorts -pinned first, which would let old pinned notes take slots
+	// from the newest tail entries.
+	params := map[string]string{
+		"ordering": "-added_at",
+	}
 	if serverName != "" {
-		serverID, err = server.GetServerIDByName(ac, serverName)
+		serverID, err := server.GetServerIDByName(ac, serverName)
 		if err != nil {
 			return nil, err
 		}
+		params["server"] = serverID
+	}
+	if pinnedOnly {
+		params["pinned"] = "true"
 	}
 
-	params := map[string]string{
-		"serverID": serverID,
-	}
-	if pageSize > 0 {
-		params["page_size"] = fmt.Sprintf("%d", pageSize)
-	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(noteURL, "", params))
+	notes, err := api.FetchPagesUpTo[NoteResponse](ac, noteURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
 
-	var response api.ListResponse[NoteResponse]
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return nil, err
-	}
-
-	for _, note := range response.Results {
+	var noteList []NoteDetails
+	for _, note := range notes {
 		noteList = append(noteList, NoteDetails{
 			ID:      note.ID,
 			Server:  note.Server.Name,
 			Author:  note.Author.Name,
 			Content: note.Content,
 			Private: note.Private,
+			Pinned:  note.Pinned,
+			AddedAt: utils.TimeUtils(note.AddedAt),
 		})
 	}
 

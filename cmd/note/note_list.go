@@ -10,32 +10,42 @@ import (
 var noteListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all notes",
-	Long: `
-	This command displays a comprehensive list of all notes stored on the Alpacon. 
-	It provides details such as note IDs, authors, and contents. 
-	This command is useful for quickly reviewing all notes and their key information. 
-	`,
-	Example: `
-	alpacon note ls
-	alpacon note list
-	`,
-	Run: func(cmd *cobra.Command, args []string) {
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
+	Short:   "Display a list of the newest notes",
+	Long: `Display notes stored on Alpacon, newest first.
 
-		noteList, err := note.GetNoteList(alpaconClient, serverName, pageSize)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the notes: %s.", err)
-		}
+Use --tail to limit the output to the newest N notes, --server to scope to one server,
+and --pinned to show only pinned notes.`,
+	Example: `  alpacon note ls
+  alpacon note ls --tail 100
+  alpacon note ls --server my-server
+  alpacon note ls --pinned`,
+	Run: func(cmd *cobra.Command, _ []string) {
+		tail, _ := cmd.Flags().GetInt("tail")
+		serverName, _ := cmd.Flags().GetString("server")
+		pinnedOnly, _ := cmd.Flags().GetBool("pinned")
 
-		utils.PrintTable(noteList)
+		runNoteList(tail, serverName, pinnedOnly)
 	},
 }
 
 func init() {
-	noteListCmd.Flags().IntVarP(&pageSize, "tail", "t", 25, "Number of log entries to show from the end")
-	noteListCmd.Flags().StringVarP(&serverName, "server", "s", "", "Specify server for notes")
+	noteListCmd.Flags().IntP("tail", "t", 25, "Number of notes to show, newest first")
+	noteListCmd.Flags().StringP("server", "s", "", "Specify server for notes")
+	noteListCmd.Flags().Bool("pinned", false, "Show only pinned notes")
+}
+
+func runNoteList(tail int, serverName string, pinnedOnly bool) {
+	utils.RequirePositiveInt("tail", tail)
+
+	alpaconClient, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+	}
+
+	noteList, err := note.GetNoteList(alpaconClient, serverName, tail, pinnedOnly)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to retrieve the notes: %s.", err)
+	}
+
+	utils.PrintTable(noteList)
 }

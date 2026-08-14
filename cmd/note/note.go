@@ -6,11 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	pageSize   int
-	serverName string
-)
-
 var NoteCmd = &cobra.Command{
 	Use:     "note",
 	Aliases: []string{"notes"},
