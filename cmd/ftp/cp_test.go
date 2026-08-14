@@ -164,6 +164,13 @@ func TestValidatePaths(t *testing.T) {
 			dest:    "./",
 		},
 		{
+			// Run strips the user prefix before validatePaths sees it; this pins
+			// that SplitPath itself does not, so the server name keeps "admin@".
+			name:    "Remote source with a user prefix",
+			sources: []string{"admin@myserver:/tmp/file.txt"},
+			dest:    "./",
+		},
+		{
 			name:       "Mixed local and remote sources",
 			sources:    []string{"./test.txt", "myserver:/tmp/file.txt"},
 			dest:       "/tmp/",
