@@ -163,9 +163,8 @@ var sudoDenialHints = []struct {
 // Invocation names the command the user ran, so a hint can show an example
 // they can copy without translating it first. A defined type rather than a
 // bare string, so an arbitrary string variable cannot reach it without a
-// conversion that names the intent. Websh command
-// mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
-// renders as exec.
+// conversion that names the intent. Websh command mode reaches this package
+// through RemoteExecArgs.InvokedAs; the zero value renders as exec.
 type Invocation string
 
 // denialCodePresent reports whether output contains the plugin's terminal denial
@@ -471,9 +470,8 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // approval request in flight—then exits with ExitCodePendingApproval. It reports
 // true when it handled the err; the caller skips its normal result handling on
 // true. Neither path carries an approval request id, so the machine signal omits
-// it. reRunHint is
-// the exact command the caller invoked (with any --env caveat in its
-// Description), so a human can copy-paste it once the request is approved.
+// it. reRunHint is the exact command the caller invoked (with any --env caveat
+// in its Description), so a human can copy-paste it once the request is approved.
 func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
