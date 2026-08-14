@@ -15,14 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// approvalDenialResult is the plugin's exact terminal denial line for a sudo
-// command that needs human approval.
-const approvalDenialResult = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
-
 // newApprovalDenialServer returns a test server that resolves one server and
-// always answers an exec command with a SUDO_APPROVAL_REQUIRED denial
-// (success=false + the plugin denial line), so the command stays pending.
-func newApprovalDenialServer() *httptest.Server {
+// always answers an exec command with the given plugin denial line
+// (success=false), so the command stays pending.
+func newApprovalDenialServer(denialLine string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -36,7 +32,7 @@ func newApprovalDenialServer() *httptest.Server {
 				"status":      "completed",
 				"success":     false,
 				"exit_code":   1,
-				"result":      approvalDenialResult,
+				"result":      denialLine,
 				"error_phase": nil,
 			}
 			_ = json.NewEncoder(w).Encode(resp)
@@ -121,7 +117,7 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
-	ts := newApprovalDenialServer()
+	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()
 
 	home := t.TempDir()
@@ -166,4 +162,81 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
 	require.NotEmpty(t, got.NextActions)
 	assert.Equal(t, "alpacon exec prod -- sudo reboot", got.NextActions[0].Command, "re-run hint should reconstruct the invocation")
+
+	// The pending message already says to re-run after approval, and this code
+	// offers nothing past that wait, so printing its hint would say it twice.
+	assert.NotContains(t, stderr.String(), "Hint:")
+}
+
+// TestExecIntentDeviationPrintsSelfServiceHint pins the denial-code hint to the
+// pending-approval path, which exits 4 before HandleCommandResult. Without an
+// explicit print, the reviewer-free way out of an intent deviation (re-declaring
+// the session intent) never reaches the user.
+func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
+	stdout, stderr := runIntentDeviationHelper(t)
+
+	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
+	assert.Contains(t, stderr, "may need an approval of its own")
+
+	// The hint rides on stderr, so the machine signal on stdout stays parseable.
+	var got struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+}
+
+// TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout covers the other
+// way into HandlePendingApproval: a --wait that ran out of window returns the
+// last denial to the same handler, so the self-service hint must survive the
+// wait rather than only reaching the user on the no-wait path.
+func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) {
+	// Shorter than the poll interval, so the window closes on the timer without
+	// the loop re-attempting the command.
+	_, stderr := runIntentDeviationHelper(t, "--wait-approval", "1ms")
+
+	assert.Contains(t, stderr, "Approval wait timed out")
+	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
+}
+
+// runIntentDeviationHelper drives the real exec command against a server that
+// answers with an intent-deviation denial, and returns its stdout and stderr
+// after asserting the pending-approval exit code. extraArgs go before the
+// server name.
+func runIntentDeviationHelper(t *testing.T, extraArgs ...string) (stdout, stderr string) {
+	t.Helper()
+
+	ts := newApprovalDenialServer(denialLine("SUDO_INTENT_DEVIATION"))
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+
+	args := []string{
+		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
+		"--",
+		"exec-worksession-helper",
+		"--output",
+		"json",
+	}
+	args = append(args, extraArgs...)
+	args = append(args, "prod", "--", "sudo", "reboot")
+
+	helper := osexec.Command(os.Args[0], args...)
+	helper.Env = append(os.Environ(),
+		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
+		"ALPACON_WORK_SESSION=",
+		"HOME="+home,
+	)
+	var outBuf, errBuf bytes.Buffer
+	helper.Stdout = &outBuf
+	helper.Stderr = &errBuf
+
+	err := helper.Run()
+	require.Error(t, err)
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4; stderr: %s", errBuf.String())
+
+	return outBuf.String(), errBuf.String()
 }

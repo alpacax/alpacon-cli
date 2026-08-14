@@ -204,9 +204,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 
 	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.WaitTimeout(), out)
 	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
-	// A sudo command pending human approval (SUDO_APPROVAL_REQUIRED) that we did
-	// not --wait on emits a machine-readable pending signal and exits before the
-	// normal result handling treats the denial as a plain failure.
+	// A sudo command left pending human approval, not waited on, emits a
+	// machine-readable pending signal and exits before the normal result
+	// handling treats the denial as a plain failure.
 	if HandlePendingApproval(err, reRunHint(parsed)) {
 		return
 	}

@@ -64,9 +64,10 @@ const (
 	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.
 	ExitCodeWorkSessionDenied = 3
 
-	// ExitCodePendingApproval is the process exit code for an action that landed
-	// pending human approval (a sudo HITL SUDO_APPROVAL_REQUIRED denial, or a work
-	// session created in the pending state) and was not waited on with --wait.
+	// ExitCodePendingApproval is the process exit code for an action whose
+	// approval is still open: a sudo HITL denial that created an approval
+	// request, a work session created in the pending state, or a wait that ended
+	// (timed out or was interrupted) with the outcome undecided.
 	// It is distinct from ExitCodeWorkSessionDenied (3): the action was not
 	// refused, it is awaiting an out-of-band approve/reject in the Alpacon console
 	// (web/Slack). Scripts and AI agents branch on it to "wait or check later"
