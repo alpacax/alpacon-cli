@@ -129,7 +129,7 @@ func stubApprovalWaitSeams(t *testing.T, interval time.Duration, code string) *e
 		runPresenceStepUp, streamApprovedCommand, approvalWaitPollInterval = origStepUp, origStream, origInterval
 	})
 	approvalWaitPollInterval = interval
-	return &event.RemoteCommandError{Output: sudoDenialLinePrefix + code + ").", ExitCode: 1}
+	return &event.RemoteCommandError{Output: denialLine(code), ExitCode: 1}
 }
 
 func TestRunExecWithApprovalWait_ResumePassesRemainingNotFull(t *testing.T) {

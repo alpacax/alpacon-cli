@@ -15,10 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// approvalDenialResult is the plugin's exact terminal denial line for a sudo
-// command that needs human approval.
-const approvalDenialResult = "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n"
-
 // newApprovalDenialServer returns a test server that resolves one server and
 // always answers an exec command with the given plugin denial line
 // (success=false), so the command stays pending.
@@ -121,7 +117,7 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
-	ts := newApprovalDenialServer(approvalDenialResult)
+	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()
 
 	home := t.TempDir()
@@ -210,7 +206,7 @@ func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) 
 func runIntentDeviationHelper(t *testing.T, extraArgs ...string) (stdout, stderr string) {
 	t.Helper()
 
-	ts := newApprovalDenialServer("Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n")
+	ts := newApprovalDenialServer(denialLine("SUDO_INTENT_DEVIATION"))
 	defer ts.Close()
 
 	home := t.TempDir()
