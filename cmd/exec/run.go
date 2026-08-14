@@ -50,7 +50,9 @@ var (
 )
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
-// guidance. Codes are kept in sync with alpacon-server utils/error_codes.py.
+// guidance. Codes mirror alpacon-server utils/error_codes.py by hand—nothing
+// enforces the sync, which is why sudoDenialHint falls back to naming a code
+// this table does not carry.
 //
 // The codes are UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
 // codes through its sanitizer into the user-facing denial line (lowercase
@@ -69,9 +71,10 @@ var (
 // an entry without one would say the same thing twice.
 //
 // The gates the server checks before it judges the command at all lead the
-// table, in that order, so a command line running several sudo calls answers
-// with the earliest gate it actually hit. The codes after them are alternative
-// verdicts on one call, so their order among themselves carries no meaning.
+// table, in that order, so output carrying denial lines from several sudo calls
+// answers with the gate the server checks earliest—not with whichever call ran
+// first. The codes after them are alternative verdicts on one call, so their
+// order among themselves carries no meaning.
 var sudoDenialHints = []struct {
 	code, guidance  string
 	pendingApproval bool
@@ -86,15 +89,14 @@ var sudoDenialHints = []struct {
 			"  alpacon workspace access-control update\n",
 	},
 	{
-		// The server could not resolve the Command record this sudo call
-		// belongs to. Nothing about the command line is wrong, so a re-run on a
-		// fresh command is the only move.
+		// Nothing about the command line is wrong, so a re-run on a fresh
+		// command is the only move.
 		code:     "SUDO_SESSION_MISSING",
 		guidance: "sudo was denied: the server could not match this sudo call to its command. Re-run the command; if it repeats, the agent and the server disagree about the command's state.\n",
 	},
 	{
-		// The work session scope is the ceiling (ADR 0014), checked before any
-		// policy step. Wording follows validateSessionForSudoUpdate in
+		// The scope ceiling of ADR 0014. Wording follows
+		// validateSessionForSudoUpdate in
 		// cmd/worksession/worksession_update.go, which answers the same gap.
 		code: "WORK_SESSION_SCOPE_NOT_ALLOWED",
 		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
@@ -140,9 +142,8 @@ var sudoDenialHints = []struct {
 		// judge reads, but only the title is a way around the wait (ADR 0016
 		// §4-5): a description edit on an approved/active session is queued for
 		// an approval of its own (work_sessions/services.py
-		// compute_modification_split), which is the very wait this path
-		// skips—only an approval-bypassing principal escapes it, which is the
-		// room the hint's wording leaves.
+		// compute_modification_split). The hint says "may" because an
+		// approval-bypassing principal escapes that queue.
 		code: "SUDO_INTENT_DEVIATION",
 		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
 			"If the session's stated purpose is out of date, re-declare it and re-run instead of waiting for a reviewer (omit SESSION_ID to use the active session):\n" +
@@ -159,7 +160,8 @@ var sudoDenialHints = []struct {
 
 // Invocation names the command the user ran, so a hint can show an example
 // they can copy without translating it first. A defined type rather than a
-// bare string, so a stray value cannot be assigned by accident. Websh command
+// bare string, so an arbitrary string variable cannot reach it without a
+// conversion that names the intent. Websh command
 // mode reaches this package through RemoteExecArgs.InvokedAs; the zero value
 // renders as exec.
 type Invocation string
@@ -455,11 +457,13 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	}
 }
 
-// HandlePendingApproval emits the structured pending-approval feedback for an
-// exec sudo command denied with an approval request in flight and not waited on,
-// then exits with ExitCodePendingApproval. It reports true when it handled the
-// err; the caller skips its normal result handling on true. The exec denial line
-// carries no approval request id, so the machine signal omits it. reRunHint is
+// HandlePendingApproval emits the structured pending-approval feedback for a
+// command left pending human approval and not waited on—either a job the server
+// parked at awaiting_approval (PendingApprovalError) or a sudo denial with an
+// approval request in flight—then exits with ExitCodePendingApproval. It reports
+// true when it handled the err; the caller skips its normal result handling on
+// true. Neither path carries an approval request id, so the machine signal omits
+// it. reRunHint is
 // the exact command the caller invoked (with any --env caveat in its
 // Description), so a human can copy-paste it once the request is approved.
 func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
