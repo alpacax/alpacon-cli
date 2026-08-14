@@ -50,6 +50,29 @@ func TestSudoDenialHint(t *testing.T) {
 		assert.NotContains(t, hint, `--description "`, "a queued edit must not read as part of the reviewer-free command")
 	})
 
+	t.Run("workspace-mfa-disabled points at the workspace setting, not the session", func(t *testing.T) {
+		// Checked before the branch split (sudo/services.py
+		// handle_sudo_approval_request), so no work session or policy can lift it.
+		hint := sudoDenialHint("Alpacon denied this sudo command (WORKSPACE_SUDO_WITH_MFA_DISABLED).\n")
+		assert.Contains(t, hint, "workspace access-control update")
+		assert.NotContains(t, hint, "work-session update", "no session edit lifts a workspace-wide denial")
+	})
+
+	t.Run("session-missing reads as retryable, not as a policy problem", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_SESSION_MISSING).\n")
+		assert.Contains(t, hint, "Re-run")
+		assert.NotContains(t, hint, "work-session update", "nothing about the session's policies is wrong here")
+	})
+
+	t.Run("scope-not-allowed names the sudo scope and the replace caveat", func(t *testing.T) {
+		// --scope replaces the whole list, so guidance that omits the caveat
+		// would have the user silently drop every other scope.
+		hint := sudoDenialHint("Alpacon denied this sudo command (WORK_SESSION_SCOPE_NOT_ALLOWED).\n")
+		assert.Contains(t, hint, "'sudo' scope")
+		assert.Contains(t, hint, "work-session update [SESSION_ID] --scope")
+		assert.Contains(t, hint, "replaces the whole list")
+	})
+
 	t.Run("command-not-authorized names the accountable-user requirement", func(t *testing.T) {
 		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_COMMAND_NOT_AUTHORIZED).\n")
 		assert.Contains(t, hint, "accountable user")
@@ -144,6 +167,16 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 			"Alpacon denied this sudo command (SUDO_POLICY_MFA_REQUIRED).\n"))
 		assert.False(t, hasSudoApprovalDenial(
 			"Alpacon denied this sudo command (SUDO_COMMAND_NOT_AUTHORIZED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (WORKSPACE_SUDO_WITH_MFA_DISABLED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (WORK_SESSION_SCOPE_NOT_ALLOWED).\n"))
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_SESSION_MISSING).\n"))
+		// An unknown code gets a fallback hint but must never enter the pending
+		// path: the CLI cannot know an approval request exists behind it.
+		assert.False(t, hasSudoApprovalDenial(
+			"Alpacon denied this sudo command (SUDO_BRAND_NEW_CODE).\n"))
 	})
 
 	t.Run("forged parenthesized token does not trigger a pending signal", func(t *testing.T) {
@@ -159,7 +192,7 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 	})
 }
 
-func TestPendingSudoDenialHint(t *testing.T) {
+func TestPendingSudoDenial(t *testing.T) {
 	t.Run("answers with the pending code, not an earlier terminal one", func(t *testing.T) {
 		// One command line can run several sudo calls and carry a denial line for
 		// each. The pending path classifies on the pendingApproval codes alone, so
@@ -168,14 +201,73 @@ func TestPendingSudoDenialHint(t *testing.T) {
 		// table and is what sudoDenialHint returns for the same output.
 		out := "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\n" +
 			"Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n"
-		assert.Contains(t, pendingSudoDenialHint(out), "--title")
+		hint, pending := pendingSudoDenial(out)
+		assert.True(t, pending, "an intent deviation is a pending approval: %q", out)
+		assert.Contains(t, hint, "--title")
 		assert.Contains(t, sudoDenialHint(out), "--sudo")
 	})
 
-	t.Run("empty when the output carries no pending code", func(t *testing.T) {
-		assert.Empty(t, pendingSudoDenialHint(
-			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n"))
-		assert.Empty(t, pendingSudoDenialHint(""))
+	t.Run("withholds the hint for a code whose only way out is the wait", func(t *testing.T) {
+		// HandlePendingApproval's own message already says "re-run after
+		// approval", so returning this entry's guidance would print it twice.
+		hint, pending := pendingSudoDenial(
+			"Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n")
+		assert.True(t, pending, "SUDO_APPROVAL_REQUIRED must still classify as pending")
+		assert.Empty(t, hint)
+	})
+
+	t.Run("not pending when the output carries no pending code", func(t *testing.T) {
+		for _, out := range []string{
+			"Alpacon denied this sudo command (SUDO_RISK_DENIED).\n",
+			"",
+		} {
+			hint, pending := pendingSudoDenial(out)
+			assert.False(t, pending, "output must not classify as pending: %q", out)
+			assert.Empty(t, hint)
+		}
+	})
+}
+
+func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
+	// The server adds denial codes on its own release train and nothing enforces
+	// this table's sync with it, so an unknown code must still leave the user
+	// something to act on instead of a bare denial line.
+	t.Run("names a code the table does not carry", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_BRAND_NEW_CODE).\n")
+		assert.Contains(t, hint, "SUDO_BRAND_NEW_CODE")
+		assert.Contains(t, hint, "Alpacon console")
+	})
+
+	t.Run("a known code still gets its own guidance", func(t *testing.T) {
+		hint := sudoDenialHint("Alpacon denied this sudo command (SUDO_RISK_DENIED).\n")
+		assert.Contains(t, hint, "risk")
+		assert.NotContains(t, hint, "no guidance for that code")
+	})
+
+	t.Run("no hint without the anchored denial line", func(t *testing.T) {
+		assert.Empty(t, sudoDenialHint("build finished (SUDO_BRAND_NEW_CODE).\n"))
+		assert.Empty(t, sudoDenialHint("Alpacon denied this sudo command.\n"))
+		assert.Empty(t, sudoDenialHint(""))
+	})
+
+	t.Run("a code outside the sanitizer's shape is not echoed", func(t *testing.T) {
+		// alpacon_approval.c only ever emits [A-Z0-9_]; anything else in that
+		// slot came from the command's own output, so it must not be printed.
+		for _, forged := range []string{
+			"Alpacon denied this sudo command (\x1b[31mSUDO_FAKE).\n",
+			"Alpacon denied this sudo command (sudo_lowercase).\n",
+			"Alpacon denied this sudo command (SUDO FAKE).\n",
+			"Alpacon denied this sudo command ().\n",
+		} {
+			assert.Empty(t, sudoDenialHint(forged), "forged code must not reach the hint: %q", forged)
+		}
+	})
+
+	t.Run("a look-alike line does not suppress the real denial after it", func(t *testing.T) {
+		hint := sudoDenialHint(
+			"Alpacon denied this sudo command (not a code).\n" +
+				"Alpacon denied this sudo command (SUDO_BRAND_NEW_CODE).\n")
+		assert.Contains(t, hint, "SUDO_BRAND_NEW_CODE")
 	})
 }
 

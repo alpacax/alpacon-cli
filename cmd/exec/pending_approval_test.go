@@ -166,6 +166,10 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, got.ExitCode)
 	require.NotEmpty(t, got.NextActions)
 	assert.Equal(t, "alpacon exec prod -- sudo reboot", got.NextActions[0].Command, "re-run hint should reconstruct the invocation")
+
+	// The pending message already says to re-run after approval, and this code
+	// offers nothing past that wait, so printing its hint would say it twice.
+	assert.NotContains(t, stderr.String(), "Hint:")
 }
 
 // TestExecIntentDeviationPrintsSelfServiceHint pins the denial-code hint to the

@@ -61,14 +61,50 @@ var (
 // out-of-band approval, ADR 0016 §3), but a reviewer can still approve it.
 // Flagging them here rather than in a second list is what keeps the hints and
 // that code set from drifting apart.
+//
+// selfService narrows the pendingApproval codes to those whose guidance names a
+// way out that is not "wait for a reviewer". HandlePendingApproval prints only
+// those: its own message already covers re-running after approval, so printing
+// an entry without one would say the same thing twice.
+//
+// The gates the server checks before it judges the command at all lead the
+// table, in that order, so a command line running several sudo calls answers
+// with the earliest gate it actually hit. The codes after them are alternative
+// verdicts on one call, so their order among themselves carries no meaning.
 var sudoDenialHints = []struct {
 	code, guidance  string
 	pendingApproval bool
+	selfService     bool
 }{
 	{
-		// The exec branch's first rung: a Command with no requesting user, i.e.
-		// a service-token submission, which the token lane only resolves under
-		// EXEC_SUDO_MODE=enforce. Re-running it with the same token repeats it.
+		// Checked before the websh/command branch split, so it answers every
+		// surface. Only a workspace admin can lift it.
+		code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
+		guidance: "sudo was denied: this workspace does not allow sudo with MFA at all, so no work session or policy can authorize it.\n" +
+			"A workspace admin lifts it (interactive terminal required):\n" +
+			"  alpacon workspace access-control update\n",
+	},
+	{
+		// The server could not resolve the Command record this sudo call
+		// belongs to. Nothing about the command line is wrong, so a re-run on a
+		// fresh command is the only move.
+		code:     "SUDO_SESSION_MISSING",
+		guidance: "sudo was denied: the server could not match this sudo call to its command. Re-run the command; if it repeats, the agent and the server disagree about the command's state.\n",
+	},
+	{
+		// The work session scope is the ceiling (ADR 0014), checked before any
+		// policy step. Wording follows validateSessionForSudoUpdate in
+		// cmd/worksession/worksession_update.go, which answers the same gap.
+		code: "WORK_SESSION_SCOPE_NOT_ALLOWED",
+		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
+			"Add it and re-run (--scope replaces the whole list, so name every scope you keep; omit SESSION_ID to use the active session):\n" +
+			"  alpacon work-session update [SESSION_ID] --scope command,sudo\n" +
+			"Adding a scope may require approval before it takes effect. A new session created with --sudo gets the scope on its own.\n",
+	},
+	{
+		// A Command with no requesting user, i.e. a service-token submission,
+		// which the token lane only resolves under EXEC_SUDO_MODE=enforce.
+		// Re-running it with the same token repeats it.
 		code: "SUDO_COMMAND_NOT_AUTHORIZED",
 		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
 			"Re-run it under a principal that carries a user (an interactive login, or a personal API token).\n",
@@ -112,6 +148,7 @@ var sudoDenialHints = []struct {
 			"  alpacon work-session update [SESSION_ID] --title \"<what you are doing>\"\n" +
 			"Editing the description instead is not a way around the wait: on an approved or active session that edit may need an approval of its own.\n",
 		pendingApproval: true,
+		selfService:     true,
 	},
 	{
 		code:     "SUDO_RISK_DENIED",
@@ -141,15 +178,64 @@ func denialHintLine(guidance string) string {
 	return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), guidance)
 }
 
+// unknownDenialCode returns the code from the plugin's terminal denial line when
+// output carries one, or "" when it carries none. It anchors on the same full
+// line denialCodePresent does and accepts only the [A-Z0-9_] shape
+// alpacon_approval.c's sanitizer emits (capped at the 63 chars its buffer
+// holds), so the code it hands back can be printed verbatim—a command's own
+// output cannot smuggle escapes or newlines into a hint through it.
+func unknownDenialCode(output string) string {
+	const open = " ("
+	const maxCodeLen = 63 // alpacon_approval.c holds the code in a char[64]
+	for rest := output; ; {
+		i := strings.Index(rest, sudoDenialLinePrefix+open)
+		if i < 0 {
+			return ""
+		}
+		rest = rest[i+len(sudoDenialLinePrefix)+len(open):]
+		// Keep scanning past a malformed slot rather than giving up on the
+		// output: a command that prints a look-alike line of its own would
+		// otherwise suppress the hint for the real denial that follows it.
+		if end := strings.Index(rest, ")."); end > 0 && end <= maxCodeLen {
+			if code := rest[:end]; isSanitizedDenialCode(code) {
+				return code
+			}
+		}
+	}
+}
+
+// isSanitizedDenialCode reports whether code has the [A-Z0-9_] shape
+// alpacon_approval.c's sanitizer emits. Anything else in that slot came from the
+// command's own output, so it must never be echoed back into a hint.
+func isSanitizedDenialCode(code string) bool {
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return code != ""
+}
+
 // sudoDenialHint returns actionable guidance when the command output shows a
 // non-interactive sudo denial. Returns "" when no such denial is present.
+//
+// A code with no table entry still gets a hint naming it: the server adds codes
+// on its own release train and nothing enforces this table's sync with
+// alpacon-server utils/error_codes.py, so the silent-"" case is what makes each
+// drift invisible until someone reports a bare denial line.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
 			return denialHintLine(h.guidance)
 		}
 	}
-	return ""
+	code := unknownDenialCode(output)
+	if code == "" {
+		return ""
+	}
+	return denialHintLine(fmt.Sprintf(
+		"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
+			"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
 }
 
 // isCommandInlineCredentialError reports whether err carries the alpacon-server
@@ -199,23 +285,31 @@ func hasSudoPresenceDenial(output string) bool {
 // in its own output cannot forge a pending signal or wedge --wait into an
 // indefinite re-run loop.
 func hasSudoApprovalDenial(output string) bool {
-	return pendingSudoDenialHint(output) != ""
+	_, pending := pendingSudoDenial(output)
+	return pending
 }
 
-// pendingSudoDenialHint returns the guidance for the pendingApproval code
-// present in output, or "" when it carries none. It scans the pendingApproval
-// codes alone rather than deferring to sudoDenialHint: one command line can run
-// several sudo calls (`sudo a; sudo b`) and carry a denial line for each, and
-// sudoDenialHint answers with whichever code sits earliest in the table—which
-// on that output may be a terminal code that had no part in the pending
-// classification.
-func pendingSudoDenialHint(output string) string {
+// pendingSudoDenial reports whether output carries a pendingApproval code, and
+// returns that code's guidance only when the entry is selfService—the caller's
+// own pending message already tells the user to re-run after approval, so an
+// entry without a way past the wait would just say it twice.
+//
+// It scans the pendingApproval codes alone rather than deferring to
+// sudoDenialHint: one command line can run several sudo calls (`sudo a; sudo b`)
+// and carry a denial line for each, and sudoDenialHint answers with whichever
+// code sits earliest in the table—which on that output may be a terminal code
+// that had no part in the pending classification.
+func pendingSudoDenial(output string) (hint string, pending bool) {
 	for _, h := range sudoDenialHints {
-		if h.pendingApproval && denialCodePresent(output, h.code) {
-			return denialHintLine(h.guidance)
+		if !h.pendingApproval || !denialCodePresent(output, h.code) {
+			continue
 		}
+		if h.selfService {
+			return denialHintLine(h.guidance), true
+		}
+		return "", true
 	}
-	return ""
+	return "", false
 }
 
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
@@ -380,10 +474,11 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	if !ok {
 		return false
 	}
-	// This exits before HandleCommandResult, the hint's only other caller. The
-	// pending message covers re-running after approval; only the hint carries
-	// the self-service path out (re-declaring a stale session intent).
-	if hint := pendingSudoDenialHint(output); hint != "" {
+	// This exits before HandleCommandResult, the hint's only other caller, so a
+	// self-service path out (re-declaring a stale session intent) would
+	// otherwise never reach the user. pendingSudoDenial withholds the guidance
+	// for codes whose only way out is the wait the message below already names.
+	if hint, _ := pendingSudoDenial(output); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
 	utils.PrintPendingApproval(
