@@ -13,7 +13,7 @@ var LogCmd = &cobra.Command{
 	Short:   "Retrieve and display server logs",
 	Long: `Retrieve and display logs for a specified server. This command allows you 
 	to view logs of different levels and types associated with a server. Use the '--tail' flag 
-	to limit the output to the last N log entries. Suitable for debugging and monitoring 
+	to show the newest N log entries. Suitable for debugging and monitoring 
 	server activities.`,
 	Example: `
 	alpacon log my-server
@@ -44,5 +44,5 @@ var LogCmd = &cobra.Command{
 func init() {
 	var tail int
 
-	LogCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of log entries to show from the end")
+	LogCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of log entries to show, newest first")
 }

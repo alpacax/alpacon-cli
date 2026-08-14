@@ -13,7 +13,7 @@ var WebFTPCmd = &cobra.Command{
 	Short:   "Retrieve and display WebFTP transfer logs",
 	Long: `
 	Retrieve and display WebFTP file transfer logs from the Alpacon, with options to filter by
-	server, user, and action. Use the '--tail' flag to limit the output to the last N entries.
+	server, user, and action. Use the '--tail' flag to show the newest N entries.
 	`,
 	Example: `
 	alpacon webftp-log
@@ -30,7 +30,7 @@ func init() {
 	var userName string
 	var action string
 
-	WebFTPCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of log entries to show from the end")
+	WebFTPCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of log entries to show, newest first")
 	WebFTPCmd.Flags().StringVarP(&serverName, "server", "s", "", "Filter by server name")
 	WebFTPCmd.Flags().StringVarP(&userName, "user", "u", "", "Filter by username")
 	WebFTPCmd.Flags().StringVarP(&action, "action", "a", "", "Filter by action (e.g., upload, download)")

@@ -13,7 +13,7 @@ var AuditCmd = &cobra.Command{
 	Short:   "Retrieve and display audit activity logs",
 	Long: `
 	Retrieve and display audit activity logs from the Alpacon, with options to filter by user,
-	application, and model. Use the '--tail' flag to limit the output to the last N entries.
+	application, and model. Use the '--tail' flag to show the newest N entries.
 	`,
 	Example: `
 	alpacon audit
@@ -30,7 +30,7 @@ func init() {
 	var app string
 	var model string
 
-	AuditCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of audit log entries to show from the end")
+	AuditCmd.Flags().IntVarP(&tail, "tail", "t", 25, "Number of audit log entries to show, newest first")
 	AuditCmd.Flags().StringVarP(&userName, "user", "u", "", "Filter by username")
 	AuditCmd.Flags().StringVarP(&app, "app", "a", "", "Filter by application")
 	AuditCmd.Flags().StringVarP(&model, "model", "m", "", "Filter by model")
