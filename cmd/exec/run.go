@@ -68,7 +68,9 @@ var (
 // selfService narrows the pendingApproval codes to those whose guidance names a
 // way out that is not "wait for a reviewer". HandlePendingApproval prints only
 // those: its own message already covers re-running after approval, so printing
-// an entry without one would say the same thing twice.
+// an entry without one would say the same thing twice. pendingSudoDenial
+// prefers a selfService entry over the rest, so the table order does not decide
+// which pending code answers.
 //
 // The gates the server checks before it judges the command at all lead the
 // table, in that order, so output carrying denial lines from several sudo calls
@@ -274,15 +276,21 @@ func hasSudoApprovalDenial(output string) bool {
 // and carry a denial line for each, and sudoDenialHint answers with whichever
 // code sits earliest in the table—which on that output may be a terminal code
 // that had no part in the pending classification.
+//
+// A selfService entry wins over any other pendingApproval code on that same
+// output, whatever the table order: the classification is identical either way,
+// so answering with the entry that has no way past the wait would drop the only
+// guidance the user could act on.
 func pendingSudoDenial(output string) (hint string, pending bool) {
 	for _, h := range sudoDenialHints {
-		if !h.pendingApproval || !denialCodePresent(output, h.code) {
-			continue
-		}
-		if h.selfService {
+		if h.pendingApproval && h.selfService && denialCodePresent(output, h.code) {
 			return denialHintLine(h.guidance), true
 		}
-		return "", true
+	}
+	for _, h := range sudoDenialHints {
+		if h.pendingApproval && denialCodePresent(output, h.code) {
+			return "", true
+		}
 	}
 	return "", false
 }

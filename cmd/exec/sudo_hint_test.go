@@ -207,6 +207,18 @@ func TestPendingSudoDenial(t *testing.T) {
 		assert.Contains(t, sudoDenialHint(out), "--sudo")
 	})
 
+	t.Run("prefers the self-service code over another pending one", func(t *testing.T) {
+		// Both codes classify the same, so answering with the one that has no way
+		// past the wait would drop the only guidance the user can act on. The
+		// approval-required entry sits earlier in the table, so a scan that took
+		// the first pending match would lose the hint on this output.
+		out := "Alpacon denied this sudo command (SUDO_APPROVAL_REQUIRED).\n" +
+			"Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n"
+		hint, pending := pendingSudoDenial(out)
+		assert.True(t, pending)
+		assert.Contains(t, hint, "--title")
+	})
+
 	t.Run("withholds the hint for a code whose only way out is the wait", func(t *testing.T) {
 		// HandlePendingApproval's own message already says "re-run after
 		// approval", so returning this entry's guidance would print it twice.
