@@ -15,17 +15,18 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// sudoDenialLinePrefix is the exact terminal-facing denial line emitted by
-// alpacon_approval.c via g_plugin_printf ("Alpacon denied this sudo command
-// (CODE)."). The other "Permission denied (CODE)" form is assigned to *errstr,
-// which only reaches the audit log—not the invoking terminal—so it must not be
-// matched. Anchoring on this full prefix (not a bare "(CODE)") stops a command
-// whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
-const sudoDenialLinePrefix = "Alpacon denied this sudo command"
+// sudoDenialLinePrefix is the terminal-facing denial line alpacon_approval.c
+// emits via g_plugin_printf ("Alpacon denied this sudo command (CODE)."), up to
+// the code slot. The other "Permission denied (CODE)" form is assigned to
+// *errstr, which only reaches the audit log—not the invoking terminal—so it must
+// not be matched. Anchoring on this full prefix (not a bare "(CODE)") stops a
+// command whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
+const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 
 // sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
 // MFA step-up). The hint table and hasSudoPresenceDenial both name it from
-// here: editing one alone would silently stop the step-up.
+// here, so renaming it cannot leave one of them behind and silently stop the
+// step-up.
 const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
@@ -167,39 +168,41 @@ type Invocation string
 // line for the given code. It anchors on the full "Alpacon denied this sudo
 // command (CODE)." line—including the trailing period the plugin emits—never a
 // bare "(CODE)" token, so a command whose own output prints the token cannot
-// forge a match on a command that succeeded. Every detector routes through here
-// so the anchoring logic lives in one place.
+// forge a match on a command that succeeded. Every code-specific detector routes
+// through here, and firstDenialCode scans for the same sudoDenialLinePrefix, so
+// the two cannot disagree on what the line looks like.
 func denialCodePresent(output, code string) bool {
-	return strings.Contains(output, sudoDenialLinePrefix+" ("+code+").")
+	return strings.Contains(output, sudoDenialLinePrefix+code+").")
 }
 
-// denialHintLine renders one table entry's guidance as the user-facing hint.
+// denialHintLine labels guidance—a table entry's or the unknown-code
+// fallback's—as the user-facing hint.
 func denialHintLine(guidance string) string {
 	return fmt.Sprintf("%s %s", utils.Yellow("Hint:"), guidance)
 }
 
-// unknownDenialCode returns the code from the plugin's terminal denial line when
-// output carries one, or "" when it carries none. It anchors on the same full
-// line denialCodePresent does and accepts only the [A-Z0-9_] shape
-// alpacon_approval.c's sanitizer emits (capped at the 63 chars its buffer
-// holds), so the code it hands back can be printed verbatim—a command's own
-// output cannot smuggle escapes or newlines into a hint through it.
-func unknownDenialCode(output string) string {
-	const open = " ("
+// firstDenialCode returns the code carried by the first well-formed terminal
+// denial line in output, or "" when output holds none. It accepts only the
+// [A-Z0-9_] shape alpacon_approval.c's sanitizer emits, capped at the 63 chars
+// its buffer holds, so the code it hands back can be printed verbatim—a
+// command's own output cannot smuggle escapes or newlines into a hint through
+// it. It answers for known and unknown codes alike; only sudoDenialHint, which
+// consults the table first, cares about the difference.
+func firstDenialCode(output string) string {
 	const maxCodeLen = 63 // alpacon_approval.c holds the code in a char[64]
-	for rest := output; ; {
-		i := strings.Index(rest, sudoDenialLinePrefix+open)
-		if i < 0 {
+	rest := output
+	for {
+		_, after, found := strings.Cut(rest, sudoDenialLinePrefix)
+		if !found {
 			return ""
 		}
-		rest = rest[i+len(sudoDenialLinePrefix)+len(open):]
+		rest = after
 		// Keep scanning past a malformed slot rather than giving up on the
 		// output: a command that prints a look-alike line of its own would
 		// otherwise suppress the hint for the real denial that follows it.
-		if end := strings.Index(rest, ")."); end > 0 && end <= maxCodeLen {
-			if code := rest[:end]; isSanitizedDenialCode(code) {
-				return code
-			}
+		code, _, closed := strings.Cut(rest, ").")
+		if closed && len(code) <= maxCodeLen && isSanitizedDenialCode(code) {
+			return code
 		}
 	}
 }
@@ -208,12 +211,15 @@ func unknownDenialCode(output string) string {
 // alpacon_approval.c's sanitizer emits. Anything else in that slot came from the
 // command's own output, so it must never be echoed back into a hint.
 func isSanitizedDenialCode(code string) bool {
+	if code == "" {
+		return false
+	}
 	for _, r := range code {
 		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
 			return false
 		}
 	}
-	return code != ""
+	return true
 }
 
 // sudoDenialHint returns actionable guidance when the command output shows a
@@ -221,53 +227,20 @@ func isSanitizedDenialCode(code string) bool {
 //
 // A code with no table entry still gets a hint naming it: the server adds codes
 // on its own release train and nothing enforces this table's sync with
-// alpacon-server utils/error_codes.py, so the silent-"" case is what makes each
-// drift invisible until someone reports a bare denial line.
+// alpacon-server utils/error_codes.py, so returning "" for one would leave the
+// next drift invisible until someone reported a bare denial line.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
 			return denialHintLine(h.guidance)
 		}
 	}
-	code := unknownDenialCode(output)
-	if code == "" {
-		return ""
+	if code := firstDenialCode(output); code != "" {
+		return denialHintLine(fmt.Sprintf(
+			"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
+				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
 	}
-	return denialHintLine(fmt.Sprintf(
-		"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
-			"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
-}
-
-// isCommandInlineCredentialError reports whether err carries the alpacon-server
-// inline-credential gate code (utils.CommandInlineCredential, ADR 0037): the
-// submitted command line itself contained a credential (e.g. a -p/--password
-// flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
-// connection string), so the server refused the command before it ever ran
-// rather than persist that line.
-func isCommandInlineCredentialError(err error) bool {
-	code, _ := utils.ParseErrorResponse(err)
-	return code == utils.CommandInlineCredential
-}
-
-// credentialInlineExample renders the --env line for invokedAs. The two commands
-// take the remote command differently: only exec has the -- separator
-// (cmd/exec/parse.go), while websh takes it as one quoted argument.
-func credentialInlineExample(invokedAs Invocation) string {
-	if invokedAs == WebshInvocation {
-		return string(WebshInvocation) + ` --env="SECRET_NAME" db-server '<command>'`
-	}
-	return string(ExecInvocation) + ` --env="SECRET_NAME" db-server -- <command>`
-}
-
-// credentialInlineHint returns the actionable guidance printed alongside
-// commandInlineCredentialMessage. It never echoes the rejected command
-// line—only fixed guidance naming --env—so it cannot leak the credential it is
-// warning about. invokedAs picks the example; empty falls back to exec.
-func credentialInlineHint(invokedAs Invocation) string {
-	return fmt.Sprintf(
-		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
-			"  %s\n",
-		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
+	return ""
 }
 
 // hasSudoPresenceDenial reports whether output carries the non-interactive sudo
@@ -310,6 +283,38 @@ func pendingSudoDenial(output string) (hint string, pending bool) {
 		return "", true
 	}
 	return "", false
+}
+
+// isCommandInlineCredentialError reports whether err carries the alpacon-server
+// inline-credential gate code (utils.CommandInlineCredential, ADR 0037): the
+// submitted command line itself contained a credential (e.g. a -p/--password
+// flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
+// connection string), so the server refused the command before it ever ran
+// rather than persist that line.
+func isCommandInlineCredentialError(err error) bool {
+	code, _ := utils.ParseErrorResponse(err)
+	return code == utils.CommandInlineCredential
+}
+
+// credentialInlineExample renders the --env line for invokedAs. The two commands
+// take the remote command differently: only exec has the -- separator
+// (cmd/exec/parse.go), while websh takes it as one quoted argument.
+func credentialInlineExample(invokedAs Invocation) string {
+	if invokedAs == WebshInvocation {
+		return string(WebshInvocation) + ` --env="SECRET_NAME" db-server '<command>'`
+	}
+	return string(ExecInvocation) + ` --env="SECRET_NAME" db-server -- <command>`
+}
+
+// credentialInlineHint returns the actionable guidance printed alongside
+// commandInlineCredentialMessage. It never echoes the rejected command
+// line—only fixed guidance naming --env—so it cannot leak the credential it is
+// warning about. invokedAs picks the example; empty falls back to exec.
+func credentialInlineHint(invokedAs Invocation) string {
+	return fmt.Sprintf(
+		"%s move the secret to --env instead (its value is read from your shell, so it never lands on the command line the server stores):\n"+
+			"  %s\n",
+		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
 // RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
