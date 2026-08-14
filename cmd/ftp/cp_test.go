@@ -202,6 +202,7 @@ func TestValidatePaths(t *testing.T) {
 	}
 }
 
+// Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	tests := []struct {
 		name         string

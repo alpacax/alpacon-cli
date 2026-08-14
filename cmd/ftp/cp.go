@@ -240,7 +240,8 @@ func validatePaths(sources []string, dest string) error {
 	allPaths = append(allPaths, dest)
 	for _, path := range allPaths {
 		if isRemotePath(path) {
-			// SplitPath accepts an empty remote path; cp requires one.
+			// SplitPath accepts an empty remote path; cp requires one. Its error
+			// text is replaced by the guidance message below.
 			if _, remotePath, err := utils.SplitPath(path); err != nil || remotePath == "" {
 				return fmt.Errorf("invalid remote path format: '%s'\n\n"+
 					"Remote paths must include both server name and path:\n"+
