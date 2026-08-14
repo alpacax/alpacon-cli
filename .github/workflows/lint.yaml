@@ -52,8 +52,13 @@ jobs:
       - name: Allow Go toolchain auto-download
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
+      # Blank GOOS/GOARCH so the tool is always built for the runner, even if
+      # this job ever gains a cross-compilation matrix.
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        env:
+          GOOS: ""
+          GOARCH: ""
 
       - name: Run govulncheck
         run: govulncheck ./...
