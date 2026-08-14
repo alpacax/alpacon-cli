@@ -42,10 +42,8 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v6
 
-      # golang/govulncheck-action pins its own setup-go with GOTOOLCHAIN=local
-      # and a `go-version-input` that overrides `go-version-file`, so a runner
-      # whose tool cache lags behind go.mod fails before the scan starts. Run
-      # the same steps directly and let go.mod pick the toolchain.
+      # Inlined instead of golang/govulncheck-action: it forces its own Go
+      # version with GOTOOLCHAIN=local, so a tool cache behind go.mod fails.
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
