@@ -243,6 +243,9 @@ func TestPendingSudoDenial(t *testing.T) {
 			wantPending: true,
 		},
 		{"a terminal code is not pending", denialLine("SUDO_RISK_DENIED"), false, ""},
+		// Claiming pending on a code the table does not carry would tell a script to
+		// retry what the server may have refused outright, so drift must fail terminal.
+		{"an unknown code is not pending", denialLine("SUDO_BRAND_NEW_CODE"), false, ""},
 		{"empty output is not pending", "", false, ""},
 	}
 
