@@ -177,46 +177,70 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 // explicit print, the reviewer-free way out of an intent deviation (re-declaring
 // the session intent) never reaches the user.
 func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
+	stdout, stderr := runIntentDeviationHelper(t)
+
+	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
+	assert.Contains(t, stderr, "may need an approval of its own")
+
+	// The hint rides on stderr, so the machine signal on stdout stays parseable.
+	var got struct {
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+}
+
+// TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout covers the other
+// way into HandlePendingApproval: a --wait that ran out of window returns the
+// last denial to the same handler, so the self-service hint must survive the
+// wait rather than only reaching the user on the no-wait path.
+func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) {
+	// Shorter than the poll interval, so the window closes on the timer without
+	// the loop re-attempting the command.
+	_, stderr := runIntentDeviationHelper(t, "--wait-approval", "1ms")
+
+	assert.Contains(t, stderr, "Approval wait timed out")
+	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
+}
+
+// runIntentDeviationHelper drives the real exec command against a server that
+// answers with an intent-deviation denial, and returns its stdout and stderr
+// after asserting the pending-approval exit code. extraArgs go before the
+// server name.
+func runIntentDeviationHelper(t *testing.T, extraArgs ...string) (stdout, stderr string) {
+	t.Helper()
+
 	ts := newApprovalDenialServer("Alpacon denied this sudo command (SUDO_INTENT_DEVIATION).\n")
 	defer ts.Close()
 
 	home := t.TempDir()
 	writeExecCommandTestConfig(t, home, ts.URL)
 
-	helper := osexec.Command(
-		os.Args[0],
+	args := []string{
 		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
 		"--",
 		"exec-worksession-helper",
 		"--output",
 		"json",
-		"prod",
-		"--",
-		"sudo",
-		"reboot",
-	)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, "prod", "--", "sudo", "reboot")
+
+	helper := osexec.Command(os.Args[0], args...)
 	helper.Env = append(os.Environ(),
 		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
 		"ALPACON_WORK_SESSION=",
 		"HOME="+home,
 	)
-	var stdout, stderr bytes.Buffer
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
+	var outBuf, errBuf bytes.Buffer
+	helper.Stdout = &outBuf
+	helper.Stderr = &errBuf
 
 	err := helper.Run()
 	require.Error(t, err)
 	var exitErr *osexec.ExitError
 	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4")
+	assert.Equal(t, utils.ExitCodePendingApproval, exitErr.ExitCode(), "pending approval must exit 4; stderr: %s", errBuf.String())
 
-	assert.Contains(t, stderr.String(), "work-session update [SESSION_ID] --title")
-	assert.Contains(t, stderr.String(), "may need an approval of its own")
-
-	// The hint rides on stderr, so the machine signal on stdout stays parseable.
-	var got struct {
-		Status string `json:"status"`
-	}
-	require.NoError(t, json.Unmarshal(stdout.Bytes(), &got), "stdout: %s", stdout.String())
-	assert.Equal(t, utils.PendingApprovalStatus, got.Status)
+	return outBuf.String(), errBuf.String()
 }

@@ -3,6 +3,7 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -273,6 +274,16 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 		} {
 			assert.Empty(t, sudoDenialHint(forged), "forged code must not reach the hint: %q", forged)
 		}
+	})
+
+	t.Run("a code longer than the plugin's buffer is not echoed", func(t *testing.T) {
+		// The 63-char cap mirrors alpacon_approval.c's char[64], so it is the
+		// bound most likely to drift silently: a longer code has the sanitizer's
+		// own shape and would otherwise be echoed verbatim.
+		const line = "Alpacon denied this sudo command (%s).\n"
+		atCap := strings.Repeat("A", 63)
+		assert.Contains(t, sudoDenialHint(fmt.Sprintf(line, atCap)), atCap)
+		assert.Empty(t, sudoDenialHint(fmt.Sprintf(line, strings.Repeat("A", 64))))
 	})
 
 	t.Run("a look-alike line does not suppress the real denial after it", func(t *testing.T) {
