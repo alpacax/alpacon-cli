@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// stagingPerm is the mode a replacement is written under, never a final mode:
+// it hides partial content from other local accounts until the write completes.
+const stagingPerm = 0600
+
 func SaveFile(fileName string, data []byte) error {
 	_, err := saveStream(fileName, bytes.NewReader(data))
 	return err
@@ -38,7 +42,12 @@ func saveStream(fileName string, r io.Reader) (int64, error) {
 	return written, nil
 }
 
-func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
+// SaveStreamAtomic writes r to fileName through a temp file in the same
+// directory, then renames it into place. The mode is decided when the write
+// starts: a destination already on disk keeps its own mode, so a write does not
+// re-permission a file the user set up, and one that is not there yet gets
+// newFilePerm minus the umask.
+func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) {
 	targetName, err := resolveWritePath(fileName)
 	if err != nil {
 		return 0, err
@@ -49,19 +58,29 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 		return 0, fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	perm := os.FileMode(0666)
-	var existingPerm os.FileMode
+	finalPerm := newFilePerm
+	replacing := false
 	if info, err := os.Stat(targetName); err == nil {
 		if info.IsDir() {
 			return 0, fmt.Errorf("destination is a directory: %s", targetName)
 		}
-		existingPerm = info.Mode().Perm()
-		perm = existingPerm
+		finalPerm = info.Mode().Perm()
+		replacing = true
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
 
-	file, err := createReplacementTempFile(dir, perm)
+	// A replacement is staged narrow and widened once the content is complete, so
+	// a download that dies mid-stream never leaves its partial content readable
+	// to anyone else. A new file cannot be staged the same way: it would need a
+	// chmod that bypasses the umask, and a caller passing 0666 is asking for the
+	// umask to apply.
+	createPerm := finalPerm
+	if replacing {
+		createPerm = stagingPerm
+	}
+
+	file, err := createReplacementTempFile(dir, createPerm)
 	if err != nil {
 		return 0, err
 	}
@@ -74,16 +93,20 @@ func SaveStreamAtomic(fileName string, r io.Reader) (int64, error) {
 		}
 	}()
 
-	if existingPerm != 0 {
-		if err := file.Chmod(existingPerm); err != nil {
-			return 0, fmt.Errorf("failed to set temp file permissions: %w", err)
-		}
-	}
-
 	written, copyErr := io.Copy(file, r)
+	// Staging cost the destination its own mode, so restore it before the rename.
+	// Through the handle: a path-based chmod here could be pointed at another
+	// file by anyone able to swap tempName for a symlink.
+	var chmodErr error
+	if copyErr == nil && replacing {
+		chmodErr = file.Chmod(finalPerm)
+	}
 	closeErr := file.Close()
 	if copyErr != nil {
 		return written, fmt.Errorf("failed to write file: %w", copyErr)
+	}
+	if chmodErr != nil {
+		return written, fmt.Errorf("failed to set temp file permissions: %w", chmodErr)
 	}
 	if closeErr != nil {
 		return written, fmt.Errorf("failed to close file: %w", closeErr)

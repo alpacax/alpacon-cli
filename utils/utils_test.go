@@ -187,7 +187,7 @@ func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0755))
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
 
-	written, err := SaveStreamAtomic(dest, &failingReader{reader: strings.NewReader("partial")})
+	written, err := SaveStreamAtomic(dest, &failingReader{reader: strings.NewReader("partial")}, 0600)
 	require.Error(t, err)
 	assert.Equal(t, int64(len("partial")), written)
 
@@ -200,16 +200,100 @@ func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
 	assert.Empty(t, matches)
 }
 
+func requireUnixModes(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file modes are not enforced on Windows")
+	}
+}
+
 func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
+	requireUnixModes(t)
+
 	dest := filepath.Join(t.TempDir(), "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
 
-	_, err := SaveStreamAtomic(dest, strings.NewReader("replacement"))
+	written, err := SaveStreamAtomic(dest, strings.NewReader("replacement"), 0666)
 	require.NoError(t, err)
+	assert.Equal(t, int64(len("replacement")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement", string(content))
 
 	info, err := os.Stat(dest)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+}
+
+// tempModeReader records the mode of every temp file present in dir each time
+// the stream is read, so a test can see what the partial file was exposed as.
+type tempModeReader struct {
+	reader io.Reader
+	dir    string
+	modes  []os.FileMode
+}
+
+func (r *tempModeReader) Read(p []byte) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(r.dir, ".alpacon-*.tmp"))
+	if err != nil {
+		return 0, err
+	}
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil {
+			return 0, err
+		}
+		r.modes = append(r.modes, info.Mode().Perm())
+	}
+	return r.reader.Read(p)
+}
+
+func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
+	requireUnixModes(t)
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "file.txt")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+
+	// The stream dies after its first chunk, so the modes sampled below are the
+	// ones a partial replacement actually sat at.
+	reader := &tempModeReader{reader: &failingReader{reader: strings.NewReader("replacement")}, dir: dir}
+	_, err := SaveStreamAtomic(dest, reader, 0600)
+	require.Error(t, err)
+
+	require.NotEmpty(t, reader.modes)
+	for _, mode := range reader.modes {
+		assert.Zero(t, mode&0077)
+	}
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "existing", string(content))
+
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0644), info.Mode().Perm())
+}
+
+func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
+	requireUnixModes(t)
+
+	dest := filepath.Join(t.TempDir(), "file.txt")
+
+	written, err := SaveStreamAtomic(dest, strings.NewReader("created"), 0600)
+	require.NoError(t, err)
+	assert.Equal(t, int64(len("created")), written)
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "created", string(content))
+
+	// The umask can narrow 0600 further, so pin the guarantee that holds: no
+	// group or other bits. The successful read above covers the owner side.
+	info, err := os.Stat(dest)
+	require.NoError(t, err)
+	assert.Zero(t, info.Mode().Perm()&0077)
 }
 
 func TestSaveStreamAtomic_WritesThroughExistingSymlink(t *testing.T) {
@@ -225,7 +309,7 @@ func TestSaveStreamAtomic_WritesThroughExistingSymlink(t *testing.T) {
 	require.NoError(t, os.Symlink(target, link))
 	require.NoError(t, os.Symlink("link.txt", chain))
 
-	_, err := SaveStreamAtomic(chain, strings.NewReader("replacement"))
+	_, err := SaveStreamAtomic(chain, strings.NewReader("replacement"), 0600)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(target)
@@ -250,7 +334,7 @@ func TestSaveStreamAtomic_WritesThroughDanglingSymlink(t *testing.T) {
 	link := filepath.Join(dir, "link.txt")
 	require.NoError(t, os.Symlink("target.txt", link))
 
-	_, err := SaveStreamAtomic(link, strings.NewReader("created"))
+	_, err := SaveStreamAtomic(link, strings.NewReader("created"), 0600)
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(target)
