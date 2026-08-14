@@ -146,6 +146,62 @@ func TestIsLocalPaths(t *testing.T) {
 	}
 }
 
+func TestValidatePaths(t *testing.T) {
+	tests := []struct {
+		name       string
+		sources    []string
+		dest       string
+		wantErrSub string
+	}{
+		{
+			name:    "Local sources with remote destination",
+			sources: []string{"./test.txt", "/home/user/file.txt"},
+			dest:    "myserver:/tmp/",
+		},
+		{
+			name:    "Remote source with local destination",
+			sources: []string{"myserver:/tmp/file.txt"},
+			dest:    "./",
+		},
+		{
+			// Run strips the user prefix before validatePaths sees it; this pins
+			// that SplitPath itself does not, so the server name keeps "admin@".
+			name:    "Remote source with a user prefix",
+			sources: []string{"admin@myserver:/tmp/file.txt"},
+			dest:    "./",
+		},
+		{
+			name:       "Mixed local and remote sources",
+			sources:    []string{"./test.txt", "myserver:/tmp/file.txt"},
+			dest:       "/tmp/",
+			wantErrSub: "cannot mix local and remote source paths",
+		},
+		{
+			name:       "Remote source without server name",
+			sources:    []string{":/tmp/file.txt"},
+			dest:       "./",
+			wantErrSub: "invalid remote path format",
+		},
+		{
+			name:       "Remote destination without path",
+			sources:    []string{"./test.txt"},
+			dest:       "myserver:",
+			wantErrSub: "invalid remote path format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePaths(tt.sources, tt.dest)
+			if tt.wantErrSub == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErrSub)
+		})
+	}
+}
+
 // Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	tests := []struct {
