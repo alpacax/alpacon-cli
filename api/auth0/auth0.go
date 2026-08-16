@@ -71,10 +71,54 @@ func resolveOrgName(envInfo *AuthEnvResponse, fallback string) string {
 	return fallback
 }
 
+// appendDeviceScope appends a `device:<id>` scope identifying this CLI
+// installation, so the server can bind an MFA presence proof to the client that
+// requested the challenge instead of falling back to an IP-based fingerprint
+// that two installations behind one egress IP would share.
+//
+// It travels as a scope because /oauth/device/code accepts only client_id,
+// scope and audience—there is no other field to put it in—and encoding a value
+// as a scope is Auth0's documented answer for this flow. The `org:<name>` scope
+// already reaches the `CLI Auth` action the same way.
+//
+// A malformed or empty identifier is dropped rather than sent: the Auth0 action
+// rejects anything failing config.IsValidDeviceID, and a rejected scope would
+// fail the whole login. Existing scopes are never reordered or rewritten.
+func appendDeviceScope(scope, deviceID string) string {
+	if !config.IsValidDeviceID(deviceID) {
+		return scope
+	}
+	return scope + " device:" + deviceID
+}
+
+// deviceCodeScope composes the scope string for the device-code request.
+func deviceCodeScope(orgName, deviceID string) string {
+	return appendDeviceScope(fmt.Sprintf("openid profile email offline_access cli org:%s", orgName), deviceID)
+}
+
+// refreshScope composes the scope string for the refresh-token grant. Auth0
+// re-runs post-login actions on a refresh exchange, so the device identifier
+// has to be present there too or the action loses it on every token refresh.
+func refreshScope(orgName, deviceID string) string {
+	return appendDeviceScope(fmt.Sprintf("cli org:%s", orgName), deviceID)
+}
+
+// currentDeviceID returns this installation's device identifier, or "" when it
+// cannot be read or created. The identifier is an optional hardening signal, so
+// a failure here degrades to the server-side fingerprint fallback instead of
+// blocking the login.
+func currentDeviceID() string {
+	deviceID, err := config.GetOrCreateDeviceID()
+	if err != nil {
+		return ""
+	}
+	return deviceID
+}
+
 func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse) (*DeviceCodeResponse, error) {
 	data := map[string]string{
 		"client_id": envInfo.Auth0.ClientID,
-		"scope":     fmt.Sprintf("openid profile email offline_access cli org:%s", resolveOrgName(envInfo, workspaceName)),
+		"scope":     deviceCodeScope(resolveOrgName(envInfo, workspaceName), currentDeviceID()),
 		"audience":  envInfo.Auth0.Audience,
 	}
 
@@ -165,7 +209,7 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 		"grant_type":    "refresh_token",
 		"client_id":     envInfo.Auth0.ClientID,
 		"refresh_token": refreshToken,
-		"scope":         fmt.Sprintf("cli org:%s", orgName),
+		"scope":         refreshScope(orgName, currentDeviceID()),
 	}
 
 	jsonData, err := json.Marshal(data)

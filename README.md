@@ -108,6 +108,8 @@ $ alpacon logout
 
 Successful login writes `~/.alpacon/config.json` containing the workspace target and credentials. Browser OAuth stores access/refresh tokens and access-token expiry; `-t` stores the supplied API token. In an interactive shell, re-login prompts with the stored target as the default instead of silently reusing it; non-interactive login requires an explicit host or `--workspace/--region`.
 
+Browser login also sends a device identifier to Auth0 so an MFA prompt can be bound to the installation that requested it. It is a random value, not a credential, generated once and reused by every workspace this installation logs in to. It is stored in `~/.alpacon/device_id`—a separate file from `config.json`, so it survives `alpacon logout`: the identifier describes the machine, not the session, and regenerating it would invalidate MFA verifications already tied to it and prompt you again. Delete the file to reset it; the next login generates a new one.
+
 For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 
 ## Commands
