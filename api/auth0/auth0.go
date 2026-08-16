@@ -240,7 +240,8 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 }
 
 // refreshWithDeviceScopeFallback runs the refresh-token grant with the device
-// scope and retries once without it when the server refuses the exchange.
+// scope and retries once without it when the server refuses that scope. See
+// isDeviceScopeRefusal for which refusals count.
 //
 // Every installation that logged in before the device scope shipped holds a
 // refresh token granted against a scope set that never contained
@@ -273,11 +274,12 @@ func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.C
 		return tokenRes, err
 	}
 
-	// Retry only a refusal the server actually sent back. A transport or
-	// decoding failure leaves it unknown whether the exchange was processed,
-	// and replaying it could spend a refresh token the server already rotated.
+	// Retry only a refusal the server actually sent back, and only one whose
+	// code says the scope is what it refused. A transport or decoding failure
+	// leaves it unknown whether the exchange was processed, and replaying it
+	// could spend a refresh token the server already rotated.
 	var oauthErr *oauthError
-	if !errors.As(err, &oauthErr) {
+	if !errors.As(err, &oauthErr) || !isDeviceScopeRefusal(oauthErr.Code) {
 		return nil, err
 	}
 
@@ -285,6 +287,56 @@ func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.C
 		"Retrying without it; MFA presence falls back to the server-side fingerprint until the next 'alpacon login'.", oauthErr.Code)
 
 	return requestRefreshedToken(envInfo, httpClient, refreshToken, fallbackScope)
+}
+
+// isDeviceScopeRefusal reports whether an OAuth error code is the authorization
+// server declining the requested scope—the one refusal dropping `device:<id>`
+// can fix.
+//
+// It is an allowlist, not a list of codes to skip, because the codes worth
+// skipping are not enumerable from here. Auth0 reports a token-endpoint rate
+// limit as `too_many_requests`, but has also been seen reporting the same
+// condition as `access_denied` with "Global limit has been reached". A skip
+// list would have to guess every such alias, and each one it missed would turn
+// a throttled endpoint into one taking twice the requests. An allowlist only
+// has to name the refusals a narrower scope can actually resolve.
+//
+// The two that qualify:
+//
+//   - invalid_scope is the spec's own name for this. RFC 6749 §5.2 defines it
+//     as the requested scope being "invalid, unknown, malformed, or exceed[ing]
+//     the scope granted by the resource owner", which is precisely §6's rule
+//     that a refresh may not ask for more than the original grant—the position
+//     every installation that logged in before `device:<id>` shipped is in.
+//   - invalid_request catches a server that treats an unrecognized scope token
+//     as a bad parameter rather than a scope decision: §5.2 files a request
+//     that "includes an unsupported parameter value (other than grant type)"
+//     under this code.
+//
+// Everything else is left alone. invalid_grant, invalid_client,
+// unauthorized_client and unsupported_grant_type describe the refresh token,
+// the client or the grant type, so a different scope cannot change the answer.
+// server_error and temporarily_unavailable are transient, and an immediate
+// second request is the wrong response to both. access_denied is excluded on
+// purpose even though a post-login action rejecting the identifier could
+// surface as one: it is also how Auth0 reports policy denials and, per above,
+// sometimes rate limiting—and retrying without the identifier could turn a deny
+// made because of the device into a success, which is the opposite of what the
+// identifier exists for.
+//
+// The set is deliberately erring on the broad side; invalid_request is here for
+// that reason alone. A scope refusal not retried degrades presence keying to
+// the shared IP-based fingerprint silently and for the whole life of the login,
+// whereas a retry that should not have run costs one request that fails exactly
+// as the first did. So add a code here if it is observed refusing this scope in
+// the field—but not merely because retrying on it looks harmless.
+func isDeviceScopeRefusal(code string) bool {
+	switch code {
+	case "invalid_scope", "invalid_request":
+		return true
+	default:
+		return false
+	}
 }
 
 // requestRefreshedToken exchanges a refresh token for a new access token under
