@@ -218,11 +218,16 @@ func TestGetOrCreateDeviceID_FilePermissions(t *testing.T) {
 	require.NoError(t, err)
 	fileInfo, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), fileInfo.Mode().Perm())
+	// Assert nothing is readable by group or other, rather than an exact mode:
+	// creation respects the process umask, so a stricter umask can legally
+	// produce 0400 here and an exact comparison would fail on that machine.
+	assert.Zero(t, fileInfo.Mode().Perm()&0o077,
+		"device id file must not be readable by group or other, got %v", fileInfo.Mode().Perm())
 
 	dirInfo, err := os.Stat(filepath.Dir(path))
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
+	assert.Zero(t, dirInfo.Mode().Perm()&0o077,
+		"config dir must not be accessible by group or other, got %v", dirInfo.Mode().Perm())
 }
 
 // TestGetOrCreateDeviceID_UnreadableFile pins that a read failure is surfaced
