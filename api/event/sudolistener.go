@@ -164,7 +164,7 @@ func (sl *SudoListener) pollMFACompletion() bool {
 		case <-timeout:
 			return false
 		case <-ticker.C:
-			completed, err := mfa.CheckMFACompletion(sl.ac)
+			completed, err := mfa.CheckSensitiveMFACompletion(sl.ac)
 			if err != nil {
 				continue
 			}

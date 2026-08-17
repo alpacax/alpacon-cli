@@ -44,6 +44,61 @@ func TestCheckMFACompletion_NotCompleted(t *testing.T) {
 	assert.False(t, completed)
 }
 
+func TestCheckSensitiveMFACompletion(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			// The regression: a proof inside the ordinary window but outside
+			// the sensitive one. Reading "completed" here stops the poll while
+			// the sensitive gate still rejects, so the action fails and only
+			// the retry succeeds.
+			name: "ordinary fresh, sensitive stale",
+			body: `{"completed": true, "completed_sensitive": false}`,
+			want: false,
+		},
+		{
+			name: "both fresh",
+			body: `{"completed": true, "completed_sensitive": true}`,
+			want: true,
+		},
+		{
+			// A server predating the two-tier split sends one verdict for both
+			// tiers; falling back to it beats polling until the timeout.
+			name: "server omits the sensitive verdict",
+			body: `{"completed": true}`,
+			want: true,
+		},
+		{
+			name: "server omits the sensitive verdict and presence is stale",
+			body: `{"completed": false}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, mfaCompletionURL, r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{
+				HTTPClient: ts.Client(),
+				BaseURL:    ts.URL,
+			}
+
+			completed, err := CheckSensitiveMFACompletion(ac)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, completed)
+		})
+	}
+}
+
 func TestCheckMFACompletion_ServerError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

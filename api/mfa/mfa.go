@@ -28,8 +28,15 @@ type mfaResponse struct {
 	MfaURL string `json:"mfa_url"`
 }
 
+// mfaCompletionResponse is the step-up probe's verdict at each presence tier.
+//
+// CompletedSensitive is a pointer so an absent field is distinguishable from a
+// reported false: a server predating the two-tier split reports neither, and a
+// caller that needs the sensitive verdict must fall back to Completed rather
+// than poll forever against a field that server will never send.
 type mfaCompletionResponse struct {
-	Completed bool `json:"completed"`
+	Completed          bool  `json:"completed"`
+	CompletedSensitive *bool `json:"completed_sensitive"`
 }
 
 func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
@@ -51,18 +58,56 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 	return nil
 }
 
+// CheckMFACompletion reports whether presence is fresh enough for an ordinary
+// action. Callers gated at the sensitive tier—privilege elevation and security
+// settings—must use CheckSensitiveMFACompletion instead.
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
-	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
+	resp, err := fetchMFACompletion(ac)
 	if err != nil {
-		return false, fmt.Errorf("failed to check MFA completion: %w", err)
-	}
-
-	var resp mfaCompletionResponse
-	if err := json.Unmarshal(responseBody, &resp); err != nil {
-		return false, fmt.Errorf("failed to parse MFA completion response: %w", err)
+		return false, err
 	}
 
 	return resp.Completed, nil
+}
+
+// CheckSensitiveMFACompletion reports whether presence is fresh enough for a
+// sensitive-tier action.
+//
+// The sensitive window is the shorter one, so asking at the ordinary tier
+// returns true while the gate that follows still rejects—the poll then stops
+// before the human has finished the browser prompt, and the action fails on a
+// step-up that had in fact not completed yet. Retrying succeeds, which is what
+// made this read as "the first sudo always fails".
+//
+// Against a server predating the two-tier split the field is absent and this
+// falls back to the ordinary verdict: that server applies one window to both
+// tiers, so the two verdicts are the same answer there.
+func CheckSensitiveMFACompletion(ac *client.AlpaconClient) (bool, error) {
+	resp, err := fetchMFACompletion(ac)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.CompletedSensitive != nil {
+		return *resp.CompletedSensitive, nil
+	}
+
+	return resp.Completed, nil
+}
+
+func fetchMFACompletion(ac *client.AlpaconClient) (mfaCompletionResponse, error) {
+	var resp mfaCompletionResponse
+
+	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
+	if err != nil {
+		return resp, fmt.Errorf("failed to check MFA completion: %w", err)
+	}
+
+	if err := json.Unmarshal(responseBody, &resp); err != nil {
+		return resp, fmt.Errorf("failed to parse MFA completion response: %w", err)
+	}
+
+	return resp, nil
 }
 
 // GetMFALinkForSudo resolves the server name and returns a CLI MFA URL.

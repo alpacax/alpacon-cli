@@ -53,7 +53,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 					return nil
 				},
 				CheckMFACompleted: func() (bool, error) {
-					return mfa.CheckMFACompletion(alpaconClient)
+					return mfa.CheckSensitiveMFACompletion(alpaconClient)
 				},
 				RefreshToken: alpaconClient.RefreshToken,
 				RetryOperation: func() error {
