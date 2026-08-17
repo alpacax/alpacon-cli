@@ -31,9 +31,10 @@ type mfaResponse struct {
 // mfaCompletionResponse is the step-up probe's verdict at each presence tier.
 //
 // CompletedSensitive is a pointer so an absent field is distinguishable from a
-// reported false: a server predating the two-tier split reports neither, and a
-// caller that needs the sensitive verdict must fall back to Completed rather
-// than poll forever against a field that server will never send.
+// reported false: a server predating the two-tier split reports Completed and
+// omits CompletedSensitive, and a caller that needs the sensitive verdict must
+// fall back to Completed rather than poll forever against a field that server
+// will never send.
 type mfaCompletionResponse struct {
 	Completed          bool  `json:"completed"`
 	CompletedSensitive *bool `json:"completed_sensitive"`
@@ -139,7 +140,7 @@ func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, err
 // receive a presence denial in the first place.
 func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	// Use the CLI-scoped sudo MFA URL (location=cli) so the mfa-success page
-	// notifies the backend, letting CheckMFACompletion observe completion.
+	// notifies the backend, letting the poll below observe completion.
 	stepUpURL, err := GetMFALinkForSudo(ac, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to get the MFA step-up link: %w", err)
@@ -185,7 +186,7 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 			spinner.Stop()
 			return fmt.Errorf("MFA step-up timed out after %v", stepUpTimeout)
 		case <-ticker.C:
-			completed, cerr := CheckMFACompletion(ac)
+			completed, cerr := CheckSensitiveMFACompletion(ac)
 			if cerr != nil || !completed {
 				// Non-fatal: the endpoint may lag the browser; keep polling.
 				continue
@@ -206,7 +207,7 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 
 // GetWorkspaceSecurityMFALink returns an MFA URL for workspace security settings.
 // Uses location "cli" so the mfa-success page notifies the backend,
-// enabling CheckMFACompletion polling to detect when MFA is done.
+// enabling the completion poll to detect when MFA is done.
 func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string) (string, error) {
 	params := map[string]string{
 		"location":  "cli",
