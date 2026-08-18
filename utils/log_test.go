@@ -131,3 +131,12 @@ func TestCliHelpers_KeepCallerNewlines(t *testing.T) {
 
 	assert.Contains(t, stderr, "first line\nsecond line: value\n")
 }
+
+// The choke point strips its arguments too, so a pre-colored value comes out
+// plain. cmd/server relies on the reverse order—sanitize the key, then color
+// it—to keep the "copy this" highlight on a registration key.
+func TestCliMessage_StripsColorFromArguments(t *testing.T) {
+	pinColor(t, true)
+
+	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
+}

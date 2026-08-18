@@ -29,6 +29,10 @@ func reportCLIError() {
 // survives too, so the detail can add a line that looks like our own prefix.
 // Accepted: \r is still dropped, so it can only append below, never overwrite
 // what is already on screen.
+//
+// The arguments go through the same strip, so never hand a Color()-wrapped
+// value to a Cli* helper—it loses its highlight. Colorize after sanitizing,
+// the way cmd/server prints a registration key.
 func cliMessage(msg string, args ...any) string {
 	lines := strings.Split(fmt.Sprintf(msg, args...), "\n")
 	for i, line := range lines {
