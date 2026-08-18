@@ -1,10 +1,10 @@
 package utils
 
 import (
-	"io"
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,21 +12,16 @@ import (
 // captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
-	require.NoError(t, err)
-	original := os.Stderr
-	os.Stderr = writer
-	defer func() { os.Stderr = original }()
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
+}
 
-	captured := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(reader)
-		captured <- string(data)
-	}()
-
-	fn()
-	require.NoError(t, writer.Close())
-	return <-captured
+// pinColor fixes the color switch for one test, whatever stderr happens to be.
+func pinColor(t *testing.T, enabled bool) {
+	t.Helper()
+	original := colorEnabled
+	colorEnabled = enabled
+	t.Cleanup(func() { colorEnabled = original })
 }
 
 func TestDebugEnabled(t *testing.T) {
@@ -69,4 +64,71 @@ func TestCliDebug(t *testing.T) {
 		stderr := captureStderr(t, func() { CliDebug("fell back to %s", "the fingerprint") })
 		assert.Empty(t, stderr)
 	})
+}
+
+// The server's error detail reaches these helpers through %s.
+func TestCliHelpers_SanitizeServerControlledText(t *testing.T) {
+	t.Setenv(DebugEnvVar, "1")
+	// Red("Error") and its siblings carry an escape of their own, so the ANSI
+	// case would fail whenever the test binary's stderr is a terminal.
+	pinColor(t, false)
+	emitters := []struct {
+		name string
+		emit func(string, ...any)
+	}{
+		{name: "CliError", emit: CliError},
+		{name: "CliWarning", emit: CliWarning},
+		{name: "CliInfo", emit: CliInfo},
+		{name: "CliSuccess", emit: CliSuccess},
+		{name: "CliDebug", emit: CliDebug},
+	}
+	tests := []struct {
+		name    string
+		detail  string
+		notWant string
+	}{
+		{name: "ANSI escape", detail: "denied\x1b[2Kapproved", notWant: "\x1b"},
+		{name: "bidi override", detail: "denied\u202eapproved", notWant: "\u202e"},
+		{name: "carriage return", detail: "denied\rapproved", notWant: "\r"},
+		{name: "8-bit CSI", detail: "denied\u009b2Kapproved", notWant: "\u009b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, emitter := range emitters {
+				t.Run(emitter.name, func(t *testing.T) {
+					stderr := captureStderr(t, func() { emitter.emit("%s", tt.detail) })
+					assert.NotContains(t, stderr, tt.notWant)
+					assert.Contains(t, stderr, "denied")
+					assert.Contains(t, stderr, "approved")
+				})
+			}
+		})
+	}
+}
+
+// Sanitizing the rendered message cannot tell a caller's newline from the
+// server's, so the detail keeps the power to open a line of its own.
+func TestCliHelpers_KeepServerNewlines(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		CliError("%s", "denied\nSuccess: approved")
+	})
+
+	assert.Contains(t, stderr, "denied\nSuccess: approved\n")
+}
+
+func TestCliHelpers_KeepCallerNewlines(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		CliWarning("first line\nsecond line: %s", "value")
+	})
+
+	assert.Contains(t, stderr, "first line\nsecond line: value\n")
+}
+
+// The choke point strips its arguments too, so a pre-colored value comes out
+// plain. cmd/server relies on the reverse order—sanitize the key, then color
+// it—to keep the "copy this" highlight on a registration key.
+func TestCliMessage_StripsColorFromArguments(t *testing.T) {
+	pinColor(t, true)
+
+	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
 }

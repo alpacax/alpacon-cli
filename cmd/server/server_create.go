@@ -266,7 +266,7 @@ func createTokenAndWarn(ac *client.AlpaconClient, name string) string {
 	if err != nil {
 		utils.CliErrorWithExit("Failed to create the registration token: %s.", err)
 	}
-	utils.CliWarning("New token created. Save the key now—it will not be shown again: %s", utils.Green(response.Key))
+	warnTokenKey("New token created. Save the key now—it will not be shown again", response.Key)
 	return response.ID
 }
 
