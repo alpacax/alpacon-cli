@@ -48,7 +48,7 @@ func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, erro
 		return nil, err
 	}
 
-	var list []SessionListItem
+	list := make([]SessionListItem, 0, len(sessions))
 	for _, s := range sessions {
 		closedAt := "-"
 		if s.ClosedAt != nil {

@@ -217,7 +217,7 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 		return nil, err
 	}
 
-	var eventList []EventAttributes
+	eventList := make([]EventAttributes, 0, len(events))
 	for _, event := range events {
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
