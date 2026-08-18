@@ -193,7 +193,9 @@ func gapFillInterval(noProgress int) time.Duration {
 	return d
 }
 
-func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, userName string) ([]EventAttributes, error) {
+// GetEventList returns the newest tail commands. The endpoint sorts -scheduled_at,
+// so the newest ones arrive first and the walk stops as soon as tail is reached.
+func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userName string) ([]EventAttributes, error) {
 	var serverID, userID string
 	var err error
 	if serverName != "" {
@@ -209,23 +211,14 @@ func GetEventList(ac *client.AlpaconClient, pageSize int, serverName string, use
 		}
 	}
 
-	relativePath := path.Join(serverID, userID)
-	params := map[string]string{}
-	if pageSize > 0 {
-		params["page_size"] = fmt.Sprintf("%d", pageSize)
-	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, relativePath, params))
+	endpoint := path.Join(getEventURL, serverID, userID)
+	events, err := api.FetchPagesUpTo[EventDetails](ac, endpoint, nil, tail)
 	if err != nil {
 		return nil, err
 	}
 
-	var response api.ListResponse[EventDetails]
-	if err = json.Unmarshal(responseBody, &response); err != nil {
-		return nil, err
-	}
-
-	var eventList []EventAttributes
-	for _, event := range response.Results {
+	eventList := make([]EventAttributes, 0, len(events))
+	for _, event := range events {
 		eventList = append(eventList, EventAttributes{
 			Server:      event.Server.Name,
 			Shell:       event.Shell,

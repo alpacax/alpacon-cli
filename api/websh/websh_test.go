@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -28,6 +29,43 @@ const (
 
 	receivedBufferSize = 8
 )
+
+// The page walk itself is pinned in api.TestFetchPagesUpTo_*; what is specific to
+// GetSessionList is that tail reaches the helper as its limit, so a tail larger than the
+// server's 100-item page cap still yields exactly tail sessions.
+func TestGetSessionList_PassesTailAsTheLimit(t *testing.T) {
+	// Twice the pages the tail needs, so a walk that ignored the limit comes back with 500
+	// and fails the length assertion instead of running until the test timeout.
+	const lastPage = 5
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		size, sizeErr := strconv.Atoi(r.URL.Query().Get("page_size"))
+		page, pageErr := strconv.Atoi(r.URL.Query().Get("page"))
+		if sizeErr != nil || pageErr != nil {
+			t.Errorf("page and page_size must be integers, got page=%q page_size=%q",
+				r.URL.Query().Get("page"), r.URL.Query().Get("page_size"))
+			http.Error(w, "bad pagination query", http.StatusBadRequest)
+			return
+		}
+
+		next := page + 1
+		if page >= lastPage {
+			next = 0
+		}
+		results := make([]SessionDetailResponse, size)
+		_ = json.NewEncoder(w).Encode(api.ListResponse[SessionDetailResponse]{Next: next, Results: results})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	list, err := GetSessionList(ac, 250)
+
+	require.NoError(t, err)
+	assert.Len(t, list, 250)
+}
 
 func TestGetSessionList(t *testing.T) {
 	closedTime := "2026-03-01T00:00:00Z"
@@ -67,7 +105,7 @@ func TestGetSessionList(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	list, err := GetSessionList(ac)
+	list, err := GetSessionList(ac, 25)
 	require.NoError(t, err)
 
 	assert.Len(t, list, 2)

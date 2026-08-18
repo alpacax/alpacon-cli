@@ -36,17 +36,19 @@ const (
 	sessionEndCloseCode = 4000
 )
 
-func GetSessionList(ac *client.AlpaconClient) ([]SessionListItem, error) {
+// GetSessionList returns the newest tail connectable sessions. The endpoint sorts
+// -added_at, so the newest ones arrive first and the walk stops as soon as tail is reached.
+func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, error) {
 	params := map[string]string{
 		"is_connectable": "true",
 	}
 
-	sessions, err := api.FetchAllPages[SessionDetailResponse](ac, sessionsBaseURL, params)
+	sessions, err := api.FetchPagesUpTo[SessionDetailResponse](ac, sessionsBaseURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
 
-	var list []SessionListItem
+	list := make([]SessionListItem, 0, len(sessions))
 	for _, s := range sessions {
 		closedAt := "-"
 		if s.ClosedAt != nil {

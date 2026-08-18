@@ -18,65 +18,111 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetEventList_NoExtraPagination(t *testing.T) {
-	var eventRequestCount atomic.Int32
+// The page walk itself is pinned in api.TestFetchPagesUpTo_*; what is specific to
+// GetEventList is that tail reaches the helper as its limit, so a tail larger than the
+// server's 100-item page cap still yields exactly tail commands.
+func TestGetEventList_PassesTailAsTheLimit(t *testing.T) {
+	// Twice the pages the tail needs, so a walk that ignored the limit comes back with 500
+	// and fails the length assertion instead of running until the test timeout.
+	const lastPage = 5
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		count := eventRequestCount.Add(1)
-		if count > 1 {
-			t.Errorf("extra request detected: request #%d to %s (should be single request)", count, r.URL.String())
+		size, sizeErr := strconv.Atoi(r.URL.Query().Get("page_size"))
+		page, pageErr := strconv.Atoi(r.URL.Query().Get("page"))
+		if sizeErr != nil || pageErr != nil {
+			t.Errorf("page and page_size must be integers, got page=%q page_size=%q",
+				r.URL.Query().Get("page"), r.URL.Query().Get("page_size"))
+			http.Error(w, "bad pagination query", http.StatusBadRequest)
 			return
 		}
 
-		pageSize := r.URL.Query().Get("page_size")
-		if pageSize != "25" {
-			t.Errorf("expected page_size=25, got %s", pageSize)
+		next := page + 1
+		if page >= lastPage {
+			next = 0
 		}
-
-		var results []EventDetails
-		for i := range 25 {
-			results = append(results, EventDetails{
-				ID:          fmt.Sprintf("evt-%d", i),
-				Server:      types.ServerSummary{Name: "test-server"},
-				Shell:       "bash",
-				Line:        fmt.Sprintf("cmd-%d", i),
-				RequestedBy: types.UserSummary{Name: "admin"},
-			})
-		}
-
-		resp := api.ListResponse[EventDetails]{
-			Count:   200, // more items exist on server
-			Results: results,
-		}
-		_ = json.NewEncoder(w).Encode(resp)
+		results := make([]EventDetails, size)
+		_ = json.NewEncoder(w).Encode(api.ListResponse[EventDetails]{Next: next, Results: results})
 	}))
 	defer ts.Close()
 
-	ac := &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	events, err := GetEventList(ac, 250, "", "")
+
+	require.NoError(t, err)
+	assert.Len(t, events, 250)
+}
+
+// The --server and --user filters are path segments, not query params, so a broken join
+// does not fail the request—it returns every command as if no filter had been given.
+func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
+	// Mirrors the lookup endpoints of api/server and api/iam, whose consts are unexported.
+	const (
+		serverLookupURL = "/api/servers/servers/"
+		userLookupURL   = "/api/iam/users/"
+	)
+
+	tests := []struct {
+		name         string
+		serverName   string
+		userName     string
+		expectedPath string
+	}{
+		{
+			name:         "both filters",
+			serverName:   "my-server",
+			userName:     "admin",
+			expectedPath: getEventURL + "srv-uuid/usr-uuid/",
+		},
+		{
+			name:         "server only",
+			serverName:   "my-server",
+			expectedPath: getEventURL + "srv-uuid/",
+		},
+		{
+			// path.Join drops the empty server segment, so a lone user ID lands on the address
+			// the command detail route also answers on. Recorded as current behavior, not as
+			// the desired one—confirming it needs the server-side route (alpacax/alpacon-cli#363).
+			name:         "user only",
+			userName:     "admin",
+			expectedPath: getEventURL + "usr-uuid/",
+		},
 	}
 
-	events, err := GetEventList(ac, 25, "", "")
-	if err != nil {
-		t.Fatalf("GetEventList error: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 
-	totalRequests := int(eventRequestCount.Load())
-	if totalRequests != 1 {
-		t.Errorf("expected 1 request, got %d", totalRequests)
-	}
-	if len(events) != 25 {
-		t.Errorf("expected 25 events, got %d", len(events))
+				switch {
+				case strings.HasPrefix(r.URL.Path, serverLookupURL):
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-uuid"}]}`))
+				case strings.HasPrefix(r.URL.Path, userLookupURL):
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"usr-uuid"}]}`))
+				case strings.HasPrefix(r.URL.Path, getEventURL):
+					assert.Equal(t, tt.expectedPath, r.URL.Path)
+					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+				default:
+					t.Errorf("unexpected request path %q", r.URL.Path)
+					http.Error(w, "unexpected path", http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := GetEventList(ac, 25, tt.serverName, tt.userName)
+
+			require.NoError(t, err)
+		})
 	}
 }
 
