@@ -72,8 +72,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		}
 
 		utils.CliSuccess("Registration token created: %s", resp.Name)
-		fmt.Fprintf(os.Stderr, "%s: Save this key now—it will not be shown again: %s\n",
-			utils.Yellow("Warning"), utils.Green(utils.SanitizeTerminalText(resp.Key)))
+		warnTokenKey("Save this key now—it will not be shown again", resp.Key)
 		if resp.ExpiresAt != nil {
 			utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
 		}
@@ -107,4 +106,11 @@ func resolveGroupIDs(ac *client.AlpaconClient, entries []string) ([]string, erro
 		}
 	}
 	return ids, nil
+}
+
+// warnTokenKey prints the one-time key like CliWarning, except it colors the
+// key after sanitizing—CliWarning would strip the highlight with the escapes.
+func warnTokenKey(prefix, key string) {
+	fmt.Fprintf(os.Stderr, "%s: %s: %s\n",
+		utils.Yellow("Warning"), prefix, utils.Green(utils.SanitizeTerminalText(key)))
 }
