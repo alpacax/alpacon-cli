@@ -29,6 +29,14 @@ func captureStderr(t *testing.T, fn func()) string {
 	return <-captured
 }
 
+// pinColor fixes the color switch for one test, whatever stderr happens to be.
+func pinColor(t *testing.T, enabled bool) {
+	t.Helper()
+	original := colorEnabled
+	colorEnabled = enabled
+	t.Cleanup(func() { colorEnabled = original })
+}
+
 func TestDebugEnabled(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -74,6 +82,9 @@ func TestCliDebug(t *testing.T) {
 // The server's error detail reaches these helpers through %s.
 func TestCliHelpers_SanitizeServerControlledText(t *testing.T) {
 	t.Setenv(DebugEnvVar, "1")
+	// Red("Error") and its siblings carry an escape of their own, so the ANSI
+	// case would fail whenever the test binary's stderr is a terminal.
+	pinColor(t, false)
 	emitters := map[string]func(string, ...any){
 		"CliError":   CliError,
 		"CliWarning": CliWarning,
