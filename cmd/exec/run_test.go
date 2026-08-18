@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -200,4 +202,157 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 
 	assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
 	assert.GreaterOrEqual(t, elapsed, waitTimeout, "loop must wait the full anchored window before timing out")
+}
+
+// statusError carries a status the way the API client's errors do.
+type statusError struct {
+	status int
+}
+
+func (e *statusError) Error() string       { return fmt.Sprintf("server said %d", e.status) }
+func (e *statusError) HTTPStatusCode() int { return e.status }
+
+func TestIsPollFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "no error is not a failure", err: nil},
+		{name: "the command ran and was denied", err: &event.RemoteCommandError{ExitCode: 1}},
+		{name: "a tick that spent a whole command timeout", err: &event.ClientTimeoutError{}},
+		{name: "a reviewer rejected the command", err: &event.CommandRejectedError{}},
+		{name: "a wrapped rejection stays an answer", err: fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandRejectedError{})},
+		{name: "transport failure carries no status", err: errors.New("connection reset"), want: true},
+		{name: "throttled", err: &statusError{status: http.StatusTooManyRequests}, want: true},
+		{name: "proxy error", err: &statusError{status: http.StatusBadGateway}, want: true},
+		{name: "unauthorized repeats on every tick", err: &statusError{status: http.StatusUnauthorized}},
+		{name: "not found repeats on every tick", err: &statusError{status: http.StatusNotFound}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPollFailure(tt.err))
+		})
+	}
+}
+
+func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		switch calls {
+		case 1:
+			return denial
+		case 2:
+			return &statusError{status: http.StatusBadGateway}
+		default:
+			return nil // a reviewer approved it; the re-attempt runs
+		}
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait re-attempts the command; it never resumes a held job")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Second, io.Discard)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 3, calls, "the failed tick must not end the wait")
+}
+
+// Reporting the last poll failure instead would exit 1 on a request still open.
+func TestRunExecWithApprovalWait_TimeoutReportsThePendingDenial(t *testing.T) {
+	const waitTimeout = 80 * time.Millisecond
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		// Alternate so the failure count never reaches the give-up bound.
+		if calls%2 == 0 {
+			return &statusError{status: http.StatusBadGateway}
+		}
+		return denial
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", waitTimeout, io.Discard)
+
+	assert.Same(t, denial, err, "a timed-out wait reports the pending denial, not the last poll failure")
+}
+
+func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		return &statusError{status: http.StatusBadGateway}
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+
+	var status *statusError
+	assert.ErrorAs(t, err, &status, "the wait ends with the failure it gave up on")
+	assert.Equal(t, utils.MaxConsecutivePollFailures+1, calls, "one denial plus the bounded run of failures")
+}
+
+func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWait(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		return &statusError{status: http.StatusUnauthorized}
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+
+	var status *statusError
+	assert.ErrorAs(t, err, &status)
+	assert.Equal(t, 2, calls, "a fatal 4xx must not be retried until the deadline")
+}
+
+// A rejection landing mid-wait must end the loop at once: re-submitting a
+// command a reviewer just rejected files a fresh approval request per tick.
+func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		return &event.CommandRejectedError{}
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run for a rejected command")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+
+	var rejected *event.CommandRejectedError
+	assert.ErrorAs(t, err, &rejected)
+	assert.Equal(t, 2, calls, "a rejection is an answer, not a failed poll to retry")
 }
