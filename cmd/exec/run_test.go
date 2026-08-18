@@ -11,6 +11,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
@@ -355,4 +356,39 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	var rejected *event.CommandRejectedError
 	assert.ErrorAs(t, err, &rejected)
 	assert.Equal(t, 2, calls, "a rejection is an answer, not a failed poll to retry")
+}
+
+// captureStderr returns everything fn writes to stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
+}
+
+func TestPrintPresenceStepUpLink(t *testing.T) {
+	original := mfaLinkByServerName
+	t.Cleanup(func() { mfaLinkByServerName = original })
+
+	// The link is printed unconditionally: api/mfa never hands back an empty URL
+	// with a nil error, so there is nothing left for this caller to filter.
+	t.Run("prints the link", func(t *testing.T) {
+		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+			return "https://example.com/mfa", nil
+		}
+
+		stderr := captureStderr(t, func() { printPresenceStepUpLink(nil, "my-server") })
+
+		assert.Contains(t, stderr, "https://example.com/mfa")
+		assert.Contains(t, stderr, "MFA verification link")
+	})
+
+	t.Run("stays silent when the link cannot be fetched", func(t *testing.T) {
+		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+			return "", errors.New("failed to parse MFA URL response")
+		}
+
+		stderr := captureStderr(t, func() { printPresenceStepUpLink(nil, "my-server") })
+
+		assert.Empty(t, stderr)
+	})
 }

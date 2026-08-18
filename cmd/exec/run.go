@@ -49,6 +49,7 @@ var approvalWaitPollInterval = 5 * time.Second
 var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
+	mfaLinkByServerName   = mfa.GetMFALinkByServerName
 )
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
@@ -348,12 +349,7 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 	}
 
 	if !utils.IsInteractiveShell() {
-		// Non-interactive: surface the verification link so a human reading the
-		// logs can complete MFA out of band, then re-run. We cannot prompt or
-		// open a browser here.
-		if url, linkErr := mfa.GetMFALinkForSudo(ac, serverName); linkErr == nil && url != "" {
-			utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
-		}
+		printPresenceStepUpLink(ac, serverName)
 		return err
 	}
 
@@ -365,6 +361,19 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
 	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
+}
+
+// printPresenceStepUpLink surfaces the verification link for a non-interactive
+// presence denial, so a human reading the logs can complete MFA out of band and
+// re-run. We cannot prompt or open a browser here. A link that cannot be
+// fetched is dropped silently: the static denial hint already carries the
+// actionable part, and the link is the extra.
+func printPresenceStepUpLink(ac *client.AlpaconClient, serverName string) {
+	url, err := mfaLinkByServerName(ac, serverName)
+	if err != nil {
+		return
+	}
+	utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
 }
 
 // approvalDenialOutput returns the captured output of a denial that left an

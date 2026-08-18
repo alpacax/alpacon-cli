@@ -33,14 +33,7 @@ type mfaCompletionResponse struct {
 }
 
 func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		utils.CliErrorWithExit("Failed to load configuration: %s.", err)
-	}
-
-	serverID, _ := server.GetServerIDByName(ac, serverName)
-	mfaURL, err := GetMFALink(ac, serverID, cfg.WorkspaceName)
+	mfaURL, err := GetMFALinkByServerName(ac, serverName)
 	if err != nil {
 		return err
 	}
@@ -65,9 +58,9 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	return resp.Completed, nil
 }
 
-// GetMFALinkForSudo resolves the server name and returns a CLI MFA URL.
-// Used by the sudo MFA listener where only the server name is available.
-func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, error) {
+// GetMFALinkByServerName resolves the server name and returns a CLI MFA URL.
+// Used where only the server name is available, not the ID.
+func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return "", fmt.Errorf("failed to load configuration: %w", err)
@@ -95,14 +88,9 @@ func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, err
 func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	// Use the CLI-scoped sudo MFA URL (location=cli) so the mfa-success page
 	// notifies the backend, letting CheckMFACompletion observe completion.
-	stepUpURL, err := GetMFALinkForSudo(ac, serverName)
+	stepUpURL, err := GetMFALinkByServerName(ac, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to get the MFA step-up link: %w", err)
-	}
-	// GetMFALink can return an empty URL without an error on a malformed
-	// response; fail fast rather than print a blank link and poll until timeout.
-	if stepUpURL == "" {
-		return fmt.Errorf("server returned an empty MFA step-up link")
 	}
 
 	fmt.Fprintf(os.Stderr, "\nsudo needs a recent MFA to proceed. Open this link to verify:\n%s\n", stepUpURL)
@@ -163,10 +151,23 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 // Uses location "cli" so the mfa-success page notifies the backend,
 // enabling CheckMFACompletion polling to detect when MFA is done.
 func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string) (string, error) {
-	params := map[string]string{
+	return fetchMFALink(ac, map[string]string{
 		"location":  "cli",
 		"workspace": workspaceName,
-	}
+	})
+}
+
+func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
+	return fetchMFALink(ac, map[string]string{
+		"location":  "cli",
+		"server":    serverID,
+		"workspace": workspaceName,
+	})
+}
+
+// fetchMFALink rejects an empty URL as an error: every caller prints the link
+// to the user.
+func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
 	if err != nil {
 		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
@@ -179,23 +180,6 @@ func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string)
 	if mfaResp.MfaURL == "" {
 		return "", fmt.Errorf("MFA URL is empty in server response")
 	}
-
-	return mfaResp.MfaURL, nil
-}
-
-func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
-	params := map[string]string{
-		"location":  "cli",
-		"server":    serverID,
-		"workspace": workspaceName,
-	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
-	if err != nil {
-		return "", fmt.Errorf("failed to get the MFA URL: %w", err)
-	}
-
-	var mfaResp mfaResponse
-	_ = json.Unmarshal(responseBody, &mfaResp)
 
 	return mfaResp.MfaURL, nil
 }

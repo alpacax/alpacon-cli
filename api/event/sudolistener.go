@@ -123,7 +123,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	// Slow path: open browser for MFA verification.
 	// Use CLI-specific MFA URL (location=cli) so the server persists
 	// MFACompletion to DB for polling.
-	mfaURL, err := mfa.GetMFALinkForSudo(sl.ac, sl.serverName)
+	mfaURL, err := mfa.GetMFALinkByServerName(sl.ac, sl.serverName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
 		return
