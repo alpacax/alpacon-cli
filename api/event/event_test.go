@@ -70,29 +70,60 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 		userLookupURL   = "/api/iam/users/"
 	)
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+	tests := []struct {
+		name         string
+		serverName   string
+		userName     string
+		expectedPath string
+	}{
+		{
+			name:         "both filters",
+			serverName:   "my-server",
+			userName:     "admin",
+			expectedPath: getEventURL + "srv-uuid/usr-uuid/",
+		},
+		{
+			name:         "server only",
+			serverName:   "my-server",
+			expectedPath: getEventURL + "srv-uuid/",
+		},
+		{
+			// path.Join drops the empty server segment, so a lone user ID lands on the address
+			// the command detail route also answers on. Recorded as current behavior, not as
+			// the desired one—confirming it needs the server-side route (alpacax/alpacon-cli#363).
+			name:         "user only",
+			userName:     "admin",
+			expectedPath: getEventURL + "usr-uuid/",
+		},
+	}
 
-		switch {
-		case strings.HasPrefix(r.URL.Path, serverLookupURL):
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-uuid"}]}`))
-		case strings.HasPrefix(r.URL.Path, userLookupURL):
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"usr-uuid"}]}`))
-		case strings.HasPrefix(r.URL.Path, getEventURL):
-			assert.Equal(t, getEventURL+"srv-uuid/usr-uuid/", r.URL.Path)
-			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
-		default:
-			t.Errorf("unexpected request path %q", r.URL.Path)
-			http.Error(w, "unexpected path", http.StatusNotFound)
-		}
-	}))
-	defer ts.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				switch {
+				case strings.HasPrefix(r.URL.Path, serverLookupURL):
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-uuid"}]}`))
+				case strings.HasPrefix(r.URL.Path, userLookupURL):
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"usr-uuid"}]}`))
+				case strings.HasPrefix(r.URL.Path, getEventURL):
+					assert.Equal(t, tt.expectedPath, r.URL.Path)
+					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+				default:
+					t.Errorf("unexpected request path %q", r.URL.Path)
+					http.Error(w, "unexpected path", http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
 
-	_, err := GetEventList(ac, 25, "my-server", "admin")
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	require.NoError(t, err)
+			_, err := GetEventList(ac, 25, tt.serverName, tt.userName)
+
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestPollCommandExecution(t *testing.T) {
