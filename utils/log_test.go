@@ -1,10 +1,10 @@
 package utils
 
 import (
-	"io"
 	"os"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,21 +12,8 @@ import (
 // captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
-	require.NoError(t, err)
-	original := os.Stderr
-	os.Stderr = writer
-	defer func() { os.Stderr = original }()
-
-	captured := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(reader)
-		captured <- string(data)
-	}()
-
-	fn()
-	require.NoError(t, writer.Close())
-	return <-captured
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
 }
 
 // pinColor fixes the color switch for one test, whatever stderr happens to be.
