@@ -4,15 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestClientTimeoutLine(t *testing.T) {
@@ -207,21 +206,8 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 // captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
-	require.NoError(t, err)
-	original := os.Stderr
-	os.Stderr = writer
-	defer func() { os.Stderr = original }()
-
-	captured := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(reader)
-		captured <- string(data)
-	}()
-
-	fn()
-	require.NoError(t, writer.Close())
-	return <-captured
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
 }
 
 func TestPrintPresenceStepUpLink(t *testing.T) {
