@@ -349,7 +349,7 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 		// Non-interactive: surface the verification link so a human reading the
 		// logs can complete MFA out of band, then re-run. We cannot prompt or
 		// open a browser here.
-		if url, linkErr := mfa.GetMFALinkByServerName(ac, serverName); linkErr == nil && url != "" {
+		if url, linkErr := mfa.GetMFALinkByServerName(ac, serverName); linkErr == nil {
 			utils.CliInfo("MFA verification link (open in a browser):\n  %s", url)
 		}
 		return err
