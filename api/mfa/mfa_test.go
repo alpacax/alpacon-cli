@@ -3,6 +3,7 @@ package mfa
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -58,4 +59,79 @@ func TestCheckMFACompletion_ServerError(t *testing.T) {
 
 	_, err := CheckMFACompletion(ac)
 	assert.Error(t, err)
+}
+
+func mfaLinkServer(t *testing.T, body string) (*client.AlpaconClient, *url.Values) {
+	t.Helper()
+	var query url.Values
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, mfaURL+"/", r.URL.Path)
+		query = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(ts.Close)
+
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, &query
+}
+
+func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
+	ac, query := mfaLinkServer(t, `{"mfa_url": "https://example.com/mfa"}`)
+
+	link, err := GetMFALink(ac, "server-id", "my-workspace")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.com/mfa", link)
+	assert.Equal(t, "cli", query.Get("location"))
+	assert.Equal(t, "server-id", query.Get("server"))
+	assert.Equal(t, "my-workspace", query.Get("workspace"))
+}
+
+// It used to yield ("", nil), so callers opened a browser on a blank link.
+func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
+	ac, _ := mfaLinkServer(t, `not json`)
+
+	link, err := GetMFALink(ac, "server-id", "my-workspace")
+
+	assert.Error(t, err)
+	assert.Empty(t, link)
+}
+
+func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
+	ac, _ := mfaLinkServer(t, `{"mfa_url": ""}`)
+
+	link, err := GetMFALink(ac, "server-id", "my-workspace")
+
+	assert.Error(t, err)
+	assert.Empty(t, link)
+}
+
+func TestGetWorkspaceSecurityMFALink_SendsNoServerScope(t *testing.T) {
+	ac, query := mfaLinkServer(t, `{"mfa_url": "https://example.com/mfa"}`)
+
+	link, err := GetWorkspaceSecurityMFALink(ac, "my-workspace")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "https://example.com/mfa", link)
+	assert.Equal(t, "cli", query.Get("location"))
+	assert.Equal(t, "my-workspace", query.Get("workspace"))
+	assert.NotContains(t, *query, "server")
+}
+
+func TestGetMFALink_ServerErrorIsAnError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail": "internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{
+		HTTPClient: ts.Client(),
+		BaseURL:    ts.URL,
+	}
+
+	link, err := GetMFALink(ac, "server-id", "my-workspace")
+
+	assert.Error(t, err)
+	assert.Empty(t, link)
 }
