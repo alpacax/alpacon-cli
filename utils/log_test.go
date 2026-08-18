@@ -70,3 +70,53 @@ func TestCliDebug(t *testing.T) {
 		assert.Empty(t, stderr)
 	})
 }
+
+// The server's error detail reaches these helpers through %s.
+func TestCliHelpers_SanitizeServerControlledText(t *testing.T) {
+	t.Setenv(DebugEnvVar, "1")
+	emitters := map[string]func(string, ...any){
+		"CliError":   CliError,
+		"CliWarning": CliWarning,
+		"CliInfo":    CliInfo,
+		"CliSuccess": CliSuccess,
+		"CliDebug":   CliDebug,
+	}
+	tests := []struct {
+		name    string
+		detail  string
+		notWant string
+	}{
+		{name: "ANSI escape", detail: "denied\x1b[2Kapproved", notWant: "\x1b"},
+		{name: "bidi override", detail: "denied\u202eapproved", notWant: "\u202e"},
+		{name: "carriage return", detail: "denied\rapproved", notWant: "\r"},
+		{name: "8-bit CSI", detail: "denied\u009b2Kapproved", notWant: "\u009b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for name, emit := range emitters {
+				stderr := captureStderr(t, func() { emit("%s", tt.detail) })
+				assert.NotContains(t, stderr, tt.notWant, name)
+				assert.Contains(t, stderr, "denied", name)
+				assert.Contains(t, stderr, "approved", name)
+			}
+		})
+	}
+}
+
+// Sanitizing the rendered message cannot tell a caller's newline from the
+// server's, so the detail keeps the power to open a line of its own.
+func TestCliHelpers_KeepServerNewlines(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		CliError("%s", "denied\nSuccess: approved")
+	})
+
+	assert.Contains(t, stderr, "denied\nSuccess: approved\n")
+}
+
+func TestCliHelpers_KeepCallerNewlines(t *testing.T) {
+	stderr := captureStderr(t, func() {
+		CliWarning("first line\nsecond line: %s", "value")
+	})
+
+	assert.Contains(t, stderr, "first line\nsecond line: value\n")
+}
