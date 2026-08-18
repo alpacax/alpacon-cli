@@ -65,9 +65,9 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	return resp.Completed, nil
 }
 
-// GetMFALinkForSudo resolves the server name and returns a CLI MFA URL.
-// Used by the sudo MFA listener where only the server name is available.
-func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, error) {
+// GetMFALinkByServerName resolves the server name and returns a CLI MFA URL.
+// Used where only the server name is available, not the ID.
+func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return "", fmt.Errorf("failed to load configuration: %w", err)
@@ -95,7 +95,7 @@ func GetMFALinkForSudo(ac *client.AlpaconClient, serverName string) (string, err
 func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	// Use the CLI-scoped sudo MFA URL (location=cli) so the mfa-success page
 	// notifies the backend, letting CheckMFACompletion observe completion.
-	stepUpURL, err := GetMFALinkForSudo(ac, serverName)
+	stepUpURL, err := GetMFALinkByServerName(ac, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to get the MFA step-up link: %w", err)
 	}
