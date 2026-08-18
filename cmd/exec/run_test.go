@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClientTimeoutLine(t *testing.T) {
@@ -200,4 +202,52 @@ func TestRunExecWithApprovalWait_TimesOutAfterWindow(t *testing.T) {
 
 	assert.Same(t, denial, err, "timeout returns the last pending denial for the caller's handler")
 	assert.GreaterOrEqual(t, elapsed, waitTimeout, "loop must wait the full anchored window before timing out")
+}
+
+// captureStderr returns everything fn writes to stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = original }()
+
+	captured := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(reader)
+		captured <- string(data)
+	}()
+
+	fn()
+	require.NoError(t, writer.Close())
+	return <-captured
+}
+
+func TestPrintPresenceStepUpLink(t *testing.T) {
+	original := mfaLinkByServerName
+	t.Cleanup(func() { mfaLinkByServerName = original })
+
+	// The link is printed unconditionally: api/mfa never hands back an empty URL
+	// with a nil error, so there is nothing left for this caller to filter.
+	t.Run("prints the link", func(t *testing.T) {
+		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+			return "https://example.com/mfa", nil
+		}
+
+		stderr := captureStderr(t, func() { printPresenceStepUpLink(nil, "my-server") })
+
+		assert.Contains(t, stderr, "https://example.com/mfa")
+		assert.Contains(t, stderr, "MFA verification link")
+	})
+
+	t.Run("stays silent when the link cannot be fetched", func(t *testing.T) {
+		mfaLinkByServerName = func(*client.AlpaconClient, string) (string, error) {
+			return "", errors.New("failed to parse MFA URL response")
+		}
+
+		stderr := captureStderr(t, func() { printPresenceStepUpLink(nil, "my-server") })
+
+		assert.Empty(t, stderr)
+	})
 }
