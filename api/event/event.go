@@ -20,17 +20,6 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Poll pacing, in multiples of the caller's base tick, widening as the poll ages
-	// and again once the server pushes back. A fixed 1s tick burns alpacon-server's
-	// default 1000/hour service-token throttle in ~17 minutes, then starves itself—each
-	// freed slot goes to a request that is throttled again.
-	pollFastWindow     = 10
-	pollMediumWindow   = 60
-	pollMediumTick     = 5
-	pollSlowTick       = 10
-	pollBackoffFactor  = 2
-	pollMaxBackoffTick = 60
-
 	// Grants of extra deadline for time lost to 429s, capped by count as well as
 	// duration: a duration budget is spent at whatever pace the server asks for, so a
 	// flat Retry-After: 1 buys a second window of one-second polls. 60 grants at the
@@ -288,35 +277,6 @@ func execTimeout() time.Duration {
 	return 30 * time.Minute
 }
 
-func nextPollTick(tick, elapsed time.Duration) time.Duration {
-	switch {
-	case elapsed < time.Duration(pollFastWindow)*tick:
-		return tick
-	case elapsed < time.Duration(pollMediumWindow)*tick:
-		return time.Duration(pollMediumTick) * tick
-	default:
-		return time.Duration(pollSlowTick) * tick
-	}
-}
-
-// nextPollBackoff returns the gap after a failed poll; attempt is the failure
-// count so far, 0 for the first. A server-sent retryAfter wins but shares the
-// cap, so a hostile value cannot park the loop until the deadline.
-func nextPollBackoff(tick time.Duration, attempt int, retryAfter time.Duration) time.Duration {
-	maxDelay := time.Duration(pollMaxBackoffTick) * tick
-	if retryAfter > 0 {
-		return min(retryAfter, maxDelay)
-	}
-	delay := tick
-	for range attempt {
-		delay *= time.Duration(pollBackoffFactor)
-		if delay >= maxDelay {
-			return maxDelay
-		}
-	}
-	return delay
-}
-
 // isPollWaitStatus reports a status the poll keeps waiting on: running, or—when
 // resuming through an approval hold—the hold itself and the transient "error"
 // compute_status the server emits in the approve→deliver window.
@@ -363,7 +323,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 		if err != nil {
-			delay = nextPollBackoff(tick, failures, utils.RetryAfter(err))
+			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 				if !throttleWarned {
@@ -397,12 +357,12 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 			throttledWait = 0
 			throttleExtensions = 0
 			throttleWarned = false
-			delay = nextPollTick(tick, seams.Now().Sub(started))
+			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
 			continue
 		}
 		// Running is handled above, so what is left here is the approval hold.
 		if isPollWaitStatus(response.Status, waitApproval) {
-			delay = nextPollTick(tick, seams.Now().Sub(started))
+			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
 			continue
 		}
 		return response, nil
