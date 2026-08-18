@@ -357,3 +357,31 @@ func TestRequiredCpPatterns(t *testing.T) {
 		})
 	}
 }
+
+func TestStripUserPrefix(t *testing.T) {
+	tests := []struct {
+		name          string
+		arg           string
+		wantRewritten string
+		wantUser      string
+	}{
+		{name: "user, host and path", arg: "alice@myserver:/tmp/f", wantRewritten: "myserver:/tmp/f", wantUser: "alice"},
+		{
+			name:          "user and host with a trailing colon",
+			arg:           "alice@myserver:",
+			wantRewritten: "myserver:",
+			wantUser:      "alice",
+		},
+		{name: "no user is untouched", arg: "myserver:/tmp/f", wantRewritten: "myserver:/tmp/f"},
+		{name: "trailing colon without a user is untouched", arg: "myserver:", wantRewritten: "myserver:"},
+		{name: "local path with an @ but no colon is untouched", arg: "./mail@example.txt", wantRewritten: "./mail@example.txt"},
+		{name: "path may itself contain an @", arg: "alice@myserver:/tmp/mail@example.txt", wantRewritten: "myserver:/tmp/mail@example.txt", wantUser: "alice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewritten, user := stripUserPrefix(tt.arg)
+			assert.Equal(t, tt.wantRewritten, rewritten)
+			assert.Equal(t, tt.wantUser, user)
+		})
+	}
+}
