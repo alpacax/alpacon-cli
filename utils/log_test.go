@@ -72,12 +72,15 @@ func TestCliHelpers_SanitizeServerControlledText(t *testing.T) {
 	// Red("Error") and its siblings carry an escape of their own, so the ANSI
 	// case would fail whenever the test binary's stderr is a terminal.
 	pinColor(t, false)
-	emitters := map[string]func(string, ...any){
-		"CliError":   CliError,
-		"CliWarning": CliWarning,
-		"CliInfo":    CliInfo,
-		"CliSuccess": CliSuccess,
-		"CliDebug":   CliDebug,
+	emitters := []struct {
+		name string
+		emit func(string, ...any)
+	}{
+		{name: "CliError", emit: CliError},
+		{name: "CliWarning", emit: CliWarning},
+		{name: "CliInfo", emit: CliInfo},
+		{name: "CliSuccess", emit: CliSuccess},
+		{name: "CliDebug", emit: CliDebug},
 	}
 	tests := []struct {
 		name    string
@@ -91,11 +94,13 @@ func TestCliHelpers_SanitizeServerControlledText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for name, emit := range emitters {
-				stderr := captureStderr(t, func() { emit("%s", tt.detail) })
-				assert.NotContains(t, stderr, tt.notWant, name)
-				assert.Contains(t, stderr, "denied", name)
-				assert.Contains(t, stderr, "approved", name)
+			for _, emitter := range emitters {
+				t.Run(emitter.name, func(t *testing.T) {
+					stderr := captureStderr(t, func() { emitter.emit("%s", tt.detail) })
+					assert.NotContains(t, stderr, tt.notWant)
+					assert.Contains(t, stderr, "denied")
+					assert.Contains(t, stderr, "approved")
+				})
 			}
 		})
 	}
