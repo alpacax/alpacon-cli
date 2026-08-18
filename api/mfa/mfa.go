@@ -33,14 +33,7 @@ type mfaCompletionResponse struct {
 }
 
 func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
-
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		utils.CliErrorWithExit("Failed to load configuration: %s.", err)
-	}
-
-	serverID, _ := server.GetServerIDByName(ac, serverName)
-	mfaURL, err := GetMFALink(ac, serverID, cfg.WorkspaceName)
+	mfaURL, err := GetMFALinkByServerName(ac, serverName)
 	if err != nil {
 		return err
 	}
