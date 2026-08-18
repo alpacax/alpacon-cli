@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	iamAPI "github.com/alpacax/alpacon-cli/api/iam"
@@ -71,7 +72,8 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		}
 
 		utils.CliSuccess("Registration token created: %s", resp.Name)
-		utils.CliWarning("Save this key now—it will not be shown again: %s", utils.Green(resp.Key))
+		fmt.Fprintf(os.Stderr, "%s: Save this key now—it will not be shown again: %s\n",
+			utils.Yellow("Warning"), utils.Green(utils.SanitizeTerminalText(resp.Key)))
 		if resp.ExpiresAt != nil {
 			utils.CliInfo("Token expires at: %s", *resp.ExpiresAt)
 		}
