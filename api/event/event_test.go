@@ -370,9 +370,10 @@ func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing
 	assert.Equal(t, "cmd-9", pending.CommandID)
 }
 
-func TestErrorFromDetails_RejectedReturnsError(t *testing.T) {
+func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
-	require.Error(t, err)
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
 	assert.Contains(t, err.Error(), "rejected by a reviewer")
 }
 
