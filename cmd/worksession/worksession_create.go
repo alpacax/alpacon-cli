@@ -432,13 +432,28 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // returns only on active (continues polling on approved until the server
 // auto-activates). Deadline-based rather than attempt-count-based so a timeout
 // under one interval (e.g. --wait-approval 15s) still waits the full duration.
+// A failed poll does not end the wait—one 429 would otherwise discard a
+// half-hour wait—unless it will repeat (a fatal 4xx) or already has.
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
 	deadline := time.Now().Add(timeout)
+	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
+	failures := 0
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
-			return nil, fmt.Errorf("polling failed: %w", err)
+			failures++
+			if !utils.IsTransientRequestError(err) || failures >= utils.MaxConsecutivePollFailures {
+				return nil, fmt.Errorf("polling failed: %w", err)
+			}
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return nil, timedOut
+			}
+			utils.CliWarning("Poll failed (%s); still waiting.", err)
+			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
+			continue
 		}
+		failures = 0
 		switch s.Status {
 		case activeWorkSessionStatus:
 			return s, nil
@@ -460,20 +475,25 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
+			return nil, timedOut
 		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
-		// remaining > 0 here; fall back to it when interval is non-positive to avoid a busy-loop.
-		step := min(remaining, interval)
-		if step <= 0 {
-			step = remaining
-		}
-		time.Sleep(step)
+		pollSleep(remaining, interval)
 	}
+}
+
+// pollSleep waits want, capped at remaining (must be positive); a non-positive
+// want falls back to remaining rather than spinning.
+func pollSleep(remaining, want time.Duration) {
+	step := min(remaining, want)
+	if step <= 0 {
+		step = remaining
+	}
+	time.Sleep(step)
 }
 
 func init() {

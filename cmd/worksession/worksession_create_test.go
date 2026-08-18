@@ -65,6 +65,45 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 }
 
+func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	session, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, "approved", session.Status)
+	assert.Equal(t, 2, requests, "the wait must retry the failed poll, not end on it")
+}
+
+func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, requests, "a 404 must not be retried")
+}
+
 func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
