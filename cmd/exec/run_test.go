@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -215,6 +216,9 @@ func (e *statusError) Error() string       { return fmt.Sprintf("server said %d"
 func (e *statusError) HTTPStatusCode() int { return e.status }
 
 func TestIsPollFailure(t *testing.T) {
+	// What a proxy error page under a JSON content type leaves the caller with.
+	unparseableBody := json.Unmarshal([]byte(`<html>502 Bad Gateway</html>`), &struct{}{})
+
 	tests := []struct {
 		name string
 		err  error
@@ -235,6 +239,11 @@ func TestIsPollFailure(t *testing.T) {
 		{name: "a wrapped terminal status stays an answer", err: fmt.Errorf("failed to execute command on 'srv' server: %w", errors.New("command failed with status: cancelled"))},
 		{name: "a dial failure never reached the server", err: &url.Error{Op: "Post", URL: "https://alpacon", Err: errors.New("connection reset")}, want: true},
 		{name: "a wrapped dial failure never reached the server", err: fmt.Errorf("wrap: %w", &url.Error{Op: "Post", URL: "https://alpacon", Err: errors.New("connection reset")}), want: true},
+		{name: "an unparseable body answered nothing", err: unparseableBody, want: true},
+		{name: "a wrapped unparseable body answered nothing", err: fmt.Errorf("failed to execute command on 'srv' server: %w", unparseableBody), want: true},
+		// readJSONResponse tags a read cut short with the status the headers gave,
+		// so it arrives here as a 2xx rather than as a status-less error.
+		{name: "a body cut short kept its status", err: &statusError{status: http.StatusOK}, want: true},
 		{name: "throttled", err: &statusError{status: http.StatusTooManyRequests}, want: true},
 		{name: "proxy error", err: &statusError{status: http.StatusBadGateway}, want: true},
 		{name: "unauthorized repeats on every tick", err: &statusError{status: http.StatusUnauthorized}},

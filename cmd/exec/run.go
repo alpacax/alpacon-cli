@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -512,7 +513,11 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // human's cancel exactly as a re-submitted rejection would.
 //
 // *url.Error satisfies net.Error, so the one errors.As covers both the dial and
-// the round-trip failure.
+// the round-trip failure. A body that comes back unparseable is evidence of the
+// same kind: the server sent something, but nothing that answers the poll—a
+// proxy error page under a JSON content type is the usual shape. A read cut
+// short carries the status its headers already gave, so it lands on the branch
+// above rather than needing an arm of its own.
 func isPollFailure(err error) bool {
 	if err == nil {
 		return false
@@ -521,7 +526,11 @@ func isPollFailure(err error) bool {
 		return !utils.IsFatalClientError(status)
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr)
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var syntaxErr *json.SyntaxError
+	return errors.As(err, &syntaxErr)
 }
 
 // HandlePendingApproval emits the structured pending-approval feedback for a
