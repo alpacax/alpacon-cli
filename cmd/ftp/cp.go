@@ -214,10 +214,7 @@ func stripUserPrefix(arg string) (rewritten, user string) {
 		return arg, ""
 	}
 	sshTarget := utils.ParseSSHTarget(arg)
-	if sshTarget.Path != "" || strings.HasSuffix(arg, ":") {
-		return sshTarget.Host + ":" + sshTarget.Path, sshTarget.User
-	}
-	return sshTarget.Host, sshTarget.User
+	return sshTarget.Host + ":" + sshTarget.Path, sshTarget.User
 }
 
 func validatePaths(sources []string, dest string) error {
