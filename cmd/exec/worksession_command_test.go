@@ -103,6 +103,16 @@ func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "missing "+execWorkSessionHelperMarker+" marker")
 		os.Exit(2)
 	}
+	// The wait loop's poll interval is a package var the parent cannot reach
+	// across the process boundary; unset, the default 5s stands.
+	if v := os.Getenv("ALPACON_TEST_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bad ALPACON_TEST_POLL_INTERVAL: "+v)
+			os.Exit(2)
+		}
+		approvalWaitPollInterval = d
+	}
 	ExecCmd.Run(ExecCmd, args)
 }
 

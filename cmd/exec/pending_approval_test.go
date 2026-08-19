@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -90,6 +91,16 @@ func runExecLogsHelper(t *testing.T, workspaceURL, outputFormat string, args ...
 	return runHelperProcess(t, workspaceURL,
 		"TestExecLogsHelperProcess", execLogsHelperMarker,
 		[]string{"GO_WANT_EXEC_LOGS_HELPER=1", "ALPACON_TEST_OUTPUT_FORMAT=" + outputFormat}, args)
+}
+
+// runExecWaitHelper is runExecHelper with the approval-wait poll interval cut to
+// milliseconds, so a test that drives the wait loop does not pay the 5s default
+// per tick.
+func runExecWaitHelper(t *testing.T, workspaceURL string, args ...string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	return runHelperProcess(t, workspaceURL,
+		"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
+		[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_TEST_POLL_INTERVAL=10ms"}, args)
 }
 
 func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, args []string) (stdout, stderr string, exitCode int) {
@@ -309,5 +320,41 @@ func TestExecRejectedExits6(t *testing.T) {
 
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "sudo", "reboot")
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.Contains(t, stderr, "rejected by a reviewer")
+}
+
+// TestExecRejectedMidWaitExits6 traces the wait loop's rejection branch out to
+// process exit: TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait stops at
+// the returned error, and TestExecRejectedExits6 enters through the no-wait path.
+func TestExecRejectedMidWaitExits6(t *testing.T) {
+	var submissions atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-%d"}]`, submissions.Add(1))
+		// The first submission is denied with an approval request in flight, so --wait blocks.
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":        "cmd-1",
+				"status":    "completed",
+				"success":   false,
+				"exit_code": 1,
+				"result":    denialLine("SUDO_APPROVAL_REQUIRED"),
+			})
+		// A reviewer rejects it while the loop is waiting.
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-2/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-2", "status": "rejected"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	_, stderr, exitCode := runExecWaitHelper(t, ts.URL, "--wait-approval", "30s", "prod", "--", "sudo", "reboot")
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a mid-wait rejection is final; stderr: %s", stderr)
 	assert.Contains(t, stderr, "rejected by a reviewer")
 }
