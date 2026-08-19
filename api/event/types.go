@@ -146,3 +146,10 @@ func IsRunningStatus(status string) bool {
 func IsAwaitingApprovalStatus(status string) bool {
 	return status == "awaiting_approval"
 }
+
+// IsRejectedStatus reports whether status is the server's terminal state for a
+// command a reviewer refused. It never ran, and re-submitting it only files a
+// second approval request.
+func IsRejectedStatus(status string) bool {
+	return status == "rejected"
+}

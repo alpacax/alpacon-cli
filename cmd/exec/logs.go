@@ -56,7 +56,7 @@ Run the command again later to check for completion.`,
 		// Exit 6 rather than 1, and through the envelope so --output json answers
 		// this refusal the way exec and work-session create do: retrying only
 		// files another approval request.
-		if details.Status == "rejected" {
+		if event.IsRejectedStatus(details.Status) {
 			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command",
 				&event.CommandRejectedError{CommandID: details.ID},
 				"command was rejected by a reviewer (status: %s)", details.Status)
