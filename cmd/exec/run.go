@@ -407,8 +407,9 @@ func isApprovalDenial(err error) bool {
 // unchanged so the caller's pending/denial handling runs.
 //
 // A tick that never reached the server is not an answer: the loop backs off, and
-// a timeout reports the denial that opened the wait, so the caller still exits on
-// the pending contract rather than as a generic failure.
+// a timeout—or a run of failed polls long enough to give up on—reports the denial
+// that opened the wait, so the caller still exits on the pending contract rather
+// than as a generic failure.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
@@ -481,7 +482,12 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 				failures++
 				if failures >= utils.MaxConsecutivePollFailures {
 					spinner.Stop()
-					return err
+					// The approval request is still open, so this exits on the
+					// pending contract like the timeout does. Exit 1 reads as
+					// retryable, and an agent answers it by re-running exec and
+					// filing a second request for the same command.
+					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
+					return pendingDenial
 				}
 				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue

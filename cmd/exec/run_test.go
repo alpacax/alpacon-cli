@@ -313,10 +313,15 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 		return nil
 	}
 
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+	})
 
-	var status *statusError
-	assert.ErrorAs(t, err, &status, "the wait ends with the failure it gave up on")
+	// The request is still open, so giving up must exit on the pending contract
+	// like the timeout does; the transport detail rides on the warning line.
+	assert.Same(t, denial, err, "an unreachable server leaves the approval request open")
+	assert.Contains(t, stderr, "server said 502")
 	assert.Equal(t, utils.MaxConsecutivePollFailures+1, calls, "one denial plus the bounded run of failures")
 }
 
