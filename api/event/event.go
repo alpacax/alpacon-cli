@@ -631,6 +631,14 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 // errorFromDetails maps a terminal command status to an error so unrecognized
 // statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
+	// A switch case cannot call a predicate, so the two approval statuses are
+	// matched ahead of it—a server-side rename then lands in types.go alone.
+	if IsAwaitingApprovalStatus(d.Status) {
+		return &PendingApprovalError{CommandID: d.ID}
+	}
+	if IsRejectedStatus(d.Status) {
+		return &CommandRejectedError{CommandID: d.ID}
+	}
 	switch d.Status {
 	case "completed", "success", "failed":
 		if d.Success != nil && !*d.Success {
@@ -654,10 +662,6 @@ func errorFromDetails(d EventDetails) error {
 			return fmt.Errorf("command failed with status: %s", d.Status)
 		}
 		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
-	case "awaiting_approval":
-		return &PendingApprovalError{CommandID: d.ID}
-	case "rejected":
-		return &CommandRejectedError{CommandID: d.ID}
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
 	}
