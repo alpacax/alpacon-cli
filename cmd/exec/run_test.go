@@ -218,6 +218,10 @@ func (e *statusError) HTTPStatusCode() int { return e.status }
 func TestIsPollFailure(t *testing.T) {
 	// What a proxy error page under a JSON content type leaves the caller with.
 	unparseableBody := json.Unmarshal([]byte(`<html>502 Bad Gateway</html>`), &struct{}{})
+	// A body that is JSON but not the response shape: parses, answers nothing.
+	driftedField := json.Unmarshal([]byte(`{"status":7}`), &struct {
+		Status string `json:"status"`
+	}{})
 
 	tests := []struct {
 		name string
@@ -241,6 +245,8 @@ func TestIsPollFailure(t *testing.T) {
 		{name: "a wrapped dial failure never reached the server", err: fmt.Errorf("wrap: %w", &url.Error{Op: "Post", URL: "https://alpacon", Err: errors.New("connection reset")}), want: true},
 		{name: "an unparseable body answered nothing", err: unparseableBody, want: true},
 		{name: "a wrapped unparseable body answered nothing", err: fmt.Errorf("failed to execute command on 'srv' server: %w", unparseableBody), want: true},
+		{name: "a drifted field type answered nothing", err: driftedField, want: true},
+		{name: "a wrapped drifted field type answered nothing", err: fmt.Errorf("failed to execute command on 'srv' server: %w", driftedField), want: true},
 		// readJSONResponse tags a read cut short with the status the headers gave,
 		// so it arrives here as a 2xx rather than as a status-less error.
 		{name: "a body cut short kept its status", err: &statusError{status: http.StatusOK}, want: true},

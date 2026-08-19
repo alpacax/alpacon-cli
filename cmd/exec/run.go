@@ -515,9 +515,12 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // *url.Error satisfies net.Error, so the one errors.As covers both the dial and
 // the round-trip failure. A body that comes back unparseable is evidence of the
 // same kind: the server sent something, but nothing that answers the poll—a
-// proxy error page under a JSON content type is the usual shape. A read cut
-// short carries the status its headers already gave, so it lands on the branch
-// above rather than needing an arm of its own.
+// proxy error page under a JSON content type is the usual shape (*json.SyntaxError),
+// and a field whose type drifted from the response shape is the same non-answer
+// one layer in (*json.UnmarshalTypeError). Both decode paths return the error
+// unwrapped, so errors.As reaches either. A read cut short carries the status its
+// headers already gave, so it lands on the branch above rather than needing an arm
+// of its own.
 func isPollFailure(err error) bool {
 	if err == nil {
 		return false
@@ -530,7 +533,11 @@ func isPollFailure(err error) bool {
 		return true
 	}
 	var syntaxErr *json.SyntaxError
-	return errors.As(err, &syntaxErr)
+	if errors.As(err, &syntaxErr) {
+		return true
+	}
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &typeErr)
 }
 
 // HandlePendingApproval emits the structured pending-approval feedback for a
