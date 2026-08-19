@@ -231,6 +231,9 @@ func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
 
 	dest := filepath.Join(t.TempDir(), "id_rsa")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+	// Chmod because a restrictive umask would mask the WriteFile mode down to
+	// owner-only, and the warning would never fire.
+	require.NoError(t, os.Chmod(dest, 0644))
 
 	stderr := captureStderr(t, func() {
 		_, err := SaveStreamAtomic(dest, strings.NewReader("key"), 0600)
@@ -303,6 +306,7 @@ func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+	require.NoError(t, os.Chmod(dest, 0644))
 
 	// The stream dies after its first chunk, so the modes sampled below are the
 	// ones a partial replacement actually sat at.
