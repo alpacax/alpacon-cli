@@ -88,6 +88,36 @@ func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {
 	assert.Equal(t, 2, requests, "the wait must retry the failed poll, not end on it")
 }
 
+// A body the server labels JSON but does not write as JSON reaches the warning
+// verbatim through parseAPIErrorPayload, so an escape sequence in it would
+// otherwise be written straight to the terminal.
+func TestPollForApproval_WarningSanitizesServerText(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("\x1b[2Kbad gateway page"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+	})
+
+	require.NoError(t, err)
+	assert.NotContains(t, stderr, "\x1b[2K")
+	assert.Contains(t, stderr, "bad gateway page")
+}
+
 func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

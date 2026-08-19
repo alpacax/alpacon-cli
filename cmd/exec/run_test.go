@@ -340,6 +340,33 @@ func TestRunExecWithApprovalWait_GivesUpAfterConsecutivePollFailures(t *testing.
 	assert.Equal(t, utils.MaxConsecutivePollFailures+1, calls, "one denial plus the bounded run of failures")
 }
 
+// The give-up warning carries a server-controlled string: for a non-JSON body
+// the client puts the body itself into the message, so escape sequences would
+// otherwise reach the terminal.
+func TestRunExecWithApprovalWait_GiveUpWarningSanitizesServerText(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, io.Writer) error {
+		calls++
+		if calls == 1 {
+			return denial
+		}
+		return fmt.Errorf("\x1b[2Kbad gateway page: %w", &statusError{status: http.StatusBadGateway})
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	stderr := captureStderr(t, func() {
+		_ = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Minute, io.Discard)
+	})
+
+	assert.NotContains(t, stderr, "\x1b[2K")
+	assert.Contains(t, stderr, "bad gateway page: server said 502")
+}
+
 func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWait(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
