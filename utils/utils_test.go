@@ -226,6 +226,54 @@ func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
+func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
+	requireUnixModes(t)
+
+	dest := filepath.Join(t.TempDir(), "id_rsa")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+
+	stderr := captureStderr(t, func() {
+		_, err := SaveStreamAtomic(dest, strings.NewReader("key"), 0600)
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stderr, "already existed at 0644 and kept that mode")
+	assert.Contains(t, stderr, "0600")
+}
+
+func TestSaveStreamAtomic_NoWarningWhenNothingIsWider(t *testing.T) {
+	requireUnixModes(t)
+	dir := t.TempDir()
+
+	t.Run("new file", func(t *testing.T) {
+		stderr := captureStderr(t, func() {
+			_, err := SaveStreamAtomic(filepath.Join(dir, "fresh"), strings.NewReader("x"), 0600)
+			require.NoError(t, err)
+		})
+		assert.Empty(t, stderr)
+	})
+
+	t.Run("existing file already owner-only", func(t *testing.T) {
+		dest := filepath.Join(dir, "narrow")
+		require.NoError(t, os.WriteFile(dest, []byte("x"), 0600))
+		stderr := captureStderr(t, func() {
+			_, err := SaveStreamAtomic(dest, strings.NewReader("y"), 0600)
+			require.NoError(t, err)
+		})
+		assert.Empty(t, stderr)
+	})
+
+	t.Run("a new file would be just as readable", func(t *testing.T) {
+		dest := filepath.Join(dir, "package")
+		require.NoError(t, os.WriteFile(dest, []byte("x"), 0644))
+		stderr := captureStderr(t, func() {
+			_, err := SaveStreamAtomic(dest, strings.NewReader("y"), 0666)
+			require.NoError(t, err)
+		})
+		assert.Empty(t, stderr)
+	})
+}
+
 // tempModeReader records the mode of every temp file present in dir each time
 // the stream is read, so a test can see what the partial file was exposed as.
 type tempModeReader struct {

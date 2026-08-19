@@ -69,6 +69,7 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
+	warnKeptWiderMode(fileName, replacing, finalPerm, newFilePerm)
 
 	// A replacement is staged narrow and widened once the content is complete, so
 	// a download that dies mid-stream never leaves its partial content readable
@@ -118,6 +119,19 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	cleanup = false
 
 	return written, nil
+}
+
+// warnKeptWiderMode signals when the kept mode leaves the content readable
+// beyond what a fresh download would be (a private key over a 0644 file). A
+// warning, not a chmod—re-permissioning a file the user set up is not the
+// CLI's call (#326).
+func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os.FileMode) {
+	const groupOtherRead = os.FileMode(0o044)
+	if !replacing || keptPerm&groupOtherRead == 0 || newFilePerm&groupOtherRead != 0 {
+		return
+	}
+	CliWarning("%s already existed at %04o and kept that mode; a new file would have been %04o. Remove it first for owner-only permissions.",
+		fileName, keptPerm, newFilePerm)
 }
 
 // resolveWritePath walks symlinks to the final target so atomic replace
