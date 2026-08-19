@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -224,7 +225,16 @@ func TestIsPollFailure(t *testing.T) {
 		{name: "a tick that spent a whole command timeout", err: &event.ClientTimeoutError{}},
 		{name: "a reviewer rejected the command", err: &event.CommandRejectedError{}},
 		{name: "a wrapped rejection stays an answer", err: fmt.Errorf("failed to execute command on 'srv' server: %w", &event.CommandRejectedError{})},
-		{name: "transport failure carries no status", err: errors.New("connection reset"), want: true},
+		// errorFromDetails reports these four as a plain error with no HTTP
+		// status. Re-submitting them re-runs a command the server already
+		// finished, so a status-less error must not read as a failed poll.
+		{name: "a cancelled command already ran", err: errors.New("command failed with status: cancelled")},
+		{name: "a stuck command already ran", err: errors.New("command failed with status: stuck")},
+		{name: "a phased error status already ran", err: errors.New("command failed: [delivery] desc (status=error)")},
+		{name: "an unrecognised status is still an answer", err: errors.New("unexpected command status: weird (command may still be running)")},
+		{name: "a wrapped terminal status stays an answer", err: fmt.Errorf("failed to execute command on 'srv' server: %w", errors.New("command failed with status: cancelled"))},
+		{name: "a dial failure never reached the server", err: &url.Error{Op: "Post", URL: "https://alpacon", Err: errors.New("connection reset")}, want: true},
+		{name: "a wrapped dial failure never reached the server", err: fmt.Errorf("wrap: %w", &url.Error{Op: "Post", URL: "https://alpacon", Err: errors.New("connection reset")}), want: true},
 		{name: "throttled", err: &statusError{status: http.StatusTooManyRequests}, want: true},
 		{name: "proxy error", err: &statusError{status: http.StatusBadGateway}, want: true},
 		{name: "unauthorized repeats on every tick", err: &statusError{status: http.StatusUnauthorized}},

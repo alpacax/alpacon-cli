@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -496,28 +497,25 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	}
 }
 
-// isPollFailure separates a tick that never got an answer from one that did:
-// RemoteCommandError means the command ran, ClientTimeoutError already spent a
-// whole command timeout. CommandRejectedError carries no HTTP status, so without
-// its own check the transient test below would re-submit a command a reviewer
-// just rejected.
+// isPollFailure separates a tick that never got an answer from one that did.
+// A poll here re-submits the command, so it demands positive evidence of a
+// transport failure rather than inferring one from a missing HTTP status:
+// errorFromDetails reports stuck, error, cancelled, and an unrecognised status
+// as a plain error, and treating those as unanswered would re-run a command the
+// server already finished—up to MaxConsecutivePollFailures times, overriding a
+// human's cancel exactly as a re-submitted rejection would.
+//
+// *url.Error satisfies net.Error, so the one errors.As covers both the dial and
+// the round-trip failure.
 func isPollFailure(err error) bool {
 	if err == nil {
 		return false
 	}
-	var remoteErr *event.RemoteCommandError
-	if errors.As(err, &remoteErr) {
-		return false
+	if status := utils.HTTPStatusCode(err); status != 0 {
+		return !utils.IsFatalClientError(status)
 	}
-	var clientTimeout *event.ClientTimeoutError
-	if errors.As(err, &clientTimeout) {
-		return false
-	}
-	var rejected *event.CommandRejectedError
-	if errors.As(err, &rejected) {
-		return false
-	}
-	return utils.IsTransientRequestError(err)
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // HandlePendingApproval emits the structured pending-approval feedback for a
