@@ -372,8 +372,8 @@ func TestStripUserPrefix(t *testing.T) {
 			wantRewritten: "myserver:",
 			wantUser:      "alice",
 		},
+		{name: "user and an empty host", arg: "alice@:", wantRewritten: ":", wantUser: "alice"},
 		{name: "no user is untouched", arg: "myserver:/tmp/f", wantRewritten: "myserver:/tmp/f"},
-		{name: "trailing colon without a user is untouched", arg: "myserver:", wantRewritten: "myserver:"},
 		{name: "local path with an @ but no colon is untouched", arg: "./mail@example.txt", wantRewritten: "./mail@example.txt"},
 		{name: "path may itself contain an @", arg: "alice@myserver:/tmp/mail@example.txt", wantRewritten: "myserver:/tmp/mail@example.txt", wantUser: "alice"},
 	}
