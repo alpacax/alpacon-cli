@@ -106,6 +106,25 @@ func TestSendRequest_404HTMLBodyExposesStatusCode(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }
 
+func TestSendRequest_TruncatedBodyKeepsStatusCode(t *testing.T) {
+	// A connection cut mid-body through a proxy: the headers already named the
+	// status, so a caller can still tell an unreadable answer from a request that
+	// never went out.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "64")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"detail":`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusOK, utils.HTTPStatusCode(err))
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+}
+
 func TestSendRequest_401ExposesStatusCode(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

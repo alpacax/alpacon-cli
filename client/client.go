@@ -233,7 +233,9 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 		return nil, withStatus(err, resp.StatusCode)
 	}
 	if readErr != nil {
-		return nil, readErr
+		// The headers already carried a status; dropping it here would leave a
+		// body cut mid-read indistinguishable from a request that never went out.
+		return nil, withStatus(readErr, resp.StatusCode)
 	}
 
 	// Empty content type is allowed for responses without content (e.g. PATCH).
