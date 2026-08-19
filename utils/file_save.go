@@ -130,7 +130,7 @@ func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os
 	if !replacing || keptPerm&groupOtherRead == 0 || newFilePerm&groupOtherRead != 0 {
 		return
 	}
-	CliWarning("%s already existed at %04o and kept that mode; a new file would have been %04o. Remove it first for owner-only permissions.",
+	CliWarning("%s already existed at %04o and kept that mode; a new file would have been at most %04o. Remove it first for owner-only permissions.",
 		fileName, keptPerm, newFilePerm)
 }
 

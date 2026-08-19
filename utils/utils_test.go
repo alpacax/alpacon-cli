@@ -241,7 +241,7 @@ func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
 	})
 
 	assert.Contains(t, stderr, "already existed at 0644 and kept that mode")
-	assert.Contains(t, stderr, "0600")
+	assert.Contains(t, stderr, "at most 0600")
 }
 
 func TestSaveStreamAtomic_NoWarningWhenNothingIsWider(t *testing.T) {
