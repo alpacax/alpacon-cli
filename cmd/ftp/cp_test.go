@@ -1,10 +1,8 @@
 package ftp
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -271,28 +269,13 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the parsing logic from the cp command
 			args := make([]string, len(tt.args))
 			copy(args, tt.args)
-			username := ""
 
-			// Apply the same parsing logic as in cp.go
-			for i, arg := range args {
-				if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
-					sshTarget := utils.ParseSSHTarget(arg)
-					if username == "" && sshTarget.User != "" {
-						username = sshTarget.User
-					}
-					if sshTarget.Path != "" {
-						args[i] = sshTarget.Host + ":" + sshTarget.Path
-					} else {
-						args[i] = sshTarget.Host
-					}
-				}
-			}
+			username := normalizeArgs(args, "")
 
-			assert.Equal(t, tt.expectedArgs, args, "Arguments should match expected after parsing")
-			assert.Equal(t, tt.expectedUser, username, "Username should match expected")
+			assert.Equal(t, tt.expectedArgs, args)
+			assert.Equal(t, tt.expectedUser, username)
 		})
 	}
 }

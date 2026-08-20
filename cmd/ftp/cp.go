@@ -74,13 +74,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		for i, arg := range args {
-			rewritten, user := stripUserPrefix(arg)
-			if username == "" {
-				username = user
-			}
-			args[i] = rewritten
-		}
+		username = normalizeArgs(args, username)
 
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
@@ -203,6 +197,19 @@ func isLocalPaths(paths []string) bool {
 		}
 	}
 	return true
+}
+
+// normalizeArgs strips inline user prefixes in place and resolves the username:
+// the -u flag wins, then the first inline user.
+func normalizeArgs(args []string, username string) string {
+	for i, arg := range args {
+		rewritten, user := stripUserPrefix(arg)
+		if username == "" {
+			username = user
+		}
+		args[i] = rewritten
+	}
+	return username
 }
 
 // stripUserPrefix rewrites user@host:path as host:path, handing back the user.
