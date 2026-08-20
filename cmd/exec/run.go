@@ -417,9 +417,10 @@ func isApprovalDenial(err error) bool {
 // channel has no approval-status endpoint to query (ADR 0015 moves approval out
 // of band). Re-running is side-effect-safe: a sudo command pending approval is
 // denied by the server and never executes, so each poll tick is a no-op denial
-// until a reviewer approves, at which point the command runs exactly once. The
-// poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a timer,
-// and a precise deadline.
+// until a reviewer approves, at which point the command runs once—except on the
+// tick that carries the approval in a response isPollFailure cannot read, which
+// re-submits it up to MaxConsecutivePollFailures times. The poll mirrors the MFA
+// step-up structure (api/mfa/mfa.go): a spinner, a timer, and a precise deadline.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, waitTimeout time.Duration, out io.Writer) error {
 	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
 
@@ -504,23 +505,31 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	}
 }
 
-// isPollFailure separates a tick that never got an answer from one that did.
-// A poll here re-submits the command, so it demands positive evidence of a
-// transport failure rather than inferring one from a missing HTTP status:
-// errorFromDetails reports stuck, error, cancelled, and an unrecognised status
-// as a plain error, and treating those as unanswered would re-run a command the
-// server already finished—up to MaxConsecutivePollFailures times, overriding a
-// human's cancel exactly as a re-submitted rejection would.
+// isPollFailure separates a tick that carried a usable answer from one that did
+// not. A poll here re-submits the command, so it names the unusable shapes rather
+// than inferring them from a missing HTTP status: errorFromDetails reports stuck,
+// error, cancelled, and an unrecognised status as a plain error, and treating
+// those as unanswered would re-run a command the server already finished—up to
+// MaxConsecutivePollFailures times, overriding a human's cancel exactly as a
+// re-submitted rejection would.
 //
 // *url.Error satisfies net.Error, so the one errors.As covers both the dial and
-// the round-trip failure. A body that comes back unparseable is evidence of the
-// same kind: the server sent something, but nothing that answers the poll—a
-// proxy error page under a JSON content type is the usual shape (*json.SyntaxError),
-// and a field whose type drifted from the response shape is the same non-answer
-// one layer in (*json.UnmarshalTypeError). Both decode paths return the error
-// unwrapped, so errors.As reaches either. A read cut short carries the status its
-// headers already gave, so it lands on the branch above rather than needing an arm
-// of its own.
+// the round-trip failure. Those two never reached the server. The remaining
+// shapes did, and are counted as failures anyway: a body that will not decode is
+// a body the server sent, and both decode sites run after it acted—SubmitCommand
+// decodes the response to the POST that already created the command, and
+// pollCommandExecution decodes after dispatch. A proxy error page under a JSON
+// content type is the usual shape (*json.SyntaxError), a field whose type drifted
+// from the response shape is the same non-answer one layer in
+// (*json.UnmarshalTypeError), and a read cut short carries the status its headers
+// gave, so it lands on the status branch above as a retryable 2xx. Both decode
+// paths return the error unwrapped, so errors.As reaches either.
+//
+// The trade is deliberate: an unreadable answer that happens to carry the
+// approval costs at most MaxConsecutivePollFailures re-runs of a command a human
+// granted, against a single hiccup discarding a wait that can run half an hour.
+// The first submission has to decode cleanly for this loop to be entered at all,
+// so the malformed response has to start mid-wait.
 func isPollFailure(err error) bool {
 	if err == nil {
 		return false
