@@ -239,11 +239,9 @@ func TestGetOrCreateDeviceID_FilePermissions(t *testing.T) {
 }
 
 // TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken pins the contract
-// createDeviceID branches on. The concurrent test below exercises it, but only
-// by winning a race, so it can pass on a run where nothing ever collided; this
-// asserts it outright. A publication step that stopped reporting fs.ErrExist
-// would silently turn that branch into dead code and take the exclusion with
-// it.
+// createDeviceID branches on. The concurrent test below reaches it only by
+// winning a race, so it can pass on a run where nothing collided; a publication
+// step that stopped reporting fs.ErrExist would turn that branch into dead code.
 func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
 	setupTestConfig(t)
 	path := mustDeviceIDPath(t)
@@ -274,13 +272,10 @@ func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing
 }
 
 // TestCreateDeviceIDFile_NeverPublishesAnEmptyFile is the property #361 was
-// about, and the one the test above cannot reach: O_EXCL plus a write on the
-// next line is exclusive on the name and passes that one too, while the path
-// exists holding nothing for the length of the write.
-//
-// The catch is probabilistic—the window is one write wide—so it runs many
-// rounds. A publication step with no window cannot fail it, which is what makes
-// a failure here real.
+// about and the one the test above cannot reach: O_EXCL plus a write on the next
+// line passes that one too, while the path exists holding nothing. The catch is
+// probabilistic—the window is one write wide—but one-sided: a publication step
+// with no window cannot fail it, so a failure here is real.
 func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 	const rounds = 200
 	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
@@ -327,12 +322,9 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 // TestGetOrCreateDeviceID_ConcurrentCreation is the property exclusive creation
 // buys. Two `alpacon` invocations can start at once—backgrounding a few shell
 // commands does it—and read-then-write lets both generate and both store,
-// leaving the loser on an identifier its installation never sends again and that
-// login's presence proof orphaned. Every caller must come away with the value
-// the file ends up holding.
-//
-// Exclusivity on the name alone does not get there; createDeviceIDFile's doc
-// comment carries the failure mode that rules it out.
+// leaving the loser on an identifier its installation never sends again. Every
+// caller must come away with the value the file ends up holding, and exclusivity
+// on the name alone does not get there—see createDeviceIDFile.
 func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	setupTestConfig(t)
 

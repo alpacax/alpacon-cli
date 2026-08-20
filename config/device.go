@@ -159,24 +159,16 @@ func createDeviceID(path string) (string, error) {
 }
 
 // createDeviceIDFile publishes deviceID at path, reporting fs.ErrExist when the
-// path is already taken, so two concurrent invocations cannot both believe they
-// created the file. A plain write would let both generate and both store, and
-// the loser would authenticate under an identifier its own installation never
-// sends again, orphaning that login's presence.
+// path is taken, so two concurrent invocations cannot both believe they created
+// the file and the loser cannot end up on an identifier its own installation
+// never sends again.
 //
-// The content lands before the name does: the value is written to a temporary
-// file, and the link publishes a file that already holds it. Creating with
-// O_EXCL and writing on the next line is exclusive on the name alone—for the
-// length of that write the path exists and is empty, and an empty file is what
-// readDeviceID reports as absent, so a concurrent invocation reads it, judges
-// it malformed, and replaces the winner's identifier with its own.
-//
-// Linking rather than renaming is what keeps the exclusion: rename replaces
-// whatever it lands on. A filesystem with no hard links—FAT, exFAT, some
-// container mounts—cannot publish this way and falls back to O_EXCL.
-//
-// The mode published is the temporary file's, which os.CreateTemp sets to 0600
-// and the umask can narrow further.
+// The content lands before the name does: O_EXCL plus a write on the next line
+// leaves the path existing and empty for the length of the write, which
+// readDeviceID reports as absent, so a concurrent invocation judges it malformed
+// and replaces the winner's identifier. Linking rather than renaming keeps the
+// exclusion—rename replaces whatever it lands on—and publishes the temporary
+// file's mode, 0600 from os.CreateTemp less the umask.
 func createDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -197,19 +189,16 @@ func createDeviceIDFile(path, deviceID string) error {
 }
 
 // createDeviceIDFileWithoutLink is the fallback for a filesystem that cannot
-// hard-link. It gives the empty window back—measured on a FAT home, 8 concurrent
-// callers came away with disagreeing identifiers in 43 of 50 rounds—and is taken
-// anyway, because the alternative there is no identifier at all: the one caller
-// of GetOrCreateDeviceID drops the error, so failing is silent and permanent.
-//
-// Any link failure lands here, not only an unsupported one. A cause unrelated to
-// hard links—no permission on the directory, no space left—fails this call the
-// same way and surfaces as this error.
+// hard-link—FAT, exFAT, some container mounts. It gives the empty window back (a
+// FAT home had 8 concurrent callers disagree in 43 of 50 rounds) and is taken
+// anyway: GetOrCreateDeviceID's only caller drops the error, so failing here is
+// silent and permanent. Any link failure lands here, not only an unsupported
+// one, so an unrelated cause—no permission, no space—surfaces as this error.
 func createDeviceIDFileWithoutLink(path, deviceID string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		// Wrapped for the same reason the link error is: a concurrent invocation
-		// can take the path between the failed link and this create.
+		// Wrapped like the link error: a concurrent invocation can take the path
+		// between the failed link and this create.
 		return fmt.Errorf("failed to create device id file: %w", err)
 	}
 
@@ -243,16 +232,13 @@ func replaceDeviceIDFile(path, deviceID string) error {
 }
 
 // writeDeviceIDTempFile writes deviceID to a fresh file beside path and returns
-// that file's name, for a caller that publishes it with a link or a rename. A
-// returned path is the caller's to remove: after a link it is a second name for
-// a file that is now published, and after a failed publication it is a leftover.
-// Nothing is returned on failure here—this function removes its own.
+// its name for a caller that publishes it with a link or a rename. A path it
+// returns is the caller's to remove; on failure it removes its own.
 func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	file, err := os.CreateTemp(filepath.Dir(path), DeviceIDFileName+"-*")
 	if err != nil {
-		// Flattened rather than wrapped, deliberately: os.CreateTemp reports
-		// fs.ErrExist once it runs out of names to try, and createDeviceID reads
-		// that error as the identifier file itself already existing.
+		// Flattened, not wrapped: os.CreateTemp reports fs.ErrExist once it runs out
+		// of names, which createDeviceID would read as the identifier file existing.
 		return "", fmt.Errorf("failed to create device id file: %v", err)
 	}
 	tempPath := file.Name()
