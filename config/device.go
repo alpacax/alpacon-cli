@@ -111,10 +111,10 @@ func createDeviceID(path string) (string, error) {
 		return "", err
 	}
 
-	err = createDeviceIDFile(path, deviceID)
-	switch {
-	case err == nil:
-	case errors.Is(err, fs.ErrExist):
+	if err = createDeviceIDFile(path, deviceID); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return "", err
+		}
 		// Something created the file between the read in GetOrCreateDeviceID
 		// and this call. Whatever it holds is already in flight, so adopt it
 		// instead of overwriting it with a value only this process knows.
@@ -140,8 +140,6 @@ func createDeviceID(path string) (string, error) {
 		if err = replaceDeviceIDFile(path, deviceID); err != nil {
 			return "", err
 		}
-	default:
-		return "", err
 	}
 
 	// Report what the file holds rather than what was generated. Both of the
