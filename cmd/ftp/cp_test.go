@@ -368,3 +368,29 @@ func TestStripUserPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeArgsUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		flagUser string
+		wantUser string
+	}{
+		{
+			name:     "the -u flag wins over an inline user",
+			args:     []string{"test.txt", "alice@myserver:/tmp/"},
+			flagUser: "carol",
+			wantUser: "carol",
+		},
+		{
+			name:     "the first inline user wins",
+			args:     []string{"alice@myserver:/tmp/f", "bob@myserver:/tmp/g"},
+			wantUser: "alice",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantUser, normalizeArgs(tt.args, tt.flagUser))
+		})
+	}
+}
