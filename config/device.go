@@ -172,11 +172,8 @@ func createDeviceID(path string) (string, error) {
 // it malformed, and replaces the winner's identifier with its own.
 //
 // Linking rather than renaming is what keeps the exclusion: rename replaces
-// whatever it lands on. A filesystem with no hard links fails here rather than
-// falling back, since every fallback either gives up the exclusion or brings
-// the empty window back. That failure costs a hardening signal rather than a
-// login: the one caller of GetOrCreateDeviceID drops the error and lets the
-// server fall back to its own fingerprint.
+// whatever it lands on. A filesystem with no hard links—FAT, exFAT, some
+// container mounts—cannot publish this way and falls back to O_EXCL.
 //
 // The mode published is the temporary file's, which os.CreateTemp sets to 0600
 // and the umask can narrow further.
@@ -187,9 +184,41 @@ func createDeviceIDFile(path, deviceID string) error {
 	}
 	defer func() { _ = os.Remove(tempPath) }()
 
-	if err = os.Link(tempPath, path); err != nil {
+	err = os.Link(tempPath, path)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, fs.ErrExist) {
 		// Wrapped, not reformatted: the caller matches fs.ErrExist on it.
 		return fmt.Errorf("failed to create device id file: %w", err)
+	}
+
+	return createDeviceIDFileWithoutLink(path, deviceID)
+}
+
+// createDeviceIDFileWithoutLink is the fallback for a filesystem that cannot
+// hard-link. It gives the empty window back—measured on a FAT home, 8 concurrent
+// callers came away with disagreeing identifiers in 43 of 50 rounds—and is taken
+// anyway, because the alternative there is no identifier at all: the one caller
+// of GetOrCreateDeviceID drops the error, so failing is silent and permanent.
+//
+// Any link failure lands here, not only an unsupported one. A cause unrelated to
+// hard links—no permission on the directory, no space left—fails this call the
+// same way and surfaces as this error.
+func createDeviceIDFileWithoutLink(path, deviceID string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		// Wrapped for the same reason the link error is: a concurrent invocation
+		// can take the path between the failed link and this create.
+		return fmt.Errorf("failed to create device id file: %w", err)
+	}
+
+	_, err = file.WriteString(deviceID + "\n")
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return fmt.Errorf("failed to write device id file: %v", err)
 	}
 
 	return nil

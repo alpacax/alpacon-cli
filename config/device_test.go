@@ -257,6 +257,22 @@ func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
 	assert.Equal(t, winner+"\n", readDeviceIDFile(t), "the loser must not have touched the published value")
 }
 
+// TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken keeps the
+// no-hard-link fallback on the contract createDeviceID branches on. It gives up
+// atomicity; it must not give up the exclusion.
+func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DeviceIDFileName)
+	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+	require.NoError(t, createDeviceIDFileWithoutLink(path, winner))
+
+	err := createDeviceIDFileWithoutLink(path, "1a2b3c4d-5e6f-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.ErrorIs(t, err, fs.ErrExist)
+	data, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, winner+"\n", string(data), "the loser must not have touched the published value")
+}
+
 // TestCreateDeviceIDFile_NeverPublishesAnEmptyFile is the property #361 was
 // about, and the one the test above cannot reach: O_EXCL plus a write on the
 // next line is exclusive on the name and passes that one too, while the path
