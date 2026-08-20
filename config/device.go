@@ -216,10 +216,10 @@ func replaceDeviceIDFile(path, deviceID string) error {
 }
 
 // writeDeviceIDTempFile writes deviceID to a fresh file beside path and returns
-// that file's name, for a caller that publishes it with a link or a rename. The
-// caller owns the returned path and has to remove it: after a link it is a
-// second name for a file that is now published, and after a failure it is a
-// leftover.
+// that file's name, for a caller that publishes it with a link or a rename. A
+// returned path is the caller's to remove: after a link it is a second name for
+// a file that is now published, and after a failed publication it is a leftover.
+// Nothing is returned on failure here—this function removes its own.
 func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	file, err := os.CreateTemp(filepath.Dir(path), DeviceIDFileName+"-*")
 	if err != nil {
