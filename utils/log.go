@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 const (
@@ -91,8 +93,23 @@ func CliInfo(msg string, args ...any) {
 }
 
 // CliWarning handles all warning messages in the CLI.
+//
+// A warning can land while a Spinner is animating stderr (SaveStreamAtomic
+// warns from inside a download), and the spinner leaves the cursor mid-line.
+// The clear and the text go out as one write so a spinner frame cannot wedge
+// itself between them.
 func CliWarning(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Yellow("Warning"), cliMessage(msg, args...))
+	fmt.Fprintf(os.Stderr, "%s%s: %s\n", clearStderrLine(), Yellow("Warning"), cliMessage(msg, args...))
+}
+
+// clearStderrLine returns the escape that wipes whatever is on the current
+// line, or "" when stderr is not a terminal—there is no spinner animation to
+// clear, and the escape would only be noise in a log.
+func clearStderrLine() string {
+	if !term.IsTerminal(int(os.Stderr.Fd())) {
+		return ""
+	}
+	return "\r\033[K"
 }
 
 // CliSuccess handles all success messages in the CLI.
