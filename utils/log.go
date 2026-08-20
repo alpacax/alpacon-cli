@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"golang.org/x/term"
 )
 
 const (
@@ -102,11 +100,14 @@ func CliWarning(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "%s%s: %s\n", clearStderrLine(), Yellow("Warning"), cliMessage(msg, args...))
 }
 
-// clearStderrLine returns the escape that wipes whatever is on the current
-// line, or "" when stderr is not a terminal—there is no spinner animation to
-// clear, and the escape would only be noise in a log.
+// clearStderrLine returns the escape that wipes the terminal's current line,
+// or "" when no spinner is animating it. The escape erases the whole line, not
+// just the frame the spinner drew—stdout and stderr share a cursor on a
+// terminal—so anything a caller streamed without a trailing newline would go
+// with it. Only a running spinner makes that trade worth taking; a spinner is
+// enabled on a TTY alone, so this subsumes the terminal test.
 func clearStderrLine() string {
-	if !term.IsTerminal(int(os.Stderr.Fd())) {
+	if activeSpinners.Load() == 0 {
 		return ""
 	}
 	return "\r\033[K"

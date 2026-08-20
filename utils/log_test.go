@@ -2,6 +2,7 @@ package utils
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -131,4 +132,27 @@ func TestCliMessage_StripsColorFromArguments(t *testing.T) {
 	pinColor(t, true)
 
 	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
+}
+
+// The clear is gated on a running spinner rather than on stderr being a
+// terminal: the escape wipes the whole line, so a warning following streamed
+// stdout would take that output with it. captureStderr's pipe hides the
+// terminal test, which is how the ungated version cleared CI.
+func TestCliWarning_ClearsTheLineOnlyWhileASpinnerRuns(t *testing.T) {
+	const clear = "\r\033[K"
+
+	t.Run("nothing is animating stderr", func(t *testing.T) {
+		stderr := captureStderr(t, func() { CliWarning("output may be incomplete") })
+
+		assert.NotContains(t, stderr, clear)
+	})
+
+	t.Run("a spinner is animating stderr", func(t *testing.T) {
+		activeSpinners.Add(1)
+		t.Cleanup(func() { activeSpinners.Add(-1) })
+
+		stderr := captureStderr(t, func() { CliWarning("output may be incomplete") })
+
+		assert.True(t, strings.HasPrefix(stderr, clear), "the clear must lead the write: %q", stderr)
+	})
 }

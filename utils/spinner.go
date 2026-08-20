@@ -5,10 +5,16 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/term"
 )
+
+// activeSpinners counts the spinners currently animating stderr. A warning
+// printed while one is running lands mid-frame, so CliWarning clears the line
+// first—but only then, since the escape erases whatever else shares that line.
+var activeSpinners atomic.Int32
 
 // Spinner displays an animated spinner with a message.
 // When stderr is not a terminal (e.g., piped or redirected), the spinner
@@ -55,6 +61,7 @@ func (s *Spinner) Start() {
 		fmt.Fprintln(os.Stderr, s.message)
 		return
 	}
+	activeSpinners.Add(1)
 
 	go func() {
 		defer close(s.doneCh)
@@ -113,4 +120,7 @@ func (s *Spinner) Stop() {
 
 	close(s.stopCh)
 	<-s.doneCh
+	// After the goroutine has returned, so the window where the last frame is
+	// still on screen keeps its clear.
+	activeSpinners.Add(-1)
 }
