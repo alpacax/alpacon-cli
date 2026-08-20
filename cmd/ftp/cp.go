@@ -74,21 +74,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		for i, arg := range args {
-			if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
-				// Parse SSH-like target: user@host:path (requires : to distinguish from local files with @)
-				sshTarget := utils.ParseSSHTarget(arg)
-				if username == "" && sshTarget.User != "" {
-					username = sshTarget.User
-				}
-				// Reconstruct the argument without the user part
-				if sshTarget.Path != "" {
-					args[i] = sshTarget.Host + ":" + sshTarget.Path
-				} else {
-					args[i] = sshTarget.Host
-				}
-			}
-		}
+		username = normalizeArgs(args, username)
 
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
@@ -211,6 +197,31 @@ func isLocalPaths(paths []string) bool {
 		}
 	}
 	return true
+}
+
+// normalizeArgs strips inline user prefixes in place and resolves the username:
+// the -u flag wins, then the first inline user.
+func normalizeArgs(args []string, username string) string {
+	for i, arg := range args {
+		rewritten, user := stripUserPrefix(arg)
+		if username == "" {
+			username = user
+		}
+		args[i] = rewritten
+	}
+	return username
+}
+
+// stripUserPrefix rewrites user@host:path as host:path, handing back the user.
+// The : is required to tell the syntax from a local file name holding an @. A
+// trailing colon survives ("alice@myserver:" stays remote), so validatePaths
+// reports the missing remote path rather than a source/destination mismatch.
+func stripUserPrefix(arg string) (rewritten, user string) {
+	if !strings.Contains(arg, "@") || !strings.Contains(arg, ":") {
+		return arg, ""
+	}
+	sshTarget := utils.ParseSSHTarget(arg)
+	return sshTarget.Host + ":" + sshTarget.Path, sshTarget.User
 }
 
 func validatePaths(sources []string, dest string) error {
