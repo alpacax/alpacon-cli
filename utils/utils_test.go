@@ -244,37 +244,38 @@ func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
 	assert.Contains(t, stderr, "at most 0600")
 }
 
-func TestSaveStreamAtomic_NoWarningWhenNothingIsWider(t *testing.T) {
+// TestKeptModeIsWider pins the guard directly: driving the same branches
+// through the filesystem makes them umask-dependent, and a umask that narrows
+// the setup mode retires the branch instead of testing it.
+func TestKeptModeIsWider(t *testing.T) {
 	requireUnixModes(t)
-	dir := t.TempDir()
 
-	t.Run("new file", func(t *testing.T) {
-		stderr := captureStderr(t, func() {
-			_, err := SaveStreamAtomic(filepath.Join(dir, "fresh"), strings.NewReader("x"), 0600)
-			require.NoError(t, err)
+	tests := []struct {
+		name        string
+		keptPerm    os.FileMode
+		newFilePerm os.FileMode
+		want        bool
+	}{
+		{"private key over a group-readable file", 0644, 0600, true},
+		{"destination already owner-only", 0600, 0600, false},
+		{"a new file would be just as readable", 0644, 0666, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, keptModeIsWider(tt.keptPerm, tt.newFilePerm))
 		})
-		assert.Empty(t, stderr)
+	}
+}
+
+func TestSaveStreamAtomic_NoWarningForANewFile(t *testing.T) {
+	requireUnixModes(t)
+
+	stderr := captureStderr(t, func() {
+		_, err := SaveStreamAtomic(filepath.Join(t.TempDir(), "fresh"), strings.NewReader("x"), 0600)
+		require.NoError(t, err)
 	})
 
-	t.Run("existing file already owner-only", func(t *testing.T) {
-		dest := filepath.Join(dir, "narrow")
-		require.NoError(t, os.WriteFile(dest, []byte("x"), 0600))
-		stderr := captureStderr(t, func() {
-			_, err := SaveStreamAtomic(dest, strings.NewReader("y"), 0600)
-			require.NoError(t, err)
-		})
-		assert.Empty(t, stderr)
-	})
-
-	t.Run("a new file would be just as readable", func(t *testing.T) {
-		dest := filepath.Join(dir, "package")
-		require.NoError(t, os.WriteFile(dest, []byte("x"), 0644))
-		stderr := captureStderr(t, func() {
-			_, err := SaveStreamAtomic(dest, strings.NewReader("y"), 0666)
-			require.NoError(t, err)
-		})
-		assert.Empty(t, stderr)
-	})
+	assert.Empty(t, stderr)
 }
 
 // tempModeReader records the mode of every temp file present in dir each time
