@@ -19,10 +19,6 @@ const (
 	// identifier must outlive it. This mirrors the web client, which keeps its
 	// own identifier in localStorage rather than alongside its session.
 	DeviceIDFileName = "device_id"
-
-	// deviceIDFileMode is the mode the identifier file is created with, and the
-	// ceiling enforced on one that already exists.
-	deviceIDFileMode = 0600
 )
 
 var (
@@ -59,9 +55,8 @@ func IsValidDeviceID(id string) bool {
 // binds to, and it identifies this installation to the identity provider,
 // travelling there in OAuth requests where it may be recorded in tenant logs.
 // So it is a stable, security-relevant identifier rather than a throwaway: the
-// file is kept at deviceIDFileMode inside the 0700 config directory, out of
-// reach of other accounts on a shared machine, and it does not belong in logs
-// or bug reports.
+// file is kept at 0600 inside the 0700 config directory, out of reach of other
+// accounts on a shared machine, and it does not belong in logs or bug reports.
 func GetOrCreateDeviceID() (string, error) {
 	path, err := deviceIDPath()
 	if err != nil {
@@ -116,25 +111,12 @@ func createDeviceID(path string) (string, error) {
 		return "", err
 	}
 
-	// O_EXCL, so two concurrent invocations cannot both believe they created
-	// the file. A plain write would let both generate and both store, and the
-	// loser would authenticate under an identifier its own installation never
-	// sends again, orphaning that login's presence. Creating rather than
-	// overwriting also makes the mode argument bite: it applies only to a file
-	// the call itself creates.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, deviceIDFileMode)
+	err = createDeviceIDFile(path, deviceID)
 	switch {
 	case err == nil:
-		_, err = file.WriteString(deviceID + "\n")
-		if closeErr := file.Close(); err == nil {
-			err = closeErr
-		}
-		if err != nil {
-			return "", fmt.Errorf("failed to write device id file: %v", err)
-		}
 	case errors.Is(err, fs.ErrExist):
 		// Something created the file between the read in GetOrCreateDeviceID
-		// and this call. Whatever it wrote is already in flight, so adopt it
+		// and this call. Whatever it holds is already in flight, so adopt it
 		// instead of overwriting it with a value only this process knows.
 		existing, readErr := readDeviceID(path)
 		if readErr != nil {
@@ -159,7 +141,7 @@ func createDeviceID(path string) (string, error) {
 			return "", err
 		}
 	default:
-		return "", fmt.Errorf("failed to create device id file: %v", err)
+		return "", err
 	}
 
 	// Report what the file holds rather than what was generated. Both of the
@@ -178,25 +160,53 @@ func createDeviceID(path string) (string, error) {
 	return stored, nil
 }
 
+// createDeviceIDFile publishes deviceID at path, reporting fs.ErrExist when the
+// path is already taken, so two concurrent invocations cannot both believe they
+// created the file. A plain write would let both generate and both store, and
+// the loser would authenticate under an identifier its own installation never
+// sends again, orphaning that login's presence.
+//
+// The content lands before the name does: the value is written to a temporary
+// file, and the link publishes a file that already holds it. Creating with
+// O_EXCL and writing on the next line is exclusive on the name alone—for the
+// length of that write the path exists and is empty, and an empty file is what
+// readDeviceID reports as absent, so a concurrent invocation reads it, judges
+// it malformed, and replaces the winner's identifier with its own.
+//
+// Linking rather than renaming is what keeps the exclusion: rename replaces
+// whatever it lands on. A filesystem with no hard links fails here rather than
+// falling back, since every fallback either gives up the exclusion or brings
+// the empty window back. That failure costs a hardening signal rather than a
+// login: the one caller of GetOrCreateDeviceID drops the error and lets the
+// server fall back to its own fingerprint.
+//
+// The mode published is the temporary file's, which os.CreateTemp sets to 0600
+// and the umask can narrow further.
+func createDeviceIDFile(path, deviceID string) error {
+	tempPath, err := writeDeviceIDTempFile(path, deviceID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tempPath) }()
+
+	if err = os.Link(tempPath, path); err != nil {
+		// Wrapped, not reformatted: the caller matches fs.ErrExist on it.
+		return fmt.Errorf("failed to create device id file: %w", err)
+	}
+
+	return nil
+}
+
 // replaceDeviceIDFile overwrites the identifier file through a temporary file
 // and a rename, so no reader observes a half-written or empty file and so the
 // replacement carries its own mode instead of inheriting whatever the file it
 // replaced had.
 func replaceDeviceIDFile(path, deviceID string) error {
-	file, err := os.CreateTemp(filepath.Dir(path), DeviceIDFileName+"-*")
+	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
-		return fmt.Errorf("failed to create device id file: %v", err)
+		return err
 	}
-	tempPath := file.Name()
 	defer func() { _ = os.Remove(tempPath) }()
-
-	_, err = file.WriteString(deviceID + "\n")
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return fmt.Errorf("failed to write device id file: %v", err)
-	}
 
 	if err = os.Rename(tempPath, path); err != nil {
 		return fmt.Errorf("failed to replace device id file: %v", err)
@@ -205,15 +215,42 @@ func replaceDeviceIDFile(path, deviceID string) error {
 	return nil
 }
 
+// writeDeviceIDTempFile writes deviceID to a fresh file beside path and returns
+// that file's name, for a caller that publishes it with a link or a rename. The
+// caller owns the returned path and has to remove it: after a link it is a
+// second name for a file that is now published, and after a failure it is a
+// leftover.
+func writeDeviceIDTempFile(path, deviceID string) (string, error) {
+	file, err := os.CreateTemp(filepath.Dir(path), DeviceIDFileName+"-*")
+	if err != nil {
+		// Flattened rather than wrapped, deliberately: os.CreateTemp reports
+		// fs.ErrExist once it runs out of names to try, and createDeviceID reads
+		// that error as the identifier file itself already existing.
+		return "", fmt.Errorf("failed to create device id file: %v", err)
+	}
+	tempPath := file.Name()
+
+	_, err = file.WriteString(deviceID + "\n")
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(tempPath)
+		return "", fmt.Errorf("failed to write device id file: %v", err)
+	}
+
+	return tempPath, nil
+}
+
 // restrictDeviceIDFileMode drops any group or other permission bits from a file
 // that already exists. A mode argument only applies to a file the call creates,
 // so an identifier file some other path left world-readable would otherwise
 // keep that mode for the life of the installation while this package claims
-// deviceIDFileMode.
+// 0600.
 //
 // Bits are only ever removed, never added: a stricter umask legitimately
-// produces something tighter than deviceIDFileMode, and loosening that back
-// would be this function undoing the protection it exists to provide.
+// produces something tighter than 0600, and loosening that back would be this
+// function undoing the protection it exists to provide.
 func restrictDeviceIDFileMode(path string) error {
 	if runtime.GOOS == "windows" {
 		// Windows has no Unix mode bits; os.Chmod there toggles the read-only

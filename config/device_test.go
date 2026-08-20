@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -237,12 +238,34 @@ func TestGetOrCreateDeviceID_FilePermissions(t *testing.T) {
 		"config dir must not be accessible by group or other, got %v", dirInfo.Mode().Perm())
 }
 
+// TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken pins the contract
+// createDeviceID branches on. The concurrent test below exercises it, but only
+// by winning a race, so it can pass on a run where nothing ever collided; this
+// asserts it outright. A publication step that stopped reporting fs.ErrExist
+// would silently turn that branch into dead code and take the exclusion with
+// it.
+func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	setupTestConfig(t)
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+	require.NoError(t, createDeviceIDFile(path, winner))
+
+	err := createDeviceIDFile(path, "1a2b3c4d-5e6f-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.ErrorIs(t, err, fs.ErrExist)
+	assert.Equal(t, winner+"\n", readDeviceIDFile(t), "the loser must not have touched the published value")
+}
+
 // TestGetOrCreateDeviceID_ConcurrentCreation is the property exclusive creation
-// buys. Two `alpacon` invocations can start at the same moment—a shell script
-// backgrounding several commands is enough—and read-then-write lets both
-// generate and both store. The loser would authenticate under an identifier its
-// own installation never sends again, orphaning that login's presence proof, so
-// every caller must come away with the one value the file ends up holding.
+// buys. Two `alpacon` invocations can start at once—backgrounding a few shell
+// commands does it—and read-then-write lets both generate and both store,
+// leaving the loser on an identifier its installation never sends again and that
+// login's presence proof orphaned. Every caller must come away with the value
+// the file ends up holding.
+//
+// Exclusivity on the name alone does not get there; createDeviceIDFile's doc
+// comment carries the failure mode that rules it out.
 func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	setupTestConfig(t)
 
