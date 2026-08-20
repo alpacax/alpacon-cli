@@ -126,6 +126,12 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 // beyond what a fresh download would be (a private key over a 0644 file). A
 // warning, not a chmod—re-permissioning a file the user set up is not the
 // CLI's call (#326).
+//
+// !replacing is redundant at today's only call site (keptPerm equals
+// newFilePerm there, which no comparison satisfies) and stays so the guard does
+// not rest on that invariant. The message names fileName rather than the
+// symlink-resolved targetName: removing the name the user typed is what gets
+// them a fresh owner-only file.
 func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os.FileMode) {
 	if !replacing || !keptModeIsWider(keptPerm, newFilePerm) {
 		return
@@ -139,11 +145,15 @@ func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os
 // synthesizes 0666 for every file without the read-only attribute—so the
 // comparison would fire on every overwrite there, and removing the file is no
 // remedy for an ACL anyway.
+//
+// newFilePerm is the mode a new file is requested at, before the umask narrows
+// it, so a restrictive umask can only silence a warning that was due—never
+// invent one.
 func keptModeIsWider(keptPerm, newFilePerm os.FileMode) bool {
 	if runtime.GOOS == "windows" {
 		return false
 	}
-	const groupOtherRead = os.FileMode(0o044)
+	const groupOtherRead = os.FileMode(0044)
 	return keptPerm&groupOtherRead != 0 && newFilePerm&groupOtherRead == 0
 }
 
