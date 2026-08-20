@@ -43,6 +43,26 @@ Run the command again later to check for completion.`,
 			return
 		}
 
+		// Exit 0 would read as a command that finished with nothing to show.
+		if event.IsAwaitingApprovalStatus(details.Status) {
+			utils.PrintPendingApproval(
+				fmt.Sprintf("Approval required—this command is held for human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status),
+				"", // the command detail carries no approval request id
+				utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
+			)
+			os.Exit(utils.ExitCodePendingApproval)
+		}
+
+		// Exit 6 rather than 1, and through the envelope so --output json answers
+		// this refusal the way exec and work-session create do: retrying only
+		// files another approval request.
+		if event.IsRejectedStatus(details.Status) {
+			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command",
+				&event.CommandRejectedError{CommandID: details.ID},
+				"command was rejected by a reviewer (status: %s)", details.Status)
+			return
+		}
+
 		// Output is stored as chunks (Result is empty under the streaming
 		// contract); reconstruct it, falling back to Result for legacy commands.
 		if output, oerr := event.GetCommandOutput(alpaconClient, jobID); oerr == nil && output != "" {
@@ -66,7 +86,9 @@ func init() {
 	ExecCmd.AddCommand(logsCmd)
 }
 
-// logsCommandOutcome maps GetCommandByID details to (stdout, stderr, exitCode). If non-empty, stderrLine ends with \n.
+// logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
+// awaiting_approval hold nor a rejection reaches here: the caller answers both on
+// the approval contract first.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	if event.IsRunningStatus(details.Status) {
 		stderrLine = fmt.Sprintf(
@@ -74,23 +96,6 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 			details.Status, details.ID,
 		)
 		return "", stderrLine, 0
-	}
-
-	// HITL: the command is held pending out-of-band human approval. It runs once
-	// approved, so report it as in-progress (exit 0) and point at a later re-check
-	// rather than treating it as an unrecognised terminal status.
-	if event.IsAwaitingApprovalStatus(details.Status) {
-		stderrLine = fmt.Sprintf(
-			"command is awaiting approval (status: %s).\nIt runs once a reviewer approves it in the Alpacon console (web). Run `alpacon exec logs %s` again to check later.\n",
-			details.Status, details.ID,
-		)
-		return "", stderrLine, 0
-	}
-
-	if details.Status == "rejected" {
-		stderrLine = fmt.Sprintf("%s: command was rejected by a reviewer (status: %s)\n",
-			utils.Red("Error"), details.Status)
-		return "", stderrLine, 1
 	}
 
 	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {

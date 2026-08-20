@@ -144,6 +144,20 @@ func IsFatalClientError(status int) bool {
 	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
+// IsTransientRequestError reports whether err may not repeat on the next
+// attempt. A missing status covers a request that never reached the server and
+// a response that failed to decode, so a caller must bound its retries.
+func IsTransientRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	status := HTTPStatusCode(err)
+	if status == 0 {
+		return true
+	}
+	return !IsFatalClientError(status)
+}
+
 func ParseErrorResponse(err error) (string, string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if coded, ok := e.(codedError); ok {

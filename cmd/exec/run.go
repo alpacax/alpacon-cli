@@ -1,9 +1,11 @@
 package exec
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -40,7 +42,9 @@ const (
 	WebshInvocation Invocation = "alpacon websh"
 )
 
-// approvalWaitPollInterval throttles the --wait re-attempt loop—slower than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var so tests can shorten it.
+// approvalWaitPollInterval is the base gap of the --wait re-attempt loop—slower
+// than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var
+// so tests can shorten it.
 var approvalWaitPollInterval = 5 * time.Second
 
 // Test seams so a unit test can drive the deadline/resume logic without real network I/O.
@@ -397,20 +401,26 @@ func isApprovalDenial(err error) bool {
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
 // it is denied with an approval request in flight (a pendingApproval code) and
-// waitTimeout is positive, blocks and re-attempts the command on a fixed
-// interval until a reviewer approves it out of band (the re-run then succeeds or
-// hits a different, terminal denial), or the bounded timeout elapses. When
-// waitTimeout is zero or negative, or the denial carries a terminal code, it
-// returns the first err unchanged so the caller's pending/denial handling runs.
+// waitTimeout is positive, blocks and re-attempts the command until a reviewer
+// approves it out of band (the re-run then succeeds or hits a different,
+// terminal denial), or the bounded timeout elapses. When waitTimeout is zero or
+// negative, or the denial carries a terminal code, it returns the first err
+// unchanged so the caller's pending/denial handling runs.
+//
+// A tick that never reached the server is not an answer: the loop backs off, and
+// a timeout—or a run of failed polls long enough to give up on—reports the denial
+// that opened the wait, so the caller still exits on the pending contract rather
+// than as a generic failure.
 //
 // Re-attempting the command is the only poll available here: the plugin's denial
 // line carries the denial code but no approval request id, and this credential
 // channel has no approval-status endpoint to query (ADR 0015 moves approval out
 // of band). Re-running is side-effect-safe: a sudo command pending approval is
 // denied by the server and never executes, so each poll tick is a no-op denial
-// until a reviewer approves, at which point the command runs exactly once. The
-// poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner, a
-// fixed-interval ticker, and a precise deadline.
+// until a reviewer approves, at which point the command runs once—except on the
+// tick that carries the approval in a response isPollFailure cannot read, which
+// re-submits it up to MaxConsecutivePollFailures times. The poll mirrors the MFA
+// step-up structure (api/mfa/mfa.go): a spinner, a timer, and a precise deadline.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, waitTimeout time.Duration, out io.Writer) error {
 	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
 
@@ -435,19 +445,22 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
 
-	deadline := time.Now().Add(waitTimeout)
+	pendingDenial := err
+	started := time.Now()
+	deadline := started.Add(waitTimeout)
 	timer := time.NewTimer(waitTimeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(approvalWaitPollInterval)
-	defer ticker.Stop()
+	poll := time.NewTimer(approvalWaitPollInterval)
+	defer poll.Stop()
+	failures := 0
 	for {
 		select {
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
 			utils.CliWarning("Approval wait timed out after %s; the command is still pending.", waitTimeout)
-			return err
-		case <-ticker.C:
+			return pendingDenial
+		case <-poll.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
 			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
@@ -463,14 +476,77 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 				}
 				return streamApprovedCommand(ac, pendingErr.CommandID, out, remaining)
 			}
-			if isApprovalDenial(err) {
+			switch {
+			case isApprovalDenial(err):
 				// Still pending—keep waiting.
+				failures = 0
+			case isPollFailure(err):
+				failures++
+				if failures >= utils.MaxConsecutivePollFailures {
+					spinner.Stop()
+					// The approval request is still open, so this exits on the
+					// pending contract like the timeout does. Exit 1 reads as
+					// retryable, and an agent answers it by re-running exec and
+					// filing a second request for the same command.
+					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
+					return pendingDenial
+				}
+				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue
+			default:
+				// Answered: it ran, or a terminal denial replaced the pending one.
+				spinner.Stop()
+				return err
 			}
-			spinner.Stop()
-			return err
+			// Each tick re-submits, so a fixed 5s gap over a 30m wait outspends the
+			// default 1000/hour service-token quota.
+			poll.Reset(utils.NextPollTick(approvalWaitPollInterval, time.Since(started)))
 		}
 	}
+}
+
+// isPollFailure separates a tick that carried a usable answer from one that did
+// not. A poll here re-submits the command, so it names the unusable shapes rather
+// than inferring them from a missing HTTP status: errorFromDetails reports stuck,
+// error, cancelled, and an unrecognised status as a plain error, and treating
+// those as unanswered would re-run a command the server already finished—up to
+// MaxConsecutivePollFailures times, overriding a human's cancel exactly as a
+// re-submitted rejection would.
+//
+// *url.Error satisfies net.Error, so the one errors.As covers both the dial and
+// the round-trip failure. Those two never reached the server. The remaining
+// shapes did, and are counted as failures anyway: a body that will not decode is
+// a body the server sent, and both decode sites run after it acted—SubmitCommand
+// decodes the response to the POST that already created the command, and
+// pollCommandExecution decodes after dispatch. A proxy error page under a JSON
+// content type is the usual shape (*json.SyntaxError), a field whose type drifted
+// from the response shape is the same non-answer one layer in
+// (*json.UnmarshalTypeError), and a read cut short carries the status its headers
+// gave, so it lands on the status branch above as a retryable 2xx. Both decode
+// paths return the error unwrapped, so errors.As reaches either.
+//
+// The trade is deliberate: an unreadable answer that happens to carry the
+// approval costs at most MaxConsecutivePollFailures re-runs of a command a human
+// granted, against a single hiccup discarding a wait that can run half an hour.
+// The first submission has to decode cleanly for this loop to be entered at all,
+// so the malformed response has to start mid-wait.
+func isPollFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status := utils.HTTPStatusCode(err); status != 0 {
+		return !utils.IsFatalClientError(status)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return true
+	}
+	var typeErr *json.UnmarshalTypeError
+	return errors.As(err, &typeErr)
 }
 
 // HandlePendingApproval emits the structured pending-approval feedback for a
@@ -572,6 +648,12 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		if errors.As(err, &clientTimeout) {
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
 			os.Exit(1)
+		}
+		var rejected *event.CommandRejectedError
+		if errors.As(err, &rejected) {
+			// Settled without a grant: retrying only files another approval request.
+			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", err, "%s", rejected)
+			return
 		}
 		if isCommandInlineCredentialError(err) {
 			if utils.OutputFormat == utils.OutputFormatJSON {

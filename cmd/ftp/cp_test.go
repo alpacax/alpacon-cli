@@ -1,10 +1,8 @@
 package ftp
 
 import (
-	"strings"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -271,28 +269,13 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the parsing logic from the cp command
 			args := make([]string, len(tt.args))
 			copy(args, tt.args)
-			username := ""
 
-			// Apply the same parsing logic as in cp.go
-			for i, arg := range args {
-				if strings.Contains(arg, "@") && strings.Contains(arg, ":") {
-					sshTarget := utils.ParseSSHTarget(arg)
-					if username == "" && sshTarget.User != "" {
-						username = sshTarget.User
-					}
-					if sshTarget.Path != "" {
-						args[i] = sshTarget.Host + ":" + sshTarget.Path
-					} else {
-						args[i] = sshTarget.Host
-					}
-				}
-			}
+			username := normalizeArgs(args, "")
 
-			assert.Equal(t, tt.expectedArgs, args, "Arguments should match expected after parsing")
-			assert.Equal(t, tt.expectedUser, username, "Username should match expected")
+			assert.Equal(t, tt.expectedArgs, args)
+			assert.Equal(t, tt.expectedUser, username)
 		})
 	}
 }
@@ -354,6 +337,60 @@ func TestRequiredCpPatterns(t *testing.T) {
 					assert.False(t, isUpload, "Should not be an upload operation")
 				}
 			}
+		})
+	}
+}
+
+func TestStripUserPrefix(t *testing.T) {
+	tests := []struct {
+		name          string
+		arg           string
+		wantRewritten string
+		wantUser      string
+	}{
+		{name: "user, host and path", arg: "alice@myserver:/tmp/f", wantRewritten: "myserver:/tmp/f", wantUser: "alice"},
+		{
+			name:          "user and host with a trailing colon",
+			arg:           "alice@myserver:",
+			wantRewritten: "myserver:",
+			wantUser:      "alice",
+		},
+		{name: "user and an empty host", arg: "alice@:", wantRewritten: ":", wantUser: "alice"},
+		{name: "no user is untouched", arg: "myserver:/tmp/f", wantRewritten: "myserver:/tmp/f"},
+		{name: "local path with an @ but no colon is untouched", arg: "./mail@example.txt", wantRewritten: "./mail@example.txt"},
+		{name: "path may itself contain an @", arg: "alice@myserver:/tmp/mail@example.txt", wantRewritten: "myserver:/tmp/mail@example.txt", wantUser: "alice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewritten, user := stripUserPrefix(tt.arg)
+			assert.Equal(t, tt.wantRewritten, rewritten)
+			assert.Equal(t, tt.wantUser, user)
+		})
+	}
+}
+
+func TestNormalizeArgsUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		flagUser string
+		wantUser string
+	}{
+		{
+			name:     "the -u flag wins over an inline user",
+			args:     []string{"test.txt", "alice@myserver:/tmp/"},
+			flagUser: "carol",
+			wantUser: "carol",
+		},
+		{
+			name:     "the first inline user wins",
+			args:     []string{"alice@myserver:/tmp/f", "bob@myserver:/tmp/g"},
+			wantUser: "alice",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantUser, normalizeArgs(tt.args, tt.flagUser))
 		})
 	}
 }
