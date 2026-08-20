@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -126,12 +127,24 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 // warning, not a chmod—re-permissioning a file the user set up is not the
 // CLI's call (#326).
 func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os.FileMode) {
-	const groupOtherRead = os.FileMode(0o044)
-	if !replacing || keptPerm&groupOtherRead == 0 || newFilePerm&groupOtherRead != 0 {
+	if !replacing || !keptModeIsWider(keptPerm, newFilePerm) {
 		return
 	}
 	CliWarning("%s already existed at %04o and kept that mode; a new file would have been at most %04o. Remove it first for owner-only permissions.",
 		fileName, keptPerm, newFilePerm)
+}
+
+// keptModeIsWider reports whether keptPerm leaves the content readable to
+// accounts newFilePerm would shut out. Windows has no Unix modes—os.Stat
+// synthesizes 0666 for every file without the read-only attribute—so the
+// comparison would fire on every overwrite there, and removing the file is no
+// remedy for an ACL anyway.
+func keptModeIsWider(keptPerm, newFilePerm os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	const groupOtherRead = os.FileMode(0o044)
+	return keptPerm&groupOtherRead != 0 && newFilePerm&groupOtherRead == 0
 }
 
 // resolveWritePath walks symlinks to the final target so atomic replace
