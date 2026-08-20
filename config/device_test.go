@@ -257,6 +257,57 @@ func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
 	assert.Equal(t, winner+"\n", readDeviceIDFile(t), "the loser must not have touched the published value")
 }
 
+// TestCreateDeviceIDFile_NeverPublishesAnEmptyFile is the property #361 was
+// about, and the one the test above cannot reach: O_EXCL plus a write on the
+// next line is exclusive on the name and passes that one too, while the path
+// exists holding nothing for the length of the write.
+//
+// The catch is probabilistic—the window is one write wide—so it runs many
+// rounds. A publication step with no window cannot fail it, which is what makes
+// a failure here real.
+func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
+	const rounds = 200
+	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+
+	for round := range rounds {
+		path := filepath.Join(t.TempDir(), DeviceIDFileName)
+
+		stop := make(chan struct{})
+		seen := make(chan string, 1)
+		var watching sync.WaitGroup
+		watching.Add(1)
+		go func() {
+			defer watching.Done()
+			for {
+				data, err := os.ReadFile(path)
+				if err == nil {
+					if string(data) != deviceID+"\n" {
+						seen <- string(data)
+					}
+					return
+				}
+				select {
+				case <-stop:
+					return
+				default:
+				}
+			}
+		}()
+
+		err := createDeviceIDFile(path, deviceID)
+		close(stop)
+		watching.Wait()
+
+		require.NoError(t, err, "round %d", round)
+		select {
+		case raw := <-seen:
+			t.Fatalf("round %d: %s was readable holding %q before it held the identifier",
+				round, DeviceIDFileName, raw)
+		default:
+		}
+	}
+}
+
 // TestGetOrCreateDeviceID_ConcurrentCreation is the property exclusive creation
 // buys. Two `alpacon` invocations can start at once—backgrounding a few shell
 // commands does it—and read-then-write lets both generate and both store,
