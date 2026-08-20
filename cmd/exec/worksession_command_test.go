@@ -91,22 +91,35 @@ func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
 	assert.Equal(t, []string{"prod"}, envelope.Context.TargetServers)
 }
 
+const execWorkSessionHelperMarker = "exec-worksession-helper"
+
 func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_EXEC_WORKSESSION_HELPER") != "1" {
 		return
 	}
 
-	args, ok := execWorkSessionHelperArgs(os.Args)
+	args, ok := helperArgsAfter(os.Args, execWorkSessionHelperMarker)
 	if !ok {
-		fmt.Fprintln(os.Stderr, "missing exec-worksession-helper marker")
+		fmt.Fprintln(os.Stderr, "missing "+execWorkSessionHelperMarker+" marker")
 		os.Exit(2)
+	}
+	// The wait loop's poll interval is a package var the parent cannot reach
+	// across the process boundary; unset, the default 5s stands.
+	if v := os.Getenv("ALPACON_TEST_POLL_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bad ALPACON_TEST_POLL_INTERVAL: "+v)
+			os.Exit(2)
+		}
+		approvalWaitPollInterval = d
 	}
 	ExecCmd.Run(ExecCmd, args)
 }
 
-func execWorkSessionHelperArgs(args []string) ([]string, bool) {
+// helperArgsAfter returns the args after marker—the helper's, not go test's.
+func helperArgsAfter(args []string, marker string) ([]string, bool) {
 	for i := 0; i < len(args); i++ {
-		if args[i] == "exec-worksession-helper" {
+		if args[i] == marker {
 			return args[i+1:], true
 		}
 	}

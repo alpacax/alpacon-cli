@@ -38,6 +38,12 @@ type PendingApprovalError struct {
 	CommandID string
 }
 
+// CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
+// agent reading a generic failure code retries, filing a fresh approval request.
+type CommandRejectedError struct {
+	CommandID string
+}
+
 type EventAttributes struct {
 	Server      string `json:"server"`
 	Shell       string `json:"shell"`
@@ -107,6 +113,13 @@ func (*PendingApprovalError) Error() string {
 	return "command is awaiting human approval"
 }
 
+func (e *CommandRejectedError) Error() string {
+	if e.CommandID == "" {
+		return "command was rejected by a reviewer"
+	}
+	return fmt.Sprintf("command %s was rejected by a reviewer", e.CommandID)
+}
+
 // DescribePhase returns the human-readable description for an error_phase,
 // or the raw identifier when the phase is unknown.
 func DescribePhase(phase string) string {
@@ -132,4 +145,11 @@ func IsRunningStatus(status string) bool {
 // and the command has not yet been delivered to the agent.
 func IsAwaitingApprovalStatus(status string) bool {
 	return status == "awaiting_approval"
+}
+
+// IsRejectedStatus reports whether status is the server's terminal state for a
+// command a reviewer refused. It never ran, and re-submitting it only files a
+// second approval request.
+func IsRejectedStatus(status string) bool {
+	return status == "rejected"
 }
