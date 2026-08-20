@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,8 +62,33 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 
 	require.Error(t, err)
 	var terminal *terminalWaitError
-	// A 500 is a transient failure, not a settled outcome—exit 1, not 6.
+	// A 500 is a transient failure, not a settled outcome—never exit 6.
 	assert.NotErrorAs(t, err, &terminal)
+}
+
+// The session is created and pending when the polls run out, so giving up must
+// exit on the pending contract like the timeout does: exit 1 reads as retryable
+// and an agent answers it with a second session and a second approval request.
+func TestPollForApproval_GivingUpIsPending(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+	})
+
+	var pending *pendingWaitError
+	require.ErrorAs(t, err, &pending)
+	assert.Equal(t, utils.MaxConsecutivePollFailures, requests, "the bound must stop the wait, not the deadline")
+	// The transport detail rides the warning line rather than the exit code.
+	assert.Contains(t, stderr, "gave up after 5 failed polls (server returned an empty error response)")
 }
 
 func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {

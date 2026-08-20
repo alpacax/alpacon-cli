@@ -313,9 +313,11 @@ type terminalWaitError struct {
 
 func (e *terminalWaitError) Error() string { return e.message }
 
-// pendingWaitError marks a wait that ran out of time with the outcome still open. Nothing
-// failed—a human simply has not decided yet—so it carries the same exit code a create
-// without --wait does, rather than the general-error code a polling failure gets.
+// pendingWaitError marks a wait that ended with the outcome still open—the window
+// elapsed, or the CLI could not reach the server for a bounded run of polls. Either
+// way the session exists and a human has not decided yet, so it carries the same exit
+// code a create without --wait does, rather than the general-error code that reads as
+// retryable and gets answered with a second session.
 type pendingWaitError struct {
 	message string
 }
@@ -442,12 +444,20 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			failures++
-			if !utils.IsTransientRequestError(err) || failures >= utils.MaxConsecutivePollFailures {
+			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
 			}
 			remaining := time.Until(deadline)
 			if remaining <= 0 {
 				return nil, timedOut
+			}
+			if failures >= utils.MaxConsecutivePollFailures {
+				// The session is created and pending, so this exits on the pending
+				// contract like the timeout does. Exit 1 reads as retryable, and an
+				// agent answers it by re-running create and filing a second session
+				// and a second approval request.
+				utils.CliWarning("Approval wait gave up after %d failed polls (%s); the work session is still pending.", failures, err)
+				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
 			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
