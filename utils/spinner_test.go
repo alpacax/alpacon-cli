@@ -78,3 +78,24 @@ func TestSpinner_AnimatingBranchPairsTheActiveCount(t *testing.T) {
 		assert.Equal(t, int32(0), activeSpinners.Load(), "and Stop disarms it")
 	})
 }
+
+// Stop closes stopCh and doneCh; a Start that reuses them launches a goroutine
+// whose select falls straight through the closed stopCh and then closes doneCh a
+// second time. Off a TTY Start never reaches the goroutine, so enabled is
+// forced here as well—no test that leaves it alone can see the panic.
+func TestSpinner_RestartsAfterStop(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = time.Millisecond
+
+		s.Start()
+		s.Stop()
+
+		s.Start()
+		assert.Equal(t, int32(1), activeSpinners.Load(), "a restarted spinner arms the line break again")
+		s.Stop()
+		assert.Equal(t, int32(0), activeSpinners.Load(), "and its Stop disarms it")
+		assert.False(t, spinnerRunning(s), "Stop must leave the spinner stopped")
+	})
+}

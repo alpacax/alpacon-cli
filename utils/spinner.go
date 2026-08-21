@@ -49,8 +49,6 @@ func NewSpinner(message string) *Spinner {
 		frames:   []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		dots:     []string{".  ", ".. ", "..."},
 		interval: 100 * time.Millisecond,
-		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
 		enabled:  term.IsTerminal(int(os.Stderr.Fd())),
 	}
 }
@@ -63,6 +61,9 @@ func (s *Spinner) Start() {
 		return
 	}
 	s.running = true
+	// Stop closes both channels, so a restart needs a fresh pair.
+	s.stopCh = make(chan struct{})
+	s.doneCh = make(chan struct{})
 	s.mu.Unlock()
 
 	if !s.enabled {
@@ -121,14 +122,16 @@ func (s *Spinner) Stop() {
 		return
 	}
 	s.running = false
+	// Read under the lock: a concurrent restart replaces the fields.
+	stopCh, doneCh := s.stopCh, s.doneCh
 	s.mu.Unlock()
 
 	if !s.enabled {
 		return
 	}
 
-	close(s.stopCh)
-	<-s.doneCh
+	close(stopCh)
+	<-doneCh
 	// After the goroutine has returned, so the window where the last frame is
 	// still on screen keeps its line break.
 	activeSpinners.Add(-1)
