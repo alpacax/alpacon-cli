@@ -89,6 +89,7 @@ func TestSpinner_RestartsAfterStop(t *testing.T) {
 		s.enabled = true
 		s.interval = time.Millisecond
 
+		require.Equal(t, int32(0), activeSpinners.Load())
 		s.Start()
 		s.Stop()
 
