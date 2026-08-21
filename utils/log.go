@@ -94,23 +94,29 @@ func CliInfo(msg string, args ...any) {
 //
 // A warning can land while a Spinner is animating stderr (SaveStreamAtomic
 // warns from inside a download), and the spinner leaves the cursor mid-line.
-// The clear and the text go out as one write so a spinner frame cannot wedge
+// The break and the text go out as one write so a spinner frame cannot wedge
 // itself between them.
 func CliWarning(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s%s: %s\n", clearStderrLine(), Yellow("Warning"), cliMessage(msg, args...))
+	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
 }
 
-// clearStderrLine returns the escape that wipes the terminal's current line,
-// or "" when no spinner is animating it. The escape erases the whole line, not
-// just the frame the spinner drew—stdout and stderr share a cursor on a
-// terminal—so anything a caller streamed without a trailing newline would go
-// with it. Only a running spinner makes that trade worth taking; a spinner is
-// enabled on a TTY alone, so this subsumes the terminal test.
-func clearStderrLine() string {
+// spinnerLineBreak returns the newline that moves a warning off the line a
+// spinner is animating, or "" when none is. A newline and not an erase escape:
+// stdout and stderr share a cursor on a terminal, so erasing the line takes any
+// streamed output not yet ended by a newline with it. Spinner.StopWriter is what
+// keeps a spinner off a line a caller is about to stream to, but it only covers
+// the call sites that opt in, and this helper backs 77 CliWarning sites that
+// cannot each be audited. The last spinner frame stays on screen in trade; the
+// spinner redraws on the line below.
+//
+// Gated on a spinner rather than on stderr being a terminal: off a TTY the
+// static progress line already ends in a newline, so a second one would only
+// add a blank line.
+func spinnerLineBreak() string {
 	if activeSpinners.Load() == 0 {
 		return ""
 	}
-	return "\r\033[K"
+	return "\n"
 }
 
 // CliSuccess handles all success messages in the CLI.

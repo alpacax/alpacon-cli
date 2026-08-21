@@ -134,17 +134,15 @@ func TestCliMessage_StripsColorFromArguments(t *testing.T) {
 	assert.Equal(t, "Save this key: secret", cliMessage("Save this key: %s", Green("secret")))
 }
 
-// The clear is gated on a running spinner rather than on stderr being a
-// terminal: the escape wipes the whole line, so a warning following streamed
-// stdout would take that output with it. captureStderr's pipe hides the
-// terminal test, which is how the ungated version cleared CI.
-func TestCliWarning_ClearsTheLineOnlyWhileASpinnerRuns(t *testing.T) {
-	const clear = "\r\033[K"
-
+// The break is gated on a running spinner rather than on stderr being a
+// terminal, and it is a newline rather than an erase escape: a spinner can
+// still be running while stdout is streamed, and erasing the line would take
+// that output with it.
+func TestCliWarning_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {
 	t.Run("nothing is animating stderr", func(t *testing.T) {
 		stderr := captureStderr(t, func() { CliWarning("output may be incomplete") })
 
-		assert.NotContains(t, stderr, clear)
+		assert.False(t, strings.HasPrefix(stderr, "\n"), "nothing to step off, so no break: %q", stderr)
 	})
 
 	t.Run("a spinner is animating stderr", func(t *testing.T) {
@@ -153,6 +151,7 @@ func TestCliWarning_ClearsTheLineOnlyWhileASpinnerRuns(t *testing.T) {
 
 		stderr := captureStderr(t, func() { CliWarning("output may be incomplete") })
 
-		assert.True(t, strings.HasPrefix(stderr, clear), "the clear must lead the write: %q", stderr)
+		assert.True(t, strings.HasPrefix(stderr, "\n"), "the break must lead the write: %q", stderr)
+		assert.NotContains(t, stderr, "\033[K")
 	})
 }

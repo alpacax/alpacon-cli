@@ -13,8 +13,8 @@ import (
 )
 
 // activeSpinners counts the spinners currently animating stderr. A warning
-// printed while one is running lands mid-frame, so CliWarning clears the line
-// first—but only then, since the escape erases whatever else shares that line.
+// printed while one is running lands mid-frame, so CliWarning breaks to a new
+// line first—but only then, since off a TTY there is no frame to step off.
 var activeSpinners atomic.Int32
 
 // Spinner displays an animated spinner with a message.
@@ -130,7 +130,7 @@ func (s *Spinner) Stop() {
 	close(s.stopCh)
 	<-s.doneCh
 	// After the goroutine has returned, so the window where the last frame is
-	// still on screen keeps its clear.
+	// still on screen keeps its line break.
 	activeSpinners.Add(-1)
 }
 
