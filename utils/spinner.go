@@ -49,8 +49,6 @@ func NewSpinner(message string) *Spinner {
 		frames:   []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		dots:     []string{".  ", ".. ", "..."},
 		interval: 100 * time.Millisecond,
-		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
 		enabled:  term.IsTerminal(int(os.Stderr.Fd())),
 	}
 }
@@ -63,6 +61,12 @@ func (s *Spinner) Start() {
 		return
 	}
 	s.running = true
+	// Stop closes both channels, so a restart needs a fresh pair—and the
+	// goroutine below takes its own copy, since the fields belong to whichever
+	// Start ran last rather than to the run it was spawned for.
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	s.stopCh, s.doneCh = stopCh, doneCh
 	s.mu.Unlock()
 
 	if !s.enabled {
@@ -73,13 +77,13 @@ func (s *Spinner) Start() {
 	activeSpinners.Add(1)
 
 	go func() {
-		defer close(s.doneCh)
+		defer close(doneCh)
 		frameIdx := 0
 		dotIdx := 0
 		dotCounter := 0
 		for {
 			select {
-			case <-s.stopCh:
+			case <-stopCh:
 				// Clear the spinner line
 				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
@@ -121,14 +125,16 @@ func (s *Spinner) Stop() {
 		return
 	}
 	s.running = false
+	// Read under the lock: a concurrent restart replaces the fields.
+	stopCh, doneCh := s.stopCh, s.doneCh
 	s.mu.Unlock()
 
 	if !s.enabled {
 		return
 	}
 
-	close(s.stopCh)
-	<-s.doneCh
+	close(stopCh)
+	<-doneCh
 	// After the goroutine has returned, so the window where the last frame is
 	// still on screen keeps its line break.
 	activeSpinners.Add(-1)

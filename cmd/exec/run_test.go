@@ -294,8 +294,8 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 // that reused a single writer would therefore animate through its first poll gap
 // and sit silent for the rest of what --wait is there to cover. Writer identity
 // is all a test can see of the spinner from here, and one writer per tick means
-// one spinner per tick.
-func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnSpinner(t *testing.T) {
+// one restart per tick.
+func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnWriter(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
 	var writers []io.Writer
@@ -317,7 +317,7 @@ func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnSpinner(t *testing.T) 
 	assert.NoError(t, err)
 	// writers[0] is the first attempt, which runs before any spinner exists.
 	require.Len(t, writers, 4)
-	assert.NotSame(t, writers[1], writers[2], "the second wait needs a spinner of its own")
+	assert.NotSame(t, writers[1], writers[2], "the second wait needs a writer of its own")
 	assert.NotSame(t, writers[2], writers[3], "and so does the third")
 }
 
