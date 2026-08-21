@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// mfaWaitMessage labels the MFA wait. The new flow animates it and the legacy
+// flow prints it once, so it lives here rather than in either branch.
+const mfaWaitMessage = "Waiting for MFA authentication..."
+
 var maxRetryDuration = 3 * time.Minute
 
 var retryInterval = 1 * time.Second
@@ -51,7 +55,7 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 
 		if callbacks.CheckMFACompleted != nil {
 			// New flow: poll lightweight completion endpoint, then retry once
-			spinner := NewSpinner("Waiting for MFA authentication...")
+			spinner := NewSpinner(mfaWaitMessage)
 			spinner.Start()
 			for {
 				if time.Since(startTime) > maxRetryDuration {
@@ -97,7 +101,7 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			// instead of a spinner: every tick retries the operation, which can
 			// stream to stdout, so there is no stretch of this loop where an
 			// animation would be safe.
-			CliInfo("Waiting for MFA authentication...")
+			CliInfo(mfaWaitMessage)
 			for {
 				if time.Since(startTime) > maxRetryDuration {
 					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
