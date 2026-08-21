@@ -155,3 +155,25 @@ func TestCliWarning_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {
 		assert.NotContains(t, stderr, "\033[K")
 	})
 }
+
+// CliDebug shares the break because the refresh-token degrade logs from inside
+// the "Refreshing access token..." spinner, and a debug line is what tells that
+// degrade apart from the path it replaced—unreadable if it lands mid-frame.
+func TestCliDebug_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {
+	t.Setenv(DebugEnvVar, "1")
+
+	t.Run("nothing is animating stderr", func(t *testing.T) {
+		stderr := captureStderr(t, func() { CliDebug("fell back to the device scope") })
+
+		assert.False(t, strings.HasPrefix(stderr, "\n"), "nothing to step off, so no break: %q", stderr)
+	})
+
+	t.Run("a spinner is animating stderr", func(t *testing.T) {
+		activeSpinners.Add(1)
+		t.Cleanup(func() { activeSpinners.Add(-1) })
+
+		stderr := captureStderr(t, func() { CliDebug("fell back to the device scope") })
+
+		assert.True(t, strings.HasPrefix(stderr, "\n"), "the break must lead the write: %q", stderr)
+	})
+}
