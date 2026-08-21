@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -237,12 +238,93 @@ func TestGetOrCreateDeviceID_FilePermissions(t *testing.T) {
 		"config dir must not be accessible by group or other, got %v", dirInfo.Mode().Perm())
 }
 
+// TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken pins the contract
+// createDeviceID branches on. The concurrent test below reaches it only by
+// winning a race, so it can pass on a run where nothing collided; a publication
+// step that stopped reporting fs.ErrExist would turn that branch into dead code.
+func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	setupTestConfig(t)
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+	require.NoError(t, createDeviceIDFile(path, winner))
+
+	err := createDeviceIDFile(path, "1a2b3c4d-5e6f-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.ErrorIs(t, err, fs.ErrExist)
+	assert.Equal(t, winner+"\n", readDeviceIDFile(t), "the loser must not have touched the published value")
+}
+
+// TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken keeps the
+// no-hard-link fallback on the contract createDeviceID branches on. It gives up
+// atomicity; it must not give up the exclusion.
+func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DeviceIDFileName)
+	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+	require.NoError(t, createDeviceIDFileWithoutLink(path, winner))
+
+	err := createDeviceIDFileWithoutLink(path, "1a2b3c4d-5e6f-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.ErrorIs(t, err, fs.ErrExist)
+	data, readErr := os.ReadFile(path)
+	require.NoError(t, readErr)
+	assert.Equal(t, winner+"\n", string(data), "the loser must not have touched the published value")
+}
+
+// TestCreateDeviceIDFile_NeverPublishesAnEmptyFile is the property #361 was
+// about and the one the test above cannot reach: O_EXCL plus a write on the next
+// line passes that one too, while the path exists holding nothing. The catch is
+// probabilistic—the window is one write wide—but one-sided: a publication step
+// with no window cannot fail it, so a failure here is real.
+func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
+	const rounds = 200
+	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
+
+	for round := range rounds {
+		path := filepath.Join(t.TempDir(), DeviceIDFileName)
+
+		stop := make(chan struct{})
+		seen := make(chan string, 1)
+		var watching sync.WaitGroup
+		watching.Add(1)
+		go func() {
+			defer watching.Done()
+			for {
+				data, err := os.ReadFile(path)
+				if err == nil {
+					if string(data) != deviceID+"\n" {
+						seen <- string(data)
+					}
+					return
+				}
+				select {
+				case <-stop:
+					return
+				default:
+				}
+			}
+		}()
+
+		err := createDeviceIDFile(path, deviceID)
+		close(stop)
+		watching.Wait()
+
+		require.NoError(t, err, "round %d", round)
+		select {
+		case raw := <-seen:
+			t.Fatalf("round %d: %s was readable holding %q before it held the identifier",
+				round, DeviceIDFileName, raw)
+		default:
+		}
+	}
+}
+
 // TestGetOrCreateDeviceID_ConcurrentCreation is the property exclusive creation
-// buys. Two `alpacon` invocations can start at the same moment—a shell script
-// backgrounding several commands is enough—and read-then-write lets both
-// generate and both store. The loser would authenticate under an identifier its
-// own installation never sends again, orphaning that login's presence proof, so
-// every caller must come away with the one value the file ends up holding.
+// buys. Two `alpacon` invocations can start at once—backgrounding a few shell
+// commands does it—and read-then-write lets both generate and both store,
+// leaving the loser on an identifier its installation never sends again. Every
+// caller must come away with the value the file ends up holding, and exclusivity
+// on the name alone does not get there—see createDeviceIDFile.
 func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	setupTestConfig(t)
 
