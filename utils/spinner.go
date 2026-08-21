@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -30,6 +31,14 @@ type Spinner struct {
 	mu       sync.Mutex
 	running  bool
 	enabled  bool
+}
+
+// spinnerStopWriter retires a spinner before the first byte of a caller's output
+// lands. See Spinner.StopWriter.
+type spinnerStopWriter struct {
+	spinner *Spinner
+	w       io.Writer
+	once    sync.Once
 }
 
 // NewSpinner creates a new spinner with the given message
@@ -123,4 +132,22 @@ func (s *Spinner) Stop() {
 	// After the goroutine has returned, so the window where the last frame is
 	// still on screen keeps its clear.
 	activeSpinners.Add(-1)
+}
+
+// StopWriter wraps w so the spinner stops before the first byte written to it
+// reaches the terminal. A spinner animates the line a caller is about to write
+// to and Stop erases that line, so output streamed while one is running gets
+// drawn over and then wiped. Callers that wait on something which may start
+// producing output—an approved command resuming, an operation retried after
+// MFA—hand their writer through here instead of having to know when the first
+// byte arrives. An empty write is not output, so it leaves the spinner alone.
+func (s *Spinner) StopWriter(w io.Writer) io.Writer {
+	return &spinnerStopWriter{spinner: s, w: w}
+}
+
+func (w *spinnerStopWriter) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		w.once.Do(w.spinner.Stop)
+	}
+	return w.w.Write(p)
 }

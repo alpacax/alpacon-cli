@@ -435,7 +435,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		spinner := utils.NewSpinner("Waiting for approval in the Alpacon console (output streams once approved)...")
 		spinner.Start()
 		defer spinner.Stop()
-		return streamApprovedCommand(ac, pendingErr.CommandID, out, waitTimeout)
+		// The wait is inside the stream call, so the spinner has to survive it—
+		// StopWriter retires it the moment the approved command's output starts.
+		return streamApprovedCommand(ac, pendingErr.CommandID, spinner.StopWriter(out), waitTimeout)
 	}
 
 	if waitTimeout <= 0 || !isApprovalDenial(err) {
@@ -444,6 +446,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 
 	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
 	spinner.Start()
+	// Every tick re-submits, so the tick that finally lands an approval streams
+	// the command's output while the spinner is still animating.
+	spinnerOut := spinner.StopWriter(out)
 
 	pendingDenial := err
 	started := time.Now()
@@ -463,7 +468,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		case <-poll.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
-			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, spinnerOut)
 			// The server may switch this request from a denial-code to a status-hold
 			// mid-wait; honor --wait by resuming the held job instead of exiting.
 			if errors.As(err, &pendingErr) {

@@ -47,13 +47,12 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
 
-		spinner := NewSpinner("Waiting for MFA authentication...")
-		spinner.Start()
-
 		startTime := time.Now()
 
 		if callbacks.CheckMFACompleted != nil {
 			// New flow: poll lightweight completion endpoint, then retry once
+			spinner := NewSpinner("Waiting for MFA authentication...")
+			spinner.Start()
 			for {
 				if time.Since(startTime) > maxRetryDuration {
 					spinner.Stop()
@@ -71,30 +70,36 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 					continue
 				}
 
+				// The wait the spinner reported is over, so it stops here rather
+				// than at each exit below: RetryOperation can stream a command's
+				// output to stdout, and a frame drawn over that output is erased
+				// with it when the spinner clears its line.
+				spinner.Stop()
+
 				// MFA completed — refresh token and retry once
 				if callbacks.RefreshToken != nil {
 					if err := callbacks.RefreshToken(); err != nil {
-						spinner.Stop()
 						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
 					}
 				}
 
 				if callbacks.RetryOperation != nil {
 					if err := callbacks.RetryOperation(); err != nil {
-						spinner.Stop()
 						return err
 					}
 				}
 
-				spinner.Stop()
 				CliSuccess("MFA authentication completed")
 				return nil
 			}
 		} else {
-			// Legacy flow: RefreshToken + RetryOperation loop
+			// Legacy flow: RefreshToken + RetryOperation loop. A static line
+			// instead of a spinner: every tick retries the operation, which can
+			// stream to stdout, so there is no stretch of this loop where an
+			// animation would be safe.
+			CliInfo("Waiting for MFA authentication...")
 			for {
 				if time.Since(startTime) > maxRetryDuration {
-					spinner.Stop()
 					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 				}
 
@@ -102,19 +107,16 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 
 				if callbacks.RefreshToken != nil {
 					if err := callbacks.RefreshToken(); err != nil {
-						spinner.Stop()
 						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
 					}
 				}
 
 				if callbacks.RetryOperation != nil {
 					if err := callbacks.RetryOperation(); err == nil {
-						spinner.Stop()
 						CliSuccess("MFA authentication completed")
 						return nil
 					}
 				} else {
-					spinner.Stop()
 					break
 				}
 			}
