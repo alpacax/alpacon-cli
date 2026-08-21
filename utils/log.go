@@ -78,11 +78,16 @@ func DebugEnabled() bool {
 // symptom when it runs: a degrade that always succeeds looks exactly like the
 // path it replaced, so without a line here there is nothing to tell the two
 // apart after the fact.
+//
+// The refresh-token degrade logs from inside the "Refreshing access token..."
+// spinner (auth0.refreshWithDeviceScopeFallback, reached from
+// client.NewAlpaconAPIClient), so this line needs the same break off an
+// animated line a warning does.
 func CliDebug(msg string, args ...any) {
 	if !DebugEnabled() {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Yellow("Debug"), cliMessage(msg, args...))
+	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Debug"), cliMessage(msg, args...))
 }
 
 // CliInfo handles all informational messages in the CLI.
@@ -91,8 +96,40 @@ func CliInfo(msg string, args ...any) {
 }
 
 // CliWarning handles all warning messages in the CLI.
+//
+// A warning can land while a Spinner is animating stderr (SaveStreamAtomic
+// warns from inside a download), and the spinner leaves the cursor mid-line.
+// The break and the text go out as one write so a spinner frame cannot wedge
+// itself between them.
 func CliWarning(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Yellow("Warning"), cliMessage(msg, args...))
+	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
+}
+
+// spinnerLineBreak returns the newline that moves a message off the line a
+// spinner is animating, or "" when none is. A newline and not an erase escape:
+// stdout and stderr share a cursor on a terminal, so erasing the line takes any
+// streamed output not yet ended by a newline with it. Spinner.StopWriter is what
+// keeps a spinner off a line a caller is about to stream to, but it only covers
+// the call sites that opt in, and this helper backs every CliWarning and
+// CliDebug site—far too many to each be audited. The last spinner frame stays on
+// screen in trade; the spinner redraws on the line below.
+//
+// Gated on a spinner rather than on stderr being a terminal: off a TTY the
+// static progress line already ends in a newline, so a second one would only
+// add a blank line.
+//
+// Only CliWarning and CliDebug take the break, because they are the two that
+// print from inside a call a spinner wraps: SaveStreamAtomic warns during a
+// download, and the refresh degrade logs during "Refreshing access token...".
+// CliInfo, CliSuccess, and CliError print from the cmd layer or an interactive
+// prompt, and by then the api call that owned the spinner has returned. One of
+// them needing the break means it has gained a call site under a spinner—look
+// at that site rather than only adding the break here.
+func spinnerLineBreak() string {
+	if activeSpinners.Load() == 0 {
+		return ""
+	}
+	return "\n"
 }
 
 // CliSuccess handles all success messages in the CLI.

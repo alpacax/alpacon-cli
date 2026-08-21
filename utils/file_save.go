@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -69,6 +70,7 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("failed to access file: %w", err)
 	}
+	warnKeptWiderMode(fileName, replacing, finalPerm, newFilePerm)
 
 	// A replacement is staged narrow and widened once the content is complete, so
 	// a download that dies mid-stream never leaves its partial content readable
@@ -118,6 +120,41 @@ func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (in
 	cleanup = false
 
 	return written, nil
+}
+
+// warnKeptWiderMode signals when the kept mode leaves the content readable
+// beyond what a fresh download would be (a private key over a 0644 file). A
+// warning, not a chmod—re-permissioning a file the user set up is not the
+// CLI's call (#326).
+//
+// !replacing is redundant at today's only call site (keptPerm equals
+// newFilePerm there, which no comparison satisfies) and stays so the guard does
+// not rest on that invariant. The message names fileName rather than the
+// symlink-resolved targetName: removing the name the user typed is what gets
+// them a fresh owner-only file.
+func warnKeptWiderMode(fileName string, replacing bool, keptPerm, newFilePerm os.FileMode) {
+	if !replacing || !keptModeIsWider(keptPerm, newFilePerm) {
+		return
+	}
+	CliWarning("%s already existed at %04o and kept that mode; a new file would have been at most %04o. Remove it first for owner-only permissions.",
+		fileName, keptPerm, newFilePerm)
+}
+
+// keptModeIsWider reports whether keptPerm leaves the content readable to
+// accounts newFilePerm would shut out. Windows has no Unix modes—os.Stat
+// synthesizes 0666 for every file without the read-only attribute—so the
+// comparison would fire on every overwrite there, and removing the file is no
+// remedy for an ACL anyway.
+//
+// newFilePerm is the mode a new file is requested at, before the umask narrows
+// it, so a restrictive umask can only silence a warning that was due—never
+// invent one.
+func keptModeIsWider(keptPerm, newFilePerm os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	const groupOtherRead = os.FileMode(0044)
+	return keptPerm&groupOtherRead != 0 && newFilePerm&groupOtherRead == 0
 }
 
 // resolveWritePath walks symlinks to the final target so atomic replace

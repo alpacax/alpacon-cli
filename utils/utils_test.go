@@ -226,6 +226,58 @@ func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 }
 
+func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
+	requireUnixModes(t)
+
+	dest := filepath.Join(t.TempDir(), "id_rsa")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+	// Chmod because a restrictive umask would mask the WriteFile mode down to
+	// owner-only, and the warning would never fire.
+	require.NoError(t, os.Chmod(dest, 0644))
+
+	stderr := captureStderr(t, func() {
+		_, err := SaveStreamAtomic(dest, strings.NewReader("key"), 0600)
+		require.NoError(t, err)
+	})
+
+	assert.Contains(t, stderr, "already existed at 0644 and kept that mode")
+	assert.Contains(t, stderr, "at most 0600")
+}
+
+// TestKeptModeIsWider pins the guard directly: driving the same branches
+// through the filesystem makes them umask-dependent, and a umask that narrows
+// the setup mode retires the branch instead of testing it.
+func TestKeptModeIsWider(t *testing.T) {
+	requireUnixModes(t)
+
+	tests := []struct {
+		name        string
+		keptPerm    os.FileMode
+		newFilePerm os.FileMode
+		want        bool
+	}{
+		{"private key over a group-readable file", 0644, 0600, true},
+		{"destination already owner-only", 0600, 0600, false},
+		{"a new file would be just as readable", 0644, 0666, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, keptModeIsWider(tt.keptPerm, tt.newFilePerm))
+		})
+	}
+}
+
+func TestSaveStreamAtomic_NoWarningForANewFile(t *testing.T) {
+	requireUnixModes(t)
+
+	stderr := captureStderr(t, func() {
+		_, err := SaveStreamAtomic(filepath.Join(t.TempDir(), "fresh"), strings.NewReader("x"), 0600)
+		require.NoError(t, err)
+	})
+
+	assert.Empty(t, stderr)
+}
+
 // tempModeReader records the mode of every temp file present in dir each time
 // the stream is read, so a test can see what the partial file was exposed as.
 type tempModeReader struct {
@@ -255,6 +307,7 @@ func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+	require.NoError(t, os.Chmod(dest, 0644))
 
 	// The stream dies after its first chunk, so the modes sampled below are the
 	// ones a partial replacement actually sat at.

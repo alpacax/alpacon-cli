@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClientTimeoutLine(t *testing.T) {
@@ -286,6 +287,38 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 
 	assert.NoError(t, err)
 	assert.Equal(t, 3, calls, "the failed tick must not end the wait")
+}
+
+// Every tick re-submits, so a still-pending one streams its denial line and
+// spends the one-shot handover that was meant for the approved output. A wait
+// that reused a single writer would therefore animate through its first poll gap
+// and sit silent for the rest of what --wait is there to cover. Writer identity
+// is all a test can see of the spinner from here, and one writer per tick means
+// one spinner per tick.
+func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnSpinner(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	var writers []io.Writer
+	runPresenceStepUp = func(_ *client.AlpaconClient, _, _, _, _ string, _ map[string]string, _ string, w io.Writer) error {
+		writers = append(writers, w)
+		_, _ = w.Write([]byte(denialLine("SUDO_APPROVAL_REQUIRED")))
+		if len(writers) < 4 {
+			return denial
+		}
+		return nil
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait re-attempts the command; it never resumes a held job")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Second, io.Discard)
+
+	assert.NoError(t, err)
+	// writers[0] is the first attempt, which runs before any spinner exists.
+	require.Len(t, writers, 4)
+	assert.NotSame(t, writers[1], writers[2], "the second wait needs a spinner of its own")
+	assert.NotSame(t, writers[2], writers[3], "and so does the third")
 }
 
 // Reporting the last poll failure instead would exit 1 on a request still open.
