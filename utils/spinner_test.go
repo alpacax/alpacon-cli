@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 	"time"
 
@@ -98,5 +99,34 @@ func TestSpinner_RestartsAfterStop(t *testing.T) {
 		s.Stop()
 		assert.Equal(t, int32(0), activeSpinners.Load(), "and its Stop disarms it")
 		assert.False(t, spinnerRunning(s), "Stop must leave the spinner stopped")
+	})
+}
+
+// Start and Stop each guard the fields, but the goroutine waits on what it was
+// handed for its whole run—a restart that swapped the fields under it would
+// leave it listening to a channel nobody closes. Only -race can see that, and
+// only if a second goroutine drives the restart: StopWriter hands Stop to
+// whoever writes the output, which need not be the goroutine that restarts.
+func TestSpinner_RestartAndStopRaceOnTheSameSpinner(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = time.Millisecond
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		for range 2 {
+			go func() {
+				defer wg.Done()
+				for range 50 {
+					s.Start()
+					s.Stop()
+				}
+			}()
+		}
+		wg.Wait()
+
+		s.Stop()
+		assert.Equal(t, int32(0), activeSpinners.Load(), "every Start that armed the line break is paired with a Stop")
 	})
 }
