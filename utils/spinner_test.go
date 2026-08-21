@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -57,4 +58,23 @@ func TestSpinner_StopWriterRetiresTheSpinnerBeforeTheFirstByte(t *testing.T) {
 	})
 
 	assert.Equal(t, "first and second", out.String())
+}
+
+// Only the animating branch counts itself, and off a TTY—which is every go test
+// run—Start returns before reaching it. Forcing enabled is what lets a test see
+// that branch at all, and the pairing it pins is what CliWarning's line break
+// reads: a dropped increment, or a decrement moved ahead of the goroutine's
+// exit, would otherwise leave the whole suite green.
+func TestSpinner_AnimatingBranchPairsTheActiveCount(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = time.Millisecond
+
+		require.Equal(t, int32(0), activeSpinners.Load())
+		s.Start()
+		assert.Equal(t, int32(1), activeSpinners.Load(), "an animating spinner arms the line break")
+		s.Stop()
+		assert.Equal(t, int32(0), activeSpinners.Load(), "and Stop disarms it")
+	})
 }
