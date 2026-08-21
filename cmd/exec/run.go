@@ -42,6 +42,11 @@ const (
 	WebshInvocation Invocation = "alpacon websh"
 )
 
+// approvalWaitMessage labels the --wait spinner. Named because each stretch of
+// waiting gets a spinner of its own (see RunExecWithApprovalWait), and two
+// labels drifting apart would read as two different waits.
+const approvalWaitMessage = "Waiting for approval in the Alpacon console..."
+
 // approvalWaitPollInterval is the base gap of the --wait re-attempt loop—slower
 // than the MFA poll (api/mfa/mfa.go) since each tick re-runs the command; a var
 // so tests can shorten it.
@@ -444,11 +449,24 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		return err
 	}
 
-	spinner := utils.NewSpinner("Waiting for approval in the Alpacon console...")
+	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
-	// Every tick re-submits, so the tick that finally lands an approval streams
-	// the command's output while the spinner is still animating.
+	// Every tick re-submits, so a tick's output starts while the spinner is
+	// animating—the denial line of a request still pending as much as the
+	// command's own output once approved. StopWriter retires the spinner at the
+	// first byte of it.
 	spinnerOut := spinner.StopWriter(out)
+	// That retirement is permanent (StopWriter fires once, and Stop closes
+	// channels Start does not reopen) and the first still-pending tick spends it,
+	// so every further stretch of waiting gets a spinner and a writer of its own.
+	// Stop first: a tick that returned without writing left the previous spinner
+	// animating, and two of them would draw over each other.
+	restartSpinner := func() {
+		spinner.Stop()
+		spinner = utils.NewSpinner(approvalWaitMessage)
+		spinner.Start()
+		spinnerOut = spinner.StopWriter(out)
+	}
 
 	pendingDenial := err
 	started := time.Now()
@@ -496,6 +514,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
 					return pendingDenial
 				}
+				restartSpinner()
 				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue
 			default:
@@ -503,6 +522,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 				spinner.Stop()
 				return err
 			}
+			restartSpinner()
 			// Each tick re-submits, so a fixed 5s gap over a 30m wait outspends the
 			// default 1000/hour service-token quota.
 			poll.Reset(utils.NextPollTick(approvalWaitPollInterval, time.Since(started)))
