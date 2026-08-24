@@ -45,16 +45,21 @@ type NextAction struct {
 }
 
 // PlainText renders the action as a human-facing line: "command  # description",
-// or just the command or description when the other is empty.
+// or just the command or description when the other is empty. Sanitized here
+// because its callers write to the terminal outside the Cli* helpers and call
+// sites interpolate server-returned ids into Command; the JSON envelope marshals
+// the fields themselves and escapes via escapeJSONControls instead.
 func (a NextAction) PlainText() string {
+	var line string
 	switch {
 	case a.Command != "" && a.Description != "":
-		return a.Command + "  # " + a.Description
+		line = a.Command + "  # " + a.Description
 	case a.Command != "":
-		return a.Command
+		line = a.Command
 	default:
-		return a.Description
+		line = a.Description
 	}
+	return SanitizeTerminalText(line)
 }
 
 // escapeJSONControls rewrites DEL, the C1 block, and Unicode format characters as

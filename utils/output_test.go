@@ -262,3 +262,22 @@ func TestPrintJSONError(t *testing.T) {
 		"next_actions": [{"command": "alpacon work-session use <ID>"}]
 	}`, buf.String())
 }
+
+// PlainText feeds the two terminal writers (pending-approval next-action lines
+// and the WorkSession diagnostic) directly, outside the Cli* sanitizing helpers,
+// and call sites interpolate server-returned ids into Command—so the rendering
+// itself must sanitize (#364). The JSON envelope marshals the struct fields and
+// is covered by escapeJSONControls instead.
+func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
+	action := NextAction{
+		Command:     "alpacon exec logs job-1\x1b[2K\u202e",
+		Description: "after\x1b]0;pwn\x07 approval\u202e",
+	}
+
+	line := action.PlainText()
+
+	assert.NotContains(t, line, "\x1b")
+	assert.NotContains(t, line, "\u202e")
+	assert.Contains(t, line, "alpacon exec logs job-1")
+	assert.Contains(t, line, "# after")
+}
