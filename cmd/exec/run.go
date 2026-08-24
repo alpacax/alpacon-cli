@@ -451,6 +451,10 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 
 	spinner := utils.NewSpinner(approvalWaitMessage)
 	spinner.Start()
+	// Every return path below stops the spinner before it writes, which is
+	// load-bearing for output ordering; this backstops paths added later. Stop
+	// on a stopped spinner is a no-op.
+	defer spinner.Stop()
 	// Every tick re-submits, so a tick's output starts while the spinner is
 	// animating—the denial line of a request still pending as much as the
 	// command's own output once approved. StopWriter retires the spinner at the
