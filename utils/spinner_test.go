@@ -102,6 +102,23 @@ func TestSpinner_RestartsAfterStop(t *testing.T) {
 	})
 }
 
+// time.NewTicker panics on a non-positive period where the sleep it replaced
+// took one happily, and the panic would fire on the spinner's own goroutine—far
+// from the caller and fatal to the process. No caller can set that today, so
+// without the fallback this test does not fail, it takes the test binary down.
+func TestSpinner_NonPositiveIntervalFallsBackToTheDefault(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = 0
+
+		s.Start()
+		s.Stop()
+
+		assert.Equal(t, int32(0), activeSpinners.Load(), "the goroutine ran to its own exit rather than dying on the ticker")
+	})
+}
+
 // Start and Stop each guard the fields, but the goroutine waits on what it was
 // handed for its whole run—a restart that swapped the fields under it would
 // leave it listening to a channel nobody closes. Only -race can see that, and

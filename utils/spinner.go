@@ -12,6 +12,10 @@ import (
 	"golang.org/x/term"
 )
 
+// defaultSpinnerInterval is the frame period NewSpinner hands out, and the
+// fallback Start uses when the field holds something a ticker cannot take.
+const defaultSpinnerInterval = 100 * time.Millisecond
+
 // activeSpinners counts the spinners currently animating stderr. A warning
 // printed while one is running lands mid-frame, so CliWarning breaks to a new
 // line first—but only then, since off a TTY there is no frame to step off.
@@ -48,7 +52,7 @@ func NewSpinner(message string) *Spinner {
 		message:  message,
 		frames:   []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		dots:     []string{".  ", ".. ", "..."},
-		interval: 100 * time.Millisecond,
+		interval: defaultSpinnerInterval,
 		enabled:  term.IsTerminal(int(os.Stderr.Fd())),
 	}
 }
@@ -72,6 +76,11 @@ func (s *Spinner) Start() {
 	msg := s.message
 	frames, dots := s.frames, s.dots
 	interval := s.interval
+	if interval <= 0 {
+		// time.NewTicker panics where the sleep this replaced took a zero
+		// happily, and a stderr animation must never take the CLI down with it.
+		interval = defaultSpinnerInterval
+	}
 	s.mu.Unlock()
 
 	if !s.enabled {
