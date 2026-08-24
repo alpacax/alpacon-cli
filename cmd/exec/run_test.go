@@ -121,10 +121,57 @@ func TestRemoteCommandOutcome(t *testing.T) {
 	}
 }
 
+// The phase line bypasses the Cli* helpers, and DescribePhase echoes an unknown
+// phase verbatim, so an attacker-chosen error_phase must be sanitized where the
+// line is assembled (#364). The second case pins the order: the lookup runs on
+// the raw phase, so a payload that only becomes a known phase after sanitizing
+// still renders as an identifier and cannot borrow that phase's description.
+func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
+	tests := []struct {
+		name       string
+		phase      string
+		wantStderr string
+	}{
+		{
+			name:       "unknown phase keeps its safe characters",
+			phase:      "boom\x1b[2K\u202e_phase",
+			wantStderr: utils.Red("Error") + ": [boom_phase] boom_phase\n",
+		},
+		{
+			// Describing before stripping is what keeps the payload from borrowing
+			// agent_timeout's own description once it sanitizes into that phase.
+			name:       "payload sanitizing into a known phase does not borrow its description",
+			phase:      "agent_\x1b[2K\u202etimeout",
+			wantStderr: utils.Red("Error") + ": [agent_timeout] agent_timeout\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stderrLine, exitCode := remoteCommandOutcome(&event.RemoteCommandError{
+				ExitCode:   1,
+				ErrorPhase: tt.phase,
+			})
+
+			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, tt.wantStderr, stderrLine)
+		})
+	}
+}
+
 func TestDetachResultLines(t *testing.T) {
 	line1, line2 := detachResultLines("a1b2c3d4-1234-5678-abcd-000000000000")
 	assert.Equal(t, "Job submitted: a1b2c3d4-1234-5678-abcd-000000000000", line1)
 	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
+}
+
+// The job id comes from the server's submit response and both lines are written
+// raw (stdout and stderr), outside the Cli* helpers—same class as #364.
+func TestDetachResultLinesSanitizesJobID(t *testing.T) {
+	line1, line2 := detachResultLines("job-1\x1b[2K\u202e")
+
+	assert.Equal(t, "Job submitted: job-1", line1)
+	assert.Equal(t, "Run `alpacon exec logs job-1` to check the result.", line2)
 }
 
 // stubApprovalWaitSeams swaps the loop's seams/interval (restored on cleanup) and returns a denial carrying the plugin line the loop keys on for that code.

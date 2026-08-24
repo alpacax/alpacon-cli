@@ -90,18 +90,23 @@ func init() {
 // awaiting_approval hold nor a rejection reaches here: the caller answers both on
 // the approval contract first.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
+	// These lines are written raw, outside the Cli* sanitizing helpers (#364). A
+	// Status that reached one of these branches equals the literal it was compared
+	// against, so it needs no strip; the ID, an unknown phase, and the
+	// unrecognised-status fallback carry the server's own text and do.
 	if event.IsRunningStatus(details.Status) {
 		stderrLine = fmt.Sprintf(
 			"command is still running (status: %s).\nRun `alpacon exec logs %s` again to check later.\n",
-			details.Status, details.ID,
+			details.Status, utils.SanitizeTerminalText(details.ID),
 		)
 		return "", stderrLine, 0
 	}
 
 	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
+			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
-				utils.Red("Error"), *details.ErrorPhase, event.DescribePhase(*details.ErrorPhase), details.Status)
+				utils.Red("Error"), phase, desc, details.Status)
 		} else {
 			stderrLine = fmt.Sprintf("%s: command failed with status: %s\n",
 				utils.Red("Error"), details.Status)
@@ -115,8 +120,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 			exitCode = *details.ExitCode
 		}
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
-			stderrLine = fmt.Sprintf("%s: [%s] %s\n",
-				utils.Red("Error"), *details.ErrorPhase, event.DescribePhase(*details.ErrorPhase))
+			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
+			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
 		}
 		return details.Result, stderrLine, exitCode
 	}
@@ -131,6 +136,6 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 	}
 
 	stderrLine = fmt.Sprintf("%s: command ended with unrecognised status: %s\n",
-		utils.Red("Error"), details.Status)
+		utils.Red("Error"), utils.SanitizeTerminalText(details.Status))
 	return details.Result, stderrLine, 1
 }

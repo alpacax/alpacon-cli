@@ -730,9 +730,24 @@ func clientTimeoutLine() string {
 	return fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, event.DescribePhase(phase))
 }
 
+// detachResultLines renders the --detach confirmation. The job id comes from the
+// server's submit response and both lines are written raw, outside the Cli*
+// helpers—sanitize here (#364).
 func detachResultLines(jobID string) (string, string) {
+	jobID = utils.SanitizeTerminalText(jobID)
 	return fmt.Sprintf("Job submitted: %s", jobID),
 		fmt.Sprintf("Run `alpacon exec logs %s` to check the result.", jobID)
+}
+
+// sanitizedPhaseParts returns the phase identifier and its description ready for
+// a raw stderr write, outside the Cli* sanitizing helpers (#364). The identifier
+// is always the server's; the description is a constant from phaseDescriptions
+// for a known phase, and the raw phase echoed back for an unknown one. Describing
+// before stripping is what keeps a payload that only becomes a known phase once
+// sanitized from borrowing that phase's description.
+func sanitizedPhaseParts(phase string) (id, desc string) {
+	return utils.SanitizeTerminalText(phase),
+		utils.SanitizeTerminalText(event.DescribePhase(phase))
 }
 
 // remoteCommandOutcome renders the stderr phase line and exit code for a remote
@@ -740,10 +755,8 @@ func detachResultLines(jobID string) (string, string) {
 // so it is not re-emitted here. stderrLine already includes its trailing newline.
 func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
 	if remoteErr.ErrorPhase != "" {
-		stderrLine = fmt.Sprintf("%s: [%s] %s\n",
-			utils.Red("Error"),
-			remoteErr.ErrorPhase,
-			event.DescribePhase(remoteErr.ErrorPhase))
+		phase, desc := sanitizedPhaseParts(remoteErr.ErrorPhase)
+		stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
 	}
 	return stderrLine, remoteErr.ExitCode
 }
