@@ -128,21 +128,21 @@ func TestRemoteCommandOutcome(t *testing.T) {
 // still renders as an identifier and cannot borrow that phase's description.
 func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 	tests := []struct {
-		name         string
-		phase        string
-		wantContains string
-		wantAbsent   string
+		name       string
+		phase      string
+		wantStderr string
 	}{
 		{
-			name:         "unknown phase keeps its safe characters",
-			phase:        "boom\x1b[2K\u202e_phase",
-			wantContains: "[boom_phase] boom_phase",
+			name:       "unknown phase keeps its safe characters",
+			phase:      "boom\x1b[2K\u202e_phase",
+			wantStderr: utils.Red("Error") + ": [boom_phase] boom_phase\n",
 		},
 		{
-			name:         "payload sanitizing into a known phase does not borrow its description",
-			phase:        "agent_\x1b[2K\u202etimeout",
-			wantContains: "[agent_timeout] agent_timeout",
-			wantAbsent:   event.DescribePhase("agent_timeout"),
+			// Describing before stripping is what keeps the payload from borrowing
+			// agent_timeout's own description once it sanitizes into that phase.
+			name:       "payload sanitizing into a known phase does not borrow its description",
+			phase:      "agent_\x1b[2K\u202etimeout",
+			wantStderr: utils.Red("Error") + ": [agent_timeout] agent_timeout\n",
 		},
 	}
 
@@ -154,12 +154,7 @@ func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 			})
 
 			assert.Equal(t, 1, exitCode)
-			assert.Contains(t, stderrLine, tt.wantContains)
-			assert.NotContains(t, stderrLine, "\x1b")
-			assert.NotContains(t, stderrLine, "\u202e")
-			if tt.wantAbsent != "" {
-				assert.NotContains(t, stderrLine, tt.wantAbsent)
-			}
+			assert.Equal(t, tt.wantStderr, stderrLine)
 		})
 	}
 }

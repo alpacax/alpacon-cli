@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -174,28 +175,25 @@ func TestLogsCommandOutcome(t *testing.T) {
 	}
 }
 
-// The stderr line bypasses the Cli* helpers, so server-controlled fields must be
-// sanitized where the line is assembled (#364). Each case injects into the one
-// field an attacker controls on that branch: Status must equal a known value to
-// reach the running/failed branches, so ID and ErrorPhase carry the payload
-// there, while the unrecognised-status fallback renders Status itself verbatim.
+// The stderr line bypasses the Cli* helpers, so each case injects into the one
+// field the server controls on that branch: Status must equal a known value to
+// reach the running and failed branches, so ID and ErrorPhase carry the payload
+// there, while the unrecognised-status fallback renders Status itself (#364).
 func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 	tests := []struct {
-		name    string
-		details event.EventDetails
-		// The whole rendering, so a sanitize that ate the surrounding text fails here
-		// rather than passing a check that only looks for the payload's absence.
-		wantContains string
+		name       string
+		details    event.EventDetails
+		wantStderr string
 	}{
 		{
-			name:         "running branch strips escape and bidi in ID",
-			details:      event.EventDetails{ID: "job-1\x1b[2K\u202e", Status: "running"},
-			wantContains: "`alpacon exec logs job-1` again",
+			name:       "running branch strips escape and bidi in ID",
+			details:    event.EventDetails{ID: "job-1\x1b[2K\u202e", Status: "running"},
+			wantStderr: "command is still running (status: running).\nRun `alpacon exec logs job-1` again to check later.\n",
 		},
 		{
-			name:         "stuck branch strips escape in unknown phase",
-			details:      event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("boom\x1b[31m\u202e")},
-			wantContains: "[boom] boom (status=stuck)",
+			name:       "stuck branch strips escape in unknown phase",
+			details:    event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("boom\x1b[31m\u202e")},
+			wantStderr: utils.Red("Error") + ": [boom] boom (status=stuck)\n",
 		},
 		{
 			name: "failure branch strips escape in unknown phase",
@@ -206,12 +204,12 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 				ExitCode:   intPtr(2),
 				ErrorPhase: strPtr("phase\x1b]0;pwn\x07\u202e"),
 			},
-			wantContains: "[phase] phase",
+			wantStderr: utils.Red("Error") + ": [phase] phase\n",
 		},
 		{
-			name:         "unrecognised status renders sanitized",
-			details:      event.EventDetails{ID: "job-1", Status: "denied\x1b[2K\u202eapproved"},
-			wantContains: "unrecognised status: deniedapproved",
+			name:       "unrecognised status renders sanitized",
+			details:    event.EventDetails{ID: "job-1", Status: "denied\x1b[2K\u202eapproved"},
+			wantStderr: utils.Red("Error") + ": command ended with unrecognised status: deniedapproved\n",
 		},
 	}
 
@@ -219,9 +217,7 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderrLine, _ := logsCommandOutcome(tt.details)
 
-			assert.Contains(t, stderrLine, tt.wantContains)
-			assert.NotContains(t, stderrLine, "\x1b")
-			assert.NotContains(t, stderrLine, "\u202e")
+			assert.Equal(t, tt.wantStderr, stderrLine)
 		})
 	}
 }

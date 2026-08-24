@@ -263,21 +263,38 @@ func TestPrintJSONError(t *testing.T) {
 	}`, buf.String())
 }
 
-// PlainText feeds the two terminal writers (pending-approval next-action lines
-// and the WorkSession diagnostic) directly, outside the Cli* sanitizing helpers,
-// and call sites interpolate server-returned ids into Command—so the rendering
-// itself must sanitize (#364). The JSON envelope marshals the struct fields and
-// is covered by escapeJSONControls instead.
+// Callers write PlainText raw, outside the Cli* helpers, and interpolate
+// server-returned ids into Command (#364).
 func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
-	action := NextAction{
-		Command:     "alpacon exec logs job-1\x1b[2K\u202e",
-		Description: "after\x1b]0;pwn\x07 approval\u202e",
+	const (
+		command     = "alpacon exec logs job-1\x1b[2K\u202e"
+		description = "after\x1b]0;pwn\x07 approval\u202e"
+	)
+	tests := []struct {
+		name   string
+		action NextAction
+		want   string
+	}{
+		{
+			name:   "command and description",
+			action: NextAction{Command: command, Description: description},
+			want:   "alpacon exec logs job-1  # after approval",
+		},
+		{
+			name:   "command only",
+			action: NextAction{Command: command},
+			want:   "alpacon exec logs job-1",
+		},
+		{
+			name:   "description only",
+			action: NextAction{Description: description},
+			want:   "after approval",
+		},
 	}
 
-	line := action.PlainText()
-
-	assert.NotContains(t, line, "\x1b")
-	assert.NotContains(t, line, "\u202e")
-	assert.Contains(t, line, "alpacon exec logs job-1")
-	assert.Contains(t, line, "# after")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.action.PlainText())
+		})
+	}
 }
