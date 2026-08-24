@@ -27,7 +27,7 @@ Subcommands for tracking:
 		if err := cmd.Help(); err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon approval ls', 'alpacon approval describe', or 'alpacon approval cancel'. Approve and reject happen in the Alpacon console (web). Run 'alpacon approval --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon approval ls', 'alpacon approval describe', or 'alpacon approval cancel'. Approval and rejection happen in the Alpacon console (web) or Slack. Run 'alpacon approval --help' for more information")
 	},
 }
 

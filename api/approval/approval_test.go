@@ -90,55 +90,6 @@ func TestGetApprovalRequest(t *testing.T) {
 	assert.Equal(t, "sudo", req.RequestType)
 }
 
-func TestApproveRequest_NoAdjustments(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/approve/"))
-		var body ApproveOptions
-		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Nil(t, body.AdjustedScopes)
-		assert.Nil(t, body.AdjustedServers)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	err := ApproveRequest(newTestClient(ts), "apr-abc", ApproveOptions{})
-	assert.NoError(t, err)
-}
-
-func TestApproveRequest_WithAdjustments(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/approve/"))
-		var body ApproveOptions
-		assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, []string{"command"}, body.AdjustedScopes)
-		assert.Equal(t, []string{"srv-uuid-1"}, body.AdjustedServers)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	err := ApproveRequest(newTestClient(ts), "apr-abc", ApproveOptions{
-		AdjustedScopes:  []string{"command"},
-		AdjustedServers: []string{"srv-uuid-1"},
-	})
-	assert.NoError(t, err)
-}
-
-func TestRejectRequest(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/reject/"))
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	err := RejectRequest(newTestClient(ts), "apr-abc")
-	assert.NoError(t, err)
-}
-
 func TestCancelRequest(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -149,32 +100,6 @@ func TestCancelRequest(t *testing.T) {
 
 	err := CancelRequest(newTestClient(ts), "apr-abc")
 	assert.NoError(t, err)
-}
-
-func TestApproveRequest_403PropagatesError(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"detail": "you do not have permission to perform this action"}`))
-	}))
-	defer ts.Close()
-
-	err := ApproveRequest(newTestClient(ts), "apr-abc", ApproveOptions{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "permission")
-}
-
-func TestRejectRequest_404PropagatesError(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"detail": "not found"}`))
-	}))
-	defer ts.Close()
-
-	err := RejectRequest(newTestClient(ts), "apr-missing")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
 }
 
 func TestCancelRequest_403PropagatesError(t *testing.T) {

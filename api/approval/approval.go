@@ -74,16 +74,6 @@ func GetApprovalRequestRaw(ac *client.AlpaconClient, id string) ([]byte, error) 
 	return ac.SendGetRequest(utils.BuildURL(approvalURL, id, nil))
 }
 
-func ApproveRequest(ac *client.AlpaconClient, id string, opts ApproveOptions) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "approve"), nil), opts)
-	return err
-}
-
-func RejectRequest(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "reject"), nil), struct{}{})
-	return err
-}
-
 func CancelRequest(ac *client.AlpaconClient, id string) error {
 	_, err := ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "cancel"), nil), struct{}{})
 	return err

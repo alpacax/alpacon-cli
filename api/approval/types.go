@@ -26,8 +26,3 @@ type ApprovalRequestAttributes struct {
 	RequestedBy string `json:"requested_by" table:"Requested By"`
 	AddedAt     string `json:"added_at"     table:"Added At"`
 }
-
-type ApproveOptions struct {
-	AdjustedScopes  []string `json:"adjusted_scopes,omitempty"`
-	AdjustedServers []string `json:"adjusted_servers,omitempty"`
-}

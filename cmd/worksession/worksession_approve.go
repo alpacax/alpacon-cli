@@ -12,7 +12,7 @@ import (
 // subcommands stay registered so the message is discoverable and existing scripts
 // get an intentional, actionable exit instead of an "unknown command".
 const approveRejectExcludedMessage = "Approvals must be done in the Alpacon console (web), not the CLI. " +
-	"The CLI is an execution and request surface only; approve and reject happen out of band. " +
+	"The CLI is an execution and request surface only; approval and rejection happen out of band. " +
 	"Use 'alpacon work-session ls' to track a session's status."
 
 var workSessionApproveCmd = &cobra.Command{
