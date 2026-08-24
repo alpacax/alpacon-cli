@@ -170,8 +170,8 @@ func createDeviceID(path string) (string, error) {
 // exclusion—rename replaces whatever it lands on—and publishes the temporary
 // file's mode: 0600 from os.CreateTemp less the umask, a free path giving
 // writeDeviceIDTempFile nothing to narrow against. A file that appears there and
-// is gone again before the link narrows it further—the one direction this
-// package moves a mode.
+// is gone again before the link leaves that mode narrower still—the one
+// direction this package moves a mode.
 func createDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -271,7 +271,7 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 // only removed, as in restrictDeviceIDFileMode: of the mode os.CreateTemp chose
 // and the mode being stood in for, the stricter wins.
 //
-// It runs while the scratch file is still nameless, because a rename publishes
+// It runs before the caller publishes the file, because a rename publishes
 // whatever mode the file carries at that instant and narrowing afterwards would
 // leave the wider one published in between. Through the open handle rather than
 // the path, as SaveStreamAtomic does—a path-based chmod can be pointed at
