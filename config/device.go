@@ -247,7 +247,7 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	if err != nil {
 		// Flattened, not wrapped: os.CreateTemp reports fs.ErrExist once it runs out
 		// of names, which createDeviceID would read as the identifier file existing.
-		return "", fmt.Errorf("failed to create device id file: %v", err)
+		return "", fmt.Errorf("failed to create temporary device id file: %v", err)
 	}
 	tempPath := file.Name()
 
@@ -260,7 +260,7 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	}
 	if err != nil {
 		_ = os.Remove(tempPath)
-		return "", fmt.Errorf("failed to write device id file: %v", err)
+		return "", fmt.Errorf("failed to prepare temporary device id file: %v", err)
 	}
 
 	return tempPath, nil

@@ -534,3 +534,51 @@ func TestGetOrCreateDeviceID_UnreadableFile(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, deviceID)
 }
+
+// TestGetOrCreateDeviceID_NamesTheScratchFileInItsError keeps two failures
+// apart. One temporary file serves both the path that creates the identifier
+// file and the path that rewrites it, so a scratch file that could not be
+// opened used to be reported as the identifier file itself—telling a user whose
+// device_id is sitting right there that it could not be created.
+func TestGetOrCreateDeviceID_NamesTheScratchFileInItsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits are not meaningful on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+	setupTestConfig(t)
+	writeDeviceIDFile(t, "not_a_valid_id\n")
+	// Readable and traversable, but nothing new can be created in it.
+	dir := filepath.Dir(mustDeviceIDPath(t))
+	require.NoError(t, os.Chmod(dir, 0500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+
+	deviceID, err := GetOrCreateDeviceID()
+
+	require.Error(t, err)
+	assert.Empty(t, deviceID)
+	assert.Contains(t, err.Error(), "temporary device id file")
+}
+
+// TestWriteDeviceIDTempFile_ReportsAFailureAfterTheScratchFileOpened covers the
+// other error the scratch file can produce: it opened, and something between
+// there and the caller receiving it failed. The mode narrowing is the reachable
+// one—a symlink loop is neither a file it can read nor an absent path—and the
+// write, the chmod, and the close report through the same message.
+func TestWriteDeviceIDTempFile_ReportsAFailureAfterTheScratchFileOpened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("narrowToPublishedFileMode does nothing on Windows")
+	}
+	setupTestConfig(t)
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	require.NoError(t, os.Symlink(path, path))
+
+	tempPath, err := writeDeviceIDTempFile(path, "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.Error(t, err)
+	assert.Empty(t, tempPath)
+	assert.Contains(t, err.Error(), "failed to prepare temporary device id file")
+	assertNoLeftoverTempFiles(t)
+}
