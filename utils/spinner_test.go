@@ -102,6 +102,30 @@ func TestSpinner_RestartsAfterStop(t *testing.T) {
 	})
 }
 
+// The goroutine blocks in a select on stopCh instead of sleeping a frame away,
+// so Stop returns the moment it closes that channel. Sleeping first would make
+// Stop wait out the rest of the frame, and an approval wait pays that on every
+// poll tick. The frame here is far longer than the budget, so only the blocking
+// select can come back in time.
+func TestSpinner_StopDoesNotWaitOutAFrame(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = 2 * time.Second
+
+		s.Start()
+		// Wait for the goroutine to reach the select. A Stop that lands before it
+		// is even scheduled returns at once however the loop is written, so the
+		// frame has to be underway for the timing to mean anything.
+		time.Sleep(100 * time.Millisecond)
+
+		start := time.Now()
+		s.Stop()
+
+		assert.Less(t, time.Since(start), 500*time.Millisecond)
+	})
+}
+
 // time.NewTicker panics on a non-positive period where the sleep it replaced
 // took one happily, and the panic would fire on the spinner's own goroutine—far
 // from the caller and fatal to the process. No caller can set that today, so
