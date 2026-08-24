@@ -77,7 +77,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		username, err := normalizeArgs(args, username)
 		if err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliErrorWithExit("%v", err)
 			return
 		}
 
