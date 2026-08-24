@@ -487,6 +487,31 @@ func TestGetOrCreateDeviceID_KeepsAStricterMode(t *testing.T) {
 	assert.Equal(t, os.FileMode(0400), fileInfo.Mode().Perm())
 }
 
+// TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing carries the property
+// above onto the path that rewrites the file. Replacing publishes a fresh
+// temporary file, which arrives with the mode os.CreateTemp chose rather than
+// the one the file it replaces had, so a read-only identifier file used to come
+// back writable—the package widening a mode it promises only ever to narrow.
+func TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits are not meaningful on Windows")
+	}
+	setupTestConfig(t)
+	writeDeviceIDFile(t, "not_a_valid_id\n")
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.Chmod(path, 0400))
+	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
+
+	deviceID, err := GetOrCreateDeviceID()
+	require.NoError(t, err)
+	assert.True(t, IsValidDeviceID(deviceID),
+		"replacement id must satisfy the Auth0 action pattern: %q", deviceID)
+
+	fileInfo, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0400), fileInfo.Mode().Perm())
+}
+
 // TestGetOrCreateDeviceID_UnreadableFile pins that a read failure is surfaced
 // rather than papered over with a fresh identifier: silently regenerating would
 // hide a permissions problem and change the identifier on every invocation.

@@ -168,7 +168,10 @@ func createDeviceID(path string) (string, error) {
 // readDeviceID reports as absent, so a concurrent invocation judges it malformed
 // and replaces the winner's identifier. Linking rather than renaming keeps the
 // exclusion—rename replaces whatever it lands on—and publishes the temporary
-// file's mode, 0600 from os.CreateTemp less the umask.
+// file's mode: 0600 from os.CreateTemp less the umask, a free path giving
+// writeDeviceIDTempFile nothing to narrow against. A file that appears there and
+// is gone again before the link narrows it further—the one direction this
+// package moves a mode.
 func createDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -214,9 +217,12 @@ func createDeviceIDFileWithoutLink(path, deviceID string) error {
 }
 
 // replaceDeviceIDFile overwrites the identifier file through a temporary file
-// and a rename, so no reader observes a half-written or empty file and so the
-// replacement carries its own mode instead of inheriting whatever the file it
-// replaced had.
+// and a rename, so no reader observes a half-written or empty file.
+//
+// The replacement carries the stricter of its own mode and the mode of the file
+// it replaces—see narrowToPublishedFileMode. Without that a rename would publish
+// whatever os.CreateTemp chose, handing a read-only identifier file back
+// writable: this package widening a mode it only ever promises to narrow.
 func replaceDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -232,8 +238,10 @@ func replaceDeviceIDFile(path, deviceID string) error {
 }
 
 // writeDeviceIDTempFile writes deviceID to a fresh file beside path and returns
-// its name for a caller that publishes it with a link or a rename. A path it
-// returns is the caller's to remove; on failure it removes its own.
+// its name for a caller that publishes it with a link or a rename, as it stands:
+// the mode is already narrowed against whatever sits at path—see
+// narrowToPublishedFileMode. A path it returns is the caller's to remove; on
+// failure it removes its own.
 func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	file, err := os.CreateTemp(filepath.Dir(path), DeviceIDFileName+"-*")
 	if err != nil {
@@ -244,6 +252,9 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	tempPath := file.Name()
 
 	_, err = file.WriteString(deviceID + "\n")
+	if err == nil {
+		err = narrowToPublishedFileMode(file, path)
+	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -253,6 +264,50 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	}
 
 	return tempPath, nil
+}
+
+// narrowToPublishedFileMode drops from file every permission bit the file at
+// path lacks, so publishing over that file cannot widen what it had. Bits are
+// only removed, as in restrictDeviceIDFileMode: of the mode os.CreateTemp chose
+// and the mode being stood in for, the stricter wins.
+//
+// It runs while the scratch file is still nameless, because a rename publishes
+// whatever mode the file carries at that instant and narrowing afterwards would
+// leave the wider one published in between. Through the open handle rather than
+// the path, as SaveStreamAtomic does—a path-based chmod can be pointed at
+// another file by anyone able to drop a symlink in the config directory.
+func narrowToPublishedFileMode(file *os.File, path string) error {
+	if runtime.GOOS == "windows" {
+		// Windows has no Unix mode bits; Chmod there toggles the read-only
+		// attribute, so intersecting the modes Go synthesizes would set it
+		// rather than narrow anything.
+		return nil
+	}
+
+	// Nothing to stand in for: this is a fresh installation, or the file was
+	// removed after the caller found the path taken.
+	publishedInfo, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to inspect device id file: %v", err)
+	}
+	tempInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to inspect temporary device id file: %v", err)
+	}
+
+	tempPerm := tempInfo.Mode().Perm()
+	perm := tempPerm & publishedInfo.Mode().Perm()
+	if perm == tempPerm {
+		return nil
+	}
+	if err = file.Chmod(perm); err != nil {
+		return fmt.Errorf("failed to restrict temporary device id file permissions: %v", err)
+	}
+
+	return nil
 }
 
 // restrictDeviceIDFileMode drops from a file that already exists every
