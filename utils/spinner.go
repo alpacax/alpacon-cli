@@ -67,51 +67,57 @@ func (s *Spinner) Start() {
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
 	s.stopCh, s.doneCh = stopCh, doneCh
+	// The rest of what the goroutine needs is copied in the same critical
+	// section, so it never reaches back into the struct during its run.
+	msg := s.message
+	frames, dots := s.frames, s.dots
+	interval := s.interval
 	s.mu.Unlock()
 
 	if !s.enabled {
-		// Print a static message so users still see progress in non-TTY output
-		fmt.Fprintln(os.Stderr, s.message)
+		// Print a static message so users still see progress in non-TTY output.
+		// Deliberately printed again on every restart: a long approval wait
+		// restarts the spinner each poll tick, and the repeated line is the
+		// heartbeat a redirected log gets from an otherwise silent wait.
+		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
 	activeSpinners.Add(1)
 
 	go func() {
 		defer close(doneCh)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		frameIdx := 0
 		dotIdx := 0
 		dotCounter := 0
 		for {
+			frame := frames[frameIdx%len(frames)]
+
+			// Animate dots if message ends with "..."
+			displayMsg := msg
+			if baseMsg, ok := strings.CutSuffix(msg, "..."); ok {
+				displayMsg = baseMsg + dots[dotIdx%len(dots)]
+			}
+
+			fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
+			frameIdx++
+
+			// Update dots every 3 frames (300ms)
+			dotCounter++
+			if dotCounter >= 3 {
+				dotIdx++
+				dotCounter = 0
+			}
+
+			// Blocking here instead of sleeping lets Stop return as soon as it
+			// closes stopCh rather than up to a frame later.
 			select {
 			case <-stopCh:
 				// Clear the spinner line
 				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
-			default:
-				s.mu.Lock()
-				msg := s.message
-				s.mu.Unlock()
-
-				frame := s.frames[frameIdx%len(s.frames)]
-
-				// Animate dots if message ends with "..."
-				displayMsg := msg
-				if strings.HasSuffix(msg, "...") {
-					baseMsg := strings.TrimSuffix(msg, "...")
-					displayMsg = baseMsg + s.dots[dotIdx%len(s.dots)]
-				}
-
-				fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
-				frameIdx++
-
-				// Update dots every 3 frames (300ms)
-				dotCounter++
-				if dotCounter >= 3 {
-					dotIdx++
-					dotCounter = 0
-				}
-
-				time.Sleep(s.interval)
+			case <-ticker.C:
 			}
 		}
 	}()
