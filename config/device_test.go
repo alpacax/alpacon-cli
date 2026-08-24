@@ -29,6 +29,19 @@ func readDeviceIDFile(t *testing.T) string {
 	return string(data)
 }
 
+// assertNoLeftoverTempFiles fails when a scratch file survived in the config
+// directory. Publishing and replacing both go through one, and either leaks it
+// on a path that returns before its cleanup runs.
+func assertNoLeftoverTempFiles(t *testing.T) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(mustDeviceIDPath(t)))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		assert.False(t, strings.HasPrefix(entry.Name(), DeviceIDFileName+"-"),
+			"temporary file %q was left behind", entry.Name())
+	}
+}
+
 // writeDeviceIDFile plants raw contents so tests can exercise values the writer
 // would never produce.
 func writeDeviceIDFile(t *testing.T, raw string) {
@@ -198,6 +211,7 @@ func TestGetOrCreateDeviceID_ReplacesMalformedValue(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, IsValidDeviceID(deviceID), "replacement id must satisfy the Auth0 action pattern: %q", deviceID)
 			assert.Equal(t, deviceID+"\n", readDeviceIDFile(t))
+			assertNoLeftoverTempFiles(t)
 		})
 	}
 }
@@ -356,12 +370,7 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	}
 
 	// A concurrent loser must not leave its scratch file behind either.
-	entries, err := os.ReadDir(filepath.Dir(mustDeviceIDPath(t)))
-	require.NoError(t, err)
-	for _, entry := range entries {
-		assert.False(t, strings.HasPrefix(entry.Name(), DeviceIDFileName+"-"),
-			"temporary file %q was left behind", entry.Name())
-	}
+	assertNoLeftoverTempFiles(t)
 }
 
 // TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue covers the same
@@ -411,6 +420,7 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 		}
 	}
 	assert.True(t, handedOut, "the value left on disk must be one that was handed out, got %q", stored)
+	assertNoLeftoverTempFiles(t)
 }
 
 // TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile pins that the mode is
