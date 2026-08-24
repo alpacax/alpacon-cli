@@ -19,6 +19,9 @@ const (
 	// identifier must outlive it. This mirrors the web client, which keeps its
 	// own identifier in localStorage rather than alongside its session.
 	DeviceIDFileName = "device_id"
+
+	// deviceIDFileExcessPerm is every permission bit outside owner read and write.
+	deviceIDFileExcessPerm = os.FileMode(0177)
 )
 
 var (
@@ -335,10 +338,10 @@ func restrictDeviceIDFileMode(path string) error {
 		return fmt.Errorf("failed to inspect device id file: %v", err)
 	}
 	perm := fileInfo.Mode().Perm()
-	if perm&0177 == 0 {
+	if perm&deviceIDFileExcessPerm == 0 {
 		return nil
 	}
-	if err = os.Chmod(path, perm&^0177); err != nil {
+	if err = os.Chmod(path, perm&^deviceIDFileExcessPerm); err != nil {
 		return fmt.Errorf("failed to restrict device id file permissions: %v", err)
 	}
 
