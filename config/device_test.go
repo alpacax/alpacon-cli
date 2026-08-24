@@ -29,6 +29,19 @@ func readDeviceIDFile(t *testing.T) string {
 	return string(data)
 }
 
+// assertNoLeftoverTempFiles fails when a scratch file survived in the config
+// directory. Publishing and replacing both go through one, and either leaks it
+// on a path that returns before its cleanup runs.
+func assertNoLeftoverTempFiles(t *testing.T) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(mustDeviceIDPath(t)))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		assert.False(t, strings.HasPrefix(entry.Name(), DeviceIDFileName+"-"),
+			"temporary file %q was left behind", entry.Name())
+	}
+}
+
 // writeDeviceIDFile plants raw contents so tests can exercise values the writer
 // would never produce.
 func writeDeviceIDFile(t *testing.T, raw string) {
@@ -198,6 +211,7 @@ func TestGetOrCreateDeviceID_ReplacesMalformedValue(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, IsValidDeviceID(deviceID), "replacement id must satisfy the Auth0 action pattern: %q", deviceID)
 			assert.Equal(t, deviceID+"\n", readDeviceIDFile(t))
+			assertNoLeftoverTempFiles(t)
 		})
 	}
 }
@@ -356,12 +370,7 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	}
 
 	// A concurrent loser must not leave its scratch file behind either.
-	entries, err := os.ReadDir(filepath.Dir(mustDeviceIDPath(t)))
-	require.NoError(t, err)
-	for _, entry := range entries {
-		assert.False(t, strings.HasPrefix(entry.Name(), DeviceIDFileName+"-"),
-			"temporary file %q was left behind", entry.Name())
-	}
+	assertNoLeftoverTempFiles(t)
 }
 
 // TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue covers the same
@@ -411,12 +420,18 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 		}
 	}
 	assert.True(t, handedOut, "the value left on disk must be one that was handed out, got %q", stored)
+	assertNoLeftoverTempFiles(t)
 }
 
 // TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile pins that the mode is
 // what this package claims it is. os.WriteFile leaves the mode of an existing
 // file alone, so an identifier file created world-readable by some other path
 // used to keep that mode for the life of the installation.
+//
+// The bound asserted is 0600, the one the package documents, rather than the
+// group and other bits alone: an owner execute bit says this file is a program
+// to run, which it is not, and a mask that spared it would leave the documented
+// mode and the enforced one disagreeing.
 func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file mode bits are not meaningful on Windows")
@@ -429,6 +444,7 @@ func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 	}{
 		{"well-formed value is kept, mode is tightened", "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b\n", 0644},
 		{"malformed value is replaced, mode is tightened", "not_a_valid_id\n", 0666},
+		{"owner execute bit is dropped too", "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b\n", 0700},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -443,8 +459,8 @@ func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 
 			fileInfo, err := os.Stat(path)
 			require.NoError(t, err)
-			assert.Zero(t, fileInfo.Mode().Perm()&0o077,
-				"device id file must not be readable by group or other, got %v", fileInfo.Mode().Perm())
+			assert.Zero(t, fileInfo.Mode().Perm()&^os.FileMode(0o600),
+				"device id file must be no more permissive than 0600, got %v", fileInfo.Mode().Perm())
 		})
 	}
 }
@@ -465,6 +481,31 @@ func TestGetOrCreateDeviceID_KeepsAStricterMode(t *testing.T) {
 
 	_, err := GetOrCreateDeviceID()
 	require.NoError(t, err)
+
+	fileInfo, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0400), fileInfo.Mode().Perm())
+}
+
+// TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing carries the property
+// above onto the path that rewrites the file. Replacing publishes a fresh
+// temporary file, which arrives with the mode os.CreateTemp chose rather than
+// the one the file it replaces had, so a read-only identifier file used to come
+// back writable—the package widening a mode it promises only ever to narrow.
+func TestGetOrCreateDeviceID_KeepsAStricterModeWhenReplacing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits are not meaningful on Windows")
+	}
+	setupTestConfig(t)
+	writeDeviceIDFile(t, "not_a_valid_id\n")
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.Chmod(path, 0400))
+	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
+
+	deviceID, err := GetOrCreateDeviceID()
+	require.NoError(t, err)
+	assert.True(t, IsValidDeviceID(deviceID),
+		"replacement id must satisfy the Auth0 action pattern: %q", deviceID)
 
 	fileInfo, err := os.Stat(path)
 	require.NoError(t, err)
@@ -492,4 +533,52 @@ func TestGetOrCreateDeviceID_UnreadableFile(t *testing.T) {
 	deviceID, err := GetOrCreateDeviceID()
 	assert.Error(t, err)
 	assert.Empty(t, deviceID)
+}
+
+// TestGetOrCreateDeviceID_NamesTheScratchFileInItsError keeps two failures
+// apart. One temporary file serves both the path that creates the identifier
+// file and the path that rewrites it, so a scratch file that could not be
+// opened used to be reported as the identifier file itself—telling a user whose
+// device_id is sitting right there that it could not be created.
+func TestGetOrCreateDeviceID_NamesTheScratchFileInItsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits are not meaningful on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+	setupTestConfig(t)
+	writeDeviceIDFile(t, "not_a_valid_id\n")
+	// Readable and traversable, but nothing new can be created in it.
+	dir := filepath.Dir(mustDeviceIDPath(t))
+	require.NoError(t, os.Chmod(dir, 0500))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+
+	deviceID, err := GetOrCreateDeviceID()
+
+	require.Error(t, err)
+	assert.Empty(t, deviceID)
+	assert.Contains(t, err.Error(), "temporary device id file")
+}
+
+// TestWriteDeviceIDTempFile_ReportsAFailureAfterTheScratchFileOpened covers the
+// other error the scratch file can produce: it opened, and something between
+// there and the caller receiving it failed. The mode narrowing is the reachable
+// one—a symlink loop is neither a file it can read nor an absent path—and the
+// write, the chmod, and the close report through the same message.
+func TestWriteDeviceIDTempFile_ReportsAFailureAfterTheScratchFileOpened(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("narrowToPublishedFileMode does nothing on Windows")
+	}
+	setupTestConfig(t)
+	path := mustDeviceIDPath(t)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+	require.NoError(t, os.Symlink(path, path))
+
+	tempPath, err := writeDeviceIDTempFile(path, "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b")
+
+	require.Error(t, err)
+	assert.Empty(t, tempPath)
+	assert.Contains(t, err.Error(), "failed to prepare temporary device id file")
+	assertNoLeftoverTempFiles(t)
 }
