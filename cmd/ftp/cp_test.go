@@ -272,8 +272,9 @@ func TestCpCommandSSHParsing(t *testing.T) {
 			args := make([]string, len(tt.args))
 			copy(args, tt.args)
 
-			username := normalizeArgs(args, "")
+			username, err := normalizeArgs(args, "")
 
+			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedArgs, args)
 			assert.Equal(t, tt.expectedUser, username)
 		})
@@ -371,26 +372,53 @@ func TestStripUserPrefix(t *testing.T) {
 
 func TestNormalizeArgsUsername(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		flagUser string
-		wantUser string
+		name         string
+		args         []string
+		flagUser     string
+		wantUser     string
+		wantArgs     []string
+		wantErrUsers []string
 	}{
 		{
 			name:     "the -u flag wins over an inline user",
 			args:     []string{"test.txt", "alice@myserver:/tmp/"},
 			flagUser: "carol",
 			wantUser: "carol",
+			wantArgs: []string{"test.txt", "myserver:/tmp/"},
 		},
 		{
-			name:     "the first inline user wins",
+			name:     "the -u flag suppresses an inline user conflict",
 			args:     []string{"alice@myserver:/tmp/f", "bob@myserver:/tmp/g"},
+			flagUser: "carol",
+			wantUser: "carol",
+			wantArgs: []string{"myserver:/tmp/f", "myserver:/tmp/g"},
+		},
+		{
+			name:     "agreeing inline users resolve to that user",
+			args:     []string{"alice@myserver:/tmp/f", "alice@other:/tmp/g"},
 			wantUser: "alice",
+			wantArgs: []string{"myserver:/tmp/f", "other:/tmp/g"},
+		},
+		{
+			name:         "conflicting inline users are rejected",
+			args:         []string{"alice@myserver:/tmp/f", "bob@myserver:/tmp/g"},
+			wantArgs:     []string{"alice@myserver:/tmp/f", "bob@myserver:/tmp/g"},
+			wantErrUsers: []string{"alice", "bob"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.wantUser, normalizeArgs(tt.args, tt.flagUser))
+			user, err := normalizeArgs(tt.args, tt.flagUser)
+			if len(tt.wantErrUsers) > 0 {
+				for _, u := range tt.wantErrUsers {
+					assert.ErrorContains(t, err, u)
+				}
+				assert.Equal(t, tt.wantArgs, tt.args)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantUser, user)
+			assert.Equal(t, tt.wantArgs, tt.args)
 		})
 	}
 }
