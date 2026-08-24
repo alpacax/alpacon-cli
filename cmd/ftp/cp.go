@@ -21,6 +21,7 @@ var CpCmd = &cobra.Command{
 	Long: `Copy files between your local machine and a remote server.
 Supports SSH-like user@host:path syntax for specifying the username inline with the remote path.
 Remote paths use the format [USER@]SERVER:/path.
+All inline users must name the same user; -u overrides them all.
 
 Use --work-session to attach this transfer to a specific work-session. This
 overrides the workspace's active work-session set via 'alpacon work-session use'.
@@ -74,7 +75,11 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		username = normalizeArgs(args, username)
+		username, err := normalizeArgs(args, username)
+		if err != nil {
+			utils.CliErrorWithExit("%s", err.Error())
+			return
+		}
 
 		sources := args[:len(args)-1]
 		dest := args[len(args)-1]
@@ -199,17 +204,28 @@ func isLocalPaths(paths []string) bool {
 	return true
 }
 
-// normalizeArgs strips inline user prefixes in place and resolves the username:
-// the -u flag wins, then the first inline user.
-func normalizeArgs(args []string, username string) string {
-	for i, arg := range args {
-		rewritten, user := stripUserPrefix(arg)
-		if username == "" {
-			username = user
+// normalizeArgs resolves the username, then strips the inline user prefixes in
+// place: the -u flag wins and inline users are ignored; without it the inline
+// users must agree, and two different ones are an error. Resolution finishes
+// before the first rewrite, so a rejected argument list is left untouched.
+func normalizeArgs(args []string, username string) (string, error) {
+	if username == "" {
+		for _, arg := range args {
+			_, user := stripUserPrefix(arg)
+			if user == "" {
+				continue
+			}
+			if username == "" {
+				username = user
+			} else if username != user {
+				return "", fmt.Errorf("all arguments must use the same user (got %q and %q); use -u USER to apply one user to every path", username, user)
+			}
 		}
-		args[i] = rewritten
 	}
-	return username
+	for i, arg := range args {
+		args[i], _ = stripUserPrefix(arg)
+	}
+	return username, nil
 }
 
 // stripUserPrefix rewrites user@host:path as host:path, handing back the user.
