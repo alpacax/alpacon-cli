@@ -173,3 +173,55 @@ func TestLogsCommandOutcome(t *testing.T) {
 		})
 	}
 }
+
+// The stderr line bypasses the Cli* helpers, so server-controlled fields must be
+// sanitized where the line is assembled (#364). Each case injects into the one
+// field an attacker controls on that branch: Status must equal a known value to
+// reach the running/failed branches, so ID and ErrorPhase carry the payload
+// there, while the unrecognised-status fallback renders Status itself verbatim.
+func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
+	tests := []struct {
+		name    string
+		details event.EventDetails
+		// The whole rendering, so a sanitize that ate the surrounding text fails here
+		// rather than passing a check that only looks for the payload's absence.
+		wantContains string
+	}{
+		{
+			name:         "running branch strips escape and bidi in ID",
+			details:      event.EventDetails{ID: "job-1\x1b[2K\u202e", Status: "running"},
+			wantContains: "`alpacon exec logs job-1` again",
+		},
+		{
+			name:         "stuck branch strips escape in unknown phase",
+			details:      event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("boom\x1b[31m\u202e")},
+			wantContains: "[boom] boom (status=stuck)",
+		},
+		{
+			name: "failure branch strips escape in unknown phase",
+			details: event.EventDetails{
+				ID:         "job-1",
+				Status:     "completed",
+				Success:    boolPtr(false),
+				ExitCode:   intPtr(2),
+				ErrorPhase: strPtr("phase\x1b]0;pwn\x07\u202e"),
+			},
+			wantContains: "[phase] phase",
+		},
+		{
+			name:         "unrecognised status renders sanitized",
+			details:      event.EventDetails{ID: "job-1", Status: "denied\x1b[2K\u202eapproved"},
+			wantContains: "unrecognised status: deniedapproved",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderrLine, _ := logsCommandOutcome(tt.details)
+
+			assert.Contains(t, stderrLine, tt.wantContains)
+			assert.NotContains(t, stderrLine, "\x1b")
+			assert.NotContains(t, stderrLine, "\u202e")
+		})
+	}
+}
