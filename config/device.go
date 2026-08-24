@@ -255,11 +255,15 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	return tempPath, nil
 }
 
-// restrictDeviceIDFileMode drops any group or other permission bits from a file
-// that already exists. A mode argument only applies to a file the call creates,
-// so an identifier file some other path left world-readable would otherwise
-// keep that mode for the life of the installation while this package claims
-// 0600.
+// restrictDeviceIDFileMode drops from a file that already exists every
+// permission bit outside owner read and write. A mode argument only applies to
+// a file the call creates, so an identifier file some other path left
+// world-readable would otherwise keep that mode for the life of the
+// installation while this package claims 0600.
+//
+// The mask covers the owner execute bit as well as group and other, so what
+// survives is at most 0600 and the claim above is the whole truth. Nothing runs
+// this file as a program, so that bit has nothing to say here.
 //
 // Bits are only ever removed, never added: a stricter umask legitimately
 // produces something tighter than 0600, and loosening that back would be this
@@ -276,10 +280,10 @@ func restrictDeviceIDFileMode(path string) error {
 		return fmt.Errorf("failed to inspect device id file: %v", err)
 	}
 	perm := fileInfo.Mode().Perm()
-	if perm&0077 == 0 {
+	if perm&0177 == 0 {
 		return nil
 	}
-	if err = os.Chmod(path, perm&^0077); err != nil {
+	if err = os.Chmod(path, perm&^0177); err != nil {
 		return fmt.Errorf("failed to restrict device id file permissions: %v", err)
 	}
 

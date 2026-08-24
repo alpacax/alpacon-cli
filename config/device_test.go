@@ -427,6 +427,11 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 // what this package claims it is. os.WriteFile leaves the mode of an existing
 // file alone, so an identifier file created world-readable by some other path
 // used to keep that mode for the life of the installation.
+//
+// The bound asserted is 0600, the one the package documents, rather than the
+// group and other bits alone: an owner execute bit says this file is a program
+// to run, which it is not, and a mask that spared it would leave the documented
+// mode and the enforced one disagreeing.
 func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file mode bits are not meaningful on Windows")
@@ -439,6 +444,7 @@ func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 	}{
 		{"well-formed value is kept, mode is tightened", "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b\n", 0644},
 		{"malformed value is replaced, mode is tightened", "not_a_valid_id\n", 0666},
+		{"owner execute bit is dropped too", "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b\n", 0700},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -453,8 +459,8 @@ func TestGetOrCreateDeviceID_TightensAnExistingPermissiveFile(t *testing.T) {
 
 			fileInfo, err := os.Stat(path)
 			require.NoError(t, err)
-			assert.Zero(t, fileInfo.Mode().Perm()&0o077,
-				"device id file must not be readable by group or other, got %v", fileInfo.Mode().Perm())
+			assert.Zero(t, fileInfo.Mode().Perm()&^os.FileMode(0o600),
+				"device id file must be no more permissive than 0600, got %v", fileInfo.Mode().Perm())
 		})
 	}
 }
