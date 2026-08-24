@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,5 +77,97 @@ func TestSpinner_AnimatingBranchPairsTheActiveCount(t *testing.T) {
 		assert.Equal(t, int32(1), activeSpinners.Load(), "an animating spinner arms the line break")
 		s.Stop()
 		assert.Equal(t, int32(0), activeSpinners.Load(), "and Stop disarms it")
+	})
+}
+
+// Stop closes stopCh and doneCh; a Start that reuses them launches a goroutine
+// whose select falls straight through the closed stopCh and then closes doneCh a
+// second time. Off a TTY Start never reaches the goroutine, so enabled is
+// forced here as well—no test that leaves it alone can see the panic.
+func TestSpinner_RestartsAfterStop(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = time.Millisecond
+
+		require.Equal(t, int32(0), activeSpinners.Load())
+		s.Start()
+		s.Stop()
+
+		s.Start()
+		assert.Equal(t, int32(1), activeSpinners.Load(), "a restarted spinner arms the line break again")
+		s.Stop()
+		assert.Equal(t, int32(0), activeSpinners.Load(), "and its Stop disarms it")
+		assert.False(t, spinnerRunning(s), "Stop must leave the spinner stopped")
+	})
+}
+
+// The goroutine blocks in a select on stopCh instead of sleeping a frame away,
+// so Stop returns the moment it closes that channel. Sleeping first would make
+// Stop wait out the rest of the frame, and an approval wait pays that on every
+// poll tick. The frame here is far longer than the budget, so only the blocking
+// select can come back in time.
+func TestSpinner_StopDoesNotWaitOutAFrame(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = 2 * time.Second
+
+		s.Start()
+		// Wait for the goroutine to reach the select. A Stop that lands before it
+		// is even scheduled returns at once however the loop is written, so the
+		// frame has to be underway for the timing to mean anything.
+		time.Sleep(100 * time.Millisecond)
+
+		start := time.Now()
+		s.Stop()
+
+		assert.Less(t, time.Since(start), 500*time.Millisecond)
+	})
+}
+
+// time.NewTicker panics on a non-positive period where the sleep it replaced
+// took one happily, and the panic would fire on the spinner's own goroutine—far
+// from the caller and fatal to the process. No caller can set that today, so
+// without the fallback this test does not fail, it takes the test binary down.
+func TestSpinner_NonPositiveIntervalFallsBackToTheDefault(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = 0
+
+		s.Start()
+		s.Stop()
+
+		assert.Equal(t, int32(0), activeSpinners.Load(), "the goroutine ran to its own exit rather than dying on the ticker")
+	})
+}
+
+// Start and Stop each guard the fields, but the goroutine waits on what it was
+// handed for its whole run—a restart that swapped the fields under it would
+// leave it listening to a channel nobody closes. Only -race can see that, and
+// only if a second goroutine drives the restart: StopWriter hands Stop to
+// whoever writes the output, which need not be the goroutine that restarts.
+func TestSpinner_RestartAndStopRaceOnTheSameSpinner(t *testing.T) {
+	captureStderr(t, func() {
+		s := NewSpinner("Waiting for approval...")
+		s.enabled = true
+		s.interval = time.Millisecond
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		for range 2 {
+			go func() {
+				defer wg.Done()
+				for range 50 {
+					s.Start()
+					s.Stop()
+				}
+			}()
+		}
+		wg.Wait()
+
+		s.Stop()
+		assert.Equal(t, int32(0), activeSpinners.Load(), "every Start that armed the line break is paired with a Stop")
 	})
 }

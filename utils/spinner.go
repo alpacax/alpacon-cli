@@ -12,6 +12,10 @@ import (
 	"golang.org/x/term"
 )
 
+// defaultSpinnerInterval is the frame period NewSpinner hands out, and the
+// fallback Start uses when the field holds something a ticker cannot take.
+const defaultSpinnerInterval = 100 * time.Millisecond
+
 // activeSpinners counts the spinners currently animating stderr. A warning
 // printed while one is running lands mid-frame, so CliWarning breaks to a new
 // line first—but only then, since off a TTY there is no frame to step off.
@@ -48,9 +52,7 @@ func NewSpinner(message string) *Spinner {
 		message:  message,
 		frames:   []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 		dots:     []string{".  ", ".. ", "..."},
-		interval: 100 * time.Millisecond,
-		stopCh:   make(chan struct{}),
-		doneCh:   make(chan struct{}),
+		interval: defaultSpinnerInterval,
 		enabled:  term.IsTerminal(int(os.Stderr.Fd())),
 	}
 }
@@ -63,51 +65,71 @@ func (s *Spinner) Start() {
 		return
 	}
 	s.running = true
+	// Stop closes both channels, so a restart needs a fresh pair—and the
+	// goroutine below takes its own copy, since the fields belong to whichever
+	// Start ran last rather than to the run it was spawned for.
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	s.stopCh, s.doneCh = stopCh, doneCh
+	// The rest of what the goroutine needs is copied in the same critical
+	// section, so it never reaches back into the struct during its run.
+	msg := s.message
+	frames, dots := s.frames, s.dots
+	interval := s.interval
+	if interval <= 0 {
+		// time.NewTicker panics where the sleep this replaced took a zero
+		// happily, and a stderr animation must never take the CLI down with it.
+		interval = defaultSpinnerInterval
+	}
 	s.mu.Unlock()
 
 	if !s.enabled {
-		// Print a static message so users still see progress in non-TTY output
-		fmt.Fprintln(os.Stderr, s.message)
+		// Print a static message so users still see progress in non-TTY output.
+		// Deliberately printed again on every restart: a long approval wait
+		// restarts the spinner each poll tick, and the repeated line is the
+		// heartbeat a redirected log gets from an otherwise silent wait.
+		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
 	activeSpinners.Add(1)
 
 	go func() {
-		defer close(s.doneCh)
+		defer close(doneCh)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		frameIdx := 0
 		dotIdx := 0
 		dotCounter := 0
+		// Drawing before the first stopCh check is deliberate: a Start answered
+		// at once paints one frame and erases it, and Stop waits on doneCh, so
+		// both land before the caller's own output.
 		for {
+			frame := frames[frameIdx%len(frames)]
+
+			// Animate dots if message ends with "..."
+			displayMsg := msg
+			if baseMsg, ok := strings.CutSuffix(msg, "..."); ok {
+				displayMsg = baseMsg + dots[dotIdx%len(dots)]
+			}
+
+			fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
+			frameIdx++
+
+			// Update dots every 3 frames (300ms)
+			dotCounter++
+			if dotCounter >= 3 {
+				dotIdx++
+				dotCounter = 0
+			}
+
+			// Blocking here instead of sleeping lets Stop return as soon as it
+			// closes stopCh rather than up to a frame later.
 			select {
-			case <-s.stopCh:
+			case <-stopCh:
 				// Clear the spinner line
 				fmt.Fprint(os.Stderr, "\r\033[K")
 				return
-			default:
-				s.mu.Lock()
-				msg := s.message
-				s.mu.Unlock()
-
-				frame := s.frames[frameIdx%len(s.frames)]
-
-				// Animate dots if message ends with "..."
-				displayMsg := msg
-				if strings.HasSuffix(msg, "...") {
-					baseMsg := strings.TrimSuffix(msg, "...")
-					displayMsg = baseMsg + s.dots[dotIdx%len(s.dots)]
-				}
-
-				fmt.Fprintf(os.Stderr, "\r%s %s", Yellow(frame), displayMsg)
-				frameIdx++
-
-				// Update dots every 3 frames (300ms)
-				dotCounter++
-				if dotCounter >= 3 {
-					dotIdx++
-					dotCounter = 0
-				}
-
-				time.Sleep(s.interval)
+			case <-ticker.C:
 			}
 		}
 	}()
@@ -121,14 +143,16 @@ func (s *Spinner) Stop() {
 		return
 	}
 	s.running = false
+	// Read under the lock: a concurrent restart replaces the fields.
+	stopCh, doneCh := s.stopCh, s.doneCh
 	s.mu.Unlock()
 
 	if !s.enabled {
 		return
 	}
 
-	close(s.stopCh)
-	<-s.doneCh
+	close(stopCh)
+	<-doneCh
 	// After the goroutine has returned, so the window where the last frame is
 	// still on screen keeps its line break.
 	activeSpinners.Add(-1)

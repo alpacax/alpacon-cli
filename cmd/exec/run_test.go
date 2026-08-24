@@ -294,8 +294,8 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 // that reused a single writer would therefore animate through its first poll gap
 // and sit silent for the rest of what --wait is there to cover. Writer identity
 // is all a test can see of the spinner from here, and one writer per tick means
-// one spinner per tick.
-func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnSpinner(t *testing.T) {
+// one restart per tick.
+func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnWriter(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 
 	var writers []io.Writer
@@ -317,8 +317,41 @@ func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnSpinner(t *testing.T) 
 	assert.NoError(t, err)
 	// writers[0] is the first attempt, which runs before any spinner exists.
 	require.Len(t, writers, 4)
-	assert.NotSame(t, writers[1], writers[2], "the second wait needs a spinner of its own")
+	assert.NotSame(t, writers[1], writers[2], "the second wait needs a writer of its own")
 	assert.NotSame(t, writers[2], writers[3], "and so does the third")
+}
+
+// Off a TTY every Start prints the wait message once, so the number of message
+// lines on stderr is exactly the number of Start calls. That pins the heartbeat
+// contract—a redirected log gets one line per stretch of waiting—and it is the
+// only test that notices restartSpinner forgetting to restart: drop its Start
+// and every other test stays green while the user sees no spinner after the
+// first tick.
+func TestRunExecWithApprovalWait_EachRestartPrintsTheHeartbeatLine(t *testing.T) {
+	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+
+	calls := 0
+	runPresenceStepUp = func(_ *client.AlpaconClient, _, _, _, _ string, _ map[string]string, _ string, w io.Writer) error {
+		calls++
+		_, _ = w.Write([]byte(denialLine("SUDO_APPROVAL_REQUIRED")))
+		if calls < 4 {
+			return denial
+		}
+		return nil
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait re-attempts the command; it never resumes a held job")
+		return nil
+	}
+
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", time.Second, io.Discard)
+	})
+
+	assert.NoError(t, err)
+	// One line for the wait's opening Start, one per still-pending tick's restart.
+	assert.Equal(t, 3, strings.Count(stderr, approvalWaitMessage))
 }
 
 // Reporting the last poll failure instead would exit 1 on a request still open.
