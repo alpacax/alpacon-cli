@@ -91,6 +91,9 @@ func (s *Spinner) Start() {
 		frameIdx := 0
 		dotIdx := 0
 		dotCounter := 0
+		// Drawing before the first stopCh check is deliberate: a Start answered
+		// at once paints one frame and erases it, and Stop waits on doneCh, so
+		// both land before the caller's own output.
 		for {
 			frame := frames[frameIdx%len(frames)]
 
