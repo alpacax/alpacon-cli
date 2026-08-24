@@ -290,6 +290,11 @@ func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 			action: NextAction{Description: description},
 			want:   "after approval",
 		},
+		{
+			name:   "command sanitizes to empty leaves no dangling separator",
+			action: NextAction{Command: "\x1b[2K\u202e", Description: description},
+			want:   "after approval",
+		},
 	}
 
 	for _, tt := range tests {

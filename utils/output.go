@@ -50,16 +50,16 @@ type NextAction struct {
 // sites interpolate server-returned ids into Command; the JSON envelope marshals
 // the fields themselves and escapes via escapeJSONControls instead.
 func (a NextAction) PlainText() string {
-	var line string
+	command := SanitizeTerminalText(a.Command)
+	description := SanitizeTerminalText(a.Description)
 	switch {
-	case a.Command != "" && a.Description != "":
-		line = a.Command + "  # " + a.Description
-	case a.Command != "":
-		line = a.Command
+	case command != "" && description != "":
+		return command + "  # " + description
+	case command != "":
+		return command
 	default:
-		line = a.Description
+		return description
 	}
-	return SanitizeTerminalText(line)
 }
 
 // escapeJSONControls rewrites DEL, the C1 block, and Unicode format characters as
