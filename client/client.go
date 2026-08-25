@@ -39,6 +39,11 @@ type apiError struct {
 	code       string
 	source     string
 	statusCode int
+	// apiPayload records that the body was a JSON object—the shape every
+	// alpacon-server error response has. A 401 without one was written by
+	// something standing in front of the server, and the stale-token retry
+	// reads this to tell the two apart.
+	apiPayload bool
 }
 
 // statusError carries an HTTP status on errors that aren't *apiError (e.g. an
@@ -139,7 +144,20 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		return nil
 	}
 	detail, code, source, hasDetail := parseAuthStatusErrorPayload(body)
-	return newAPIError(authStatusMessage(statusCode, code, detail, hasDetail), code, source)
+	return &apiError{
+		message:    authStatusMessage(statusCode, code, detail, hasDetail),
+		code:       code,
+		source:     source,
+		apiPayload: isJSONObject(body),
+	}
+}
+
+// isJSONObject reports whether body is a JSON object. alpacon-server renders
+// every error as one, so anything else on a 401—an HTML page, a bare string,
+// nothing at all—came from a proxy, a WAF or an mTLS gate ahead of it.
+func isJSONObject(body []byte) bool {
+	var parsed map[string]any
+	return json.Unmarshal(body, &parsed) == nil && parsed != nil
 }
 
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
@@ -319,6 +337,14 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // from a refusal it cannot.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
+		return false
+	}
+	var ae *apiError
+	if !errors.As(err, &ae) || !ae.apiPayload {
+		// A 401 the server did not write: a gateway refused the request before
+		// it arrived. No token this process can obtain changes that answer, so
+		// renewing would spend an Auth0 round trip and a config rewrite to be
+		// rejected the same way.
 		return false
 	}
 	code, _ := utils.ParseErrorResponse(err)

@@ -810,6 +810,46 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
+// A proxy, a WAF or an mTLS gate can answer 401 before the request ever reaches
+// alpacon-server, and what it writes is not the JSON every server error carries.
+// No token this process can obtain moves that answer, so renewing on it would
+// spend an Auth0 round trip and a config rewrite to be refused the same way.
+func TestSendRequest_GatewayUnauthorizedIsNotRenewed(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+	}{
+		{name: "html error page", contentType: "text/html", body: "<html><body>401 Authorization Required</body></html>"},
+		{name: "plain text", contentType: "text/plain", body: "client certificate required"},
+		{name: "no body", contentType: "", body: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			renewals := stubTokenRenewal(t, "fresh")
+
+			requests := 0
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if tt.contentType != "" {
+					w.Header().Set("Content-Type", tt.contentType)
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			ac := newBearerTestClient(ts.URL, "stale")
+			_, err := ac.SendGetRequest("/api/test/")
+
+			require.Error(t, err)
+			assert.Equal(t, 0, *renewals, "a 401 alpacon-server did not write is not a stale credential")
+			assert.Equal(t, 1, requests, "a gateway refusal must not be replayed")
+		})
+	}
+}
+
 // A renewal this process cannot complete leaves it nothing better to send, so
 // the caller reads the server's own rejection rather than the renewal's.
 func TestSendRequest_RenewalFailureSurfacesTheOriginal401(t *testing.T) {
