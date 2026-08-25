@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -664,4 +666,288 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 	assert.ErrorContains(t, err1, "invalid token")
 	assert.ErrorContains(t, err2, "invalid token")
 	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once even on failure")
+}
+
+// newBearerTestClient builds a client authenticated the way an Auth0 login
+// leaves it: an access token, no legacy API key.
+func newBearerTestClient(baseURL, accessToken string) *AlpaconClient {
+	return &AlpaconClient{
+		HTTPClient:  &http.Client{},
+		BaseURL:     baseURL,
+		AccessToken: accessToken,
+	}
+}
+
+// stubTokenRenewal swaps the refresh seam for one that installs newToken and
+// counts its runs. The seam runs with tokenMu held, so it writes the field the
+// way refreshLocked does.
+func stubTokenRenewal(t *testing.T, newToken string) *int {
+	t.Helper()
+	orig := refreshAccessToken
+	t.Cleanup(func() { refreshAccessToken = orig })
+	calls := 0
+	refreshAccessToken = func(ac *AlpaconClient) error {
+		calls++
+		ac.AccessToken = newToken
+		return nil
+	}
+	return &calls
+}
+
+// staleTokenHandler answers the code-less 401 alpacon-server sends once an
+// access token expires: its Auth0 authenticator swallows the expired token
+// (auth0/auth.py) and IsAuthenticatedOr401 raises DRF's NotAuthenticated, which
+// no branch of the server's error_code_handler rewrites—so the body carries a
+// detail and no code.
+func staleTokenHandler(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"detail": "Authentication credentials were not provided."}`))
+}
+
+// An access token that expires mid-command is deterministic, not transient: a
+// wait long enough to outlive it fails every time. A separate invocation
+// refreshes at construction and succeeds, so a request in flight must renew too.
+func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status": "approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	body, err := ac.SendGetRequest("/api/test/")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status": "approved"}`, string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
+}
+
+// The server rejects a stale token in its permission layer, before the view
+// runs, so the first attempt changed nothing—but only a replayed body makes the
+// retry the same request.
+func TestSendPostRequest_ReplaysTheBodyAfterRenewal(t *testing.T) {
+	stubTokenRenewal(t, "fresh")
+
+	var bodies []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if len(bodies) == 1 {
+			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendPostRequest("/api/test/", map[string]string{"purpose": "deploy"})
+
+	require.NoError(t, err)
+	require.Len(t, bodies, 2)
+	assert.JSONEq(t, `{"purpose": "deploy"}`, bodies[1], "the replay must carry the original body")
+}
+
+// Every deliberate 401 carries an error code (MFA required, IP not allowed,
+// token ACL). Renewing on one would retry a refusal the new token cannot change.
+func TestSendRequest_CodedUnauthorizedIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_required"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 0, *renewals, "a coded 401 is the server's decision, not a stale credential")
+	assert.Equal(t, 1, requests)
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthMFARequired, code, "the code must still reach the MFA handler")
+}
+
+// A service token or a legacy API key has no refresh token behind it, so a
+// renewal would spend an Auth0 round trip to fail.
+func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+}
+
+func TestSendRequest_RenewalFailureSurfacesTheOriginal401(t *testing.T) {
+	orig := refreshAccessToken
+	t.Cleanup(func() { refreshAccessToken = orig })
+	refreshAccessToken = func(*AlpaconClient) error { return errors.New("refresh token rejected") }
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	// The caller must read what the server said, not how the renewal failed.
+	assert.ErrorContains(t, err, "Authentication credentials were not provided.")
+	assert.Equal(t, 1, requests, "a failed renewal must not replay the request")
+}
+
+// A token the server keeps rejecting is not a token this process can fix, so the
+// retry happens once—never a loop against a 401 that will not move.
+func TestSendRequest_RenewsAtMostOncePerRequest(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, 2, requests)
+}
+
+// Two requests in flight share one expiry. The second must retry with what the
+// first fetched instead of spending a second refresh-token grant on it.
+func TestSendRequest_ConcurrentStaleRequestsRenewOnce(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer stale" {
+			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = ac.SendGetRequest("/api/test/")
+		}()
+	}
+	wg.Wait()
+
+	assert.NoError(t, errs[0])
+	assert.NoError(t, errs[1])
+	assert.Equal(t, 1, *renewals, "the second request must reuse the token the first fetched")
+}
+
+// A download bypasses sendRequest to hand the caller an open body, so it needs
+// the same renewal rather than reporting a stale token as a download failure.
+func TestSendGetRequestForDownload_RenewsAStaleTokenAndRetries(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			staleTokenHandler(w)
+			return
+		}
+		_, _ = w.Write([]byte("package-bytes"))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	resp, err := ac.SendGetRequestForDownload("/api/test/")
+
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "package-bytes", string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent)
+}
+
+// A download's 403 is a refusal, not a stale credential: it must reach the
+// caller unretried, and carry its status the way every other API error does.
+func TestSendGetRequestForDownload_ForbiddenIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"detail": "no access"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequestForDownload("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
+}
+
+// A streamed upload that is not a file cannot be rewound, so the renewal must
+// stop rather than replay a truncated body.
+func TestSendMultipartStreamRequest_UnrewindableBodyIsNotReplayed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = io.Copy(io.Discard, r.Body)
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	// A bare io.Reader gives net/http nothing to rewind with; an *os.File body
+	// would, which is why SendMultipartStreamRequest sets GetBody for one.
+	body := struct{ io.Reader }{strings.NewReader("payload")}
+	_, err := ac.SendMultipartStreamRequest("/api/test/", "multipart/form-data", body, -1)
+
+	require.Error(t, err)
+	assert.Equal(t, 1, *renewals, "the token is renewed, but the request cannot be replayed")
+	assert.Equal(t, 1, requests)
 }

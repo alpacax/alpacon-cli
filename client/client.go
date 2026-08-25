@@ -23,7 +23,16 @@ import (
 
 const (
 	checkPrivilegesURL = "/api/iam/users/-"
+
+	// bearerPrefix is the scheme setHTTPHeader signs an access token with. The
+	// stale-token retry reads it back off the request to learn which token the
+	// server rejected.
+	bearerPrefix = "Bearer "
 )
+
+// refreshAccessToken is a test seam so a unit test can drive the stale-token
+// retry without real Auth0 I/O.
+var refreshAccessToken = (*AlpaconClient).refreshLocked
 
 type apiError struct {
 	message    string
@@ -201,8 +210,8 @@ func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 
 func (ac *AlpaconClient) setHTTPHeader(req *http.Request) *http.Request {
 	req.Header.Set("User-Agent", ac.UserAgent)
-	if ac.AccessToken != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", ac.AccessToken))
+	if accessToken := ac.accessToken(); accessToken != "" {
+		req.Header.Set("Authorization", bearerPrefix+accessToken)
 	} else if ac.Token != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("token=\"%s\"", ac.Token))
 	}
@@ -246,7 +255,96 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+// sendRequest sends req and, when the server reports the access token stale,
+// renews it and sends the request once more.
+//
+// The renewal belongs here rather than in each polling loop because only the
+// process-wide credential is stale, not the request: alpacon-server rejects a
+// stale token in its permission layer (utils/api/permissions.py), before the
+// view runs, so the first attempt changed nothing and the replay is the same
+// request rather than a second one. A client built at startup and held for a
+// half-hour approval wait would otherwise never re-enter the refresh that
+// NewAlpaconAPIClient runs once.
 func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
+	body, err := ac.roundTrip(req)
+	retry, ok := ac.renewedRequest(req, err)
+	if !ok {
+		return body, err
+	}
+	return ac.roundTrip(retry)
+}
+
+// renewedRequest reports whether err is a renewable stale-token rejection and,
+// if the renewal succeeds, returns the request to replay.
+func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Request, bool) {
+	if !isStaleCredential(err) {
+		return nil, false
+	}
+	sent, ok := strings.CutPrefix(req.Header.Get("Authorization"), bearerPrefix)
+	if !ok {
+		// A legacy API key or a service token: no refresh-token grant stands
+		// behind it, so a renewal would spend an Auth0 round trip to fail.
+		return nil, false
+	}
+	if !ac.renewAccessToken(sent) {
+		return nil, false
+	}
+	retry, ok := replayableClone(req)
+	if !ok {
+		return nil, false
+	}
+	return ac.setHTTPHeader(retry), true
+}
+
+// renewAccessToken installs a fresh access token, reporting whether one is now
+// in hand. sent is the token the rejected request carried: a different one means
+// another request in flight already renewed it, and retrying with that one beats
+// spending a second refresh-token grant on the same expiry.
+func (ac *AlpaconClient) renewAccessToken(sent string) bool {
+	ac.tokenMu.Lock()
+	defer ac.tokenMu.Unlock()
+	if ac.AccessToken != sent {
+		return true
+	}
+	return refreshAccessToken(ac) == nil
+}
+
+// isStaleCredential reports whether err is the 401 a mid-flight token expiry
+// produces. alpacon-server's Auth0 authenticator swallows an expired token and
+// returns no user (auth0/auth.py), so the request falls through to
+// IsAuthenticatedOr401 and raises DRF's NotAuthenticated—which no branch of the
+// server's error_code_handler rewrites, leaving a 401 with a detail and no code.
+// Every deliberate 401 (MFA required, IP not allowed, token ACL) carries a code,
+// so the empty code slot is what separates a credential this process can renew
+// from a refusal it cannot.
+func isStaleCredential(err error) bool {
+	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
+		return false
+	}
+	code, _ := utils.ParseErrorResponse(err)
+	return code == ""
+}
+
+// replayableClone clones req with a rewound body, reporting false when the body
+// cannot be rewound. Such a body carries no GetBody—a streamed upload that is
+// not a file—and replaying it would send a truncated one.
+func replayableClone(req *http.Request) (*http.Request, bool) {
+	if req.GetBody == nil {
+		if req.Body != nil {
+			return nil, false
+		}
+		return req.Clone(req.Context()), true
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return nil, false
+	}
+	clone := req.Clone(req.Context())
+	clone.Body = body
+	return clone, true
+}
+
+func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -328,22 +426,7 @@ func (ac *AlpaconClient) SendMultipartStreamRequest(url, contentType string, bod
 		req.ContentLength = contentLength
 	}
 
-	resp, err := ac.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := readJSONResponse(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
-	}
-
-	return respBody, nil
+	return ac.sendRequest(req)
 }
 
 // SendGetRequestToURL sends a GET request to an absolute URL (e.g., an external service)
@@ -365,6 +448,18 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 		return nil, err
 	}
 
+	resp, err := ac.downloadRoundTrip(req)
+	retry, ok := ac.renewedRequest(req, err)
+	if !ok {
+		return resp, err
+	}
+	return ac.downloadRoundTrip(retry)
+}
+
+// downloadRoundTrip surfaces a 401/403 as an error and leaves the body open on
+// every other status for the caller to stream. The status is tagged onto the
+// error so the stale-token retry—and utils.HTTPStatusCode—can read it.
+func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -373,7 +468,7 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, checkAuthStatus(resp.StatusCode, body)
+		return nil, withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode)
 	}
 
 	return resp, nil
@@ -395,9 +490,29 @@ func (ac *AlpaconClient) IsUsingHTTPS() (bool, error) {
 // RefreshToken refreshes the access token using the stored refresh token.
 // Uses ac.BaseURL (not config's WorkspaceURL) to stay consistent with the client's target.
 func (ac *AlpaconClient) RefreshToken() error {
+	ac.tokenMu.Lock()
+	defer ac.tokenMu.Unlock()
+	return ac.refreshLocked()
+}
+
+// accessToken reads the token a request should carry. Every read goes through
+// here because sendRequest can replace it between two requests.
+func (ac *AlpaconClient) accessToken() string {
+	ac.tokenMu.Lock()
+	defer ac.tokenMu.Unlock()
+	return ac.AccessToken
+}
+
+// refreshLocked runs the refresh-token grant and installs the new access token.
+// The caller holds tokenMu; auth0.RefreshAccessToken uses the bare HTTP client,
+// so it cannot re-enter sendRequest and deadlock on it.
+func (ac *AlpaconClient) refreshLocked() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return err
+	}
+	if cfg.RefreshToken == "" {
+		return errors.New("no refresh token stored; run 'alpacon login' to authenticate again")
 	}
 	tokenRes, err := auth0.RefreshAccessToken(ac.BaseURL, ac.HTTPClient, cfg.RefreshToken)
 	if err != nil {

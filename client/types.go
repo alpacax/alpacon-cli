@@ -14,6 +14,9 @@ type AlpaconClient struct {
 	Username    string
 	UserAgent   string
 
+	// tokenMu guards AccessToken, which sendRequest renews mid-flight when the
+	// server reports it stale. No package outside this one reads the field.
+	tokenMu  sync.Mutex
 	loadOnce sync.Once
 	loadErr  error
 }
