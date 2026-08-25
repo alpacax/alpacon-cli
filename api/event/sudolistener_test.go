@@ -345,3 +345,70 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 
 	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
 }
+
+func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
+	// The first attempt connects and subscribes, then every later session create
+	// fails: an outage that never reaches the dial, so onDialFailed never fires.
+	createThenFail := func(attempt int32) int {
+		if attempt == 1 {
+			return http.StatusCreated
+		}
+		return http.StatusInternalServerError
+	}
+	upgradeFirstOnly := func(attempt int32) bool { return attempt == 1 }
+
+	ts, sessions, _ := newWatcherTestServer(t, createThenFail, upgradeFirstOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second))
+
+		require.Eventually(t, func() bool {
+			return sessions.Load() >= 3
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+		"a session create that keeps failing is an outage and must be announced once")
+}
+
+func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
+	// The dial keeps succeeding but every resubscribe after the first fails, so the
+	// channel is dead even though onDialFailed never fires.
+	createThenFail := func(attempt int32) int {
+		if attempt == 1 {
+			return http.StatusCreated
+		}
+		return http.StatusInternalServerError
+	}
+
+	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, createThenFail, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second))
+
+		require.Eventually(t, func() bool {
+			return subscribes.Load() >= 3
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+		"a resubscribe that keeps failing is an outage and must be announced once")
+}
