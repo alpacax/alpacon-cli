@@ -42,12 +42,6 @@ type wsListener struct {
 	conn        *websocket.Conn
 }
 
-// isFatalRequestError reports whether retrying cause is pointless: a 4xx names a
-// bad request or an expired login, which the next attempt would hit again.
-func isFatalRequestError(cause error) bool {
-	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
-}
-
 // newProvisionedWSListener builds the skeleton for a listener that obtains a new
 // URL for every dial attempt. ac may be nil (empty header, for tests).
 func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
@@ -195,4 +189,10 @@ func (w *wsListener) connectAndListen() (connected bool) {
 
 		w.handleFrame(message)
 	}
+}
+
+// isFatalRequestError reports whether retrying cause is pointless: a 4xx names a
+// bad request or an expired login, which the next attempt would hit again.
+func isFatalRequestError(cause error) bool {
+	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
 }
