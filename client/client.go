@@ -301,9 +301,9 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 // another request in flight already renewed it, and retrying with that one beats
 // spending a second refresh-token grant on the same expiry.
 func (ac *AlpaconClient) renewAccessToken(sent string) bool {
-	ac.tokenMu.Lock()
-	defer ac.tokenMu.Unlock()
-	if ac.AccessToken != sent {
+	ac.refreshMu.Lock()
+	defer ac.refreshMu.Unlock()
+	if ac.accessToken() != sent {
 		return true
 	}
 	return refreshAccessToken(ac) == nil
@@ -490,8 +490,8 @@ func (ac *AlpaconClient) IsUsingHTTPS() (bool, error) {
 // RefreshToken refreshes the access token using the stored refresh token.
 // Uses ac.BaseURL (not config's WorkspaceURL) to stay consistent with the client's target.
 func (ac *AlpaconClient) RefreshToken() error {
-	ac.tokenMu.Lock()
-	defer ac.tokenMu.Unlock()
+	ac.refreshMu.Lock()
+	defer ac.refreshMu.Unlock()
 	return ac.refreshLocked()
 }
 
@@ -503,9 +503,16 @@ func (ac *AlpaconClient) accessToken() string {
 	return ac.AccessToken
 }
 
+// setAccessToken installs the token every later request carries.
+func (ac *AlpaconClient) setAccessToken(token string) {
+	ac.tokenMu.Lock()
+	defer ac.tokenMu.Unlock()
+	ac.AccessToken = token
+}
+
 // refreshLocked runs the refresh-token grant and installs the new access token.
-// The caller holds tokenMu; auth0.RefreshAccessToken uses the bare HTTP client,
-// so it cannot re-enter sendRequest and deadlock on it.
+// The caller holds refreshMu; auth0.RefreshAccessToken uses the bare HTTP
+// client, so it cannot re-enter sendRequest and deadlock on it.
 func (ac *AlpaconClient) refreshLocked() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -518,7 +525,7 @@ func (ac *AlpaconClient) refreshLocked() error {
 	if err != nil {
 		return err
 	}
-	ac.AccessToken = tokenRes.AccessToken
+	ac.setAccessToken(tokenRes.AccessToken)
 	return nil
 }
 

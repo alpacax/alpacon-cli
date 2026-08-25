@@ -678,19 +678,26 @@ func newBearerTestClient(baseURL, accessToken string) *AlpaconClient {
 	}
 }
 
-// stubTokenRenewal swaps the refresh seam for one that installs newToken and
-// counts its runs. The seam runs with tokenMu held, so it writes the field the
-// way refreshLocked does.
-func stubTokenRenewal(t *testing.T, newToken string) *int {
+// swapTokenRenewal points the refresh seam at renew for the rest of the test.
+// The restore lives here so no test can leak a stub into the next one.
+func swapTokenRenewal(t *testing.T, renew func(*AlpaconClient) error) {
 	t.Helper()
 	orig := refreshAccessToken
 	t.Cleanup(func() { refreshAccessToken = orig })
+	refreshAccessToken = renew
+}
+
+// stubTokenRenewal swaps the refresh seam for one that installs newToken and
+// counts its runs. The seam runs with refreshMu held, so it installs the token
+// through setAccessToken the way refreshLocked does.
+func stubTokenRenewal(t *testing.T, newToken string) *int {
+	t.Helper()
 	calls := 0
-	refreshAccessToken = func(ac *AlpaconClient) error {
+	swapTokenRenewal(t, func(ac *AlpaconClient) error {
 		calls++
-		ac.AccessToken = newToken
+		ac.setAccessToken(newToken)
 		return nil
-	}
+	})
 	return &calls
 }
 
@@ -803,10 +810,10 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
+// A renewal this process cannot complete leaves it nothing better to send, so
+// the caller reads the server's own rejection rather than the renewal's.
 func TestSendRequest_RenewalFailureSurfacesTheOriginal401(t *testing.T) {
-	orig := refreshAccessToken
-	t.Cleanup(func() { refreshAccessToken = orig })
-	refreshAccessToken = func(*AlpaconClient) error { return errors.New("refresh token rejected") }
+	swapTokenRenewal(t, func(*AlpaconClient) error { return errors.New("refresh token rejected") })
 
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -950,4 +957,37 @@ func TestSendMultipartStreamRequest_UnrewindableBodyIsNotReplayed(t *testing.T) 
 	require.Error(t, err)
 	assert.Equal(t, 1, *renewals, "the token is renewed, but the request cannot be replayed")
 	assert.Equal(t, 1, requests)
+}
+
+// The refresh-token grant is unbounded network I/O—no HTTP client on that path
+// sets a timeout—so it must not hold the lock every other request takes to read
+// the token. A background goroutine sharing this client (api/event/sudolistener.go
+// spawns one per MFA frame) would otherwise stall the whole session on one slow
+// Auth0 call.
+func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	swapTokenRenewal(t, func(ac *AlpaconClient) error {
+		close(entered)
+		<-release
+		ac.setAccessToken("fresh")
+		return nil
+	})
+
+	ac := newBearerTestClient("https://example.com", "stale")
+	renewed := make(chan bool, 1)
+	go func() { renewed <- ac.renewAccessToken("stale") }()
+	<-entered
+
+	read := make(chan string, 1)
+	go func() { read <- ac.accessToken() }()
+	select {
+	case token := <-read:
+		assert.Equal(t, "stale", token, "a read during the grant sees the token still in force")
+	case <-time.After(2 * time.Second):
+		t.Fatal("a token read blocked on an in-flight refresh")
+	}
+
+	close(release)
+	assert.True(t, <-renewed, "the stubbed grant installs a token: %q", "fresh")
 }
