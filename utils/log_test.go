@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"os"
 	"strings"
 	"testing"
@@ -176,4 +177,26 @@ func TestCliDebug_BreaksTheLineOnlyWhileASpinnerRuns(t *testing.T) {
 
 		assert.True(t, strings.HasPrefix(stderr, "\n"), "the break must lead the write: %q", stderr)
 	})
+}
+
+func TestWarnTerminalTextAltered(t *testing.T) {
+	pinColor(t, false)
+
+	var buf bytes.Buffer
+	WarnTerminalTextAltered(&buf, "  ")
+
+	got := buf.String()
+	assert.True(t, strings.HasPrefix(got, "  Warning"), "the indent must come before the label: %q", got)
+	assert.True(t, strings.HasSuffix(got, "\n"), "the warning must end with a newline: %q", got)
+	assert.Equal(t, 1, strings.Count(got, "\n"))
+	assert.Contains(t, got, "control characters")
+}
+
+func TestWarnTerminalTextAltered_ColorsTheLabel(t *testing.T) {
+	pinColor(t, true)
+
+	var buf bytes.Buffer
+	WarnTerminalTextAltered(&buf, "")
+
+	assert.Contains(t, buf.String(), Yellow("Warning"))
 }

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -19,26 +20,29 @@ func reportCLIError() {
 	fmt.Fprintln(os.Stderr, "For issues, check the latest version or report on", gitIssueURL)
 }
 
-// cliMessage sanitizes a rendered message before it reaches the terminal:
-// client.parseAPIError puts the server's error detail into every one of these
-// helpers through %s, and the --output json envelope is the only path escaping
-// it today (escapeJSONControls).
+// cliMessage exists because client.parseAPIError puts the server's error detail
+// into every one of these helpers through %s; the --output json envelope is the
+// only path escaping it instead (escapeJSONControls).
 //
-// Per line, because SanitizeTerminalText drops \n and callers pass multi-line
-// guidance. Splitting after the format is rendered means a \n from the server
-// survives too, so the detail can add a line that looks like our own prefix.
-// Accepted: \r is still dropped, so it can only append below, never overwrite
-// what is already on screen.
+// Sanitizing after the format is rendered means a \n from the server survives
+// too, so the detail can add a line that looks like our own prefix. Accepted:
+// \r is still dropped, so it can only append below, never overwrite what is
+// already on screen.
 //
 // The arguments go through the same strip, so never hand a Color()-wrapped
 // value to a Cli* helper—it loses its highlight. Colorize after sanitizing,
 // the way cmd/server prints a registration key.
 func cliMessage(msg string, args ...any) string {
-	lines := strings.Split(fmt.Sprintf(msg, args...), "\n")
-	for i, line := range lines {
-		lines[i] = SanitizeTerminalText(line)
-	}
-	return strings.Join(lines, "\n")
+	clean, _ := SanitizeTerminalBlock(fmt.Sprintf(msg, args...))
+	return clean
+}
+
+// WarnTerminalTextAltered takes a writer and an indent because its callers
+// print outside the Cli* helpers and line the warning up with the value it is
+// about.
+func WarnTerminalTextAltered(w io.Writer, indent string) {
+	_, _ = fmt.Fprintf(w, "%s%s: control characters from the server were removed from the text below.\n",
+		indent, Yellow("Warning"))
 }
 
 // CliError handles all error messages in the CLI.

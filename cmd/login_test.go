@@ -846,3 +846,66 @@ func writeLoginCommandTestConfig(t *testing.T, home string) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), data, 0600))
 }
+
+func TestPrintDeviceCodePrompt(t *testing.T) {
+	tests := []struct {
+		name            string
+		verificationURI string
+		userCode        string
+		wantContains    []string
+		wantWarning     bool
+		wantPrintedURI  string
+	}{
+		{
+			name:            "prints a clean pair without a warning",
+			verificationURI: "https://demo.alpacon.io/activate?code=ABCD-1234",
+			userCode:        "ABCD-1234",
+			wantContains:    []string{"https://demo.alpacon.io/activate?code=ABCD-1234", "ABCD-1234"},
+			wantPrintedURI:  "https://demo.alpacon.io/activate?code=ABCD-1234",
+		},
+		{
+			name:            "warns when the URL carried an escape",
+			verificationURI: "https://demo.alpacon.io\x1b[2Khttps://evil.example.com",
+			userCode:        "ABCD-1234",
+			wantContains:    []string{"https://demo.alpacon.iohttps://evil.example.com"},
+			wantWarning:     true,
+			wantPrintedURI:  "https://demo.alpacon.iohttps://evil.example.com",
+		},
+		{
+			name:            "warns when the URL carried an injected line",
+			verificationURI: "https://demo.alpacon.io\n\nVerification code: FAKE-0000",
+			userCode:        "ABCD-1234",
+			wantContains:    []string{"https://demo.alpacon.ioVerification code: FAKE-0000"},
+			wantWarning:     true,
+			wantPrintedURI:  "https://demo.alpacon.ioVerification code: FAKE-0000",
+		},
+		{
+			name:            "warns when the code carried a bidi override",
+			verificationURI: "https://demo.alpacon.io/activate",
+			userCode:        "ABCD\u202e-1234",
+			wantContains:    []string{"ABCD-1234"},
+			wantWarning:     true,
+			wantPrintedURI:  "https://demo.alpacon.io/activate",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			printedURI := printDeviceCodePrompt(&buf, tt.verificationURI, tt.userCode)
+
+			got := buf.String()
+			assert.Equal(t, tt.wantPrintedURI, printedURI)
+			assert.Contains(t, got, printedURI, "the browser must open the URL the operator was shown")
+			assert.NotContains(t, got, "\x1b[2K")
+			assert.NotContains(t, got, "\u202e")
+			for _, want := range tt.wantContains {
+				assert.Contains(t, got, want)
+			}
+			if tt.wantWarning {
+				assert.Contains(t, got, "Warning")
+			} else {
+				assert.NotContains(t, got, "Warning")
+			}
+		})
+	}
+}

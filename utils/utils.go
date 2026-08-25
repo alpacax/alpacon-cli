@@ -528,6 +528,29 @@ func SanitizeTerminalText(s string) string {
 	return StripControlChars(StripFormatAndANSI(s))
 }
 
+// SanitizeTerminalLine is SanitizeTerminalText plus the answer to whether it had
+// to take anything out. A \n counts as altered here: the caller's value is one
+// line by contract, so a newline in it is a forged line and not a line ending
+// worth keeping.
+func SanitizeTerminalLine(s string) (clean string, altered bool) {
+	clean = SanitizeTerminalText(s)
+	return clean, clean != s
+}
+
+// SanitizeTerminalBlock sanitizes per line, because SanitizeTerminalText drops
+// \n and callers print multi-line values the operator saves as files. CRLF is
+// folded first, or a server sending DOS line endings would report every value
+// as altered; a lone \r is still dropped, and does report altered.
+func SanitizeTerminalBlock(s string) (clean string, altered bool) {
+	normalized := strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	for i, line := range lines {
+		lines[i] = SanitizeTerminalText(line)
+	}
+	clean = strings.Join(lines, "\n")
+	return clean, clean != normalized
+}
+
 // ProcessEditedData facilitates user modifications to original data,
 // formats it, supports editing via a temp file, compares the edited data against the original,
 // and parses it into JSON. If no changes are made, the update is aborted and an error is returned.
