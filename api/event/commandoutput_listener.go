@@ -26,12 +26,17 @@ type ChunkEvent struct {
 // event WebSocket, exposing chunks on Chunks() and the command's fin on
 // Finished().
 //
-// Lifecycle: NewCommandOutputListener -> Start -> (consume Chunks) -> Stop.
-// Stop is idempotent and safe to call from any goroutine.
+// Lifecycle: NewCommandOutputListener -> Start -> subscribeTo -> (consume Chunks) -> Stop.
+// Stop is idempotent and safe to call from any goroutine. Event channel tokens are
+// single-use, so every dial provisions its own session and re-subscribes.
 type CommandOutputListener struct {
 	*wsListener
-	cmdMu     sync.Mutex // guards commandID
+	ac        *client.AlpaconClient
+	cmdMu     sync.Mutex // guards commandID, serverID
 	commandID string
+	serverID  string
+	chanMu    sync.Mutex // guards channelID
+	channelID string
 	chunks    chan ChunkEvent
 	finished  chan struct{}
 }
@@ -50,16 +55,66 @@ type commandOutputEnvelope struct {
 }
 
 // NewCommandOutputListener constructs a listener without connecting. ac may be
-// nil (empty header, for tests); commandID may be set later via setCommandID.
-func NewCommandOutputListener(ac *client.AlpaconClient, wsURL, commandID string) *CommandOutputListener {
+// nil (empty header, for tests); the targets are set later via setTargets, because
+// SubmitCommand must run once the WS is already connected.
+func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
 	l := &CommandOutputListener{
-		wsListener: newWSListener(ac, wsURL, commandOutputConnectTimeout),
-		commandID:  commandID,
-		chunks:     make(chan ChunkEvent, commandOutputChunkBuffer),
-		finished:   make(chan struct{}, 1),
+		ac:       ac,
+		chunks:   make(chan ChunkEvent, commandOutputChunkBuffer),
+		finished: make(chan struct{}, 1),
 	}
+	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, commandOutputConnectTimeout)
 	l.handleFrame = l.handleMessage
+	l.onConnected = l.subscribe
 	return l
+}
+
+func (l *CommandOutputListener) provisionSession() (string, error) {
+	session, err := CreateEventSession(l.ac)
+	if err != nil {
+		return "", err
+	}
+
+	l.chanMu.Lock()
+	l.channelID = session.ChannelID
+	l.chanMu.Unlock()
+
+	return session.WebsocketURL, nil
+}
+
+// subscribeTo issues the first subscription, once the command exists. Every later
+// connect re-issues it through onConnected.
+func (l *CommandOutputListener) subscribeTo(commandID, serverID string) error {
+	l.setTargets(commandID, serverID)
+	return l.subscribe()
+}
+
+func (l *CommandOutputListener) subscribe() error {
+	l.cmdMu.Lock()
+	commandID, serverID := l.commandID, l.serverID
+	l.cmdMu.Unlock()
+
+	// The command is submitted only after the WS is up, so the first connect has
+	// nothing to subscribe to yet.
+	if commandID == "" {
+		return nil
+	}
+
+	l.chanMu.Lock()
+	channelID := l.channelID
+	l.chanMu.Unlock()
+
+	if err := SubscribeEvent(l.ac, channelID, EventTypeCommandOutput, commandID); err != nil {
+		return err
+	}
+
+	// Chunks carry no end marker, so without this the exit waits for the poll to
+	// notice. Best effort: on failure that poll stays the only terminal signal.
+	if serverID != "" {
+		_ = SubscribeEvent(l.ac, channelID, EventTypeCommandFin, serverID)
+	}
+
+	return nil
 }
 
 // Chunks returns a receive-only channel of parsed chunk events.
@@ -102,10 +157,11 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	}
 }
 
-// setCommandID assigns the commandID after construction. Used because
-// SubmitCommand must run after the WS is already connected.
-func (l *CommandOutputListener) setCommandID(id string) {
+// setTargets names the command whose chunks to keep and the server whose fin event
+// ends the stream.
+func (l *CommandOutputListener) setTargets(commandID, serverID string) {
 	l.cmdMu.Lock()
-	l.commandID = id
+	l.commandID = commandID
+	l.serverID = serverID
 	l.cmdMu.Unlock()
 }

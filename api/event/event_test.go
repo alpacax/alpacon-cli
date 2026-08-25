@@ -856,15 +856,13 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 // so a test can hand streamSubscribed a poll tick of its own choosing.
 func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string, out io.Writer, tick time.Duration, waitApproval bool) <-chan error {
 	t.Helper()
-	session, err := CreateEventSession(ac)
-	require.NoError(t, err)
-	listener := NewCommandOutputListener(ac, session.WebsocketURL, cmdID)
+	listener := NewCommandOutputListener(ac)
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, session, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
+		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
 	}()
 	return done
 }

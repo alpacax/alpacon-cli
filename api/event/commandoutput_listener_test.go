@@ -2,13 +2,10 @@ package event
 
 import (
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +42,8 @@ func TestCommandOutputListener_HandleMessage_FiltersAndEmits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewCommandOutputListener(nil, "", "cmd-1")
+			l := NewCommandOutputListener(nil)
+			l.setTargets("cmd-1", "")
 			l.handleMessage([]byte(tt.payload))
 
 			select {
@@ -87,7 +85,8 @@ func TestCommandOutputListener_HandleMessage_FinishedIsPerCommand(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := NewCommandOutputListener(nil, "", "cmd-1")
+			l := NewCommandOutputListener(nil)
+			l.setTargets("cmd-1", "")
 			l.handleMessage([]byte(tt.payload))
 
 			select {
@@ -105,17 +104,11 @@ func TestCommandOutputListener_HandleMessage_FinishedIsPerCommand(t *testing.T) 
 }
 
 func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
-	upgrader := websocket.Upgrader{}
 	cmdID := "cmd-uuid"
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		defer func() { _ = conn.Close() }()
 
-		// Emit two chunks
 		for _, c := range []ChunkEvent{{Seq: 0, Content: "a"}, {Seq: 1, Content: "b"}} {
 			env := map[string]any{
 				"event_type": "command_output",
@@ -135,12 +128,11 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 				return
 			}
 		}
-	}))
-	defer ts.Close()
+	})
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
-
-	l := NewCommandOutputListener(nil, wsURL, cmdID)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.setTargets(cmdID, "")
 	l.Start()
 	defer l.Stop()
 
@@ -161,17 +153,9 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 }
 
 func TestCommandOutputListener_Reconnects(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-	var connectionCount atomic.Int32
 	cmdID := "cmd-uuid"
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		n := connectionCount.Add(1)
-
+	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// First connection: emit one chunk and drop
 			env := `{"event_type":"command_output","payload":{"command_id":"` + cmdID + `","seq":0,"content":"first"}}`
@@ -187,11 +171,12 @@ func TestCommandOutputListener_Reconnects(t *testing.T) {
 				return
 			}
 		}
-	}))
-	defer ts.Close()
+	})
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
-	l := NewCommandOutputListener(nil, wsURL, cmdID)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.setTargets(cmdID, "")
+	l.reconnectBaseDelay = testReconnectBaseDelay
 	l.Start()
 	defer l.Stop()
 
@@ -204,11 +189,59 @@ func TestCommandOutputListener_Reconnects(t *testing.T) {
 		case c := <-l.Chunks():
 			got = append(got, c)
 		case <-timeout:
-			t.Fatalf("timeout, got %+v (connections=%d)", got, connectionCount.Load())
+			t.Fatalf("timeout, got %+v (sessions=%d)", got, sessions.Load())
 		}
 	}
 
 	assert.Equal(t, ChunkEvent{Seq: 0, Content: "first"}, got[0])
 	assert.Equal(t, ChunkEvent{Seq: 1, Content: "second"}, got[1])
-	assert.GreaterOrEqual(t, connectionCount.Load(), int32(2))
+	assert.GreaterOrEqual(t, sessions.Load(), int32(2))
+}
+
+func TestCommandOutputListener_CreatesANewSessionAndResubscribesOnReconnect(t *testing.T) {
+	ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
+		if n == 1 {
+			// The token is single-use, so recovering means a whole new session.
+			_ = conn.Close()
+			return
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.reconnectBaseDelay = testReconnectBaseDelay
+	l.Start()
+	defer l.Stop()
+
+	require.True(t, l.WaitConnected(3*time.Second))
+	require.NoError(t, l.subscribeTo("cmd-1", "srv-1"))
+
+	assert.Eventually(t, func() bool {
+		return sessions.Load() >= 2 && subscribes.Load() >= 3
+	}, 5*time.Second, 10*time.Millisecond, "a reconnect must create a new session and re-issue both subscriptions")
+}
+
+func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
+	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.Start()
+	defer l.Stop()
+
+	// The command is submitted only after the WS is up, so there is nothing to
+	// subscribe to on the first connect.
+	require.True(t, l.WaitConnected(3*time.Second))
+	assert.Equal(t, int32(0), subscribes.Load())
 }

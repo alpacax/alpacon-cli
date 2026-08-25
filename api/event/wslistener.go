@@ -41,12 +41,6 @@ type wsListener struct {
 	conn        *websocket.Conn
 }
 
-// newWSListener builds the skeleton for a listener that always dials the same
-// URL. ac may be nil (empty header, for tests).
-func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time.Duration) *wsListener {
-	return newProvisionedWSListener(ac, func() (string, error) { return wsURL, nil }, handshakeTimeout)
-}
-
 // newProvisionedWSListener builds the skeleton for a listener that obtains a new
 // URL for every dial attempt. ac may be nil (empty header, for tests).
 func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
