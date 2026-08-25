@@ -324,7 +324,15 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	if ac.accessToken() != sent {
 		return true
 	}
-	return refreshAccessToken(ac) == nil
+	if err := refreshAccessToken(ac); err != nil {
+		// The caller goes on to surface the server's own 401, which says to log
+		// in again but not why the renewal behind it failed. Without this line
+		// a long wait that dies on a rejected refresh token leaves no trace of
+		// the rejection.
+		utils.CliDebug("access token renewal failed: %v", err)
+		return false
+	}
+	return true
 }
 
 // isStaleCredential reports whether err is the 401 a mid-flight token expiry
