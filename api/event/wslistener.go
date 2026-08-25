@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 )
 
@@ -39,6 +40,12 @@ type wsListener struct {
 	closeOnce   sync.Once
 	mu          sync.Mutex // guards conn
 	conn        *websocket.Conn
+}
+
+// isFatalRequestError reports whether retrying cause is pointless: a 4xx names a
+// bad request or an expired login, which the next attempt would hit again.
+func isFatalRequestError(cause error) bool {
+	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
 }
 
 // newProvisionedWSListener builds the skeleton for a listener that obtains a new

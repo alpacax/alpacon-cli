@@ -3,6 +3,7 @@ package websh
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -356,10 +357,8 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 
 	if !listener.WaitConnected(5 * time.Second) {
 		listener.Stop()
-		// An older server without the events API answers 404; that is not worth a
-		// warning, and the session runs fine without sudo MFA events.
-		if err := listener.Err(); err != nil && !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
+		if warning := sudoListenerWarning(listener.Err()); warning != "" {
+			utils.CliWarning("%s", warning)
 		}
 		return nil
 	}
@@ -367,14 +366,16 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	return listener
 }
 
-// isNotFoundError checks if an error message indicates a 404/not-found response.
-// AlpaconClient.SendPostRequest returns the server's error detail (e.g., "Not found.")
-// rather than the raw HTTP status code.
-func isNotFoundError(err error) bool {
-	if err == nil {
-		return false
+// sudoListenerWarning explains why the sudo MFA listener never connected, or
+// returns "" when the failure is not worth telling the user about. A 404 means an
+// older server without the events API; the websh session runs fine without them.
+// A nil cause means the listener kept retrying until the wait ran out.
+func sudoListenerWarning(cause error) string {
+	if utils.HTTPStatusCode(cause) == http.StatusNotFound {
+		return ""
 	}
-	msg := strings.TrimSpace(strings.ToLower(err.Error()))
-	return msg == "not found" || msg == "not found." ||
-		strings.HasSuffix(msg, ": not found") || strings.HasSuffix(msg, ": not found.")
+	if cause == nil {
+		return "Sudo MFA listener unavailable: timed out connecting to the event channel"
+	}
+	return fmt.Sprintf("Sudo MFA listener unavailable: %s", cause)
 }

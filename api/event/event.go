@@ -380,7 +380,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, fmt.Errorf("event websocket connect timeout"))
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, listenerFailure(listener))
 	}
 
 	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
@@ -402,7 +402,7 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, cmdID, out, true, fmt.Errorf("event websocket connect timeout"))
+		return runCommandFallbackFromID(ac, cmdID, out, true, listenerFailure(listener))
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
@@ -411,6 +411,15 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 		serverID = details.Server.ID
 	}
 	return streamSubscribed(ac, listener, cmdID, serverID, out, timeout, streamPollTick, true)
+}
+
+// listenerFailure names why the listener never connected: the server's own error
+// when it reached the server at all, the connect budget otherwise.
+func listenerFailure(listener *CommandOutputListener) error {
+	if err := listener.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("event websocket connect timeout")
 }
 
 // streamSubscribed subscribes to cmdID's output channel and to serverID's fin

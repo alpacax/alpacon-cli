@@ -122,7 +122,7 @@ func (sl *SudoListener) subscribe() error {
 // is left to the reconnect loop.
 func (sl *SudoListener) failIfFatal(cause error) error {
 	sl.stateMu.Lock()
-	fatal := !sl.subscribed && utils.IsFatalClientError(utils.HTTPStatusCode(cause))
+	fatal := !sl.subscribed && isFatalRequestError(cause)
 	if fatal {
 		sl.err = cause
 	}

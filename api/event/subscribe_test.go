@@ -5,10 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -145,7 +145,7 @@ func TestSubscribeEvent_ServerError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to subscribe to sudo events: ")
 }
 
-func TestSubscribeEvent_NotFoundKeepsServerMessageLast(t *testing.T) {
+func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -160,7 +160,7 @@ func TestSubscribeEvent_NotFoundKeepsServerMessageLast(t *testing.T) {
 
 	err := SubscribeEvent(ac, "channel-456", EventTypeSudo, "session-123")
 	require.Error(t, err)
-	// websh's isNotFoundError matches a literal ": not found." suffix on the
-	// lowercased message, so the wrap must keep the server's detail last.
-	assert.True(t, strings.HasSuffix(strings.ToLower(err.Error()), ": not found."), "got %q", err.Error())
+	// websh reads the status off this error to stay quiet on an older server, so the
+	// wrap must keep it reachable.
+	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }

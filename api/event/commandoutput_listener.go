@@ -35,8 +35,9 @@ type CommandOutputListener struct {
 	cmdMu     sync.Mutex // guards commandID, serverID
 	commandID string
 	serverID  string
-	chanMu    sync.Mutex // guards channelID
+	stateMu   sync.Mutex // guards channelID, err
 	channelID string
+	err       error
 	chunks    chan ChunkEvent
 	finished  chan struct{}
 }
@@ -69,15 +70,32 @@ func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
 	return l
 }
 
+// Err returns why the listener could not connect, so a caller that only sees
+// WaitConnected time out can still report the server's own reason.
+func (l *CommandOutputListener) Err() error {
+	l.stateMu.Lock()
+	defer l.stateMu.Unlock()
+	return l.err
+}
+
 func (l *CommandOutputListener) provisionSession() (string, error) {
 	session, err := CreateEventSession(l.ac)
 	if err != nil {
+		l.stateMu.Lock()
+		l.err = err
+		l.stateMu.Unlock()
+		// A 4xx means a bad request or an expired login, so retrying only burns the
+		// caller's connect budget before it falls back to polling anyway.
+		if isFatalRequestError(err) {
+			l.Stop()
+		}
 		return "", err
 	}
 
-	l.chanMu.Lock()
+	l.stateMu.Lock()
 	l.channelID = session.ChannelID
-	l.chanMu.Unlock()
+	l.err = nil
+	l.stateMu.Unlock()
 
 	return session.WebsocketURL, nil
 }
@@ -100,9 +118,9 @@ func (l *CommandOutputListener) subscribe() error {
 		return nil
 	}
 
-	l.chanMu.Lock()
+	l.stateMu.Lock()
 	channelID := l.channelID
-	l.chanMu.Unlock()
+	l.stateMu.Unlock()
 
 	if err := SubscribeEvent(l.ac, channelID, EventTypeCommandOutput, commandID); err != nil {
 		return err

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -87,7 +86,7 @@ func (w *Watcher) Err() error {
 // The session request carries neither --type nor --target, so only a fatal 4xx proves
 // retrying pointless. Anything else gets the retry window a dial failure already gets.
 func (w *Watcher) sessionCreateFailed(cause error) error {
-	if utils.IsFatalClientError(utils.HTTPStatusCode(cause)) {
+	if isFatalRequestError(cause) {
 		return w.fail(cause)
 	}
 

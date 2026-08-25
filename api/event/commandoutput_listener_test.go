@@ -245,3 +245,24 @@ func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
 	require.True(t, l.WaitConnected(3*time.Second))
 	assert.Equal(t, int32(0), subscribes.Load())
 }
+
+func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
+	ts, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.Start()
+	defer l.Stop()
+
+	// A rejected session must end the wait immediately rather than burning the whole
+	// connect budget, and the caller needs the server's reason for its fallback.
+	assert.False(t, l.WaitConnected(commandOutputConnectTimeout))
+
+	err := l.Err()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create event session")
+}
+
+func TestListenerFailureFallsBackToTheConnectBudget(t *testing.T) {
+	assert.Contains(t, listenerFailure(NewCommandOutputListener(nil)).Error(), "connect timeout")
+}

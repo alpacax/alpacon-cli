@@ -270,52 +270,41 @@ func TestCommandParsing(t *testing.T) {
 	}
 }
 
-func TestIsNotFoundError(t *testing.T) {
+// statusErr carries an HTTP status the way client's own errors do, so the warning
+// decision can be tested without standing up a server.
+type statusErr struct {
+	status int
+}
+
+func (e statusErr) Error() string       { return fmt.Sprintf("server said %d", e.status) }
+func (e statusErr) HTTPStatusCode() int { return e.status }
+
+func TestSudoListenerWarning(t *testing.T) {
 	tests := []struct {
-		name     string
-		err      error
-		expected bool
+		name  string
+		cause error
+		want  string
 	}{
 		{
-			name:     "server returns Not found.",
-			err:      fmt.Errorf("Not found."),
-			expected: true,
+			name:  "an older server without the events API stays silent",
+			cause: fmt.Errorf("failed to create event session: %w", statusErr{status: http.StatusNotFound}),
+			want:  "",
 		},
 		{
-			name:     "exact not found without period",
-			err:      fmt.Errorf("Not found"),
-			expected: true,
+			name:  "a rejected request names the server's reason",
+			cause: fmt.Errorf("failed to create event session: %w", statusErr{status: http.StatusBadRequest}),
+			want:  "Sudo MFA listener unavailable: failed to create event session: server said 400",
 		},
 		{
-			name:     "case insensitive NOT FOUND",
-			err:      fmt.Errorf("NOT FOUND"),
-			expected: true,
-		},
-		{
-			name:     "wrapped not found error",
-			err:      fmt.Errorf("failed to create event session: Not found"),
-			expected: true,
-		},
-		{
-			name:     "wrapped with period",
-			err:      fmt.Errorf("failed to subscribe: Not found."),
-			expected: true,
-		},
-		{
-			name:     "unrelated error",
-			err:      fmt.Errorf("connection refused"),
-			expected: false,
-		},
-		{
-			name:     "api insufficient data",
-			err:      fmt.Errorf("code: api_insufficient_data"),
-			expected: false,
+			name:  "no cause at all means the wait ran out",
+			cause: nil,
+			want:  "Sudo MFA listener unavailable: timed out connecting to the event channel",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isNotFoundError(tt.err))
+			assert.Equal(t, tt.want, sudoListenerWarning(tt.cause))
 		})
 	}
 }
