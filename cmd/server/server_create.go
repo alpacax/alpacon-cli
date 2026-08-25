@@ -293,19 +293,30 @@ func printGuideVerifyFooter(stepNum int) {
 	fmt.Fprintln(os.Stderr, "  Your server will appear in the Servers list within moments.")
 }
 
+// printGuideCommand warns rather than withholds: the operator decides, and an
+// automation reading this guide keeps working. The warning goes above the
+// value, so a guide with several altered fields says which ones.
+func printGuideCommand(w io.Writer, s string) {
+	clean, altered := utils.SanitizeTerminalBlock(s)
+	if altered {
+		utils.WarnTerminalTextAltered(w, "  ")
+	}
+	_, _ = fmt.Fprintln(w, clean)
+}
+
 func displayGuideFromJSON(guide server.RegistrationMethodGuideJsonResponse) {
 	printGuideHeader(guide.PlatformLabel, guide.ServerName, guide.AlpaconURL)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Alpamon"))
 	fmt.Fprintln(os.Stderr)
 	for _, installCmd := range guide.InstallCommands {
-		fmt.Fprintln(os.Stderr, installCmd)
+		printGuideCommand(os.Stderr, installCmd)
 	}
 	fmt.Fprintln(os.Stderr)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Register"))
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.RegisterCommand)
+	printGuideCommand(os.Stderr, guide.RegisterCommand)
 	fmt.Fprintln(os.Stderr)
 
 	printGuideVerifyFooter(3)
@@ -316,31 +327,31 @@ func displayAnsibleGuideFromJSON(guide server.AnsibleGuideJsonResponse) {
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 1 — Install Ansible collection"))
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.CollectionInstall)
+	printGuideCommand(os.Stderr, guide.CollectionInstall)
 	fmt.Fprintln(os.Stderr)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 2 — Configure inventory"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Save as inventory.ini:")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.InventorySnippet)
+	printGuideCommand(os.Stderr, guide.InventorySnippet)
 	fmt.Fprintln(os.Stderr)
 
 	fmt.Fprintln(os.Stderr, utils.Bold("Step 3 — Register"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, utils.Bold("Option A — Bundled playbook (recommended):"))
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.RunCommandQuick)
+	printGuideCommand(os.Stderr, guide.RunCommandQuick)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, utils.Bold("Option B — Custom playbook:"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Save as playbook.yml:")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.PlaybookSnippet)
+	printGuideCommand(os.Stderr, guide.PlaybookSnippet)
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Then run:")
 	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, guide.RunCommandCustom)
+	printGuideCommand(os.Stderr, guide.RunCommandCustom)
 	fmt.Fprintln(os.Stderr)
 
 	printGuideVerifyFooter(4)
