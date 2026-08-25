@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	checkPrivilegesURL = "/api/iam/users/-"
+	checkPrivilegesURL = "/api/iam/users/-/"
 )
 
 type apiError struct {
