@@ -356,6 +356,11 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 
 	if !listener.WaitConnected(5 * time.Second) {
 		listener.Stop()
+		// An older server without the events API answers 404; that is not worth a
+		// warning, and the session runs fine without sudo MFA events.
+		if err := listener.Err(); err != nil && !isNotFoundError(err) {
+			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
+		}
 		return nil
 	}
 

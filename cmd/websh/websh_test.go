@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/api/websh"
+	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -443,4 +448,47 @@ func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
 	assert.Equal(t, "prod", args.Server)
 	assert.Equal(t, "psql -h localhost", args.Command)
 	assert.Equal(t, parsed.Env, args.Env)
+}
+
+// newSudoListenerTestServer serves only the event session endpoint, with the status
+// and body the test wants, so setupSudoListener's failure path can be driven directly.
+func newSudoListenerTestServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/events/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	})
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestSetupSudoListener_StaysSilentOnNotFound(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusNotFound, `{"detail":"Not found."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var listener *event.SudoListener
+	_, stderr := testutil.CaptureOutput(t, func() {
+		listener = setupSudoListener(ac, "session-1", "my-server")
+	})
+
+	assert.Nil(t, listener)
+	assert.Empty(t, stderr, "an older server without the events API must not warn")
+}
+
+func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var listener *event.SudoListener
+	_, stderr := testutil.CaptureOutput(t, func() {
+		listener = setupSudoListener(ac, "session-1", "my-server")
+	})
+
+	assert.Nil(t, listener)
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
 }
