@@ -290,7 +290,6 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 			output:       denialLine("not a code") + denialLine("SUDO_BRAND_NEW_CODE"),
 			wantContains: []string{"SUDO_BRAND_NEW_CODE"},
 		},
-		{"prefix without the code slot", "Alpacon denied this sudo command.\n", nil},
 		{"the code slot without the prefix", "build finished (SUDO_BRAND_NEW_CODE).\n", nil},
 		{"empty output", "", nil},
 		{
@@ -307,6 +306,8 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 		{"escape sequence in the code slot", denialLine("\x1b[31mSUDO_FAKE"), nil},
 		{"lowercase code", denialLine("sudo_lowercase"), nil},
 		{"space in the code", denialLine("SUDO FAKE"), nil},
+		// nil, not a coverage gap: the sanitizer drops a bad code whole, parentheses
+		// included, so an empty slot is not a shape the agent ever emits.
 		{"empty code slot", denialLine(""), nil},
 	}
 
@@ -331,6 +332,56 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 		assert.Contains(t, sudoDenialHint(denialLine(atCap)), atCap)
 		assert.Empty(t, sudoDenialHint(denialLine(strings.Repeat("A", 64))))
 	})
+}
+
+func TestSudoDenialHintCodelessDenial(t *testing.T) {
+	// Spelled out, not reused from sudoDenialCodelessLine, so changing that constant
+	// fails these tests instead of moving along with them.
+	const codelessLine = "Alpacon denied this sudo command.\n"
+
+	tests := []struct {
+		name            string
+		output          string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:         "the codeless line points at the console",
+			output:       codelessLine,
+			wantContains: []string{"no code", "Alpacon console"},
+		},
+		{
+			// Fires deliberately, not by accident—see sudoDenialHint's codeless
+			// branch for why a forged match is accepted.
+			name:         "a failed command that printed the sentence itself",
+			output:       "echo \"Alpacon denied this sudo command.\"\n",
+			wantContains: []string{"Alpacon console"},
+		},
+		{
+			name:            "a code the table carries still wins on the same output",
+			output:          denialLine("SUDO_RISK_DENIED") + codelessLine,
+			wantContains:    []string{"runtime risk assessment"},
+			wantNotContains: []string{"no code"},
+		},
+		{
+			name:            "a code the table does not carry still wins on the same output",
+			output:          denialLine("SUDO_BRAND_NEW_CODE") + codelessLine,
+			wantContains:    []string{"SUDO_BRAND_NEW_CODE"},
+			wantNotContains: []string{"no code"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hint := sudoDenialHint(tt.output)
+			for _, want := range tt.wantContains {
+				assert.Contains(t, hint, want)
+			}
+			for _, notWant := range tt.wantNotContains {
+				assert.NotContains(t, hint, notWant)
+			}
+		})
+	}
 }
 
 func TestIsApprovalDenial(t *testing.T) {

@@ -25,6 +25,13 @@ import (
 // command whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 
+// sudoDenialCodelessLine is the denial line the agent emits with no code to
+// name: alpacon_approval.c with an empty error_code_buf, pam_alpamon.c with
+// code[0] == '\0'. Its own literal rather than sudoDenialLinePrefix with an
+// empty slot—the sanitizer rejects a bad code whole, so the parentheses go with
+// it and no empty-slot form ever reaches the terminal.
+const sudoDenialCodelessLine = "Alpacon denied this sudo command."
+
 // sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
 // MFA step-up). The hint table and hasSudoPresenceDenial both name it from
 // here, so renaming it cannot leave one of them behind and silently stop the
@@ -242,6 +249,9 @@ func isSanitizedDenialCode(code string) bool {
 // on its own release train and nothing enforces this table's sync with
 // alpacon-server utils/error_codes.py, so returning "" for one would leave the
 // next drift invisible until someone reported a bare denial line.
+//
+// A denial carrying no code gets a last, thinner hint: without a category from
+// the server there is only the console to point at.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
@@ -252,6 +262,15 @@ func sudoDenialHint(output string) string {
 		return denialHintLine(fmt.Sprintf(
 			"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
 				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
+	}
+	// No code slot to anchor on, so a command printing the same sentence in its own
+	// output gets the hint too. Accepted: this branch only prints a fixed line—a
+	// forged match reaches no step-up, no --wait loop, and echoes nothing the
+	// command chose. Anchoring harder re-opens the silent denial this closes.
+	if strings.Contains(output, sudoDenialCodelessLine) {
+		return denialHintLine(
+			"sudo was denied, and the denial carried no code to explain it.\n" +
+				"Read the denial in the Alpacon console (web).\n")
 	}
 	return ""
 }
