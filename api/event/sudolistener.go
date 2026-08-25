@@ -47,23 +47,88 @@ type sudoMFAEvent struct {
 // The AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
 // http.Client is concurrency-safe. Token refresh and grant verification are
 // serialized by mfaMu so only one MFA flow runs at a time.
+//
+// Event channel tokens are single-use, so every dial provisions its own session
+// and re-subscribes once connected.
 type SudoListener struct {
 	*wsListener
 	ac         *client.AlpaconClient
 	serverName string
+	sessionID  string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
+
+	stateMu    sync.Mutex // guards channelID, subscribed, err
+	channelID  string
+	subscribed bool
+	err        error
 }
 
 // NewSudoListener creates a SudoListener but does not connect yet. ac may be
 // nil in tests; MFA request frames are then dropped instead of dereferencing it.
-func NewSudoListener(ac *client.AlpaconClient, wsURL, serverName string) *SudoListener {
+func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *SudoListener {
 	sl := &SudoListener{
-		wsListener: newWSListener(ac, wsURL, sudoHandshakeTimeout),
 		ac:         ac,
 		serverName: serverName,
+		sessionID:  sessionID,
 	}
+	sl.wsListener = newProvisionedWSListener(ac, sl.provisionSession, sudoHandshakeTimeout)
 	sl.handleFrame = sl.handleMessage
+	sl.onConnected = sl.subscribe
 	return sl
+}
+
+// Err returns the error that stopped the listener before it ever subscribed.
+func (sl *SudoListener) Err() error {
+	sl.stateMu.Lock()
+	defer sl.stateMu.Unlock()
+	return sl.err
+}
+
+func (sl *SudoListener) provisionSession() (string, error) {
+	session, err := CreateEventSession(sl.ac)
+	if err != nil {
+		return "", sl.failIfFatal(err)
+	}
+
+	sl.stateMu.Lock()
+	sl.channelID = session.ChannelID
+	sl.stateMu.Unlock()
+
+	return session.WebsocketURL, nil
+}
+
+func (sl *SudoListener) subscribe() error {
+	sl.stateMu.Lock()
+	channelID := sl.channelID
+	sl.stateMu.Unlock()
+
+	if err := SubscribeEvent(sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
+		return sl.failIfFatal(err)
+	}
+
+	sl.stateMu.Lock()
+	sl.subscribed = true
+	sl.stateMu.Unlock()
+
+	return nil
+}
+
+// failIfFatal stops the listener when retrying cannot help: a 4xx before the first
+// subscribe means a bad session or an expired login, not an outage. Everything else
+// is left to the reconnect loop.
+func (sl *SudoListener) failIfFatal(cause error) error {
+	sl.stateMu.Lock()
+	fatal := !sl.subscribed && utils.IsFatalClientError(utils.HTTPStatusCode(cause))
+	if fatal {
+		sl.err = cause
+	}
+	sl.stateMu.Unlock()
+
+	if fatal {
+		sl.Stop()
+	}
+
+	return cause
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {

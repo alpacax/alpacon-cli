@@ -347,35 +347,15 @@ func extractValue(args []string, i int) (string, int) {
 	return "", i
 }
 
-// setupSudoListener creates an event session, connects the event WebSocket,
-// then subscribes to sudo events for the given websh session. The server
-// requires the WebSocket to be connected before allowing subscriptions.
-// Returns nil if the events API is not available. Silently skips "not found"
-// errors (older servers); logs a warning for other failures.
+// setupSudoListener starts the sudo MFA listener for the given websh session.
+// The listener provisions its own event channel and re-subscribes on every
+// connect, so it survives a disconnect. Returns nil when it cannot connect.
 func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *event.SudoListener {
-	eventSession, err := event.CreateEventSession(ac)
-	if err != nil {
-		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
-		}
-		return nil
-	}
-
-	// Start listener first — the server requires the WebSocket channel to be
-	// connected before it accepts event subscriptions.
-	listener := event.NewSudoListener(ac, eventSession.WebsocketURL, serverName)
+	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
 
 	if !listener.WaitConnected(5 * time.Second) {
 		listener.Stop()
-		return nil
-	}
-
-	if err := event.SubscribeEvent(ac, eventSession.ChannelID, event.EventTypeSudo, sessionID); err != nil {
-		listener.Stop()
-		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
-		}
 		return nil
 	}
 
