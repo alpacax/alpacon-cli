@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -131,8 +132,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 				utils.CliErrorWithExit("Device code request failed. %v", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "\nPlease authenticate by visiting:\n%s\n\n", utils.Blue(deviceCode.VerificationURIComplete))
-			fmt.Fprintf(os.Stderr, "Verification code: %s\n\n", utils.Bold(deviceCode.UserCode))
+			printDeviceCodePrompt(os.Stderr, deviceCode.VerificationURIComplete, deviceCode.UserCode)
 			if !noBrowser {
 				utils.OpenBrowser(deviceCode.VerificationURIComplete)
 			}
@@ -525,4 +525,17 @@ func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
 // LoginAndSaveCredentials, so a failed preload is non-fatal.
 func shouldFailOnProfileError(token string) bool {
 	return token == ""
+}
+
+// printDeviceCodePrompt sanitizes the URL and the code before Blue and Bold go
+// on—the reverse order would strip the highlight along with the escapes. Both
+// come from the authorization server, and a person reads them off the screen.
+func printDeviceCodePrompt(w io.Writer, verificationURI, userCode string) {
+	uri, uriAltered := utils.SanitizeTerminalBlock(verificationURI)
+	code, codeAltered := utils.SanitizeTerminalBlock(userCode)
+	if uriAltered || codeAltered {
+		utils.WarnTerminalTextAltered(w, "")
+	}
+	_, _ = fmt.Fprintf(w, "\nPlease authenticate by visiting:\n%s\n\n", utils.Blue(uri))
+	_, _ = fmt.Fprintf(w, "Verification code: %s\n\n", utils.Bold(code))
 }
