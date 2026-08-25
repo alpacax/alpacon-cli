@@ -530,9 +530,13 @@ func shouldFailOnProfileError(token string) bool {
 // printDeviceCodePrompt sanitizes the URL and the code before Blue and Bold go
 // on—the reverse order would strip the highlight along with the escapes. Both
 // come from the authorization server, and a person reads them off the screen.
+//
+// The line strip and not the block one: a URL and a device code are single
+// values, so a newline in either is the server writing its own line into a
+// prompt the CLI is supposed to own.
 func printDeviceCodePrompt(w io.Writer, verificationURI, userCode string) {
-	uri, uriAltered := utils.SanitizeTerminalBlock(verificationURI)
-	code, codeAltered := utils.SanitizeTerminalBlock(userCode)
+	uri, uriAltered := utils.SanitizeTerminalLine(verificationURI)
+	code, codeAltered := utils.SanitizeTerminalLine(userCode)
 	if uriAltered || codeAltered {
 		utils.WarnTerminalTextAltered(w, "")
 	}

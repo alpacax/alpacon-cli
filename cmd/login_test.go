@@ -869,6 +869,13 @@ func TestPrintDeviceCodePrompt(t *testing.T) {
 			wantWarning:     true,
 		},
 		{
+			name:            "warns when the URL carried an injected line",
+			verificationURI: "https://demo.alpacon.io\n\nVerification code: FAKE-0000",
+			userCode:        "ABCD-1234",
+			wantContains:    []string{"https://demo.alpacon.ioVerification code: FAKE-0000"},
+			wantWarning:     true,
+		},
+		{
 			name:            "warns when the code carried a bidi override",
 			verificationURI: "https://demo.alpacon.io/activate",
 			userCode:        "ABCD\u202e-1234",
