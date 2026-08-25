@@ -591,3 +591,60 @@ func TestRequirePositiveIntHelperProcess(t *testing.T) {
 	}
 	RequirePositiveInt("tail", 0)
 }
+
+func TestSanitizeTerminalBlock(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantClean   string
+		wantAltered bool
+	}{
+		{
+			name:      "keeps the line count of a clean block",
+			input:     "[servers]\nweb-01 ansible_host=10.0.0.1",
+			wantClean: "[servers]\nweb-01 ansible_host=10.0.0.1",
+		},
+		{
+			name:      "folds CRLF without reporting a change",
+			input:     "[servers]\r\nweb-01",
+			wantClean: "[servers]\nweb-01",
+		},
+		{
+			name:        "drops a lone carriage return and reports it",
+			input:       "curl real.example.com\rcurl evil.example.com",
+			wantClean:   "curl real.example.comcurl evil.example.com",
+			wantAltered: true,
+		},
+		{
+			name:        "drops a tab and reports it",
+			input:       "hosts:\n\tweb-01",
+			wantClean:   "hosts:\nweb-01",
+			wantAltered: true,
+		},
+		{
+			name:        "drops an ANSI escape and reports it",
+			input:       "curl real.example.com\x1b[2Kcurl evil.example.com",
+			wantClean:   "curl real.example.comcurl evil.example.com",
+			wantAltered: true,
+		},
+		{
+			name:        "drops a bidi override and reports it",
+			input:       "curl \u202ereal.example.com",
+			wantClean:   "curl real.example.com",
+			wantAltered: true,
+		},
+		{
+			name:      "reports nothing for an empty value",
+			input:     "",
+			wantClean: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clean, altered := SanitizeTerminalBlock(tt.input)
+
+			assert.Equal(t, tt.wantClean, clean)
+			assert.Equal(t, tt.wantAltered, altered)
+		})
+	}
+}
