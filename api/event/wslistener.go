@@ -35,7 +35,7 @@ type wsListener struct {
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
-	connected   chan struct{} // closed after the first successful connect and subscribe
+	connected   chan struct{} // closed once a dial connected and onConnected returned
 	connectOnce sync.Once
 	closeOnce   sync.Once
 	mu          sync.Mutex // guards conn
@@ -75,8 +75,9 @@ func (w *wsListener) Start() {
 	}()
 }
 
-// WaitConnected blocks until connected and subscribed, timeout, or shutdown;
-// returns whether it connected.
+// WaitConnected blocks until a dial has connected and its onConnected hook has
+// returned, until timeout, or until shutdown; returns whether it connected. A hook
+// with nothing to subscribe to still counts, so this promises no subscription.
 func (w *wsListener) WaitConnected(timeout time.Duration) bool {
 	select {
 	case <-w.connected:

@@ -93,7 +93,7 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 	sl := NewSudoListener(ac, "my-server", "session-1")
 	sl.Start()
 
-	require.True(t, sl.WaitConnected(3*time.Second))
+	require.True(t, sl.WaitConnected(3*time.Second), "the listener must connect before Stop has a connection to close")
 
 	sl.Stop()
 
@@ -313,7 +313,7 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 		sl.Start()
 		defer sl.Stop()
 
-		require.True(t, sl.WaitConnected(3*time.Second))
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
 		// A third session means at least two dials failed after the first connect.
 		require.Eventually(t, func() bool {
@@ -340,7 +340,7 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 		sl.Start()
 		defer sl.Stop()
 
-		assert.False(t, sl.WaitConnected(300*time.Millisecond))
+		assert.False(t, sl.WaitConnected(300*time.Millisecond), "a listener that never upgrades must not report a connection")
 	})
 
 	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
@@ -369,7 +369,7 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 		sl.Start()
 		defer sl.Stop()
 
-		require.True(t, sl.WaitConnected(3*time.Second))
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
 		require.Eventually(t, func() bool {
 			return sessions.Load() >= 3
@@ -402,7 +402,7 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 		sl.Start()
 		defer sl.Stop()
 
-		require.True(t, sl.WaitConnected(3*time.Second))
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
 		require.Eventually(t, func() bool {
 			return subscribes.Load() >= 3
@@ -411,4 +411,52 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 
 	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
 		"a resubscribe that keeps failing is an outage and must be announced once")
+}
+
+func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
+	// Upgrade the first and third dials: outage, recovery, outage. The second
+	// outage is a new one, so the recovery must clear the warned flag.
+	upgradeFirstAndThird := func(attempt int32) bool { return attempt == 1 || attempt == 3 }
+
+	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstAndThird, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
+
+		// Six sessions means the fifth dial already failed, so the second outage
+		// has had its chance to speak.
+		require.Eventually(t, func() bool {
+			return sessions.Load() >= 6
+		}, 5*time.Second, 10*time.Millisecond)
+	})
+
+	assert.Equal(t, 2, strings.Count(stderr, "Sudo MFA listener disconnected"),
+		"a recovered channel makes the next outage a new one, worth announcing again")
+}
+
+func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
+	ts, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	sl := NewSudoListener(ac, "my-server", "session-1")
+	sl.reconnectBaseDelay = testReconnectBaseDelay
+	sl.Start()
+	defer sl.Stop()
+
+	// A rejected session before the first subscribe must end the wait rather than
+	// retry, and websh needs the server's reason for its warning.
+	assert.False(t, sl.WaitConnected(3*time.Second), "a rejected session must not report a connection")
+
+	err := sl.Err()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create event session")
 }
