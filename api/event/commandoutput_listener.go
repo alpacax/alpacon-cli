@@ -31,15 +31,16 @@ type ChunkEvent struct {
 // single-use, so every dial provisions its own session and re-subscribes.
 type CommandOutputListener struct {
 	*wsListener
-	ac        *client.AlpaconClient
-	cmdMu     sync.Mutex // guards commandID, serverID
-	commandID string
-	serverID  string
-	stateMu   sync.Mutex // guards channelID, err
-	channelID string
-	err       error
-	chunks    chan ChunkEvent
-	finished  chan struct{}
+	ac         *client.AlpaconClient
+	cmdMu      sync.Mutex // guards commandID, serverID
+	commandID  string
+	serverID   string
+	stateMu    sync.Mutex // guards channelID, subscribed, err
+	channelID  string
+	subscribed bool
+	err        error
+	chunks     chan ChunkEvent
+	finished   chan struct{}
 }
 
 // commandOutputEnvelope is the WS message format emitted by alpacon-server. One
@@ -83,10 +84,14 @@ func (l *CommandOutputListener) provisionSession() (string, error) {
 	if err != nil {
 		l.stateMu.Lock()
 		l.err = err
+		// Before the first subscribe a 4xx means a bad request or an expired login,
+		// so retrying only burns the caller's connect budget before it falls back to
+		// polling anyway. Once the command is streaming, giving up would cost the
+		// rest of the run its live output, so every status is retried.
+		fatal := !l.subscribed && isFatalRequestError(err)
 		l.stateMu.Unlock()
-		// A 4xx means a bad request or an expired login, so retrying only burns the
-		// caller's connect budget before it falls back to polling anyway.
-		if isFatalRequestError(err) {
+
+		if fatal {
 			l.Stop()
 		}
 		return "", err
@@ -131,6 +136,10 @@ func (l *CommandOutputListener) subscribe() error {
 	if serverID != "" {
 		_ = SubscribeEvent(l.ac, channelID, EventTypeCommandFin, serverID)
 	}
+
+	l.stateMu.Lock()
+	l.subscribed = true
+	l.stateMu.Unlock()
 
 	return nil
 }

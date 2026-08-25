@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -136,7 +137,7 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 	l.Start()
 	defer l.Stop()
 
-	require.True(t, l.WaitConnected(2*time.Second), "should connect")
+	require.True(t, l.WaitConnected(2*time.Second), "the listener must connect before any chunk can arrive")
 
 	got := []ChunkEvent{}
 	timeout := time.After(2 * time.Second)
@@ -180,7 +181,7 @@ func TestCommandOutputListener_Reconnects(t *testing.T) {
 	l.Start()
 	defer l.Stop()
 
-	require.True(t, l.WaitConnected(2*time.Second))
+	require.True(t, l.WaitConnected(2*time.Second), "the first dial must connect before a reconnect can be observed")
 
 	got := []ChunkEvent{}
 	timeout := time.After(5 * time.Second)
@@ -218,7 +219,7 @@ func TestCommandOutputListener_CreatesANewSessionAndResubscribesOnReconnect(t *t
 	l.Start()
 	defer l.Stop()
 
-	require.True(t, l.WaitConnected(3*time.Second))
+	require.True(t, l.WaitConnected(3*time.Second), "the first dial must connect before the reconnect")
 	require.NoError(t, l.subscribeTo("cmd-1", "srv-1"))
 
 	assert.Eventually(t, func() bool {
@@ -242,7 +243,7 @@ func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
 
 	// The command is submitted only after the WS is up, so there is nothing to
 	// subscribe to on the first connect.
-	require.True(t, l.WaitConnected(3*time.Second))
+	require.True(t, l.WaitConnected(3*time.Second), "the first dial must connect even with nothing to subscribe to")
 	assert.Equal(t, int32(0), subscribes.Load())
 }
 
@@ -256,7 +257,7 @@ func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
 
 	// A rejected session must end the wait immediately rather than burning the whole
 	// connect budget, and the caller needs the server's reason for its fallback.
-	assert.False(t, l.WaitConnected(commandOutputConnectTimeout))
+	assert.False(t, l.WaitConnected(commandOutputConnectTimeout), "a rejected session must not report a connection")
 
 	err := l.Err()
 	require.Error(t, err)
@@ -265,4 +266,45 @@ func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
 
 func TestListenerFailureFallsBackToTheConnectBudget(t *testing.T) {
 	assert.Contains(t, listenerFailure(NewCommandOutputListener(nil)).Error(), "connect timeout")
+}
+
+func TestCommandOutputListener_KeepsRetryingAfterTheFirstSubscribe(t *testing.T) {
+	// A 4xx on a later session create is not a dead end: the command is already
+	// streaming, so giving up would cost the rest of a long run its live output.
+	rejectSecond := func(attempt int32) int {
+		if attempt == 2 {
+			return http.StatusUnauthorized
+		}
+		return http.StatusCreated
+	}
+
+	subscribed := make(chan struct{})
+	ts, sessions, _ := newWatcherTestServer(t, rejectSecond, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
+		if n == 1 {
+			// Hold the first connection until the caller has subscribed, so the
+			// rejected reconnect lands on a listener that is already streaming.
+			<-subscribed
+			_ = conn.Close()
+			return
+		}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.reconnectBaseDelay = testReconnectBaseDelay
+	l.Start()
+	defer l.Stop()
+
+	require.True(t, l.WaitConnected(3*time.Second), "the first dial must connect")
+	require.NoError(t, l.subscribeTo("cmd-1", "srv-1"))
+	close(subscribed)
+
+	assert.Eventually(t, func() bool {
+		return sessions.Load() >= 3
+	}, 5*time.Second, 10*time.Millisecond, "a rejected reconnect must not end a listener that already subscribed")
 }
