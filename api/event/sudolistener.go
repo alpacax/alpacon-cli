@@ -57,9 +57,10 @@ type SudoListener struct {
 	sessionID  string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 
-	stateMu    sync.Mutex // guards channelID, subscribed, err
+	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
 	channelID  string
 	subscribed bool
+	warned     bool
 	err        error
 }
 
@@ -74,6 +75,7 @@ func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *Su
 	sl.wsListener = newProvisionedWSListener(ac, sl.provisionSession, sudoHandshakeTimeout)
 	sl.handleFrame = sl.handleMessage
 	sl.onConnected = sl.subscribe
+	sl.onDialFailed = sl.announceOutage
 	return sl
 }
 
@@ -108,6 +110,8 @@ func (sl *SudoListener) subscribe() error {
 
 	sl.stateMu.Lock()
 	sl.subscribed = true
+	// A recovered channel means the next outage is a new one, worth announcing again.
+	sl.warned = false
 	sl.stateMu.Unlock()
 
 	return nil
@@ -129,6 +133,24 @@ func (sl *SudoListener) failIfFatal(cause error) error {
 	}
 
 	return cause
+}
+
+// announceOutage reports a dropped event channel once per outage. Before the first
+// subscribe the caller (websh) already handles the failure, so this stays quiet.
+// The message is wrapped in CRLF because websh holds the terminal in raw mode.
+func (sl *SudoListener) announceOutage(error) {
+	sl.stateMu.Lock()
+	quiet := !sl.subscribed || sl.warned
+	if !quiet {
+		sl.warned = true
+	}
+	sl.stateMu.Unlock()
+
+	if quiet {
+		return
+	}
+
+	_, _ = fmt.Fprint(os.Stderr, "\r\n\033[33mSudo MFA listener disconnected; retrying...\033[0m\r\n")
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {

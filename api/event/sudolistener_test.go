@@ -5,10 +5,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -292,4 +294,54 @@ func TestSudoListener_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 
 	assert.True(t, sl.WaitConnected(3*time.Second), "a 503 before the first subscribe is not fatal; the next attempt must connect")
 	assert.NoError(t, sl.Err())
+}
+
+func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
+	// Upgrade the first connection, then refuse: the listener is subscribed and every
+	// later dial fails, which is exactly one outage.
+	upgradeFirstOnly := func(attempt int32) bool { return attempt == 1 }
+
+	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second))
+
+		// A third session means at least two dials failed after the first connect.
+		require.Eventually(t, func() bool {
+			return sessions.Load() >= 3
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+		"one outage must produce exactly one warning, not one per retry")
+}
+
+func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
+	// Never upgrade: the listener never subscribes, so websh's own WaitConnected
+	// failure is the only thing that should speak.
+	neverUpgrade := func(int32) bool { return false }
+
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, neverUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.Start()
+		defer sl.Stop()
+
+		assert.False(t, sl.WaitConnected(300*time.Millisecond))
+	})
+
+	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
 }
