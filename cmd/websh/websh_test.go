@@ -20,6 +20,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// statusErr carries an HTTP status the way client's own errors do, so the warning
+// decision can be tested without standing up a server.
+type statusErr struct {
+	status int
+}
+
+func (e statusErr) Error() string       { return fmt.Sprintf("server said %d", e.status) }
+func (e statusErr) HTTPStatusCode() int { return e.status }
+
 func TestCommandParsing(t *testing.T) {
 	tests := []struct {
 		testName          string
@@ -270,15 +279,6 @@ func TestCommandParsing(t *testing.T) {
 	}
 }
 
-// statusErr carries an HTTP status the way client's own errors do, so the warning
-// decision can be tested without standing up a server.
-type statusErr struct {
-	status int
-}
-
-func (e statusErr) Error() string       { return fmt.Sprintf("server said %d", e.status) }
-func (e statusErr) HTTPStatusCode() int { return e.status }
-
 func TestSudoListenerWarning(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -480,4 +480,11 @@ func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
 
 	assert.Nil(t, listener)
 	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
+}
+
+func TestSudoListenerWarning_SanitizesTheServersText(t *testing.T) {
+	warning := sudoListenerWarning(errors.New("boom \x1b[31mred\x1b[0m"))
+
+	assert.NotContains(t, warning, "\x1b")
+	assert.Contains(t, warning, "boom")
 }

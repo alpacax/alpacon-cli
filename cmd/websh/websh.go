@@ -369,7 +369,9 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 // sudoListenerWarning explains why the sudo MFA listener never connected, or
 // returns "" when the failure is not worth telling the user about. A 404 means an
 // older server without the events API; the websh session runs fine without them.
-// A nil cause means the listener kept retrying until the wait ran out.
+// A nil cause means the listener kept retrying until the wait ran out. The cause
+// carries the server's own text, which is sanitized before it reaches a terminal
+// this command is about to put into raw mode.
 func sudoListenerWarning(cause error) string {
 	if utils.HTTPStatusCode(cause) == http.StatusNotFound {
 		return ""
@@ -377,5 +379,5 @@ func sudoListenerWarning(cause error) string {
 	if cause == nil {
 		return "Sudo MFA listener unavailable: timed out connecting to the event channel"
 	}
-	return fmt.Sprintf("Sudo MFA listener unavailable: %s", cause)
+	return fmt.Sprintf("Sudo MFA listener unavailable: %s", utils.SanitizeTerminalText(cause.Error()))
 }
