@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -115,11 +116,11 @@ func (l *CommandOutputListener) subscribeTo(commandID, serverID string) error {
 func (l *CommandOutputListener) subscribe() error {
 	// A fatal session failure can stop the listener between the caller's WaitConnected
 	// and its subscribeTo. Subscribing then succeeds against a channel nothing reads,
-	// so the caller would stream from a dead listener instead of falling back.
-	select {
-	case <-l.done:
-		return errors.New("event listener stopped before the subscription")
-	default:
+	// so the caller would stream from a dead listener instead of falling back. Checking
+	// again once the subscriptions are in narrows the window to their round trips rather
+	// than closing it: a Stop landing after the second check still goes unnoticed.
+	if err := l.halted(); err != nil {
+		return err
 	}
 
 	l.cmdMu.Lock()
@@ -146,11 +147,31 @@ func (l *CommandOutputListener) subscribe() error {
 		_ = SubscribeEvent(l.ac, channelID, EventTypeCommandFin, serverID)
 	}
 
+	if err := l.halted(); err != nil {
+		return err
+	}
+
 	l.stateMu.Lock()
 	l.subscribed = true
 	l.stateMu.Unlock()
 
 	return nil
+}
+
+// halted reports why the listener stopped, or nil while it is live. provisionSession
+// records the reason on its way out, and carrying it here is what keeps the caller's
+// fallback warning naming the server's own refusal rather than the halt.
+func (l *CommandOutputListener) halted() error {
+	select {
+	case <-l.done:
+	default:
+		return nil
+	}
+
+	if cause := l.Err(); cause != nil {
+		return fmt.Errorf("event listener stopped while subscribing: %w", cause)
+	}
+	return errors.New("event listener stopped while subscribing")
 }
 
 // Chunks returns a receive-only channel of parsed chunk events.

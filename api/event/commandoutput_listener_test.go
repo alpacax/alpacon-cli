@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -315,4 +316,36 @@ func TestCommandOutputListener_SubscribeFailsOnAStoppedListener(t *testing.T) {
 	// A fatal session failure can stop the listener while the caller is still inside
 	// SubmitCommand, and the server would accept a subscription on the dead channel.
 	assert.Error(t, l.subscribeTo("command-1", "server-1"), "a stopped listener must not report a live subscription")
+}
+
+func TestCommandOutputListener_SubscribeCarriesWhyTheListenerStopped(t *testing.T) {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+
+	cause := errors.New("session create rejected")
+	l.stateMu.Lock()
+	l.err = cause
+	l.stateMu.Unlock()
+	l.Stop()
+
+	// The fallback warning prints this error, so dropping the cause would report the
+	// halt where the user needs the server's own refusal.
+	assert.ErrorIs(t, l.subscribeTo("command-1", "server-1"), cause)
+}
+
+func TestCommandOutputListener_SubscribeFailsWhenTheListenerStopsMidSubscription(t *testing.T) {
+	var l *CommandOutputListener
+	// Stop lands while SubscribeEvent is in flight, which is the window a single check
+	// before the request cannot see.
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, func(int32) int {
+		l.Stop()
+		return http.StatusCreated
+	}, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l = NewCommandOutputListener(ac)
+
+	assert.Error(t, l.subscribeTo("command-1", "server-1"), "a listener stopped mid-subscription must not report a live subscription")
 }
