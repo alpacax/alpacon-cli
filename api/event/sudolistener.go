@@ -28,6 +28,10 @@ const (
 	mfaPollingTimeout = 60 * time.Second
 
 	sudoHandshakeTimeout = 10 * time.Second
+
+	// sudoOutageWarning is asserted on by the tests, so it lives here rather than
+	// inline at the one place that prints it.
+	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
 )
 
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
@@ -60,10 +64,11 @@ type SudoListener struct {
 	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
 	refreshToken func() error
 
-	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
+	stateMu    sync.Mutex // guards channelID, subscribed, warned, refreshed, err
 	channelID  string
 	subscribed bool
 	warned     bool
+	refreshed  bool
 	err        error
 }
 
@@ -137,9 +142,19 @@ func (sl *SudoListener) announceOutage(cause error) {
 // the reconnect loop. Every cause is recorded either way, so a caller reading Err()
 // after a timeout gets the transport's own words rather than nothing.
 func (sl *SudoListener) fail(cause error) error {
+	// refreshToken is assigned before Start and never reassigned, so no lock here.
+	expired := sl.refreshToken != nil && utils.HTTPStatusCode(cause) == http.StatusUnauthorized
+
 	sl.stateMu.Lock()
 	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
+	// websh created its own session on this token moments ago, so a 401 on the first
+	// attempt means it expired in between and a refresh would fix it. One is enough:
+	// a 401 answering a token this listener just renewed is a real refusal.
+	if fatal && expired && !sl.refreshed {
+		sl.refreshed = true
+		fatal = false
+	}
 	announce := sl.subscribed && !sl.warned
 	if announce {
 		sl.warned = true
@@ -157,22 +172,22 @@ func (sl *SudoListener) fail(cause error) error {
 			// Stop cancels neither an in-flight dial nor a session create, so a
 			// failure landing after it must not claim anything is still retrying.
 		default:
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow("Sudo MFA listener disconnected; retrying..."))
+			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
 		}
 	}
 
-	sl.refreshExpiredToken(cause)
+	if expired {
+		sl.refreshExpiredToken()
+	}
 
 	return cause
 }
 
-// refreshExpiredToken renews the access token when cause is a 401. Past the first
-// subscribe nothing is fatal, so without this an access token that expires mid-session
-// is re-presented on every dial until websh exits and sudo MFA never comes back.
-func (sl *SudoListener) refreshExpiredToken(cause error) {
-	if sl.refreshToken == nil || utils.HTTPStatusCode(cause) != http.StatusUnauthorized {
-		return
-	}
+// refreshExpiredToken renews the access token so the next dial stops presenting the one
+// that just came back 401. Past the first subscribe nothing else would: no status is
+// fatal there, so an access token that expires mid-session would be re-presented on
+// every dial until websh exits and sudo MFA would never come back.
+func (sl *SudoListener) refreshExpiredToken() {
 	// An MFA flow holds mfaMu across its own refresh; a second one would race it.
 	if !sl.mfaMu.TryLock() {
 		return

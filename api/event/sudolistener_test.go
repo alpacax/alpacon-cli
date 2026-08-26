@@ -322,7 +322,7 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 	})
 
-	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
 		"one outage must produce exactly one warning, not one per retry")
 }
 
@@ -343,7 +343,7 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 		assert.False(t, sl.WaitConnected(300*time.Millisecond), "a listener that never upgrades must not report a connection")
 	})
 
-	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
+	assert.NotContains(t, stderr, sudoOutageWarning)
 }
 
 func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
@@ -375,7 +375,7 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 	})
 
-	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
 		"a session create that keeps failing is an outage and must be announced once")
 }
 
@@ -407,7 +407,7 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 	})
 
-	assert.Equal(t, 1, strings.Count(stderr, "Sudo MFA listener disconnected"),
+	assert.Equal(t, 1, strings.Count(stderr, sudoOutageWarning),
 		"a resubscribe that keeps failing is an outage and must be announced once")
 }
 
@@ -435,7 +435,7 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 		}, 5*time.Second, 10*time.Millisecond)
 	})
 
-	assert.Equal(t, 2, strings.Count(stderr, "Sudo MFA listener disconnected"),
+	assert.Equal(t, 2, strings.Count(stderr, sudoOutageWarning),
 		"a recovered channel makes the next outage a new one, worth announcing again")
 }
 
@@ -540,7 +540,7 @@ func TestSudoListener_StaysQuietWhenAFailureLandsAfterStop(t *testing.T) {
 		_ = sl.fail(errors.New("dial failed after the stop"))
 	})
 
-	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
+	assert.NotContains(t, stderr, sudoOutageWarning)
 }
 
 func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
@@ -560,4 +560,32 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	err := sl.Err()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to create event session")
+}
+
+func TestSudoListener_TriesOneRefreshBeforeGivingUpOnAnUnauthorizedFirstSession(t *testing.T) {
+	alwaysUnauthorized := func(int32) int { return http.StatusUnauthorized }
+
+	ts, sessions, _ := newWatcherTestServer(t, alwaysUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	sl := NewSudoListener(ac, "my-server", "session-1")
+	sl.reconnectBaseDelay = testReconnectBaseDelay
+
+	var refreshes atomic.Int32
+	sl.refreshToken = func() error {
+		refreshes.Add(1)
+		return nil
+	}
+	sl.Start()
+	defer sl.Stop()
+
+	select {
+	case <-sl.stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a 401 answering a freshly renewed token must stop the listener")
+	}
+
+	assert.Equal(t, int32(1), refreshes.Load(), "the refusal is only worth one refresh")
+	assert.Equal(t, int32(2), sessions.Load(), "that refresh buys exactly one more attempt")
+	assert.Error(t, sl.Err(), "websh still needs the reason it gave up")
 }
