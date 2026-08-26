@@ -192,8 +192,9 @@ func (w *wsListener) connectAndListen() (connected bool) {
 	}
 }
 
-// isFatalRequestError reports whether retrying cause is pointless: a 4xx names a
-// bad request or an expired login, which the next attempt would hit again.
+// isFatalRequestError reports whether retrying cause is pointless: a 4xx that refuses
+// rather than asks to be retried names a bad request or an expired login, which the
+// next attempt would hit again.
 func isFatalRequestError(cause error) bool {
 	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
 }

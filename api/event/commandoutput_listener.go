@@ -84,10 +84,10 @@ func (l *CommandOutputListener) provisionSession() (string, error) {
 	if err != nil {
 		l.stateMu.Lock()
 		l.err = err
-		// Before the first subscribe a 4xx means a bad request or an expired login,
-		// so retrying only burns the caller's connect budget before it falls back to
-		// polling anyway. Once the command is streaming, giving up would cost the
-		// rest of the run its live output, so every status is retried.
+		// Before the first subscribe a fatal 4xx means a bad request or an expired
+		// login, so retrying only burns the caller's connect budget before it falls
+		// back to polling anyway. Once the command is streaming, giving up would cost
+		// the rest of the run its live output, so every status is retried.
 		fatal := !l.subscribed && isFatalRequestError(err)
 		l.stateMu.Unlock()
 
