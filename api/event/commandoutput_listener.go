@@ -84,10 +84,9 @@ func (l *CommandOutputListener) provisionSession() (string, error) {
 	if err != nil {
 		l.stateMu.Lock()
 		l.err = err
-		// Before the first subscribe a fatal 4xx means a bad request or an expired
-		// login, so retrying only burns the caller's connect budget before it falls
-		// back to polling anyway. Once the command is streaming, giving up would cost
-		// the rest of the run its live output, so every status is retried.
+		// Before the first subscribe a fatal 4xx only burns the caller's connect budget
+		// before it falls back to polling anyway. Once the command is streaming, giving
+		// up would cost the rest of the run its live output, so every status is retried.
 		fatal := !l.subscribed && isFatalRequestError(err)
 		l.stateMu.Unlock()
 
@@ -105,8 +104,7 @@ func (l *CommandOutputListener) provisionSession() (string, error) {
 	return session.WebsocketURL, nil
 }
 
-// subscribeTo issues the first subscription, once the command exists. Every later
-// connect re-issues it through onConnected.
+// subscribeTo issues the first subscription; every later connect re-issues it through onConnected.
 func (l *CommandOutputListener) subscribeTo(commandID, serverID string) error {
 	l.setTargets(commandID, serverID)
 	return l.subscribe()
@@ -184,8 +182,6 @@ func (l *CommandOutputListener) handleMessage(raw []byte) {
 	}
 }
 
-// setTargets names the command whose chunks to keep and the server whose fin event
-// ends the stream.
 func (l *CommandOutputListener) setTargets(commandID, serverID string) {
 	l.cmdMu.Lock()
 	l.commandID = commandID

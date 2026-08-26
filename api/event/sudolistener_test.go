@@ -297,8 +297,7 @@ func TestSudoListener_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 }
 
 func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
-	// Upgrade the first connection, then refuse: the listener is subscribed and every
-	// later dial fails, which is exactly one outage.
+	// Subscribed once, then every later dial fails: exactly one outage.
 	upgradeFirstOnly := func(attempt int32) bool { return attempt == 1 }
 
 	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstOnly, alwaysCreated, func(conn *websocket.Conn, _ int32) {
@@ -326,8 +325,7 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 }
 
 func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
-	// Never upgrade: the listener never subscribes, so websh's own WaitConnected
-	// failure is the only thing that should speak.
+	// It never subscribes, so websh's WaitConnected failure is the only thing that speaks.
 	neverUpgrade := func(int32) bool { return false }
 
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, neverUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
@@ -347,8 +345,7 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 }
 
 func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
-	// The first attempt connects and subscribes, then every later session create
-	// fails: an outage that never reaches the dial, so onDialFailed never fires.
+	// This outage never reaches the dial, so onDialFailed is not what announces it.
 	createThenFail := func(attempt int32) int {
 		if attempt == 1 {
 			return http.StatusCreated
@@ -381,8 +378,7 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 }
 
 func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
-	// The dial keeps succeeding but every resubscribe after the first fails, so the
-	// channel is dead even though onDialFailed never fires.
+	// The dial succeeds every time; only the resubscribe fails, so onDialFailed never fires.
 	createThenFail := func(attempt int32) int {
 		if attempt == 1 {
 			return http.StatusCreated
@@ -414,8 +410,7 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 }
 
 func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
-	// Upgrade the first and third dials: outage, recovery, outage. The second
-	// outage is a new one, so the recovery must clear the warned flag.
+	// Outage, recovery, outage: the recovery must clear the warned flag.
 	upgradeFirstAndThird := func(attempt int32) bool { return attempt == 1 || attempt == 3 }
 
 	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, upgradeFirstAndThird, alwaysCreated, func(conn *websocket.Conn, _ int32) {
@@ -432,8 +427,7 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
 
-		// Six sessions means the fifth dial already failed, so the second outage
-		// has had its chance to speak.
+		// Six sessions means the fifth dial already failed, so the second outage has spoken.
 		require.Eventually(t, func() bool {
 			return sessions.Load() >= 6
 		}, 5*time.Second, 10*time.Millisecond)
@@ -452,8 +446,7 @@ func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
 	sl.Start()
 	defer sl.Stop()
 
-	// A rejected session before the first subscribe must end the wait rather than
-	// retry, and websh needs the server's reason for its warning.
+	// It must end the wait rather than retry, and websh needs the server's reason.
 	assert.False(t, sl.WaitConnected(3*time.Second), "a rejected session must not report a connection")
 
 	err := sl.Err()

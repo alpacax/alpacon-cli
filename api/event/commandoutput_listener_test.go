@@ -241,8 +241,6 @@ func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
 	l.Start()
 	defer l.Stop()
 
-	// The command is submitted only after the WS is up, so there is nothing to
-	// subscribe to on the first connect.
 	require.True(t, l.WaitConnected(3*time.Second), "the first dial must connect even with nothing to subscribe to")
 	assert.Equal(t, int32(0), subscribes.Load())
 }
@@ -255,8 +253,8 @@ func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
 	l.Start()
 	defer l.Stop()
 
-	// A rejected session must end the wait immediately rather than burning the whole
-	// connect budget, and the caller needs the server's reason for its fallback.
+	// A rejected session ends the wait instead of retrying, and the caller needs the
+	// server's own reason for its fallback.
 	assert.False(t, l.WaitConnected(commandOutputConnectTimeout), "a rejected session must not report a connection")
 
 	err := l.Err()
@@ -269,8 +267,6 @@ func TestListenerFailureFallsBackToTheConnectBudget(t *testing.T) {
 }
 
 func TestCommandOutputListener_KeepsRetryingAfterTheFirstSubscribe(t *testing.T) {
-	// A 4xx on a later session create is not a dead end: the command is already
-	// streaming, so giving up would cost the rest of a long run its live output.
 	rejectSecond := func(attempt int32) int {
 		if attempt == 2 {
 			return http.StatusUnauthorized

@@ -117,17 +117,15 @@ func (sl *SudoListener) subscribe() error {
 	return nil
 }
 
-// announceOutage is the dial-failure hook: a dial error reaches neither
-// provisionSession nor subscribe, so without it a transport outage is silent.
 func (sl *SudoListener) announceOutage(cause error) {
 	_ = sl.fail(cause)
 }
 
-// fail decides what a failed connect attempt means. A fatal 4xx before the first
-// subscribe is a bad session or an expired login, so the listener stops carrying the
-// reason; websh reports that one itself, which is why nothing is announced before then.
-// Once subscribed, the same failure is an outage: announced once, then left to the
-// reconnect loop, with its own CRLF because websh holds the terminal in raw mode.
+// fail decides what a failed connect attempt means. Before the first subscribe a fatal
+// 4xx is a bad session or an expired login: the listener stops, carrying the reason for
+// websh to report, and says nothing itself. After it, the same failure is an outage
+// announced once, in CRLF because websh holds the terminal in raw mode, then left to
+// the reconnect loop.
 func (sl *SudoListener) fail(cause error) error {
 	sl.stateMu.Lock()
 	fatal := !sl.subscribed && isFatalRequestError(cause)

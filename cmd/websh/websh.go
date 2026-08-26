@@ -350,8 +350,7 @@ func extractValue(args []string, i int) (string, int) {
 }
 
 // setupSudoListener starts the sudo MFA listener for the given websh session.
-// The listener provisions its own event channel and re-subscribes on every
-// connect, so it survives a disconnect. Returns nil when it cannot connect.
+// Returns nil when it cannot connect.
 func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *event.SudoListener {
 	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
@@ -370,12 +369,10 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	return listener
 }
 
-// sudoListenerWarning explains why the sudo MFA listener never connected, or
-// returns "" when the failure is not worth telling the user about. A 404 means an
-// older server without the events API; the websh session runs fine without them.
-// A nil cause means the listener kept retrying until the wait ran out. The cause
-// carries the server's own text, which is sanitized before it reaches a terminal
-// this command is about to put into raw mode.
+// sudoListenerWarning explains why the sudo MFA listener never connected, or returns ""
+// when the failure is not worth telling the user about: a 404 is an older server without
+// the events API, and the websh session runs fine without it. The server's own text is
+// sanitized because this command is about to put the terminal into raw mode.
 func sudoListenerWarning(cause error) string {
 	if utils.HTTPStatusCode(cause) == http.StatusNotFound {
 		return ""
