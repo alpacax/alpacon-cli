@@ -40,9 +40,10 @@ type apiError struct {
 	source     string
 	statusCode int
 	// apiPayload records that the body was a JSON object—the shape every
-	// alpacon-server error response has. A 401 without one was written by
-	// something standing in front of the server, and the stale-token retry
-	// reads this to tell the two apart.
+	// alpacon-server error response has. It is a filter, not a provenance flag:
+	// only the negative holds, since anything standing in front of the server
+	// can emit a JSON object too. The stale-token retry reads it to drop
+	// gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
 }
 
@@ -154,7 +155,8 @@ func checkAuthStatus(statusCode int, body []byte) error {
 
 // isJSONObject reports whether body is a JSON object. alpacon-server renders
 // every error as one, so anything else on a 401—an HTML page, a bare string,
-// nothing at all—came from a proxy, a WAF or an mTLS gate ahead of it.
+// nothing at all—came from a proxy, a WAF or an mTLS gate ahead of it. Only
+// that direction holds: a JSON object clears the test whoever wrote it.
 func isJSONObject(body []byte) bool {
 	var parsed map[string]any
 	return json.Unmarshal(body, &parsed) == nil && parsed != nil
@@ -317,7 +319,12 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 // renewAccessToken installs a fresh access token, reporting whether one is now
 // in hand. sent is the token the rejected request carried: a different one means
 // another request in flight already renewed it, and retrying with that one beats
-// spending a second refresh-token grant on the same expiry.
+// spending a second refresh-token grant on the same expiry. A failed grant
+// leaves the token as it was, so the sent check collapses nothing—every other
+// in-flight request that took the same 401 runs its own grant. The in-flight
+// count bounds that and each request still retries at most once; a caller that
+// ever fans requests out widely enough for the bound to hurt should remember
+// the failure for the life of the client instead.
 func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
@@ -335,14 +342,19 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	return true
 }
 
-// isStaleCredential reports whether err is the 401 a mid-flight token expiry
-// produces. alpacon-server's Auth0 authenticator swallows an expired token and
-// returns no user (auth0/auth.py), so the request falls through to
-// IsAuthenticatedOr401 and raises DRF's NotAuthenticated—which no branch of the
-// server's error_code_handler rewrites, leaving a 401 with a detail and no code.
-// Every deliberate 401 (MFA required, IP not allowed, token ACL) carries a code,
-// so the empty code slot is what separates a credential this process can renew
-// from a refusal it cannot.
+// isStaleCredential reports whether err is a 401 a fresh access token could
+// plausibly move. alpacon-server's Auth0 authenticator catches every exception
+// out of the authentication it wraps and returns no user (auth0/auth.py), so the
+// request falls through to IsAuthenticatedOr401 and raises DRF's
+// NotAuthenticated—which no branch of the server's error_code_handler rewrites,
+// leaving a 401 with a detail and no code. An expired token lands there, and so
+// does every other Auth0-bearer rejection that same catch-all absorbs: a
+// workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
+// Those cost one grant and one replay before surfacing the same error, and the
+// MFA case a refresh may genuinely fix. So the empty code slot is not proof of
+// expiry—it is the only 401 worth spending one retry on, because a coded refusal
+// (MFA required, IP not allowed, token ACL) names what it wants and a new token
+// is not it.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false

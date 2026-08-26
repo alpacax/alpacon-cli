@@ -766,8 +766,8 @@ func TestSendPostRequest_ReplaysTheBodyAfterRenewal(t *testing.T) {
 	assert.JSONEq(t, `{"purpose": "deploy"}`, bodies[1], "the replay must carry the original body")
 }
 
-// Every deliberate 401 carries an error code (MFA required, IP not allowed,
-// token ACL). Renewing on one would retry a refusal the new token cannot change.
+// A coded 401 (MFA required, IP not allowed, token ACL) names what it wants,
+// and a new token is not it. Renewing would retry a refusal unchanged.
 func TestSendRequest_CodedUnauthorizedIsNotRenewed(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
