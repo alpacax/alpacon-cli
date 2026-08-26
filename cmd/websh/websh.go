@@ -377,8 +377,9 @@ func sudoListenerWarning(cause error) string {
 	if utils.HTTPStatusCode(cause) == http.StatusNotFound {
 		return ""
 	}
-	if cause == nil {
-		return "Sudo MFA listener unavailable: timed out connecting to the event channel"
+	reason := "timed out connecting to the event channel"
+	if cause != nil {
+		reason = utils.SanitizeTerminalText(cause.Error())
 	}
-	return fmt.Sprintf("Sudo MFA listener unavailable: %s", utils.SanitizeTerminalText(cause.Error()))
+	return fmt.Sprintf("Sudo MFA listener unavailable: %s", reason)
 }
