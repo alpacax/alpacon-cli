@@ -2,10 +2,12 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -448,6 +450,112 @@ func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
 
 	// It must end the wait rather than retry, and websh needs the server's reason.
 	assert.False(t, sl.WaitConnected(3*time.Second), "a rejected session must not report a connection")
+
+	err := sl.Err()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create event session")
+}
+
+func TestSudoListener_RefreshesTheAccessTokenOnUnauthorized(t *testing.T) {
+	// The token expires only after the listener is subscribed, where nothing is fatal.
+	createThenUnauthorized := func(attempt int32) int {
+		if attempt == 1 {
+			return http.StatusCreated
+		}
+		return http.StatusUnauthorized
+	}
+
+	ts, sessions, _ := newWatcherTestServer(t, createThenUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var refreshes atomic.Int32
+	testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.refreshToken = func() error {
+			refreshes.Add(1)
+			return nil
+		}
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before a 401 counts as post-subscribe")
+
+		require.Eventually(t, func() bool {
+			return refreshes.Load() >= 1
+		}, 3*time.Second, 10*time.Millisecond, "a 401 after the first subscribe must renew the token instead of re-presenting it")
+	})
+
+	assert.Greater(t, sessions.Load(), int32(1))
+}
+
+func TestSudoListener_LeavesTheTokenAloneOnOtherStatuses(t *testing.T) {
+	createThenServerError := func(attempt int32) int {
+		if attempt == 1 {
+			return http.StatusCreated
+		}
+		return http.StatusInternalServerError
+	}
+
+	ts, sessions, _ := newWatcherTestServer(t, createThenServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
+		_ = conn.Close()
+	})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var refreshes atomic.Int32
+	testutil.CaptureOutput(t, func() {
+		sl := NewSudoListener(ac, "my-server", "session-1")
+		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.refreshToken = func() error {
+			refreshes.Add(1)
+			return nil
+		}
+		sl.Start()
+		defer sl.Stop()
+
+		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe")
+
+		require.Eventually(t, func() bool {
+			return sessions.Load() >= 3
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	assert.Zero(t, refreshes.Load(), "only a 401 says the token is the problem")
+}
+
+func TestSudoListener_StaysQuietWhenAFailureLandsAfterStop(t *testing.T) {
+	sl := NewSudoListener(nil, "my-server", "session-1")
+	sl.stateMu.Lock()
+	sl.subscribed = true
+	sl.stateMu.Unlock()
+
+	sl.Stop()
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		// Stop cancels no in-flight dial, so its failure still reaches fail afterwards.
+		_ = sl.fail(errors.New("dial failed after the stop"))
+	})
+
+	assert.NotContains(t, stderr, "Sudo MFA listener disconnected")
+}
+
+func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
+	alwaysServerError := func(int32) int { return http.StatusInternalServerError }
+
+	ts, _, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	sl := NewSudoListener(ac, "my-server", "session-1")
+	sl.reconnectBaseDelay = testReconnectBaseDelay
+	sl.Start()
+	defer sl.Stop()
+
+	// A 500 is retried, so the wait runs out; websh still has to name the reason.
+	assert.False(t, sl.WaitConnected(500*time.Millisecond), "a listener that never creates a session must not report connected")
 
 	err := sl.Err()
 	require.Error(t, err)

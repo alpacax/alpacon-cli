@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"sync"
@@ -56,6 +57,8 @@ type SudoListener struct {
 	serverName string
 	sessionID  string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
+	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
+	refreshToken func() error
 
 	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
 	channelID  string
@@ -64,13 +67,17 @@ type SudoListener struct {
 	err        error
 }
 
-// NewSudoListener creates a SudoListener but does not connect yet. ac may be
-// nil in tests; MFA request frames are then dropped instead of dereferencing it.
+// NewSudoListener creates a SudoListener but does not connect yet. ac may be nil
+// only for a test that never calls Start: MFA request frames are then dropped, but
+// provisioning a session on the listen goroutine would dereference it.
 func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *SudoListener {
 	sl := &SudoListener{
 		ac:         ac,
 		serverName: serverName,
 		sessionID:  sessionID,
+	}
+	if ac != nil {
+		sl.refreshToken = ac.RefreshToken
 	}
 	sl.wsListener = newProvisionedWSListener(ac, sl.provisionSession, sudoHandshakeTimeout)
 	sl.handleFrame = sl.handleMessage
@@ -79,7 +86,8 @@ func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *Su
 	return sl
 }
 
-// Err returns the error that stopped the listener before it ever subscribed.
+// Err returns the last reason the listener could not connect, so a caller that only
+// sees WaitConnected time out can report that instead of a bare timeout.
 func (sl *SudoListener) Err() error {
 	sl.stateMu.Lock()
 	defer sl.stateMu.Unlock()
@@ -112,6 +120,7 @@ func (sl *SudoListener) subscribe() error {
 	sl.subscribed = true
 	// A recovered channel means the next outage is a new one, worth announcing again.
 	sl.warned = false
+	sl.err = nil
 	sl.stateMu.Unlock()
 
 	return nil
@@ -125,13 +134,12 @@ func (sl *SudoListener) announceOutage(cause error) {
 // 4xx is a bad session or an expired login: the listener stops, carrying the reason for
 // websh to report, and says nothing itself. After it, the same failure is an outage
 // announced once, in CRLF because websh holds the terminal in raw mode, then left to
-// the reconnect loop.
+// the reconnect loop. Every cause is recorded either way, so a caller reading Err()
+// after a timeout gets the transport's own words rather than nothing.
 func (sl *SudoListener) fail(cause error) error {
 	sl.stateMu.Lock()
+	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
-	if fatal {
-		sl.err = cause
-	}
 	announce := sl.subscribed && !sl.warned
 	if announce {
 		sl.warned = true
@@ -140,12 +148,40 @@ func (sl *SudoListener) fail(cause error) error {
 
 	if fatal {
 		sl.Stop()
-	}
-	if announce {
-		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow("Sudo MFA listener disconnected; retrying..."))
+		return cause
 	}
 
+	if announce {
+		select {
+		case <-sl.done:
+			// Stop cancels neither an in-flight dial nor a session create, so a
+			// failure landing after it must not claim anything is still retrying.
+		default:
+			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow("Sudo MFA listener disconnected; retrying..."))
+		}
+	}
+
+	sl.refreshExpiredToken(cause)
+
 	return cause
+}
+
+// refreshExpiredToken renews the access token when cause is a 401. Past the first
+// subscribe nothing is fatal, so without this an access token that expires mid-session
+// is re-presented on every dial until websh exits and sudo MFA never comes back.
+func (sl *SudoListener) refreshExpiredToken(cause error) {
+	if sl.refreshToken == nil || utils.HTTPStatusCode(cause) != http.StatusUnauthorized {
+		return
+	}
+	// An MFA flow holds mfaMu across its own refresh; a second one would race it.
+	if !sl.mfaMu.TryLock() {
+		return
+	}
+	defer sl.mfaMu.Unlock()
+
+	// A failed refresh leaves the next attempt to the reconnect loop, which is
+	// where a recovery would land anyway.
+	_ = sl.refreshToken()
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {
