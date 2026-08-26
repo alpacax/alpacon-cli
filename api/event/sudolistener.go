@@ -149,8 +149,10 @@ func (sl *SudoListener) fail(cause error) error {
 	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
 	// websh created its own session on this token moments ago, so a 401 on the first
-	// attempt means it expired in between and a refresh would fix it. One is enough:
-	// a 401 answering a token this listener just renewed is a real refusal.
+	// attempt means it expired in between and a refresh would fix it. The allowance is
+	// spent here whether or not the refresh below lands, because what it bounds is the
+	// downgrade, not the refresh: a refresh that fails leaves the retry presenting the
+	// same token, and that second 401 is the one that has to stop us.
 	if fatal && expired && !sl.refreshed {
 		sl.refreshed = true
 		fatal = false
