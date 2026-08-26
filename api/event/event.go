@@ -413,8 +413,8 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	return streamSubscribed(ac, listener, cmdID, serverID, out, timeout, streamPollTick, true)
 }
 
-// listenerFailure names why the listener never connected: the server's own error
-// when it reached the server at all, the connect budget otherwise.
+// listenerFailure names why the listener never connected: the last error a session
+// attempt recorded, or the connect budget when no attempt got that far.
 func listenerFailure(listener *CommandOutputListener) error {
 	if err := listener.Err(); err != nil {
 		return err
