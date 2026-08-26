@@ -343,12 +343,12 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 }
 
 // isStaleCredential reports whether err is a 401 a fresh access token could
-// plausibly move. alpacon-server's Auth0 authenticator catches every exception
-// out of the authentication it wraps and returns no user (auth0/auth.py), so the
-// request falls through to IsAuthenticatedOr401 and raises DRF's
-// NotAuthenticated—which no branch of the server's error_code_handler rewrites,
-// leaving a 401 with a detail and no code. An expired token lands there, and so
-// does every other Auth0-bearer rejection that same catch-all absorbs: a
+// plausibly move. alpacon-server's Auth0 authenticator returns no user on every
+// bearer rejection, whether it absorbs an exception or declines outright
+// (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
+// raises DRF's NotAuthenticated—which no branch of the server's
+// error_code_handler rewrites, leaving a 401 with a detail and no code. An
+// expired token lands there, and so does every other Auth0-bearer rejection: a
 // workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
 // Those cost one grant and one replay before surfacing the same error, and the
 // MFA case a refresh may genuinely fix. So the empty code slot is not proof of
