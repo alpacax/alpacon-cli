@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,6 +308,11 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	configFile := filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName)
 
 	var writers sync.WaitGroup
+	// One slot per writer, each written only by its own goroutine, so collecting
+	// the failures costs no synchronization. A writer that never lands leaves the
+	// reader re-reading what CreateConfig wrote, which parses every time and would
+	// let this test pass without ever testing a replacement.
+	writeErrs := make([]error, 2)
 	done := make(chan struct{})
 	for w := range 2 {
 		writers.Add(1)
@@ -315,7 +321,10 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 			// Varying lengths so a half-written file differs in size from the
 			// one it replaced, which is what a reader would catch.
 			for i := range 300 {
-				_ = SaveRefreshedAuth0Token(strings.Repeat(string(rune('a'+w)), 1+i%400), 3600)
+				if err := SaveRefreshedAuth0Token(strings.Repeat(string(rune('a'+w)), 1+i%400), 3600); err != nil {
+					writeErrs[w] = err
+					return
+				}
 			}
 		}()
 	}
@@ -328,6 +337,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	for {
 		select {
 		case <-done:
+			assert.NoError(t, errors.Join(writeErrs...))
 			assert.Positive(t, reads, "the reader never got to run, so the test proved nothing")
 			return
 		default:
