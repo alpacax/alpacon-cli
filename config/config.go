@@ -60,9 +60,12 @@ func SwitchWorkspace(newURL, newName string) error {
 // an expired token writes this file—and two writers truncating the same path
 // leave a config that no longer parses, which the next command reports as a
 // broken file and answers with "run alpacon login". Encoding into a sibling
-// temp file and renaming it over the target means a reader sees one whole
-// config or the other, never a half of each. Two writers can still lose each
-// other's token, which costs one refresh and nothing else.
+// temp file and renaming it over the target means a concurrent reader sees one
+// whole config or the other, never a half of each. That is atomicity against
+// another process and not durability against a crash: nothing flushes the temp
+// file before the rename, so a power loss can still bring the config back empty
+// or reverted. Two writers can still lose each other's token, which costs one
+// refresh and nothing else.
 func saveConfig(config *Config) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
