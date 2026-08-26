@@ -405,10 +405,12 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	callCount := 0
+	var requestedPath string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
+		requestedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    " alice ",
 			IsStaff:     true,
 			IsSuperuser: false,
@@ -423,6 +425,9 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	assert.Equal(t, "alice", ac.Username)
 	assert.Equal(t, "staff", ac.Privileges)
 
+	// Without the trailing slash Django's APPEND_SLASH answers a 301 and the client pays a second round trip.
+	assert.Equal(t, "/api/iam/users/-/", requestedPath)
+
 	_ = ac.LoadCurrentUser() // second call must be a no-op
 	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once")
 }
@@ -430,7 +435,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    "bob",
 			IsStaff:     true,
 			IsSuperuser: true,
@@ -446,7 +451,7 @@ func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
 func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    "carol",
 			IsStaff:     false,
 			IsSuperuser: false,
