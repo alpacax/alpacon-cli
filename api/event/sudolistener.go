@@ -89,8 +89,7 @@ func (sl *SudoListener) Err() error {
 func (sl *SudoListener) provisionSession() (string, error) {
 	session, err := CreateEventSession(sl.ac)
 	if err != nil {
-		sl.announceOutage(err)
-		return "", sl.failIfFatal(err)
+		return "", sl.fail(err)
 	}
 
 	sl.stateMu.Lock()
@@ -106,8 +105,7 @@ func (sl *SudoListener) subscribe() error {
 	sl.stateMu.Unlock()
 
 	if err := SubscribeEvent(sl.ac, channelID, EventTypeSudo, sl.sessionID); err != nil {
-		sl.announceOutage(err)
-		return sl.failIfFatal(err)
+		return sl.fail(err)
 	}
 
 	sl.stateMu.Lock()
@@ -119,40 +117,37 @@ func (sl *SudoListener) subscribe() error {
 	return nil
 }
 
-// failIfFatal stops the listener when retrying cannot help: a 4xx before the first
-// subscribe means a bad session or an expired login, not an outage. Everything else
-// is left to the reconnect loop.
-func (sl *SudoListener) failIfFatal(cause error) error {
+// announceOutage is the dial-failure hook: a dial error reaches neither
+// provisionSession nor subscribe, so without it a transport outage is silent.
+func (sl *SudoListener) announceOutage(cause error) {
+	_ = sl.fail(cause)
+}
+
+// fail decides what a failed connect attempt means. A fatal 4xx before the first
+// subscribe is a bad session or an expired login, so the listener stops carrying the
+// reason; websh reports that one itself, which is why nothing is announced before then.
+// Once subscribed, the same failure is an outage: announced once, then left to the
+// reconnect loop, with its own CRLF because websh holds the terminal in raw mode.
+func (sl *SudoListener) fail(cause error) error {
 	sl.stateMu.Lock()
 	fatal := !sl.subscribed && isFatalRequestError(cause)
 	if fatal {
 		sl.err = cause
+	}
+	announce := sl.subscribed && !sl.warned
+	if announce {
+		sl.warned = true
 	}
 	sl.stateMu.Unlock()
 
 	if fatal {
 		sl.Stop()
 	}
+	if announce {
+		_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow("Sudo MFA listener disconnected; retrying..."))
+	}
 
 	return cause
-}
-
-// announceOutage reports a dropped event channel once per outage. Before the first
-// subscribe the caller (websh) already handles the failure, so this stays quiet.
-// The message is wrapped in CRLF because websh holds the terminal in raw mode.
-func (sl *SudoListener) announceOutage(error) {
-	sl.stateMu.Lock()
-	quiet := !sl.subscribed || sl.warned
-	if !quiet {
-		sl.warned = true
-	}
-	sl.stateMu.Unlock()
-
-	if quiet {
-		return
-	}
-
-	_, _ = fmt.Fprint(os.Stderr, "\r\n\033[33mSudo MFA listener disconnected; retrying...\033[0m\r\n")
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {
