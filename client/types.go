@@ -26,7 +26,7 @@ type AlpaconClient struct {
 	loadErr   error
 }
 
-type CheckPrivilegesResponse struct {
+type CurrentUserResponse struct {
 	Username    string `json:"username"`
 	IsStaff     bool   `json:"is_staff"`
 	IsSuperuser bool   `json:"is_superuser"`

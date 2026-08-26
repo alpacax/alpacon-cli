@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	checkPrivilegesURL = "/api/iam/users/-"
+	currentUserURL = "/api/iam/users/-/"
 
 	// bearerPrefix is the scheme setHTTPHeader signs an access token with. The
 	// stale-token retry reads it back off the request to learn which token the
@@ -109,12 +109,12 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 
 func (ac *AlpaconClient) LoadCurrentUser() error {
 	ac.loadOnce.Do(func() {
-		body, err := ac.SendGetRequest(checkPrivilegesURL)
+		body, err := ac.SendGetRequest(currentUserURL)
 		if err != nil {
 			ac.loadErr = err
 			return
 		}
-		var resp CheckPrivilegesResponse
+		var resp CurrentUserResponse
 		if err := json.Unmarshal(body, &resp); err != nil {
 			ac.loadErr = err
 			return
