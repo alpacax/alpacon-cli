@@ -410,7 +410,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 		callCount++
 		requestedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    " alice ",
 			IsStaff:     true,
 			IsSuperuser: false,
@@ -435,7 +435,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    "bob",
 			IsStaff:     true,
 			IsSuperuser: true,
@@ -451,7 +451,7 @@ func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
 func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CheckPrivilegesResponse{
+		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
 			Username:    "carol",
 			IsStaff:     false,
 			IsSuperuser: false,
