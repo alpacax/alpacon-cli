@@ -304,3 +304,15 @@ func TestCommandOutputListener_KeepsRetryingAfterTheFirstSubscribe(t *testing.T)
 		return sessions.Load() >= 3
 	}, 5*time.Second, 10*time.Millisecond, "a rejected reconnect must not end a listener that already subscribed")
 }
+
+func TestCommandOutputListener_SubscribeFailsOnAStoppedListener(t *testing.T) {
+	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	l := NewCommandOutputListener(ac)
+	l.Stop()
+
+	// A fatal session failure can stop the listener while the caller is still inside
+	// SubmitCommand, and the server would accept a subscription on the dead channel.
+	assert.Error(t, l.subscribeTo("command-1", "server-1"), "a stopped listener must not report a live subscription")
+}

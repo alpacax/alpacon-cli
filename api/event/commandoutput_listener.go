@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -112,6 +113,15 @@ func (l *CommandOutputListener) subscribeTo(commandID, serverID string) error {
 }
 
 func (l *CommandOutputListener) subscribe() error {
+	// A fatal session failure can stop the listener between the caller's WaitConnected
+	// and its subscribeTo. Subscribing then succeeds against a channel nothing reads,
+	// so the caller would stream from a dead listener instead of falling back.
+	select {
+	case <-l.done:
+		return errors.New("event listener stopped before the subscription")
+	default:
+	}
+
 	l.cmdMu.Lock()
 	commandID, serverID := l.commandID, l.serverID
 	l.cmdMu.Unlock()
