@@ -55,6 +55,14 @@ func SwitchWorkspace(newURL, newName string) error {
 	return saveConfig(&cfg)
 }
 
+// saveConfig replaces the config file in one step. Another alpacon process can
+// be saving a renewed access token at the same moment—every command that meets
+// an expired token writes this file—and two writers truncating the same path
+// leave a config that no longer parses, which the next command reports as a
+// broken file and answers with "run alpacon login". Encoding into a sibling
+// temp file and renaming it over the target means a reader sees one whole
+// config or the other, never a half of each. Two writers can still lose each
+// other's token, which costs one refresh and nothing else.
 func saveConfig(config *Config) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -66,17 +74,35 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	configFile := filepath.Join(configDir, ConfigFileName)
-	file, err := os.OpenFile(configFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	file, err := os.CreateTemp(configDir, ConfigFileName+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
 	}
-	defer func() { _ = file.Close() }()
+	tempFile := file.Name()
+	defer func() {
+		_ = file.Close()
+		_ = os.Remove(tempFile)
+	}()
+
+	// The temp file holds the same credentials the config file does, so it
+	// carries the same mode from the moment it exists.
+	if err = file.Chmod(0600); err != nil {
+		return fmt.Errorf("failed to set config file permissions: %v", err)
+	}
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "    ")
 	if err = encoder.Encode(config); err != nil {
 		return fmt.Errorf("failed to encode config to JSON: %v", err)
+	}
+
+	if err = file.Close(); err != nil {
+		return fmt.Errorf("failed to write config file: %v", err)
+	}
+
+	configFile := filepath.Join(configDir, ConfigFileName)
+	if err = os.Rename(tempFile, configFile); err != nil {
+		return fmt.Errorf("failed to replace config file: %v", err)
 	}
 
 	return nil

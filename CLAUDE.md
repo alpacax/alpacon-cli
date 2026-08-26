@@ -189,7 +189,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 - **Go version**: see the `go` directive in `go.mod`
 - **Linter**: golangci-lint v2 with errcheck, govet, ineffassign, staticcheck, unused (see `.golangci.yml`)
-- **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`)
+- **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`). `saveConfig` writes a sibling temp file and renames it over the target—two alpacon processes can be saving a renewed access token at the same moment, and a plain truncate-and-write leaves a config the next command cannot parse. Any new writer must go through `saveConfig`
 - **Alias**: `alpacon` can also be invoked as `ac`
 - **File transfer**: The `cp` command lives in `cmd/ftp/` (package name `ftp`)
 - **Exit codes**: `0` success, `1` general error, `2` usage error (only `work-session`, `event wait`/`watch`, and `utils.RequirePositiveInt`; every other command's own validation and Cobra parse errors still exit `1`), `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".

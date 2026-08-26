@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -292,5 +294,51 @@ func TestGetAuthMethod(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, GetAuthMethod(tt.cfg))
 		})
+	}
+}
+
+// Another alpacon process can be saving a renewed token at the same moment, and
+// whatever the two writers do to each other, a reader must never find a config
+// it cannot parse—that failure reaches the user as a forced re-login.
+func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://alpacon.io", "alpacon", "", "", "eyJ", "refresh", "", 3600, false))
+
+	configFile := filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName)
+
+	var writers sync.WaitGroup
+	done := make(chan struct{})
+	for w := range 2 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			// Varying lengths so a half-written file differs in size from the
+			// one it replaced, which is what a reader would catch.
+			for i := range 300 {
+				_ = SaveRefreshedAuth0Token(strings.Repeat(string(rune('a'+w)), 1+i%400), 3600)
+			}
+		}()
+	}
+	go func() {
+		writers.Wait()
+		close(done)
+	}()
+
+	reads := 0
+	for {
+		select {
+		case <-done:
+			assert.Positive(t, reads, "the reader never got to run, so the test proved nothing")
+			return
+		default:
+		}
+		body, err := os.ReadFile(configFile)
+		if os.IsNotExist(err) {
+			continue
+		}
+		require.NoError(t, err)
+		var cfg Config
+		require.NoError(t, json.Unmarshal(body, &cfg), "read a config that does not parse: %q", body)
+		reads++
 	}
 }
