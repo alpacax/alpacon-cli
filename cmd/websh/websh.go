@@ -308,7 +308,7 @@ Note: All flags must be placed before the server name.
 		// ready, the approval request will expire and they can retry.
 		listenerDone := make(chan *event.SudoListener, 1)
 		go func() {
-			listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
+			listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
 		}()
 		defer func() {
 			select {
@@ -351,7 +351,7 @@ func extractValue(args []string, i int) (string, int) {
 
 // setupSudoListener starts the sudo MFA listener for the given websh session.
 // Returns nil when it cannot connect.
-func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *event.SudoListener {
+func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *event.SudoListener {
 	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
 

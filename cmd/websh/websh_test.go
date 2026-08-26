@@ -462,7 +462,7 @@ func TestSetupSudoListener_StaysSilentOnNotFound(t *testing.T) {
 
 	var listener *event.SudoListener
 	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "session-1", "my-server")
+		listener = setupSudoListener(ac, "my-server", "session-1")
 	})
 
 	assert.Nil(t, listener)
@@ -475,7 +475,7 @@ func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
 
 	var listener *event.SudoListener
 	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "session-1", "my-server")
+		listener = setupSudoListener(ac, "my-server", "session-1")
 	})
 
 	assert.Nil(t, listener)
@@ -494,7 +494,7 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_ = setupSudoListener(ac, "session-1", "my-server")
+		_ = setupSudoListener(ac, "my-server", "session-1")
 	})
 
 	require.NotEmpty(t, stderr, "a rejected request must warn, or there is nothing to check")
