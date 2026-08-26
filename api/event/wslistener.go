@@ -43,7 +43,8 @@ type wsListener struct {
 }
 
 // newProvisionedWSListener builds the skeleton for a listener that obtains a new
-// URL for every dial attempt. ac may be nil (empty header, for tests).
+// URL for every dial attempt. A nil ac only means an empty header here; whether it
+// is safe at all is provision's call, since every attempt runs it.
 func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
 	wsHeader := http.Header{}
 	if ac != nil {

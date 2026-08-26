@@ -56,9 +56,10 @@ type commandOutputEnvelope struct {
 	} `json:"payload"`
 }
 
-// NewCommandOutputListener constructs a listener without connecting. ac may be
-// nil (empty header, for tests); the targets are set later via setTargets, because
-// SubmitCommand must run once the WS is already connected.
+// NewCommandOutputListener constructs a listener without connecting. ac may be nil
+// only for a test that never calls Start, because provisioning a session dereferences
+// it. The targets are set later via setTargets, because SubmitCommand must run once
+// the WS is already connected.
 func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
 	l := &CommandOutputListener{
 		ac:       ac,
