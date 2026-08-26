@@ -14,8 +14,16 @@ type AlpaconClient struct {
 	Username    string
 	UserAgent   string
 
-	loadOnce sync.Once
-	loadErr  error
+	// tokenMu guards AccessToken, which sendRequest renews mid-flight when the
+	// server reports it stale. No package outside this one reads the field.
+	tokenMu sync.Mutex
+	// refreshMu serializes the refresh-token grant so one expiry costs one round
+	// trip. The grant is unbounded network I/O, so it runs under this lock and
+	// never under tokenMu—otherwise a slow Auth0 would stall every other request
+	// the client has in flight.
+	refreshMu sync.Mutex
+	loadOnce  sync.Once
+	loadErr   error
 }
 
 type CurrentUserResponse struct {
