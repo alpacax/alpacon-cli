@@ -4,16 +4,30 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/api/websh"
+	"github.com/alpacax/alpacon-cli/client"
 	execCmd "github.com/alpacax/alpacon-cli/cmd/exec"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// statusErr carries an HTTP status the way client's own errors do, so the warning
+// decision can be tested without standing up a server.
+type statusErr struct {
+	status int
+}
+
+func (e statusErr) Error() string       { return fmt.Sprintf("server said %d", e.status) }
+func (e statusErr) HTTPStatusCode() int { return e.status }
 
 func TestCommandParsing(t *testing.T) {
 	tests := []struct {
@@ -265,52 +279,32 @@ func TestCommandParsing(t *testing.T) {
 	}
 }
 
-func TestIsNotFoundError(t *testing.T) {
+func TestSudoListenerWarning(t *testing.T) {
 	tests := []struct {
-		name     string
-		err      error
-		expected bool
+		name  string
+		cause error
+		want  string
 	}{
 		{
-			name:     "server returns Not found.",
-			err:      fmt.Errorf("Not found."),
-			expected: true,
+			name:  "an older server without the events API stays silent",
+			cause: fmt.Errorf("failed to create event session: %w", statusErr{status: http.StatusNotFound}),
+			want:  "",
 		},
 		{
-			name:     "exact not found without period",
-			err:      fmt.Errorf("Not found"),
-			expected: true,
+			name:  "a rejected request names the server's reason",
+			cause: fmt.Errorf("failed to create event session: %w", statusErr{status: http.StatusBadRequest}),
+			want:  "Sudo MFA listener unavailable: failed to create event session: server said 400",
 		},
 		{
-			name:     "case insensitive NOT FOUND",
-			err:      fmt.Errorf("NOT FOUND"),
-			expected: true,
-		},
-		{
-			name:     "wrapped not found error",
-			err:      fmt.Errorf("failed to create event session: Not found"),
-			expected: true,
-		},
-		{
-			name:     "wrapped with period",
-			err:      fmt.Errorf("failed to subscribe: Not found."),
-			expected: true,
-		},
-		{
-			name:     "unrelated error",
-			err:      fmt.Errorf("connection refused"),
-			expected: false,
-		},
-		{
-			name:     "api insufficient data",
-			err:      fmt.Errorf("code: api_insufficient_data"),
-			expected: false,
+			name:  "no cause at all means the wait ran out",
+			cause: nil,
+			want:  "Sudo MFA listener unavailable: timed out connecting to the event channel",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, isNotFoundError(tt.err))
+			assert.Equal(t, tt.want, sudoListenerWarning(tt.cause))
 		})
 	}
 }
@@ -443,4 +437,69 @@ func TestBuildRemoteExecArgsPinsWebshInvocation(t *testing.T) {
 	assert.Equal(t, "prod", args.Server)
 	assert.Equal(t, "psql -h localhost", args.Command)
 	assert.Equal(t, parsed.Env, args.Env)
+}
+
+// newSudoListenerTestServer serves only the event session endpoint, with the status
+// and body the test wants, so setupSudoListener's failure path can be driven directly.
+func newSudoListenerTestServer(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/events/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	})
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestSetupSudoListener_StaysSilentOnNotFound(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusNotFound, `{"detail":"Not found."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var listener *event.SudoListener
+	_, stderr := testutil.CaptureOutput(t, func() {
+		listener = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	assert.Nil(t, listener)
+	assert.Empty(t, stderr, "an older server without the events API must not warn")
+}
+
+func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	var listener *event.SudoListener
+	_, stderr := testutil.CaptureOutput(t, func() {
+		listener = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	assert.Nil(t, listener)
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
+}
+
+func TestSudoListenerWarning_SanitizesTheServersText(t *testing.T) {
+	warning := sudoListenerWarning(errors.New("boom \x1b[31mred\x1b[0m"))
+
+	assert.NotContains(t, warning, "\x1b")
+	assert.Contains(t, warning, "boom")
+}
+
+func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_ = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	require.NotEmpty(t, stderr, "a rejected request must warn, or there is nothing to check")
+	for _, line := range strings.Split(strings.TrimSuffix(stderr, "\n"), "\n") {
+		assert.True(t, strings.HasSuffix(line, "\r"),
+			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
+	}
 }

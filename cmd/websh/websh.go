@@ -3,6 +3,8 @@ package websh
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -306,7 +308,7 @@ Note: All flags must be placed before the server name.
 		// ready, the approval request will expire and they can retry.
 		listenerDone := make(chan *event.SudoListener, 1)
 		go func() {
-			listenerDone <- setupSudoListener(alpaconClient, session.ID, serverName)
+			listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
 		}()
 		defer func() {
 			select {
@@ -347,34 +349,19 @@ func extractValue(args []string, i int) (string, int) {
 	return "", i
 }
 
-// setupSudoListener creates an event session, connects the event WebSocket,
-// then subscribes to sudo events for the given websh session. The server
-// requires the WebSocket to be connected before allowing subscriptions.
-// Returns nil if the events API is not available. Silently skips "not found"
-// errors (older servers); logs a warning for other failures.
-func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *event.SudoListener {
-	eventSession, err := event.CreateEventSession(ac)
-	if err != nil {
-		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
-		}
-		return nil
-	}
-
-	// Start listener first — the server requires the WebSocket channel to be
-	// connected before it accepts event subscriptions.
-	listener := event.NewSudoListener(ac, eventSession.WebsocketURL, serverName)
+// setupSudoListener starts the sudo MFA listener for the given websh session.
+// Returns nil when it cannot connect.
+func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *event.SudoListener {
+	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
 
 	if !listener.WaitConnected(5 * time.Second) {
 		listener.Stop()
-		return nil
-	}
-
-	if err := event.SubscribeEvent(ac, eventSession.ChannelID, event.EventTypeSudo, sessionID); err != nil {
-		listener.Stop()
-		if !isNotFoundError(err) {
-			utils.CliWarning("Sudo MFA listener unavailable: %s", err)
+		if warning := sudoListenerWarning(listener.Err()); warning != "" {
+			// Not utils.CliWarning: this runs in a goroutine racing
+			// OpenNewTerminal, so the terminal may already be in raw mode,
+			// where a bare newline leaves the cursor where it stood.
+			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n", utils.Yellow("Warning"), warning)
 		}
 		return nil
 	}
@@ -382,14 +369,17 @@ func setupSudoListener(ac *client.AlpaconClient, sessionID, serverName string) *
 	return listener
 }
 
-// isNotFoundError checks if an error message indicates a 404/not-found response.
-// AlpaconClient.SendPostRequest returns the server's error detail (e.g., "Not found.")
-// rather than the raw HTTP status code.
-func isNotFoundError(err error) bool {
-	if err == nil {
-		return false
+// sudoListenerWarning explains why the sudo MFA listener never connected, or returns ""
+// when the failure is not worth telling the user about: a 404 is an older server without
+// the events API, and the websh session runs fine without it. The server's own text is
+// sanitized because this command is about to put the terminal into raw mode.
+func sudoListenerWarning(cause error) string {
+	if utils.HTTPStatusCode(cause) == http.StatusNotFound {
+		return ""
 	}
-	msg := strings.TrimSpace(strings.ToLower(err.Error()))
-	return msg == "not found" || msg == "not found." ||
-		strings.HasSuffix(msg, ": not found") || strings.HasSuffix(msg, ": not found.")
+	reason := "timed out connecting to the event channel"
+	if cause != nil {
+		reason = utils.SanitizeTerminalText(cause.Error())
+	}
+	return fmt.Sprintf("Sudo MFA listener unavailable: %s", reason)
 }

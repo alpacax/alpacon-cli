@@ -376,16 +376,11 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
-	session, err := CreateEventSession(ac)
-	if err != nil {
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, err)
-	}
-
-	listener := NewCommandOutputListener(ac, session.WebsocketURL, "")
+	listener := NewCommandOutputListener(ac)
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, fmt.Errorf("event websocket connect timeout"))
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, listenerFailure(listener))
 	}
 
 	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
@@ -393,9 +388,8 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 		listener.Stop()
 		return err
 	}
-	listener.setCommandID(cmdResp.ID)
 
-	return streamSubscribed(ac, session, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
+	return streamSubscribed(ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -404,15 +398,11 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 // PendingApprovalError; the parked job produced no output yet, so resubscribing
 // loses nothing.
 func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer, timeout time.Duration) error {
-	session, err := CreateEventSession(ac)
-	if err != nil {
-		return runCommandFallbackFromID(ac, cmdID, out, true, err)
-	}
-	listener := NewCommandOutputListener(ac, session.WebsocketURL, cmdID)
+	listener := NewCommandOutputListener(ac)
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallbackFromID(ac, cmdID, out, true, fmt.Errorf("event websocket connect timeout"))
+		return runCommandFallbackFromID(ac, cmdID, out, true, listenerFailure(listener))
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
@@ -420,23 +410,26 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 	if details, err := GetCommandByID(ac, cmdID); err == nil {
 		serverID = details.Server.ID
 	}
-	return streamSubscribed(ac, session, listener, cmdID, serverID, out, timeout, streamPollTick, true)
+	return streamSubscribed(ac, listener, cmdID, serverID, out, timeout, streamPollTick, true)
+}
+
+// listenerFailure names why the listener never connected: the last error a session
+// attempt recorded, or the connect budget when no attempt got that far.
+func listenerFailure(listener *CommandOutputListener) error {
+	if err := listener.Err(); err != nil {
+		return err
+	}
+	return fmt.Errorf("event websocket connect timeout")
 }
 
 // streamSubscribed subscribes to cmdID's output channel and to serverID's fin
 // channel, warm-fires persisted chunks, then writes live chunks to out until the
 // fin event or the poll reports a terminal state. Shared by the fresh-submit and
 // approval-resume paths.
-func streamSubscribed(ac *client.AlpaconClient, session *EventSessionResponse, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout, tick time.Duration, waitApproval bool) error {
-	if err := SubscribeEvent(ac, session.ChannelID, EventTypeCommandOutput, cmdID); err != nil {
+func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout, tick time.Duration, waitApproval bool) error {
+	if err := listener.subscribeTo(cmdID, serverID); err != nil {
 		listener.Stop()
 		return runCommandFallbackFromID(ac, cmdID, out, waitApproval, err)
-	}
-	// Chunks carry no end marker, so without this the exit waits for the poll below
-	// to notice—up to 10 ticks once the command is a minute old. Best effort: on
-	// failure that poll stays the only terminal signal, as before.
-	if serverID != "" {
-		_ = SubscribeEvent(ac, session.ChannelID, EventTypeCommandFin, serverID)
 	}
 
 	// Warm-fire: drain any chunks already persisted. Advance lastSeq only over

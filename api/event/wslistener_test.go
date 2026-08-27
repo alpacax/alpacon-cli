@@ -18,7 +18,7 @@ import (
 const testReconnectBaseDelay = 10 * time.Millisecond
 
 func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
-	w := newWSListener(nil, "", 0)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	assert.PanicsWithValue(t, "event: wsListener.handleFrame must be assigned before Start", func() {
 		w.Start()
@@ -26,7 +26,7 @@ func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
 }
 
 func TestWSListener_StopIsIdempotent(t *testing.T) {
-	w := newWSListener(nil, "", 0)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	w.Stop()
 	w.Stop()
@@ -34,7 +34,7 @@ func TestWSListener_StopIsIdempotent(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Success(t *testing.T) {
-	w := newWSListener(nil, "", 0)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	// Simulate connection after short delay
 	go func() {
@@ -47,7 +47,7 @@ func TestWSListener_WaitConnected_Success(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Timeout(t *testing.T) {
-	w := newWSListener(nil, "", 0)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	start := time.Now()
 	result := w.WaitConnected(100 * time.Millisecond)
@@ -82,7 +82,7 @@ func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
 
-	w := newWSListener(nil, "ws"+strings.TrimPrefix(server.URL, "http"), time.Second)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "ws" + strings.TrimPrefix(server.URL, "http"), nil }, time.Second)
 	w.handleFrame = func([]byte) {}
 
 	assert.False(t, w.connectAndListen(), "failed handshake should not count as connected")
@@ -98,7 +98,7 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 	}))
 	defer server.Close()
 
-	w := newWSListener(nil, "ws"+strings.TrimPrefix(server.URL, "http"), time.Second)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "ws" + strings.TrimPrefix(server.URL, "http"), nil }, time.Second)
 	w.handleFrame = func([]byte) {}
 	w.Stop()
 
@@ -118,7 +118,7 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
-	w := newWSListener(nil, "", 0)
+	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)

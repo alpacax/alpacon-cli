@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 )
 
@@ -34,21 +35,16 @@ type wsListener struct {
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
-	connected   chan struct{} // closed after the first successful connect and subscribe
+	connected   chan struct{} // closed once a dial connected and onConnected returned
 	connectOnce sync.Once
 	closeOnce   sync.Once
 	mu          sync.Mutex // guards conn
 	conn        *websocket.Conn
 }
 
-// newWSListener builds the skeleton for a listener that always dials the same
-// URL. ac may be nil (empty header, for tests).
-func newWSListener(ac *client.AlpaconClient, wsURL string, handshakeTimeout time.Duration) *wsListener {
-	return newProvisionedWSListener(ac, func() (string, error) { return wsURL, nil }, handshakeTimeout)
-}
-
 // newProvisionedWSListener builds the skeleton for a listener that obtains a new
-// URL for every dial attempt. ac may be nil (empty header, for tests).
+// URL for every dial attempt. A nil ac only means an empty header here; whether it
+// is safe at all is provision's call, since every attempt runs it.
 func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
 	wsHeader := http.Header{}
 	if ac != nil {
@@ -80,8 +76,9 @@ func (w *wsListener) Start() {
 	}()
 }
 
-// WaitConnected blocks until connected and subscribed, timeout, or shutdown;
-// returns whether it connected.
+// WaitConnected blocks until a dial has connected and its onConnected hook has
+// returned, until timeout, or until shutdown; returns whether it connected. A hook
+// with nothing to subscribe to still counts, so this promises no subscription.
 func (w *wsListener) WaitConnected(timeout time.Duration) bool {
 	select {
 	case <-w.connected:
@@ -194,4 +191,10 @@ func (w *wsListener) connectAndListen() (connected bool) {
 
 		w.handleFrame(message)
 	}
+}
+
+// isFatalRequestError reports whether retrying is pointless: a 4xx that refuses rather
+// than asks to be retried is a bad request or an expired login, unchanged by a retry.
+func isFatalRequestError(cause error) bool {
+	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
 }
