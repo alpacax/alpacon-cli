@@ -61,8 +61,8 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 
 // ErrorCallbacks returns the standard callback set commands hand to
 // utils.HandleCommonErrors: MFA and username-required handling, MFA completion
-// polling, and a token refresh before each retry. retry re-runs the operation
-// that failed.
+// polling, and a token refresh once MFA completes. The retry function re-runs
+// the operation that failed.
 func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(serverName string) error {
