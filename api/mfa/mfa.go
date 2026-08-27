@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -56,6 +57,27 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	}
 
 	return resp.Completed, nil
+}
+
+// ErrorCallbacks returns the standard callback set commands hand to
+// utils.HandleCommonErrors: MFA and username-required handling, MFA completion
+// polling, and a token refresh before each retry. retry re-runs the operation
+// that failed.
+func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
+	return utils.ErrorHandlerCallbacks{
+		OnMFARequired: func(serverName string) error {
+			return HandleMFAError(ac, serverName)
+		},
+		OnUsernameRequired: func() error {
+			_, err := iam.HandleUsernameRequired()
+			return err
+		},
+		CheckMFACompleted: func() (bool, error) {
+			return CheckMFACompletion(ac)
+		},
+		RefreshToken:   ac.RefreshToken,
+		RetryOperation: retry,
+	}
 }
 
 // GetMFALinkByServerName resolves the server name and returns a CLI MFA URL.

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/ftp"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
@@ -109,23 +108,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
-				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						_, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
-						return err
-					},
-				})
+				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
+					_, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
+					return err
+				}))
 
 				if err != nil {
 					utils.HandleWorkSessionError(err, "webftp", serverName, authMethod, workSessionID)
@@ -138,23 +124,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
 			serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
-				err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-					OnMFARequired: func(srv string) error {
-						return mfa.HandleMFAError(alpaconClient, srv)
-					},
-					OnUsernameRequired: func() error {
-						_, err := iam.HandleUsernameRequired()
-						return err
-					},
-					CheckMFACompleted: func() (bool, error) {
-						return mfa.CheckMFACompletion(alpaconClient)
-					},
-					RefreshToken: alpaconClient.RefreshToken,
-					RetryOperation: func() error {
-						_, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
-						return err
-					},
-				})
+				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
+					_, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
+					return err
+				}))
 
 				if err != nil {
 					utils.HandleWorkSessionError(err, "webftp", serverName, authMethod, workSessionID)

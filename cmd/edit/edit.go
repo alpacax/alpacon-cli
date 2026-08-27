@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
@@ -140,7 +139,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
 			downloaded, err := ftpapi.DownloadFileToPath(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, workSessionID)
 			if err != nil {
-				err = utils.HandleCommonErrors(err, target.Server, editErrorCallbacks(ac, func() error {
+				err = utils.HandleCommonErrors(err, target.Server, mfa.ErrorCallbacks(ac, func() error {
 					var retryErr error
 					downloaded, retryErr = ftpapi.DownloadFileToPath(ac, target.Server, target.RemotePath, localPath, target.Username, groupname, workSessionID)
 					return retryErr
@@ -151,7 +150,7 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 		upload: func(target editTarget, localPath, workSessionID string) error {
 			err := ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 			if err != nil {
-				err = utils.HandleCommonErrors(err, target.Server, editErrorCallbacks(ac, func() error {
+				err = utils.HandleCommonErrors(err, target.Server, mfa.ErrorCallbacks(ac, func() error {
 					return ftpapi.UploadLocalFileAs(ac, localPath, target.Server, target.RemotePath, target.Username, groupname, workSessionID)
 				}))
 			}
@@ -159,23 +158,6 @@ func realEditDeps(ac *client.AlpaconClient, groupname string) editDeps {
 		},
 		runEditor:    runLocalEditor,
 		confirmLarge: confirmLargeEdit,
-	}
-}
-
-func editErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
-	return utils.ErrorHandlerCallbacks{
-		OnMFARequired: func(serverName string) error {
-			return mfa.HandleMFAError(ac, serverName)
-		},
-		OnUsernameRequired: func() error {
-			_, err := iam.HandleUsernameRequired()
-			return err
-		},
-		CheckMFACompleted: func() (bool, error) {
-			return mfa.CheckMFACompletion(ac)
-		},
-		RefreshToken:   ac.RefreshToken,
-		RetryOperation: retry,
 	}
 }
 

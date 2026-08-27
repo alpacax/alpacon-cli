@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
@@ -278,23 +277,10 @@ Note: All flags must be placed before the server name.
 		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 
 		if err != nil {
-			err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-				OnMFARequired: func(srv string) error {
-					return mfa.HandleMFAError(alpaconClient, srv)
-				},
-				OnUsernameRequired: func() error {
-					_, err := iam.HandleUsernameRequired()
-					return err
-				},
-				CheckMFACompleted: func() (bool, error) {
-					return mfa.CheckMFACompletion(alpaconClient)
-				},
-				RefreshToken: alpaconClient.RefreshToken,
-				RetryOperation: func() error {
-					session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
-					return err
-				},
-			})
+			err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
+				session, err = websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
+				return err
+			}))
 
 			if err != nil {
 				utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
