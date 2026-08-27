@@ -135,3 +135,20 @@ func TestGetMFALink_ServerErrorIsAnError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, link)
 }
+
+func TestErrorCallbacks_WiresEveryField(t *testing.T) {
+	ac := &client.AlpaconClient{}
+	retried := false
+
+	cb := ErrorCallbacks(ac, func() error { retried = true; return nil })
+
+	assert.NotNil(t, cb.OnMFARequired)
+	assert.NotNil(t, cb.OnUsernameRequired)
+	// A nil CheckMFACompleted silently drops every caller onto the legacy
+	// retry loop in utils.HandleCommonErrors—no compile error, no failure.
+	assert.NotNil(t, cb.CheckMFACompleted)
+	assert.NotNil(t, cb.RefreshToken)
+
+	assert.NoError(t, cb.RetryOperation())
+	assert.True(t, retried, "RetryOperation must be the closure passed in")
+}
