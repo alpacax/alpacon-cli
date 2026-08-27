@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCheckMFACompletion_Completed(t *testing.T) {
@@ -149,6 +150,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	assert.NotNil(t, cb.CheckMFACompleted)
 	assert.NotNil(t, cb.RefreshToken)
 
+	require.NotNil(t, cb.RetryOperation)
 	assert.NoError(t, cb.RetryOperation())
 	assert.True(t, retried, "RetryOperation must be the closure passed in")
 }
