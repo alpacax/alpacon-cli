@@ -31,12 +31,12 @@ var workspaceUsageCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		paymentBaseURL, err := workspace.GetPaymentAPIBaseURL(cfg.WorkspaceURL)
+		paymentBaseURL, err := workspace.GetPaymentAPIBaseURL(alpaconClient.BaseURL)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to determine payment API URL: %s.", err)
 		}
 
-		workspaceID, err := workspace.GetWorkspaceID(alpaconClient, paymentBaseURL, cfg.WorkspaceName)
+		workspaceID, err := workspace.GetWorkspaceID(alpaconClient, paymentBaseURL, alpaconClient.WorkspaceName)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to find workspace: %s.", err)
 		}
