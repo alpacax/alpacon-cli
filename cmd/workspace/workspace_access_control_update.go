@@ -21,8 +21,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
-		cfg, err := config.LoadConfig()
-		if err != nil {
+		if _, err := config.LoadConfig(); err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
 
@@ -39,7 +38,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var accessControlDetail []byte
 		accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, cfg.WorkspaceName, func() error {
+			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, func() error {
 				accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
 				return err
 			}))

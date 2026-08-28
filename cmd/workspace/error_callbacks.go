@@ -9,19 +9,16 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// errorCallbacks returns the callback set the workspace update commands hand to
-// utils.HandleCommonErrors. It differs from mfa.ErrorCallbacks in that these
-// commands take no username and their MFA link is workspace-scoped rather than
-// server-scoped. The retry function re-runs the operation that failed.
+// errorCallbacks is mfa.ErrorCallbacks for the workspace update commands: no
+// username, and a workspace-scoped MFA link instead of a server-scoped one.
 //
-// workspaceName comes from the caller's own config read rather than a fresh one
-// inside the callback: ac pins its BaseURL at construction from that same read,
-// and an editor session sits between it and the MFA prompt. Re-reading here
-// would point the link at a workspace the request is no longer going to.
-func errorCallbacks(ac *client.AlpaconClient, workspaceName string, retry func() error) utils.ErrorHandlerCallbacks {
+// The workspace name comes off ac, pinned there beside BaseURL. Reading config
+// here instead would let another shell's 'alpacon ws use' point the link at a
+// workspace this client is not talking to.
+func errorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(_ string) error {
-			mfaURL, err := mfa.GetWorkspaceSecurityMFALink(ac, workspaceName)
+			mfaURL, err := mfa.GetWorkspaceSecurityMFALink(ac)
 			if err != nil {
 				return err
 			}
