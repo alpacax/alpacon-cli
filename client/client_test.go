@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1035,4 +1036,20 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 
 	close(release)
 	assert.True(t, <-renewed, "the stubbed grant installs a token: %q", "fresh")
+}
+
+// Everything below cmd/ reads the workspace off the client, so dropping either
+// field here leaves every MFA link the process builds naming no workspace.
+func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(
+		"https://my-workspace.alpacon.io", "my-workspace", "alpat-token",
+		"", "", "", "alpacon.io", 0, false,
+	))
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://my-workspace.alpacon.io", ac.BaseURL)
+	assert.Equal(t, "my-workspace", ac.WorkspaceName)
 }
