@@ -12,7 +12,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	ac := &client.AlpaconClient{}
 	retried := false
 
-	cb := errorCallbacks(ac, func() error { retried = true; return nil })
+	cb := errorCallbacks(ac, "my-workspace", func() error { retried = true; return nil })
 
 	assert.NotNil(t, cb.OnMFARequired)
 	// A nil CheckMFACompleted silently drops both update commands onto the

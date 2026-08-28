@@ -3,6 +3,7 @@ package workspace
 import (
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,11 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -33,7 +39,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var accessControlDetail []byte
 		accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, func() error {
+			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, cfg.WorkspaceName, func() error {
 				accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
 				return err
 			}))
