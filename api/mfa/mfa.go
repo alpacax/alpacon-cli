@@ -3,6 +3,7 @@ package mfa
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -80,12 +80,14 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 	}
 }
 
-// GetMFALinkByServerName resolves the server name and returns a CLI MFA URL.
-// Used where only the server name is available, not the ID.
+// GetMFALinkByServerName is for callers holding a name, not an ID. It runs at the
+// MFA prompt, which an editor session or a long transfer puts minutes after the
+// client was built—config by then can name another workspace.
 func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string, error) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return "", fmt.Errorf("failed to load configuration: %w", err)
+	// Before the lookup, so no workspace costs no round trip and the error names
+	// the workspace rather than a lookup that failed after it.
+	if err := requireWorkspace(ac); err != nil {
+		return "", err
 	}
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
@@ -93,7 +95,7 @@ func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string
 		return "", fmt.Errorf("failed to resolve server: %w", err)
 	}
 
-	return GetMFALink(ac, serverID, cfg.WorkspaceName)
+	return GetMFALink(ac, serverID)
 }
 
 // StepUpForSudo runs an interactive MFA step-up for an exec-sudo presence denial
@@ -169,27 +171,40 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	}
 }
 
-// GetWorkspaceSecurityMFALink returns an MFA URL for workspace security settings.
-// Uses location "cli" so the mfa-success page notifies the backend,
-// enabling CheckMFACompletion polling to detect when MFA is done.
-func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient, workspaceName string) (string, error) {
+// GetWorkspaceSecurityMFALink uses location "cli" so the mfa-success page notifies
+// the backend, which is what CheckMFACompletion polls for.
+func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient) (string, error) {
 	return fetchMFALink(ac, map[string]string{
 		"location":  "cli",
-		"workspace": workspaceName,
+		"workspace": ac.WorkspaceName,
 	})
 }
 
-func GetMFALink(ac *client.AlpaconClient, serverID string, workspaceName string) (string, error) {
+// GetMFALink scopes the link to one server. The workspace is the client's own,
+// never caller-supplied: no link may name a workspace the request is not going to.
+func GetMFALink(ac *client.AlpaconClient, serverID string) (string, error) {
 	return fetchMFALink(ac, map[string]string{
 		"location":  "cli",
 		"server":    serverID,
-		"workspace": workspaceName,
+		"workspace": ac.WorkspaceName,
 	})
 }
 
-// fetchMFALink rejects an empty URL as an error: every caller prints the link
-// to the user.
+// requireWorkspace rejects a client that can name no workspace: every link carries one.
+func requireWorkspace(ac *client.AlpaconClient) error {
+	if ac.WorkspaceName == "" {
+		return errors.New("no workspace name on the client; run 'alpacon login' first")
+	}
+	return nil
+}
+
+// fetchMFALink rejects an empty URL as an error: every caller prints the link to
+// the user. The workspace is checked first, or the link would name none.
 func fetchMFALink(ac *client.AlpaconClient, params map[string]string) (string, error) {
+	if err := requireWorkspace(ac); err != nil {
+		return "", err
+	}
+
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(mfaURL, "", params))
 	if err != nil {
 		return "", fmt.Errorf("failed to get the MFA URL: %w", err)

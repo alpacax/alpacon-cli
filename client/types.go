@@ -6,13 +6,14 @@ import (
 )
 
 type AlpaconClient struct {
-	HTTPClient  *http.Client
-	BaseURL     string
-	Token       string
-	AccessToken string
-	Privileges  string
-	Username    string
-	UserAgent   string
+	HTTPClient    *http.Client
+	BaseURL       string
+	WorkspaceName string // the workspace BaseURL points at; config can be rewritten mid-flight
+	Token         string
+	AccessToken   string
+	Privileges    string
+	Username      string
+	UserAgent     string
 
 	// tokenMu guards AccessToken, which sendRequest renews mid-flight when the
 	// server reports it stale. No package outside this one reads the field.

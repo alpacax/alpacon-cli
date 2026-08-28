@@ -85,11 +85,12 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	}
 
 	client := &AlpaconClient{
-		HTTPClient:  httpClient,
-		BaseURL:     validConfig.WorkspaceURL,
-		Token:       validConfig.Token,
-		AccessToken: validConfig.AccessToken,
-		UserAgent:   utils.GetUserAgent(),
+		HTTPClient:    httpClient,
+		BaseURL:       validConfig.WorkspaceURL,
+		WorkspaceName: validConfig.WorkspaceName,
+		Token:         validConfig.Token,
+		AccessToken:   validConfig.AccessToken,
+		UserAgent:     utils.GetUserAgent(),
 	}
 
 	if isAccessTokenExpired(validConfig) {

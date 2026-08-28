@@ -15,7 +15,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	ac := &client.AlpaconClient{}
 	retried := false
 
-	cb := errorCallbacks(ac, "my-workspace", func() error { retried = true; return nil })
+	cb := errorCallbacks(ac, func() error { retried = true; return nil })
 
 	assert.NotNil(t, cb.OnMFARequired)
 	// A nil CheckMFACompleted silently drops both update commands onto the
@@ -30,7 +30,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	assert.True(t, retried, "RetryOperation must be the closure passed in")
 }
 
-func TestErrorCallbacks_MFALinkNamesTheWorkspacePassedIn(t *testing.T) {
+func TestErrorCallbacks_MFALinkNamesTheWorkspaceTheClientIsPinnedTo(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 
 	var query url.Values
@@ -41,11 +41,30 @@ func TestErrorCallbacks_MFALinkNamesTheWorkspacePassedIn(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	cb := errorCallbacks(ac, "my-workspace", func() error { return nil })
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, WorkspaceName: "my-workspace"}
+	cb := errorCallbacks(ac, func() error { return nil })
 
-	// The link must name the workspace the caller pinned the client to. Reading
-	// config here instead would drift from ac.BaseURL across an editor session.
+	// A config read here instead of ac would drift from ac.BaseURL across an editor session.
 	require.NoError(t, cb.OnMFARequired(""))
 	assert.Equal(t, "my-workspace", query.Get("workspace"))
+}
+
+func TestErrorCallbacks_EmptyWorkspaceFailsInsteadOfPrintingALink(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+
+	// A usable link, so dropping the guard fails both asserts rather than
+	// tripping the parse error an empty body would raise anyway.
+	called := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mfa_url": "https://example.com/mfa"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	cb := errorCallbacks(ac, func() error { return nil })
+
+	assert.Error(t, cb.OnMFARequired(""))
+	assert.False(t, called, "an empty workspace must not reach the server")
 }

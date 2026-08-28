@@ -42,7 +42,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var authenticationDetail []byte
 		authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, cfg.WorkspaceName, func() error {
+			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, func() error {
 				authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
 				return err
 			}))
