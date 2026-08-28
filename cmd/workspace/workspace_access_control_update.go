@@ -21,6 +21,9 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
+		// No IsSaaS() gate, unlike the sibling authentication update: the server
+		// registers access-control outside AUTH0_ENABLED and the viewset has an
+		// onprem path, so this works self-hosted too.
 		if _, err := config.LoadConfig(); err != nil {
 			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
 		}
