@@ -1,10 +1,6 @@
 package workspace
 
 import (
-	"fmt"
-	"os"
-
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -25,6 +21,11 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 			utils.CliErrorWithExit("This command requires an interactive terminal.")
 		}
 
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -38,29 +39,10 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var accessControlDetail []byte
 		accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", utils.ErrorHandlerCallbacks{
-				OnMFARequired: func(_ string) error {
-					cfg, loadErr := config.LoadConfig()
-					if loadErr != nil {
-						return fmt.Errorf("failed to load configuration: %w", loadErr)
-					}
-					mfaURL, mfaErr := mfa.GetWorkspaceSecurityMFALink(alpaconClient, cfg.WorkspaceName)
-					if mfaErr != nil {
-						return mfaErr
-					}
-					fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
-					utils.OpenBrowser(mfaURL)
-					return nil
-				},
-				CheckMFACompleted: func() (bool, error) {
-					return mfa.CheckMFACompletion(alpaconClient)
-				},
-				RefreshToken: alpaconClient.RefreshToken,
-				RetryOperation: func() error {
-					accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
-					return err
-				},
-			})
+			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, cfg.WorkspaceName, func() error {
+				accessControlDetail, err = workspace.PatchAccessControl(alpaconClient, data)
+				return err
+			}))
 			if err != nil {
 				utils.CliErrorWithExit("Failed to update access control settings: %s.", err)
 			}

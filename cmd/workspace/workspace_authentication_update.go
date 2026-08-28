@@ -1,10 +1,6 @@
 package workspace
 
 import (
-	"fmt"
-	"os"
-
-	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -46,25 +42,10 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var authenticationDetail []byte
 		authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", utils.ErrorHandlerCallbacks{
-				OnMFARequired: func(_ string) error {
-					mfaURL, mfaErr := mfa.GetWorkspaceSecurityMFALink(alpaconClient, cfg.WorkspaceName)
-					if mfaErr != nil {
-						return mfaErr
-					}
-					fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
-					utils.OpenBrowser(mfaURL)
-					return nil
-				},
-				CheckMFACompleted: func() (bool, error) {
-					return mfa.CheckMFACompletion(alpaconClient)
-				},
-				RefreshToken: alpaconClient.RefreshToken,
-				RetryOperation: func() error {
-					authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
-					return err
-				},
-			})
+			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, cfg.WorkspaceName, func() error {
+				authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
+				return err
+			}))
 			if err != nil {
 				utils.CliErrorWithExit("Failed to update authentication settings: %s.", err)
 			}

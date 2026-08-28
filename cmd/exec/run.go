@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
-	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -646,22 +645,9 @@ func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username
 		return propagated
 	}
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
-			OnMFARequired: func(srv string) error {
-				return mfa.HandleMFAError(ac, srv)
-			},
-			OnUsernameRequired: func() error {
-				_, err := iam.HandleUsernameRequired()
-				return err
-			},
-			CheckMFACompleted: func() (bool, error) {
-				return mfa.CheckMFACompletion(ac)
-			},
-			RefreshToken: ac.RefreshToken,
-			RetryOperation: func() error {
-				return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
-			},
-		})
+		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, func() error {
+			return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
+		}))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
 			return propagated
