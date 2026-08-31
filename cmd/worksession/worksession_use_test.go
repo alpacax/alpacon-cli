@@ -14,8 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestClient returns a client pinned to the workspace setupTmpConfig writes,
-// so the config key it files under matches the one the assertions read.
+// newTestClient pins the client to setupTmpConfig's workspace so tests write and read the same config key.
 func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 	return &client.AlpaconClient{
 		HTTPClient:    ts.Client(),
@@ -136,10 +135,10 @@ func TestRunUnset_Idempotent(t *testing.T) {
 	assert.Equal(t, "", got)
 }
 
-// A --wait --use create can block for minutes on a human approver. Another shell
-// running `alpacon ws use` in that window rewrites the workspace name in the shared
-// config file, so the session must be filed under the workspace the client is pinned
-// to, not under whatever the file names once the wait is over.
+// TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand covers a --wait --use
+// create that blocks for minutes on a human approver while another shell's `alpacon ws use`
+// rewrites the config's workspace name; the session must file under the client's pinned
+// workspace, not whatever the file names when the wait ends.
 func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
