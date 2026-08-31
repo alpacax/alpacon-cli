@@ -183,32 +183,25 @@ func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
 }
 
-// SetActiveWorkSession persists the work-session UUID for the current workspace.
-// Pass "" to clear the entry for the current workspace.
+// SetActiveWorkSession persists the work-session UUID for the config's current workspace ("" clears it);
+// a caller holding a client must use SetActiveWorkSessionFor with the client's pinned workspace instead.
 func SetActiveWorkSession(uuid string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	if cfg.WorkspaceName == "" {
-		return errors.New("no active workspace; run 'alpacon login' first")
+	return setActiveWorkSessionOn(&cfg, cfg.WorkspaceName, uuid)
+}
+
+// SetActiveWorkSessionFor persists the work-session UUID under workspaceName ("" clears it); workspaceName
+// is a parameter, not a fresh read, because create --wait --use can block on approval long
+// enough for another shell's 'alpacon ws use' to file it under a workspace it was never created in.
+func SetActiveWorkSessionFor(workspaceName, uuid string) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
-	current := ""
-	if cfg.ActiveWorkSessions != nil {
-		current = cfg.ActiveWorkSessions[cfg.WorkspaceName]
-	}
-	if current == uuid {
-		return nil
-	}
-	if cfg.ActiveWorkSessions == nil {
-		cfg.ActiveWorkSessions = map[string]string{}
-	}
-	if uuid == "" {
-		delete(cfg.ActiveWorkSessions, cfg.WorkspaceName)
-	} else {
-		cfg.ActiveWorkSessions[cfg.WorkspaceName] = uuid
-	}
-	return saveConfig(&cfg)
+	return setActiveWorkSessionOn(&cfg, workspaceName, uuid)
 }
 
 // GetActiveWorkSession returns the active work-session UUID for the current workspace.
@@ -265,4 +258,28 @@ func GetSmuxConfig() *smux.Config {
 	config.MaxReceiveBuffer = 4194304           // 4MB
 	config.MaxStreamBuffer = 65536              // 64KB per stream
 	return config
+}
+
+// setActiveWorkSessionOn shares one LoadConfig across both setters—two reads would reopen
+// the closed race: workspaceName from the first read applied to a map from a second, mid-switch.
+func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) error {
+	if workspaceName == "" {
+		return errors.New("no active workspace; run 'alpacon login' first")
+	}
+	current := ""
+	if cfg.ActiveWorkSessions != nil {
+		current = cfg.ActiveWorkSessions[workspaceName]
+	}
+	if current == uuid {
+		return nil
+	}
+	if cfg.ActiveWorkSessions == nil {
+		cfg.ActiveWorkSessions = map[string]string{}
+	}
+	if uuid == "" {
+		delete(cfg.ActiveWorkSessions, workspaceName)
+	} else {
+		cfg.ActiveWorkSessions[workspaceName] = uuid
+	}
+	return saveConfig(cfg)
 }

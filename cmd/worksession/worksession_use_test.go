@@ -14,10 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newTestClient pins the client to setupTmpConfig's workspace so tests write and read the same config key.
 func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 	return &client.AlpaconClient{
-		HTTPClient: ts.Client(),
-		BaseURL:    ts.URL,
+		HTTPClient:    ts.Client(),
+		BaseURL:       ts.URL,
+		WorkspaceName: "ws",
 	}
 }
 
@@ -131,4 +133,35 @@ func TestRunUnset_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	got, _ := config.GetActiveWorkSession()
 	assert.Equal(t, "", got)
+}
+
+// TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand covers a --wait --use
+// create that blocks for minutes on a human approver while another shell's `alpacon ws use`
+// rewrites the config's workspace name; the session must file under the client's pinned
+// workspace, not whatever the file names when the wait ends.
+func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	require.NoError(t, config.CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "ses-a",
+			"description": "deploy",
+			"status":      "active",
+		})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, WorkspaceName: "ws-a"}
+
+	require.NoError(t, config.SwitchWorkspace("https://ws-b.example.com", "ws-b"))
+
+	_, err := worksession.RunUse(ac, "ses-a")
+	require.NoError(t, err)
+
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "ses-a", cfg.ActiveWorkSessions["ws-a"])
+	assert.NotContains(t, cfg.ActiveWorkSessions, "ws-b")
 }

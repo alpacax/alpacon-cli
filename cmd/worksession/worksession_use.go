@@ -115,7 +115,7 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	}
 	// Persist the canonical ID from the API rather than the raw argument so config
 	// stays consistent with server-side canonicalization and the printed JSON fields.
-	if err := config.SetActiveWorkSession(ws.ID); err != nil {
+	if err := config.SetActiveWorkSessionFor(ac.WorkspaceName, ws.ID); err != nil {
 		return nil, err
 	}
 	return ws, nil
