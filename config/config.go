@@ -183,19 +183,33 @@ func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
 }
 
-// SetActiveWorkSession persists the work-session UUID for the current workspace.
-// Pass "" to clear the entry for the current workspace.
+// SetActiveWorkSession persists the work-session UUID for the workspace the config
+// names at this moment. Pass "" to clear that entry. A caller holding a client must
+// use SetActiveWorkSessionFor with the client's pinned workspace instead.
 func SetActiveWorkSession(uuid string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	if cfg.WorkspaceName == "" {
+	return SetActiveWorkSessionFor(cfg.WorkspaceName, uuid)
+}
+
+// SetActiveWorkSessionFor persists the work-session UUID under workspaceName.
+// Pass "" as uuid to clear that workspace's entry. The workspace comes from the
+// caller because a command can outlive the config file's answer: create --wait --use
+// blocks on a human approver, and another shell's 'alpacon ws use' in that window
+// would otherwise file the session under a workspace it was never created in.
+func SetActiveWorkSessionFor(workspaceName, uuid string) error {
+	if workspaceName == "" {
 		return errors.New("no active workspace; run 'alpacon login' first")
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 	current := ""
 	if cfg.ActiveWorkSessions != nil {
-		current = cfg.ActiveWorkSessions[cfg.WorkspaceName]
+		current = cfg.ActiveWorkSessions[workspaceName]
 	}
 	if current == uuid {
 		return nil
@@ -204,9 +218,9 @@ func SetActiveWorkSession(uuid string) error {
 		cfg.ActiveWorkSessions = map[string]string{}
 	}
 	if uuid == "" {
-		delete(cfg.ActiveWorkSessions, cfg.WorkspaceName)
+		delete(cfg.ActiveWorkSessions, workspaceName)
 	} else {
-		cfg.ActiveWorkSessions[cfg.WorkspaceName] = uuid
+		cfg.ActiveWorkSessions[workspaceName] = uuid
 	}
 	return saveConfig(&cfg)
 }
