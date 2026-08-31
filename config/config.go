@@ -183,7 +183,7 @@ func (c Config) IsSaaS() bool {
 	return c.AccessToken != ""
 }
 
-// SetActiveWorkSession persists uuid for the config's current workspace ("" clears it);
+// SetActiveWorkSession persists the work-session UUID for the config's current workspace ("" clears it);
 // a caller holding a client must use SetActiveWorkSessionFor with the client's pinned workspace instead.
 func SetActiveWorkSession(uuid string) error {
 	cfg, err := LoadConfig()
@@ -193,7 +193,7 @@ func SetActiveWorkSession(uuid string) error {
 	return setActiveWorkSessionOn(&cfg, cfg.WorkspaceName, uuid)
 }
 
-// SetActiveWorkSessionFor persists uuid under workspaceName ("" clears it); workspaceName
+// SetActiveWorkSessionFor persists the work-session UUID under workspaceName ("" clears it); workspaceName
 // is a parameter, not a fresh read, because create --wait --use can block on approval long
 // enough for another shell's 'alpacon ws use' to file it under a workspace it was never created in.
 func SetActiveWorkSessionFor(workspaceName, uuid string) error {
