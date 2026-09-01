@@ -594,14 +594,6 @@ func isPollFailure(err error) bool {
 	return errors.As(err, &typeErr)
 }
 
-// HandlePendingApproval emits the structured pending-approval feedback for a
-// command left pending human approval and not waited on—either a job the server
-// parked at awaiting_approval (PendingApprovalError) or a sudo denial with an
-// approval request in flight—then exits with ExitCodePendingApproval. It reports
-// true when it handled the err; the caller skips its normal result handling on
-// true. Neither path carries an approval request id, so the machine signal omits
-// it. reRunHint is the exact command the caller invoked (with any --env caveat
-// in its Description), so a human can copy-paste it once the request is approved.
 // HandlePurposeDemand reports a command the gate parked for its purpose and
 // exits, or returns false when err is something else.
 //
@@ -617,15 +609,22 @@ func HandlePurposeDemand(err error) bool {
 		return false
 	}
 	utils.PrintPurposeDemand(
-		"Purpose required—the verification gate held this command and is asking what it is for. "+
-			"No approver has been notified: state the purpose and it is judged again, once, with that in hand. "+
-			"Stay silent and it takes the ordinary path when the demand expires.",
+		utils.PurposeDemandLead+" Stay silent and it takes the ordinary path when the demand expires.",
 		purposeErr.CommandID,
+		purposeErr.RequestedAt,
 	)
 	os.Exit(utils.ExitCodePurposeRequired)
 	return true
 }
 
+// HandlePendingApproval emits the structured pending-approval feedback for a
+// command left pending human approval and not waited on—either a job the server
+// parked at awaiting_approval (PendingApprovalError) or a sudo denial with an
+// approval request in flight—then exits with ExitCodePendingApproval. It reports
+// true when it handled the err; the caller skips its normal result handling on
+// true. Neither path carries an approval request id, so the machine signal omits
+// it. reRunHint is the exact command the caller invoked (with any --env caveat
+// in its Description), so a human can copy-paste it once the request is approved.
 func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError

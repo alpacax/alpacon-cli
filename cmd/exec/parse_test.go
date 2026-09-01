@@ -911,3 +911,61 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 		})
 	}
 }
+
+// The --purpose flag (ADR 0052). The ceiling is counted in runes: the server
+// validates with DRF's CharField(max_length=...), which counts characters, so a
+// byte count would refuse a Korean purpose at roughly a third of the limit.
+func TestParseRemoteExecArgsPurpose(t *testing.T) {
+	koreanAtCeiling := make([]rune, PurposeMaxLength)
+	for i := range koreanAtCeiling {
+		koreanAtCeiling[i] = '한'
+	}
+	overCeiling := make([]rune, PurposeMaxLength+1)
+	for i := range overCeiling {
+		overCeiling[i] = 'x'
+	}
+
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		wantErr     string
+		wantPurpose string
+	}{
+		{
+			name:        "separate value",
+			args:        []string{"--purpose", "clock skew", "prod", "uptime"},
+			wantPurpose: "clock skew",
+		},
+		{
+			name:        "attached value",
+			args:        []string{"--purpose=clock skew", "prod", "uptime"},
+			wantPurpose: "clock skew",
+		},
+		{
+			name:        "a 2000-character Korean purpose is within the ceiling",
+			args:        []string{"--purpose", string(koreanAtCeiling), "prod", "uptime"},
+			wantPurpose: string(koreanAtCeiling),
+		},
+		{
+			name:    "blank is a usage error, not a 400 that spends the demand",
+			args:    []string{"--purpose", "   ", "prod", "uptime"},
+			wantErr: "--purpose requires a value",
+		},
+		{
+			name:    "over the ceiling",
+			args:    []string{"--purpose", string(overCeiling), "prod", "uptime"},
+			wantErr: "limited to 2000 characters",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed := ParseRemoteExecArgs(tc.args)
+
+			if tc.wantErr != "" {
+				assert.Contains(t, parsed.Err, tc.wantErr)
+				return
+			}
+			assert.Empty(t, parsed.Err)
+			assert.Equal(t, tc.wantPurpose, parsed.Purpose)
+		})
+	}
+}

@@ -64,6 +64,11 @@ Flags:
   --detach                      Submit the command and return immediately without
                                 waiting for completion. Prints the job ID to stdout.
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
+                                Inside an agent-requester work session, a command
+                                the gate holds for its purpose can sit for about a
+                                minute before taking the ordinary path—nothing here
+                                waits, but the command does. Pass --purpose to skip
+                                the hold, or read the demand with 'exec logs'.
   --wait                        When a sudo command needs human approval, block and
                                 re-attempt until a reviewer approves it in the Alpacon
                                 console (web), or the wait times out (default 5m).

@@ -3,7 +3,6 @@ package exec
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
@@ -65,12 +64,9 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
 			return
 		}
-		if strings.TrimSpace(purpose) == "" {
-			utils.CliErrorWithExit("PURPOSE cannot be empty: the server refuses a blank answer and the command only gets one demand")
-			return
-		}
-		if len(purpose) > PurposeMaxLength {
-			utils.CliErrorWithExit("PURPOSE is limited to %d characters; the server refuses a longer one", PurposeMaxLength)
+		// Same ceiling and wording as --purpose, counted the same way.
+		if msg := checkPurpose("PURPOSE", purpose); msg != "" {
+			utils.CliErrorWithExit("%s", msg)
 			return
 		}
 

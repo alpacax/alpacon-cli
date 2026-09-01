@@ -2,15 +2,43 @@ package utils
 
 import (
 	"fmt"
+	"math"
 	"os"
+	"time"
 )
 
+// PurposeDeadlineAssumed is the server's default COMMAND_PURPOSE_DEADLINE.
+//
+// The setting is env-overridable, so this cannot be authoritative—but the
+// server does report `purpose_requested_at`, and elapsed time is the larger of
+// the two errors: without it, a demand noticed four minutes later still reads
+// "60s left". Subtracting the elapsed time from an assumed default fixes that,
+// and the residual error only ever runs one way. A workspace that raised the
+// deadline makes this understate the window, which hurries the caller; nothing
+// here can make it overstate one, which would let the caller miss it.
+const PurposeDeadlineAssumed = 60 * time.Second
+
+// PurposeDemandLead is the first half of the message every surface prints for an
+// open demand. `exec` and `exec logs` differ only in what they add after it, so
+// keeping the shared half here stops one from being reworded without the other.
+const PurposeDemandLead = "Purpose required—the verification gate held this command and is asking what it is for. " +
+	"No approver has been notified: state the purpose and it is judged again, once, with that in hand."
+
+// purposeGuidance says what makes a purpose worth stating. It travels in the
+// response rather than living only in help text: an agent reads the answer to
+// its own call far more reliably than documentation that context compaction may
+// have dropped.
+const purposeGuidance = "State a fact local to this host that the work session's description does not already imply—clock skew against a certificate's notBefore window, a duplicate config block overriding the edited value, contention for a single JVM attach slot. General knowledge adds nothing: the assessor already has it. A purpose cannot lower a command's intrinsic risk, cannot outrank the session description, and cannot make an unmeasurable command measurable; an attempt to argue the verdict down is reported and denied."
+
 // purposeRequiredCtx is the machine-readable context for a purpose demand. The
-// command id is what the answer is addressed to, and the deadline is why the
-// answer cannot wait for a human to read the message.
+// command id is what the answer is addressed to. DeadlineSeconds is what remains
+// of the window, computed from the server's own timestamp; it is omitted rather
+// than guessed when the server did not supply one, because
+// COMMAND_PURPOSE_DEADLINE is env-overridable and a copied default would be a
+// deadline that does not exist on a workspace which raised it.
 type purposeRequiredCtx struct {
 	CommandID       string `json:"command_id"`
-	DeadlineSeconds int    `json:"deadline_seconds"`
+	DeadlineSeconds *int   `json:"deadline_seconds,omitempty"`
 }
 
 // purposeRequiredJSON is the JSON envelope printed under --output json when the
@@ -34,16 +62,17 @@ type purposeRequiredJSON struct {
 	NextActions           []NextAction       `json:"next_actions,omitempty"`
 }
 
-// PurposeDeadlineSeconds mirrors the server's default COMMAND_PURPOSE_DEADLINE.
-// Reported so a consumer knows the answer is urgent; the server owns the real
-// clock, so this is copy and never a timer the CLI enforces.
-const PurposeDeadlineSeconds = 60
-
-// purposeGuidance says what makes a purpose worth stating. It travels in the
-// response rather than living only in help text: an agent reads the answer to
-// its own call far more reliably than documentation that context compaction may
-// have dropped.
-const purposeGuidance = "State a fact local to this host that the work session's description does not already imply—clock skew against a certificate's notBefore window, a duplicate config block overriding the edited value, contention for a single JVM attach slot. General knowledge adds nothing: the assessor already has it. A purpose cannot lower a command's intrinsic risk, cannot outrank the session description, and cannot make an unmeasurable command measurable; an attempt to argue the verdict down is reported and denied."
+// remainingPurposeWindow reports the seconds left before the demand expires, or
+// nil when requestedAt is absent. A window already elapsed reports 0 rather than
+// a negative: the answer is late either way, and a negative number invites a
+// consumer to do arithmetic with it.
+func remainingPurposeWindow(requestedAt *time.Time) *int {
+	if requestedAt == nil {
+		return nil
+	}
+	left := int(math.Max(0, time.Until(requestedAt.Add(PurposeDeadlineAssumed)).Seconds()))
+	return &left
+}
 
 // purposeNextActions lists the follow-ups for a consumer reading the message.
 // Answering leads; checking the outcome afterwards is the fallback for a demand
@@ -52,7 +81,7 @@ func purposeNextActions(commandID string) []NextAction {
 	return []NextAction{
 		{
 			Command:     fmt.Sprintf("alpacon exec purpose %s 'WHAT THIS COMMAND IS FOR'", commandID),
-			Description: "Answer now—the demand expires in about a minute and there is one per command",
+			Description: "Answer now—the demand expires shortly and there is one per command",
 		},
 		{
 			Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
@@ -64,10 +93,16 @@ func purposeNextActions(commandID string) []NextAction {
 // PrintPurposeDemand emits the structured "state the purpose" feedback for a
 // command the gate parked. Under --output json it writes a
 // {"status":"purpose_required", ...} envelope to stdout; otherwise it writes an
-// actionable message to stderr.
+// actionable message to stderr. requestedAt may be nil, in which case no
+// deadline is reported rather than one being invented.
 // It never exits—the caller owns process exit so the exit-code contract stays in
 // one place.
-func PrintPurposeDemand(message, commandID string) {
+func PrintPurposeDemand(message, commandID string, requestedAt *time.Time) {
+	// Sanitized once, here: the id is server-supplied and every line below
+	// interpolates it into text written straight to the terminal (#364).
+	commandID = SanitizeTerminalText(commandID)
+	remaining := remainingPurposeWindow(requestedAt)
+
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeRequiredJSON{
 			OK:                    false,
@@ -78,7 +113,7 @@ func PrintPurposeDemand(message, commandID string) {
 			RequiresHumanApproval: false,
 			AnswerableByCaller:    true,
 			Guidance:              purposeGuidance,
-			Context:               purposeRequiredCtx{CommandID: commandID, DeadlineSeconds: PurposeDeadlineSeconds},
+			Context:               purposeRequiredCtx{CommandID: commandID, DeadlineSeconds: remaining},
 			NextActions:           purposeNextActions(commandID),
 		}
 		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
@@ -90,7 +125,10 @@ func PrintPurposeDemand(message, commandID string) {
 	}
 
 	CliWarning("%s", message)
-	fmt.Fprintf(os.Stderr, "  %s\n", purposeGuidance)
+	if remaining != nil {
+		fmt.Fprintf(os.Stderr, "  About %ds left to answer.\n", *remaining)
+	}
+	fmt.Fprintf(os.Stderr, "  %s\n", SanitizeTerminalText(purposeGuidance))
 	for _, action := range purposeNextActions(commandID) {
 		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
 	}

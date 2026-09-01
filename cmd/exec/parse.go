@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -13,6 +14,25 @@ import (
 // Checked here so an over-long one is a usage error rather than a 400 that
 // costs a parked command its one demand.
 const PurposeMaxLength = 2000
+
+// checkPurpose validates a stated purpose against the server's rules, returning
+// an empty string when it passes. subject names the thing being validated—the
+// flag for `exec --purpose`, the argument for `exec purpose`—so one ceiling and
+// one wording serve both.
+//
+// The ceiling is counted in runes, not bytes. The server validates with DRF's
+// CharField(max_length=...), which counts characters, so len() would refuse a
+// Korean purpose at roughly 666 of them—while telling the caller the server
+// would refuse it, which at that length is untrue.
+func checkPurpose(subject, purpose string) string {
+	if strings.TrimSpace(purpose) == "" {
+		return subject + " requires a value describing what this command is for"
+	}
+	if utf8.RuneCountInString(purpose) > PurposeMaxLength {
+		return fmt.Sprintf("%s is limited to %d characters; the server refuses a longer one", subject, PurposeMaxLength)
+	}
+	return ""
+}
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
@@ -116,11 +136,8 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
-			if strings.TrimSpace(purpose) == "" {
-				return RemoteExecArgs{Err: "--purpose requires a value describing what this command is for"}
-			}
-			if len(purpose) > PurposeMaxLength {
-				return RemoteExecArgs{Err: fmt.Sprintf("--purpose is limited to %d characters; the server refuses a longer one", PurposeMaxLength)}
+			if msg := checkPurpose("--purpose", purpose); msg != "" {
+				return RemoteExecArgs{Err: msg}
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string

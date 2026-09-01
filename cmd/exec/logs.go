@@ -49,9 +49,7 @@ Run the command again later to check for completion.`,
 		// the verdict, so --detach cannot see it at submission time.
 		if event.IsAwaitingPurposeStatus(details.Status) {
 			utils.PrintPurposeDemand(
-				"Purpose required—the verification gate held this command and is asking what it is for. "+
-					"No approver has been notified: state the purpose and it is judged again, once, with that in hand.",
-				details.ID,
+				utils.PurposeDemandLead, details.ID, details.PurposeRequestedAt,
 			)
 			os.Exit(utils.ExitCodePurposeRequired)
 		}
