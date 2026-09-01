@@ -57,16 +57,19 @@ Revoking a role the user does not hold changes nothing and succeeds.`,
 			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		if role.Name == rbac.RoleAdmin && rbac.HoldsWorkspaceRole(bindings, rbac.RoleSuperuser) {
-			next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s superuser --cascade", args[0])}
-			utils.CliErrorWithExit("%s still holds the superuser role, and superuser implies admin. Revoking admin alone would delete the binding and leave every platform flag set. Revoke superuser first: %s",
-				userLabel, next.PlainText())
-		}
-
+		// Nothing-to-do outranks the invariant guard. A user holding superuser but no
+		// admin binding has nothing for 'revoke admin' to delete, so refusing there
+		// would break this command's own promise that revoking an unheld role succeeds.
 		targets := plannedRevocations(bindings, role.Name, cascade)
 		if len(targets) == 0 {
 			utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", userLabel, role.Name)
 			return
+		}
+
+		if wouldStrandThePlatformFlags(bindings, role.Name, targets) {
+			next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s superuser --cascade", args[0])}
+			utils.CliErrorWithExit("%s still holds the superuser role, and superuser implies admin. Revoking admin alone would delete the binding and leave every platform flag set. Revoke superuser first: %s",
+				userLabel, next.PlainText())
 		}
 
 		if dryRun {
@@ -143,6 +146,20 @@ func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, casca
 	}
 
 	return targets
+}
+
+// wouldStrandThePlatformFlags reports whether the planned revocation would delete a
+// row and leave the account's platform flags untouched.
+//
+// It is the admin-while-superuser case: the server accepts the delete, then re-forces
+// is_staff because is_superuser still stands, so both flags survive while the account
+// stops registering as an admin. It takes the planned targets rather than deciding
+// from the role name alone, because a revoke with nothing to delete is a no-op, not a
+// broken invariant.
+func wouldStrandThePlatformFlags(bindings []rbac.UserRoleResponse, roleName string, targets []rbac.UserRoleResponse) bool {
+	return roleName == rbac.RoleAdmin &&
+		len(targets) > 0 &&
+		rbac.HoldsWorkspaceRole(bindings, rbac.RoleSuperuser)
 }
 
 func describeTargets(targets []rbac.UserRoleResponse) string {

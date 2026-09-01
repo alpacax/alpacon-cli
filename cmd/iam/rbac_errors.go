@@ -26,12 +26,16 @@ const (
 // forgets to say.
 const (
 	// gateRoleRead is a read on /api/rbac/. An API token is refused outright on an
-	// Alpacon Cloud workspace, and the audit log answers the same bare 403 for a token
-	// that merely lacks the role_audit_log:read scope. A caller who simply cannot see
-	// the target is narrowed to 200 rather than refused.
+	// Alpacon Cloud workspace. A caller who simply cannot see the target is narrowed to
+	// 200 rather than refused, so a 403 here is never about visibility.
 	gateRoleRead rbacGate = iota
 	// gateRoleWrite is a binding write: the superuser role, plus the same token refusal.
 	gateRoleWrite
+	// gateAuditRead is the role audit log, the one /api/rbac/ route exempt from the
+	// Auth0 gate. An API token reaches it on every deployment and is refused only for
+	// missing the role_audit_log:read scope - the opposite failure from gateRoleRead,
+	// which is why it cannot share that message.
+	gateAuditRead
 	// gateUserRead is an introspection read hosted on /api/iam/users/. API tokens are
 	// accepted there; reading another account needs user:read on it.
 	gateUserRead
@@ -80,12 +84,16 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		switch {
 		case gate == gateUserRead:
 			return errors.New("reading another account's permissions requires the user:read permission on that account; your own are always readable")
+		case gate == gateAuditRead && !ac.IsBearerAuth():
+			return errors.New("this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session instead")
+		case gate == gateAuditRead:
+			return errors.New("reading another account's role history requires an auditor of the whole workspace; everyone else sees only the changes naming them")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
 			return errors.New("a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
 		case gate == gateRoleWrite:
 			return errors.New("a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			return errors.New("the RBAC API refuses API tokens on Alpacon Cloud workspaces, reads included. Run 'alpacon login' to authenticate through the browser; 'alpacon user role history' is the exception and needs a token carrying the role_audit_log:read scope")
+			return errors.New("the RBAC API refuses API tokens on Alpacon Cloud workspaces, reads included. Run 'alpacon login' to authenticate through the browser")
 		default:
 			return errors.New("this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
 		}

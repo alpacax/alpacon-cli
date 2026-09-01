@@ -272,10 +272,24 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantSaid: []string{"superuser role", "API token", "alpacon login"},
 		},
 		{
-			name: "a role read with an api token never mentions a write privilege",
+			// One message per gate, so neither has to walk back what it just said: this
+			// one refuses the token outright and never mentions a scope.
+			name: "a role read with an api token never mentions a write privilege or a scope",
 			ac:   apiToken, gate: gateRoleRead,
-			wantSaid:    []string{"API token", "alpacon login", "role_audit_log:read"},
-			wantNotSaid: []string{"superuser role", "write"},
+			wantSaid:    []string{"API token", "alpacon login"},
+			wantNotSaid: []string{"superuser role", "write", "role_audit_log:read", "exception"},
+		},
+		{
+			name: "the audit log names the scope, not the token refusal",
+			ac:   apiToken, gate: gateAuditRead,
+			wantSaid:    []string{"role_audit_log:read"},
+			wantNotSaid: []string{"superuser role", "refuses API tokens"},
+		},
+		{
+			name: "the audit log with a bearer names the audit reach",
+			ac:   bearer, gate: gateAuditRead,
+			wantSaid:    []string{"auditor"},
+			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
 		},
 		{
 			name: "a role read with a bearer says visibility, not privilege",
@@ -314,9 +328,60 @@ func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 	// "code: X" is not parsed, because the prefix has to start its own segment.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 
-	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateUserRead} {
+	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead} {
 		got := describeRBACError(ac, gate, coded)
 		require.Error(t, got)
 		assert.Contains(t, got.Error(), "last superuser")
+	}
+}
+
+// Refusing a revoke the workspace has nothing to revoke would break this command's
+// own promise that revoking an unheld role succeeds. The invariant only bites when
+// there is a row to delete.
+func TestWouldStrandThePlatformFlags(t *testing.T) {
+	adminRow := workspaceBinding("adm", rbac.RoleAdmin)
+	superRow := workspaceBinding("su", rbac.RoleSuperuser)
+
+	tests := []struct {
+		name     string
+		bindings []rbac.UserRoleResponse
+		roleName string
+		targets  []rbac.UserRoleResponse
+		want     bool
+	}{
+		{
+			name:     "admin while superuser stands is the half-state to refuse",
+			bindings: []rbac.UserRoleResponse{adminRow, superRow},
+			roleName: rbac.RoleAdmin,
+			targets:  []rbac.UserRoleResponse{adminRow},
+			want:     true,
+		},
+		{
+			name:     "superuser held but no admin row leaves nothing to strand",
+			bindings: []rbac.UserRoleResponse{superRow},
+			roleName: rbac.RoleAdmin,
+			targets:  nil,
+			want:     false,
+		},
+		{
+			name:     "admin alone is an ordinary revoke",
+			bindings: []rbac.UserRoleResponse{adminRow},
+			roleName: rbac.RoleAdmin,
+			targets:  []rbac.UserRoleResponse{adminRow},
+			want:     false,
+		},
+		{
+			name:     "revoking superuser is never the stranding case",
+			bindings: []rbac.UserRoleResponse{adminRow, superRow},
+			roleName: rbac.RoleSuperuser,
+			targets:  []rbac.UserRoleResponse{superRow},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, wouldStrandThePlatformFlags(tt.bindings, tt.roleName, tt.targets))
+		})
 	}
 }
