@@ -59,8 +59,9 @@ func copyPreserved(preservedPath, targetPath string) error {
 }
 
 // SweepPreserved clears what an earlier update could not delete: on Windows the
-// preserved copy is the executable that was running then, and a staging copy
-// outlives a run killed while it was being written.
+// preserved copy is the executable that was running then, and a staging or
+// utils.SaveStreamAtomic temp file outlives a run killed while writing it.
+// Callers hold the update lock, which is what keeps a live write safe.
 func SweepPreserved(dir, binaryName string) int {
 	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(binaryName) + `\.(` + preservedSuffix + `|` + stagedSuffix + `)\.\d+$`)
 	entries, err := os.ReadDir(dir)
@@ -70,10 +71,11 @@ func SweepPreserved(dir, binaryName string) int {
 
 	removed := 0
 	for _, entry := range entries {
-		if entry.IsDir() || !pattern.MatchString(entry.Name()) {
+		name := entry.Name()
+		if entry.IsDir() || (!pattern.MatchString(name) && !utils.IsReplacementTempName(name)) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, entry.Name())); err == nil {
+		if err := os.Remove(filepath.Join(dir, name)); err == nil {
 			removed++
 		}
 	}

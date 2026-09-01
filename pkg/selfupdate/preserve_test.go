@@ -44,15 +44,15 @@ func TestRestorePreservedPutsTheBinaryBack(t *testing.T) {
 
 func TestSweepPreservedRemovesOnlyTimestampedCopies(t *testing.T) {
 	dir := t.TempDir()
-	keep := []string{"alpacon", "alpacon.old", "alpacon.old.notanumber", "other.old.123", "alpacon.staged"}
-	remove := []string{"alpacon.old.1", "alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000"}
+	keep := []string{"alpacon", "alpacon.old", "alpacon.old.notanumber", "other.old.123", "alpacon.staged", ".alpacon-.tmp", ".alpacon-1-2-3.tmp.bak"}
+	remove := []string{"alpacon.old.1", "alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000", ".alpacon-4242-1735689600000000000-0.tmp"}
 	for _, name := range append(append([]string{}, keep...), remove...) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0600))
 	}
 
 	removed := SweepPreserved(dir, "alpacon")
 
-	assert.Equal(t, 3, removed)
+	assert.Equal(t, 4, removed)
 	for _, name := range keep {
 		_, err := os.Stat(filepath.Join(dir, name))
 		assert.NoError(t, err, "sweep must not remove %s", name)
