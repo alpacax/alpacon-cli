@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,6 +29,39 @@ func TestReplaceBinaryKeepsTheDestinationMode(t *testing.T) {
 	info, err := os.Stat(target)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+}
+
+func TestReplaceBinaryWarnsWhenAnyLocalAccountCanRewriteTheInstall(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "alpacon")
+	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0777))
+	require.NoError(t, os.Chmod(target, 0777)) // A umask that narrows WriteFile's 0777 would retire the branch rather than test it.
+	replacement := filepath.Join(dir, "alpacon.new")
+	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		require.NoError(t, ReplaceBinary(target, replacement))
+	})
+
+	assert.Contains(t, stderr, "writable by group or other (0777)")
+	assert.Contains(t, stderr, "chmod go-w")
+	info, err := os.Stat(target)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0777), info.Mode().Perm(), "the warning replaces a chmod; it must not become one")
+}
+
+func TestReplaceBinaryStaysQuietOnAnOrdinaryInstallMode(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "alpacon")
+	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
+	replacement := filepath.Join(dir, "alpacon.new")
+	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		require.NoError(t, ReplaceBinary(target, replacement))
+	})
+
+	assert.Empty(t, stderr, "0755 is what a normal install looks like, and a warning on every update teaches operators to ignore it")
 }
 
 func TestReplaceBinaryLeavesNoPreservedCopyOnSuccess(t *testing.T) {
