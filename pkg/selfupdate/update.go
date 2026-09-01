@@ -9,6 +9,10 @@ import (
 
 var ErrWorkDirUnavailable = errors.New("cannot create the download directory") // Separates the download's scratch directory from the install path: both refuse with EACCES, and sudo answers only one of them.
 
+// compareVersions reads an unparseable core as 0.0.0, so an importer that skips
+// IsUnknownVersion would have a dev build reinstall the latest release forever.
+var ErrUnknownVersion = errors.New("the running build's version matches no release")
+
 type Options struct {
 	ReleaseAPIURL  string
 	CurrentVersion string
@@ -26,6 +30,10 @@ type Result struct {
 }
 
 func Run(opts Options) (Result, error) {
+	if IsUnknownVersion(opts.CurrentVersion) {
+		return Result{}, fmt.Errorf("%w: %q", ErrUnknownVersion, opts.CurrentVersion)
+	}
+
 	release, err := LatestRelease(opts.ReleaseAPIURL)
 	if err != nil {
 		return Result{}, err

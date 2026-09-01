@@ -180,3 +180,16 @@ func TestRunNamesTheTemporaryDirectoryWhenItCannotBeWritten(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkDirUnavailable)
 	assert.ErrorIs(t, err, os.ErrPermission)
 }
+
+// The command guards this too, but the package is public and an importer may not.
+func TestRunRefusesABuildThatMatchesNoRelease(t *testing.T) {
+	opts, executable := updateFixture(t, noOwnerRunner)
+	opts.CurrentVersion = "dev"
+
+	_, err := Run(opts)
+
+	require.ErrorIs(t, err, ErrUnknownVersion)
+	content, readErr := os.ReadFile(executable)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old binary", string(content))
+}
