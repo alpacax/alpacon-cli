@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
@@ -12,6 +11,7 @@ import (
 // Error codes returned by the RBAC binding endpoints (alpacon-server utils/error_codes.py).
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
+	codePermissionDenied     = "permission_denied"
 	codeSuperuserLastRemoval = "rbac_superuser_last_removal_forbidden"
 	codeBulkLimitExceeded    = "rbac_bulk_limit_exceeded"
 	codeInvalidInput         = "invalid_input"
@@ -41,6 +41,15 @@ const (
 
 type rbacGate int
 
+// rewritten carries an actionable message while keeping the server's error in the
+// chain, so utils.HTTPStatusCode and errors.Is still reach it. Printing shows only
+// the actionable half: the refusal it replaces is a bare code or DRF's generic
+// sentence, and repeating either after our own would only pad the line.
+type rewritten struct {
+	message string
+	cause   error
+}
+
 // describeRBACError rewrites RBAC refusals into something an operator can act on: the
 // coded ones carry no human detail, and the likeliest refusal is a 403 with no code,
 // which needs both the gate and the credential to name a fix that can work.
@@ -56,41 +65,55 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case codeAdminLastRemoval:
-		return errors.New("this is the workspace's last admin, and a workspace cannot be left without one; grant 'admin' to someone else first")
+		return rewrite(err, "this is the workspace's last admin, and a workspace cannot be left without one; grant 'admin' to someone else first")
 	case codeSuperuserLastRemoval:
-		return errors.New("this is the workspace's last superuser, and a workspace cannot be left without one; grant 'superuser' to someone else first")
+		return rewrite(err, "this is the workspace's last superuser, and a workspace cannot be left without one; grant 'superuser' to someone else first")
 	// Unreachable from 'grant', which absorbs duplicates as convergence; kept for any later
 	// caller that writes a binding without doing the same.
 	case rbac.CodeRoleAssignmentDuplicate:
-		return errors.New("that role is already bound to the user at this scope")
+		return rewrite(err, "that role is already bound to the user at this scope")
 	case codeBulkLimitExceeded:
-		return errors.New("the server refused the request as a bulk operation; this is a bug in the CLI, which binds one role to one user per request")
+		return rewrite(err, "the server refused the request as a bulk operation; this is a bug in the CLI, which binds one role to one user per request")
 	case codeInvalidInput:
-		return errors.New("the server rejected the binding scope")
+		return rewrite(err, "the server rejected the binding scope")
 	case codeWorkspaceSuspended:
-		return errors.New("this workspace is suspended, so it accepts no changes")
+		return rewrite(err, "this workspace is suspended, so it accepts no changes")
+	case codePermissionDenied:
+		return rewrite(err, "that is not an account you may read; your own is always readable")
 	}
 
 	if utils.HTTPStatusCode(err) == http.StatusForbidden && code == "" {
 		switch {
 		case gate == gateUserRead:
-			return errors.New("reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
+			return rewrite(err, "reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
 		case gate == gatePermissionIntrospect:
-			return errors.New("this endpoint pins no permission of its own, so a cross-account read of it is satisfied only by a wildcard grant—in practice the superuser role. Your own permissions are always readable; run the command without a USER argument")
+			return rewrite(err, "this endpoint pins no permission of its own, so a cross-account read of it is satisfied only by a wildcard grant—in practice the superuser role. Your own permissions are always readable; run the command without a USER argument")
 		case gate == gateAuditRead && !ac.IsBearerAuth():
-			return errors.New("this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session instead")
+			return rewrite(err, "the role history is limited to an auditor of the whole workspace; everyone else sees only the changes naming them. An API token additionally needs the role_audit_log:read scope")
 		case gate == gateAuditRead:
-			return errors.New("reading another account's role history requires an auditor of the whole workspace; everyone else sees only the changes naming them")
+			return rewrite(err, "reading another account's role history requires an auditor of the whole workspace; everyone else sees only the changes naming them")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
-			return errors.New("a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
+			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
 		case gate == gateRoleWrite:
-			return errors.New("a role-binding write requires the superuser role")
+			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			return errors.New("the RBAC API refuses API tokens on Alpacon Cloud workspaces, reads included. Run 'alpacon login' to authenticate through the browser")
+			// Lead with the reading that holds on both deployments. The credential refusal
+			// exists only where the Auth0 gate is installed, and a self-hosted workspace does
+			// not install it, so telling every token session to log in through a browser
+			// sends most of them after a fix that changes nothing.
+			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
 		default:
-			return errors.New("this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
+			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
 		}
 	}
 
 	return err
+}
+
+func (e *rewritten) Error() string { return e.message }
+
+func (e *rewritten) Unwrap() error { return e.cause }
+
+func rewrite(cause error, message string) error {
+	return &rewritten{message: message, cause: cause}
 }

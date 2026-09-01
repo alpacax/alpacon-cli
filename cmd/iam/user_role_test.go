@@ -11,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -246,15 +247,19 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantSaid: []string{"superuser role", "API token", "alpacon login"},
 		},
 		{
-			name: "a role read with an api token never mentions a write privilege or a scope",
+			// The credential refusal exists only behind the Auth0 gate, which self-hosted
+			// does not install, so the deployment-independent reading has to come first.
+			name: "a role read with an api token leads with visibility, not the credential",
 			ac:   apiToken, gate: gateRoleRead,
-			wantSaid:    []string{"API token", "alpacon login"},
-			wantNotSaid: []string{"superuser role", "write", "role_audit_log:read", "exception"},
+			wantSaid:    []string{"may not see", "API token", "alpacon login"},
+			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
 		},
 		{
-			name: "the audit log names the scope, not the token refusal",
+			// A token that already holds the scope must not be told it lacks it, so the
+			// reach limit leads and the scope is the additional condition.
+			name: "the audit log leads with the reach limit, then the scope",
 			ac:   apiToken, gate: gateAuditRead,
-			wantSaid:    []string{"role_audit_log:read"},
+			wantSaid:    []string{"auditor", "role_audit_log:read"},
 			wantNotSaid: []string{"superuser role", "refuses API tokens"},
 		},
 		{
@@ -398,4 +403,30 @@ func TestResolveSubject(t *testing.T) {
 			assert.Equal(t, tt.wantLabel, got.Label)
 		})
 	}
+}
+
+// permission_denied is the code the troubleshoot read answers when the target is not
+// the caller. It is a coded 403, so it never reaches the codeless branch, and without
+// a case of its own it fell through to the server's generic sentence while every
+// sibling refusal on this surface got guidance.
+func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
+	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
+	coded := fmt.Errorf("request failed with status 403: {\"code\": %q}", codePermissionDenied)
+
+	got := describeRBACError(ac, gateRoleRead, coded)
+	require.Error(t, got)
+	assert.Contains(t, got.Error(), "not an account you may read")
+}
+
+// The rewritten message is what an operator reads, but the server's error stays in
+// the chain so a caller can still reach its status.
+func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
+	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
+	cause := statusOnlyError{status: http.StatusForbidden}
+
+	got := describeRBACError(ac, gateRoleWrite, cause)
+	require.Error(t, got)
+
+	assert.NotContains(t, got.Error(), "forbidden", "the raw refusal must not pad the operator's line")
+	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(got))
 }
