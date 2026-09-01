@@ -164,7 +164,7 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 // reporting it—spending the command's single chance on a wait that cannot end
 // well, since the answer was this caller's to give all along.
 func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
-	stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+	_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
 	calls := 0
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
