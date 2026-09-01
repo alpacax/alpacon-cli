@@ -1,13 +1,9 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
-	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/selfupdate"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -18,48 +14,26 @@ var versionCmd = &cobra.Command{
 	Long:  "Displays the current version of the CLI and checks if there is an available update.",
 	Run: func(cmd *cobra.Command, args []string) {
 		utils.CliInfo("Current version: %s", utils.Version)
-		tagName, htmlURL, err := getLatestRelease()
+		release, err := selfupdate.LatestRelease(selfupdate.DefaultReleaseAPIURL)
 		if err != nil {
 			utils.CliWarning("Could not check for updates: %s", err)
 			return
 		}
-		releaseVersion := strings.TrimPrefix(tagName, "v")
-		if releaseVersion != utils.Version {
-			utils.CliWarning("Upgrade available: %s -> %s\nVisit %s for release notes.", utils.Version, releaseVersion, htmlURL)
-		} else {
-			utils.CliInfo("You are up to date!")
+		if selfupdate.IsOutdated(utils.Version, release.Version) {
+			utils.CliWarning("%s", upgradeNotice(utils.Version, release.Version, release.HTMLURL))
+			return
 		}
+		utils.CliInfo("You are up to date!")
 	},
 }
 
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-	HTMLURL string `json:"html_url"`
-}
-
-func getLatestRelease() (tagName, htmlURL string, err error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/alpacax/alpacon-cli/releases/latest", nil)
-	if err != nil {
-		return "", "", err
+// A released build is sent to 'alpacon update' whoever owns it: asking which
+// package manager does would spawn dpkg and rpm on every 'alpacon version', so
+// the caveat stands in for the answer.
+func upgradeNotice(current, latest, htmlURL string) string {
+	action := "Run 'alpacon update' to install it—on an install another tool owns it prints how to update through that tool instead."
+	if selfupdate.IsUnknownVersion(current) {
+		action = "Install a released build to update."
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("User-Agent", utils.GetUserAgent())
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("GitHub API returned %s", resp.Status)
-	}
-
-	var release githubRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
-		return "", "", err
-	}
-
-	return release.TagName, release.HTMLURL, nil
+	return fmt.Sprintf("Upgrade available: %s -> %s\n%s Release notes: %s", current, latest, action, htmlURL)
 }
