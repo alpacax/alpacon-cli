@@ -7,17 +7,6 @@ import (
 	"time"
 )
 
-// PurposeDeadlineAssumed is the server's default COMMAND_PURPOSE_DEADLINE.
-//
-// The setting is env-overridable, so this cannot be authoritative—but the
-// server does report `purpose_requested_at`, and elapsed time is the larger of
-// the two errors: without it, a demand noticed four minutes later still reads
-// "60s left". Subtracting the elapsed time from an assumed default fixes that,
-// and the residual error only ever runs one way. A workspace that raised the
-// deadline makes this understate the window, which hurries the caller; nothing
-// here can make it overstate one, which would let the caller miss it.
-const PurposeDeadlineAssumed = 60 * time.Second
-
 // PurposeDemandLead is the first half of the message every surface prints for an
 // open demand. `exec` and `exec logs` differ only in what they add after it, so
 // keeping the shared half here stops one from being reworded without the other.

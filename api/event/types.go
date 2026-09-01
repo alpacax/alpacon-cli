@@ -86,15 +86,18 @@ type EventDetails struct {
 	AddedAt       time.Time           `json:"added_at"`
 	Server        types.ServerSummary `json:"server"`
 	RequestedBy   types.UserSummary   `json:"requested_by"`
-	// What the requester said this command is for, when the gate asked, and
-	// when the ask expires (ADR 0052). All three are absent on a server
-	// predating the read exposure, and on any command nobody was asked—which is
-	// every command until the gate is enabled, so nil and empty are the
-	// ordinary shapes here. The expiry is server-derived: the window's length
-	// is a setting no endpoint publishes.
-	Purpose            string     `json:"purpose"`
-	PurposeRequestedAt *time.Time `json:"purpose_requested_at"`
-	PurposeExpiresAt   *time.Time `json:"purpose_expires_at"`
+	// What the requester said this command is for, and when the ask expires
+	// (ADR 0052). Both are absent on a server predating the read exposure, and
+	// on any command nobody was asked—which is every command until the gate is
+	// enabled, so nil and empty are the ordinary shapes here.
+	//
+	// The expiry is server-derived and read instead of `purpose_requested_at`:
+	// the window's length is COMMAND_PURPOSE_DEADLINE and no endpoint publishes
+	// it, so a start time alone would leave this client guessing the length.
+	// The start time is deliberately not parsed—no surface here shows it, and a
+	// field read by nothing is a promise no surface keeps.
+	Purpose          string     `json:"purpose"`
+	PurposeExpiresAt *time.Time `json:"purpose_expires_at"`
 }
 
 type CommandRequest struct {
