@@ -55,20 +55,22 @@ catalog' to see the names this workspace defines.`,
 
 		request := rbac.BindingCreateRequest{User: subj.ID, Role: role.ID, Reason: reason}
 
+		// Disclose before the dry-run returns, not after: the companion binding and the
+		// missing justification are what someone reaches for --dry-run to see.
+		if rbac.IsPlatformTier(role.Name) {
+			if role.Name == rbac.RoleSuperuser {
+				utils.CliInfo("The server also creates a companion workspace-wide admin binding for a superuser grant.")
+			}
+			warnMissingReason(reason)
+		}
+
 		if dryRun {
 			utils.CliInfo("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, subj.Label, subj.ID, role.ID)
 			return
 		}
 
-		if rbac.IsPlatformTier(role.Name) {
-			warnMissingReason(reason)
-			if !yes {
-				if role.Name == rbac.RoleSuperuser {
-					utils.ConfirmAction("Grant %s the superuser role? The server also creates a companion workspace-wide admin binding.", subj.Label)
-				} else {
-					utils.ConfirmAction("Grant %s the %s role?", subj.Label, role.Name)
-				}
-			}
+		if rbac.IsPlatformTier(role.Name) && !yes {
+			utils.ConfirmAction("Grant %s the %s role?", subj.Label, role.Name)
 		}
 
 		grant := func() error {

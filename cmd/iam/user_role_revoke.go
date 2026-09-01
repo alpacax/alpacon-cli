@@ -69,6 +69,14 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 				subj.Label, next.PlainText())
 		}
 
+		// Same ordering as grant: what --dry-run is for is seeing these before the write.
+		if rbac.IsPlatformTier(role.Name) {
+			if role.Name == rbac.RoleSuperuser && !cascade && rbac.HoldsWorkspaceRole(bindings, rbac.RoleAdmin) {
+				utils.CliInfo("The companion admin binding stays, so %s remains a workspace administrator; --cascade removes both.", subj.Label)
+			}
+			warnMissingReason(reason)
+		}
+
 		if dryRun {
 			for _, target := range targets {
 				utils.CliInfo("Would revoke %s from %s (binding %s).", target.Role.Name, subj.Label, target.ID)
@@ -76,11 +84,8 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			return
 		}
 
-		if rbac.IsPlatformTier(role.Name) {
-			warnMissingReason(reason)
-			if !yes {
-				utils.ConfirmAction("Revoke %s from %s?", describeTargets(targets), subj.Label)
-			}
+		if rbac.IsPlatformTier(role.Name) && !yes {
+			utils.ConfirmAction("Revoke %s from %s?", describeTargets(targets), subj.Label)
 		}
 
 		// Superuser first: the reverse order fails open, leaving superuser standing once admin is gone.
