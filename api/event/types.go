@@ -44,6 +44,23 @@ type CommandRejectedError struct {
 	CommandID string
 }
 
+// AwaitingPurposeError is returned when the server parked a command at the
+// "awaiting_purpose" status: the verification gate would have queued it for a
+// human, so instead of opening an approval request it is asking the requester
+// what the command is for (ADR 0052). Nobody has been notified, so this is not
+// a wait—the answer is the caller's to give, with 'alpacon exec purpose'.
+// CommandID identifies the parked job; re-submitting would create a second
+// command that gets its own demand and may run twice.
+type AwaitingPurposeError struct {
+	CommandID string
+	// When the demand stops being answerable, as the server computed it. Nil
+	// when absent—an older server, or a command that was never asked. The
+	// reporter states the remaining window only when this is present:
+	// COMMAND_PURPOSE_DEADLINE is env-overridable and no endpoint publishes it,
+	// so a client deriving this itself would be guessing the window's length.
+	ExpiresAt *time.Time
+}
+
 type EventAttributes struct {
 	Server      string `json:"server"`
 	Shell       string `json:"shell"`
@@ -69,6 +86,18 @@ type EventDetails struct {
 	AddedAt       time.Time           `json:"added_at"`
 	Server        types.ServerSummary `json:"server"`
 	RequestedBy   types.UserSummary   `json:"requested_by"`
+	// What the requester said this command is for, and when the ask expires
+	// (ADR 0052). Both are absent on a server predating the read exposure, and
+	// on any command nobody was asked—which is every command until the gate is
+	// enabled, so nil and empty are the ordinary shapes here.
+	//
+	// The expiry is server-derived and read instead of `purpose_requested_at`:
+	// the window's length is COMMAND_PURPOSE_DEADLINE and no endpoint publishes
+	// it, so a start time alone would leave this client guessing the length.
+	// The start time is deliberately not parsed—no surface here shows it, and a
+	// field read by nothing is a promise no surface keeps.
+	Purpose          string     `json:"purpose"`
+	PurposeExpiresAt *time.Time `json:"purpose_expires_at"`
 }
 
 type CommandRequest struct {
@@ -82,6 +111,21 @@ type CommandRequest struct {
 	Server      string            `json:"server"`
 	RunAfter    []string          `json:"run_after"`
 	WorkSession string            `json:"work_session,omitempty"`
+	// What this one command is for (ADR 0052). Sent only when the caller
+	// supplied it; with it in hand the assessor judges on the first pass and the
+	// demand round trip never happens, which is the steady state the ADR intends.
+	Purpose string `json:"purpose,omitempty"`
+	// Declares that this client answers a purpose demand. The gate does not arm
+	// without it, so the declaration is the opt-in—and it is unconditional here
+	// because every exec path surfaces the demand to its caller instead of
+	// stalling on it.
+	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
+}
+
+// CommandPurposeRequest is the body of the purpose-demand answer. Write-only on
+// the server side: the 202 carries no echo of what was just sent.
+type CommandPurposeRequest struct {
+	Purpose string `json:"purpose"`
 }
 
 type CommandResponse struct {
@@ -111,6 +155,10 @@ func (*ClientTimeoutError) Error() string {
 
 func (*PendingApprovalError) Error() string {
 	return "command is awaiting human approval"
+}
+
+func (*AwaitingPurposeError) Error() string {
+	return "command is awaiting the requester's stated purpose"
 }
 
 func (e *CommandRejectedError) Error() string {
@@ -145,6 +193,14 @@ func IsRunningStatus(status string) bool {
 // and the command has not yet been delivered to the agent.
 func IsAwaitingApprovalStatus(status string) bool {
 	return status == "awaiting_approval"
+}
+
+// IsAwaitingPurposeStatus reports whether status is the server's hold state for
+// a command parked while the gate asks the requester what it is for (ADR 0052).
+// Unlike the approval hold this one is answerable here and expires on its own
+// in about a minute, after which the command takes the ordinary path.
+func IsAwaitingPurposeStatus(status string) bool {
+	return status == "awaiting_purpose"
 }
 
 // IsRejectedStatus reports whether status is the server's terminal state for a

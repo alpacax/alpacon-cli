@@ -1,12 +1,45 @@
 package exec
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// PurposeMaxLength is the server's ceiling on a stated purpose (ADR 0052).
+// Checked here so an over-long one is a usage error rather than a 400 that
+// costs a parked command its one demand.
+const PurposeMaxLength = 2000
+
+// checkPurpose validates a stated purpose against the server's rules, returning
+// the value to send and an empty string when it passes. subject names the thing
+// being validated—the flag for `exec --purpose`, the argument for
+// `exec purpose`—so one ceiling and one wording serve both.
+//
+// Surrounding whitespace is trimmed, and the ceiling is counted on what is
+// actually sent, so the length checked is the length that travels. Trimming is
+// not sanitizing: stripping control characters out of a purpose would falsify a
+// statement the assessor and the audit record attribute to the requester, so
+// the text itself reaches the server as typed.
+//
+// The ceiling is counted in runes, not bytes. The server validates with DRF's
+// CharField(max_length=...), which counts characters, so len() would refuse a
+// Korean purpose at roughly 666 of them—while telling the caller the server
+// would refuse it, which at that length is untrue.
+func checkPurpose(subject, purpose string) (string, string) {
+	trimmed := strings.TrimSpace(purpose)
+	if trimmed == "" {
+		return "", subject + " requires a value describing what this command is for"
+	}
+	if utf8.RuneCountInString(trimmed) > PurposeMaxLength {
+		return "", fmt.Sprintf("%s is limited to %d characters; the server refuses a longer one", subject, PurposeMaxLength)
+	}
+	return trimmed, ""
+}
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
@@ -16,6 +49,9 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
+	// What this command is for (ADR 0052). Sent on submission, so the assessor
+	// judges with it on the first pass and no demand is issued.
+	Purpose string
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
 	// WebshInvocation, and exec leaves it empty, which the hint reads as exec.
@@ -44,6 +80,7 @@ type RemoteExecArgs struct {
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
+		purpose                                                  string
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
@@ -98,6 +135,17 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
+			}
+		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
+			var errMsg string
+			// No short form: pass the long name as sentinel to disable attached-value parsing.
+			purpose, i, errMsg = extractFlagValue(args, i, "--purpose")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			var msg string
+			if purpose, msg = checkPurpose("--purpose", purpose); msg != "" {
+				return RemoteExecArgs{Err: msg}
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string
@@ -165,6 +213,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		OutputFormat:  outputFormat,
 		Server:        server,
 		Command:       ShellJoin(commandParts),
+		Purpose:       purpose,
 		Env:           env,
 		WaitApproval:  waitApproval,
 		Detach:        detach,

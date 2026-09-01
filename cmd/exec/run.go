@@ -361,8 +361,8 @@ func credentialInlineHint(invokedAs Invocation) string {
 // the static denial hint; non-interactive humans additionally get the
 // verification link they can complete out of band. Reached via RunRemoteExec by
 // exec and websh command mode; interactive websh keeps its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
-	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
+func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
 	// RemoteCommandError carrying the denial line. Require that error as well as
 	// the line match: a command that merely prints the line and SUCCEEDS
@@ -385,7 +385,7 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
-	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, out)
+	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
 // printPresenceStepUpLink surfaces the verification link for a non-interactive
@@ -444,8 +444,8 @@ func isApprovalDenial(err error) bool {
 // tick that carries the approval in a response isPollFailure cannot read, which
 // re-submits it up to MaxConsecutivePollFailures times. The poll mirrors the MFA
 // step-up structure (api/mfa/mfa.go): a spinner, a timer, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, waitTimeout time.Duration, out io.Writer) error {
-	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, out)
+func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
@@ -506,7 +506,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 		case <-poll.C:
 			// Re-attempt via the presence-aware path so a step-up still fires if
 			// the approved command then needs fresh MFA (SUDO_PRESENCE_REQUIRED).
-			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, spinnerOut)
+			err = runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, spinnerOut)
 			// The server may switch this request from a denial-code to a status-hold
 			// mid-wait; honor --wait by resuming the held job instead of exiting.
 			if errors.As(err, &pendingErr) {
@@ -594,6 +594,27 @@ func isPollFailure(err error) bool {
 	return errors.As(err, &typeErr)
 }
 
+// HandlePurposeDemand reports a command the gate parked for its purpose and
+// exits, or returns false when err is something else.
+//
+// It never waits, not even under --wait. --wait exists because an approval is
+// somebody else's to give and the caller can only block; a purpose demand is
+// this caller's own to answer, and the window is about a minute, so blocking
+// would spend the command's single chance on sleep. It runs ahead of
+// HandlePendingApproval because a parked command has no approval request yet:
+// reporting one would name a queue nobody has been added to.
+func HandlePurposeDemand(err error) bool {
+	var purposeErr *event.AwaitingPurposeError
+	if !errors.As(err, &purposeErr) {
+		return false
+	}
+	utils.PrintPurposeDemand(
+		utils.PurposeDemandLead, purposeErr.CommandID, purposeErr.ExpiresAt,
+	)
+	os.Exit(utils.ExitCodePurposeRequired)
+	return true
+}
+
 // HandlePendingApproval emits the structured pending-approval feedback for a
 // command left pending human approval and not waited on—either a job the server
 // parked at awaiting_approval (PendingApprovalError) or a sudo denial with an
@@ -639,14 +660,14 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 // RunCommandWithRetry executes a remote command with MFA/username-required error
 // handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
-	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
+func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 	if propagated, ok := propagateCommandError(err); ok {
 		return propagated
 	}
 	if err != nil {
 		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, func() error {
-			return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, out)
+			return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 		}))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
@@ -709,6 +730,12 @@ func propagateCommandError(err error) (error, bool) {
 	var pending *event.PendingApprovalError
 	if errors.As(err, &pending) {
 		return pending, true
+	}
+	// The purpose demand is the caller's to answer, so it must reach
+	// HandlePurposeDemand intact rather than be retried as a transport failure.
+	var purposeDemand *event.AwaitingPurposeError
+	if errors.As(err, &purposeDemand) {
+		return purposeDemand, true
 	}
 	return nil, false
 }

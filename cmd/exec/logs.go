@@ -43,6 +43,17 @@ Run the command again later to check for completion.`,
 			return
 		}
 
+		// Ahead of the approval hold: a parked command has no approval request,
+		// so reporting one would name a queue it is not in (ADR 0052). This is
+		// the detach path's only sight of the demand—SubmitCommand returns before
+		// the verdict, so --detach cannot see it at submission time.
+		if event.IsAwaitingPurposeStatus(details.Status) {
+			utils.PrintPurposeDemand(
+				utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
+			)
+			os.Exit(utils.ExitCodePurposeRequired)
+		}
+
 		// Exit 0 would read as a command that finished with nothing to show.
 		if event.IsAwaitingApprovalStatus(details.Status) {
 			utils.PrintPendingApproval(
@@ -69,6 +80,15 @@ Run the command again later to check for completion.`,
 			details.Result = output
 		}
 
+		// What the requester said the command was for, ahead of the outcome and
+		// on stderr so stdout stays the command's own output. Sanitized here
+		// and not at the API boundary: this is text one principal wrote that
+		// now reaches another principal's terminal (#364).
+		if details.Purpose != "" {
+			fmt.Fprintf(os.Stderr, "Stated purpose: %s\n",
+				utils.SanitizeTerminalText(details.Purpose))
+		}
+
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
@@ -87,8 +107,8 @@ func init() {
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
-// awaiting_approval hold nor a rejection reaches here: the caller answers both on
-// the approval contract first.
+// awaiting_purpose demand, the awaiting_approval hold, nor a rejection reaches
+// here: the caller answers all three on their own contracts first.
 func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine string, exitCode int) {
 	// These lines are written raw, outside the Cli* sanitizing helpers (#364). A
 	// Status that reached one of these branches equals the literal it was compared
