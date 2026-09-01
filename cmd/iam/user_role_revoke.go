@@ -32,7 +32,7 @@ Revoking a role the user does not hold changes nothing and succeeds.`,
   alpacon user role revoke john admin --dry-run`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		reason, _ := cmd.Flags().GetString("reason")
+		reason := reasonFlag(cmd)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		yes, _ := cmd.Flags().GetBool("yes")
 		cascade, _ := cmd.Flags().GetBool("cascade")

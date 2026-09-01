@@ -30,7 +30,7 @@ catalog' to see the names this workspace defines.`,
   alpacon user role grant john auditor --dry-run`,
 	Args: cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		reason, _ := cmd.Flags().GetString("reason")
+		reason := reasonFlag(cmd)
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		yes, _ := cmd.Flags().GetBool("yes")
 
@@ -116,10 +116,20 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 	return nil
 }
 
+// reasonFlag reads --reason and trims it once, so the value the warning judges is the
+// value the server records. Sending a whitespace-only reason would fill the audit
+// entry with blanks while the server's own unjustified-grant warning stayed quiet,
+// which is worse than the honest omission the operator meant.
+func reasonFlag(cmd *cobra.Command) string {
+	reason, _ := cmd.Flags().GetString("reason")
+
+	return strings.TrimSpace(reason)
+}
+
 // warnMissingReason says what an unjustified platform-tier change costs. The server
 // accepts a blank justification and records the omission; it does not refuse.
 func warnMissingReason(reason string) {
-	if strings.TrimSpace(reason) == "" {
+	if reason == "" {
 		utils.CliWarning("No --reason given, so the audit entry for this change will carry no justification.")
 	}
 }

@@ -206,3 +206,30 @@ func TestLooksLikePermission(t *testing.T) {
 		})
 	}
 }
+
+// The warning judges the trimmed value, so the wire has to carry the trimmed value
+// too. A whitespace-only justification sent as-is would warn the operator that the
+// audit entry carries nothing while filling it with blanks, which also keeps the
+// server's own unjustified-grant warning quiet.
+func TestReasonFlagTrimsOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		flag string
+		want string
+	}{
+		{"unset", "", ""},
+		{"whitespace only", "   \t ", ""},
+		{"padded", "  SEC-1421  ", "SEC-1421"},
+		{"already clean", "on-call rotation Q3", "on-call rotation Q3"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{Use: "x"}
+			cmd.Flags().String("reason", "", "")
+			require.NoError(t, cmd.Flags().Set("reason", tt.flag))
+
+			assert.Equal(t, tt.want, reasonFlag(cmd))
+		})
+	}
+}
