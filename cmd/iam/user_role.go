@@ -58,15 +58,11 @@ role_audit_log:read scope, on either deployment.`,
 	},
 }
 
-// subject is who a command is acting on.
-//
-// PK and ID differ on purpose. The self form sends "-", which UserViewSet.get_object
-// short-circuits before the object permission check. An own UUID also passes that
-// check, through the user:owner role auto-granted per account ("user:*" on self), so
-// "-" is not the difference between working and refused: it is the server's own self
-// route, one fewer check, and the form that still works for an account missing that
-// binding. ID is the resolved UUID, for the endpoints that take the user in a query
-// filter or a request body, where "-" is not a value the server accepts.
+// subject is who a command is acting on. PK addresses the user in the path: the self
+// form sends "-", the server's own self route, which UserViewSet.get_object
+// short-circuits before the object permission check (an own UUID passes that check
+// too, via the auto-granted user:owner role). ID is the resolved UUID, for endpoints
+// taking the user in a query filter or a body, where "-" is not a value the server accepts.
 type subject struct {
 	PK    string
 	ID    string
@@ -104,13 +100,10 @@ func resolveSubject(ac *client.AlpaconClient, args []string) subject {
 	return subject{PK: userID, ID: userID, Label: args[0]}
 }
 
-// canonicalUUID normalizes a UUID the operator typed. utils.IsUUID accepts the
-// un-dashed 32-hex form and either case, and one consumer cannot cope: the audit
-// log's ?user= is a plain CharFilter compared against a varchar holding the
-// canonical dashed lowercase form, so a non-canonical value matches nothing and
-// 'user role history' prints an empty table and exits 0—indistinguishable from an
-// account whose roles nobody ever changed. The binding list is unaffected; its
-// filter coerces the value itself.
+// canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in
+// either case. The audit log's ?user= is a plain CharFilter over a varchar holding the
+// canonical form, so a non-canonical value matches nothing and 'user role history'
+// prints an empty table and exits 0. The binding list's filter coerces the value itself.
 func canonicalUUID(id string) string {
 	hex := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	if len(hex) != 32 {

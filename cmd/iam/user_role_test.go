@@ -248,16 +248,13 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantSaid: []string{"superuser role", "API token", "alpacon login"},
 		},
 		{
-			// The credential refusal exists only behind the Auth0 gate, which self-hosted
-			// does not install, so the deployment-independent reading has to come first.
 			name: "a role read with an api token leads with visibility, not the credential",
 			ac:   apiToken, gate: gateRoleRead,
 			wantSaid:    []string{"may not see", "API token", "alpacon login"},
 			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
 		},
 		{
-			// A token that already holds the scope must not be told it lacks it, so the
-			// reach limit leads and the scope is the additional condition.
+			// A token that already holds the scope must not be told it lacks it.
 			name: "the audit log leads with the reach limit, then the scope",
 			ac:   apiToken, gate: gateAuditRead,
 			wantSaid:    []string{"auditor", "role_audit_log:read"},
@@ -406,10 +403,7 @@ func TestResolveSubject(t *testing.T) {
 	}
 }
 
-// permission_denied is the code the troubleshoot read answers when the target is not
-// the caller. It is a coded 403, so it never reaches the codeless branch, and without
-// a case of its own it fell through to the server's generic sentence while every
-// sibling refusal on this surface got guidance.
+// A coded 403 never reaches the codeless branch, so it needs a case of its own.
 func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
 	coded := fmt.Errorf("request failed with status 403: {\"code\": %q}", codePermissionDenied)
@@ -419,8 +413,6 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	assert.Contains(t, got.Error(), "not an account you may read")
 }
 
-// The rewritten message is what an operator reads, but the server's error stays in
-// the chain so a caller can still reach its status.
 func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
 	cause := statusOnlyError{status: http.StatusForbidden}
@@ -431,15 +423,14 @@ func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 	assert.NotContains(t, got.Error(), "forbidden", "the raw refusal must not pad the operator's line")
 	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(got))
 
-	// The code has to survive too: ParseErrorResponse walks the chain, and a rewrite
-	// that swallowed it would take the MFA and duplicate routing with it.
+	// The code has to survive the rewrite too. Nothing consumes it downstream today -
+	// HandleCommonErrors and IsDuplicateBinding both see the raw error and the rewrite
+	// runs after them - so this pins a forward contract, not a live path.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 	code, _ := utils.ParseErrorResponse(describeRBACError(ac, gateRoleWrite, coded))
 	assert.Equal(t, codeSuperuserLastRemoval, code)
 }
 
-// A non-canonical UUID matches nothing on the audit log's varchar filter, and an empty
-// audit read is indistinguishable from an account nobody ever touched.
 func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
 	const canonical = "2222222a-2222-2222-2222-22222222222b"
 

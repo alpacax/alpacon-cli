@@ -392,8 +392,6 @@ func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 	assert.Equal(t, "Jane Doe", missing[0].User)
 }
 
-// The server's bulk branch answers 201 with an empty body. No caller reads the body,
-// so an empty one must not turn a successful write into an error.
 func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -403,9 +401,8 @@ func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
 	assert.NoError(t, GrantRole(newTestClient(ts), BindingCreateRequest{User: userID, Role: adminRoleID}))
 }
 
-// The three IAM-hosted reads had no coverage: a renamed field on the check endpoint
-// would decode to false, so can-i would print "no" and -q would exit 1—fail-closed,
-// but silently wrong. The scopes path is built by concatenation and nothing pinned it.
+// A renamed field on the check endpoint would decode to false: can-i prints "no" and
+// -q exits 1—fail-closed, but silently wrong.
 func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -236,9 +236,8 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 	return result
 }
 
-// The 201 body is not decoded: no caller reads it, and the server's bulk branch
-// answers 201 with an empty body, which would fail to unmarshal for nothing. Callers
-// re-read the bindings instead.
+// The 201 body is discarded: no caller reads it, and the server's bulk branch answers
+// 201 with an empty body.
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 	_, err := ac.SendPostRequest(userRolesURL, request)
 

@@ -9,8 +9,7 @@ import (
 )
 
 // Error codes this surface can receive (alpacon-server utils/error_codes.py). All but
-// permission_denied come from the binding endpoints; that one is the troubleshoot read
-// refusing a target that is not the caller.
+// permission_denied come from the binding endpoints; that one is the troubleshoot read.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -36,18 +35,16 @@ const (
 	// are accepted on the IAM routes, so a refusal is about the permission, not the credential.
 	gateUserRead
 	// gatePermissionIntrospect: /api/iam/users/{id}/permissions/ pins no scope, so it
-	// auto-resolves to an orphan 'user:permissions'. A cross-account read is then satisfied
-	// only by a wildcard grant; a self read passes through the per-account user:owner role,
-	// and the "-" alias skips the check outright.
+	// auto-resolves to an orphan 'user:permissions': cross-account only a wildcard grant
+	// satisfies it, while a self read passes through user:owner's 'user:*'.
 	gatePermissionIntrospect
 )
 
 type rbacGate int
 
-// rewritten carries an actionable message while keeping the server's error in the
-// chain, so utils.HTTPStatusCode and errors.Is still reach it. Printing shows only
-// the actionable half: the refusal it replaces is a bare code or DRF's generic
-// sentence, and repeating either after our own would only pad the line.
+// rewritten keeps the server's error in the chain—utils.HTTPStatusCode and
+// ParseErrorResponse walk it—while Error() prints only the actionable message: the
+// refusal it replaces is a bare code or DRF's generic sentence.
 type rewritten struct {
 	message string
 	cause   error
@@ -100,10 +97,8 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		case gate == gateRoleWrite:
 			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			// Lead with the reading that holds on both deployments. The credential refusal
-			// exists only where the Auth0 gate is installed, and a self-hosted workspace does
-			// not install it, so telling every token session to log in through a browser
-			// sends most of them after a fix that changes nothing.
+			// Lead with the reading that holds on both deployments: the credential refusal exists
+			// only where the Auth0 gate is installed, and self-hosted does not install it.
 			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
 		default:
 			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")
