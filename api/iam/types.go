@@ -148,3 +148,20 @@ type SetUsernameResponse struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 }
+
+// UserEdit is the outcome of an interactive 'alpacon user update' session.
+type UserEdit struct {
+	// Changes is the sparse patch to send: only the fields the edit actually
+	// changed, with the read-only privilege flags removed.
+	Changes map[string]any `json:"changes"`
+	// Privileges holds the privilege-flag edits that were removed. The server would
+	// have answered 200 and ignored them, so they are reported rather than sent.
+	Privileges []PrivilegeEdit `json:"privileges"`
+}
+
+// PrivilegeEdit is one edit to a read-only privilege flag: the field, and the value
+// the operator asked for.
+type PrivilegeEdit struct {
+	Field string `json:"field"`
+	Want  bool   `json:"want"`
+}
