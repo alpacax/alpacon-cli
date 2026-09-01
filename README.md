@@ -70,7 +70,7 @@ If the binary or its directory is group- or world-writable, the update says so o
 
 #### What the checksum does and does not prove
 
-Releases are checksum-verified but **unsigned**. The SHA-256 comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release and no signature is attached. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and verification would pass.
+Releases are checksum-verified but **unsigned**. The SHA-256 comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release and no signature is attached. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and verification would pass. Signing the checksums against a pinned identity is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
 
 To check out of band, compare `alpacon version` against the [Releases](https://github.com/alpacax/alpacon-cli/releases) page, and verify the archive yourself before installing it:
 
