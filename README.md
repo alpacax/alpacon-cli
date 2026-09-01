@@ -64,9 +64,9 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 ### Updating
 
-`alpacon update` brings the CLI to the latest release. A binary built from source carries the version `dev`, which matches no release, so the command refuses it and says so—build with GoReleaser or install a released build to use it. A binary you placed yourself is downloaded, verified against the release's SHA-256 checksums, and replaced in place; the old binary is kept beside it until the replacement succeeds—on Windows, where a running executable stays locked, it is kept as `alpacon.exe.old.<timestamp>` and removed by the next update. A binary a package manager or a version manager owns is never overwritten—the command prints how to update through that tool and exits `1`, leaving the upgrade to you. Homebrew, deb and rpm get the exact command; mise and asdf are named without one, since the command depends on how the tool was set up. While it runs it holds `.alpacon-update.lock` beside the binary, so two updates cannot replace the same file at once; the file stays there afterwards and is safe to leave alone. The command only moves forward: a build ahead of the latest release, such as a release candidate, is left alone rather than downgraded. `alpacon update --check` reports whether a newer release exists and installs nothing, exiting `8` when there is one.
+`alpacon update` brings the CLI to the latest release. A binary built from source carries the version `dev`, which matches no release, so the command refuses it and says so—build with GoReleaser or install a released build to use it. A binary you placed yourself is downloaded, verified against the release's SHA-256 checksums, and replaced in place; the old binary is kept beside it until the replacement succeeds—on Windows, where a running executable stays locked, it is kept as `alpacon.exe.old.<timestamp>` and removed by the next update. A binary a package manager or a version manager owns is never overwritten—the command prints how to update through that tool and exits `1`, leaving the upgrade to you. If the ownership question cannot be answered at all—`rpm -qf` takes a read lock on the rpm database, so it is killed when another package transaction holds it—the binary is left alone rather than assumed unowned, and the command says to retry once that transaction has finished. Homebrew, deb and rpm get the exact command; mise and asdf are named without one, since the command depends on how the tool was set up. While it runs it holds `.alpacon-update.lock` beside the binary, so two updates cannot replace the same file at once; the file stays there afterwards and is safe to leave alone. The command only moves forward: a build ahead of the latest release, such as a release candidate, is left alone rather than downgraded. `alpacon update --check` reports whether a newer release exists and installs nothing, exiting `8` when there is one.
 
-If the binary is group- or world-writable, the update keeps that mode and says so on stderr rather than narrowing it—re-permissioning a file you set up is your call. Close it with `chmod go-w`, since any local account can otherwise replace the binary you run.
+If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
 #### What the checksum does and does not prove
 
@@ -75,6 +75,7 @@ Releases are checksum-verified but **unsigned**. The SHA-256 comparison proves t
 To check out of band, compare `alpacon version` against the [Releases](https://github.com/alpacax/alpacon-cli/releases) page, and verify the archive yourself before installing it:
 
 ```bash
+# The archive is .tar.gz everywhere but Windows, which ships .zip.
 curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-<os>-<arch>.tar.gz
 curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-checksums.sha256
 sha256sum --check --ignore-missing alpacon-<version>-checksums.sha256
@@ -82,11 +83,16 @@ sha256sum --check --ignore-missing alpacon-<version>-checksums.sha256
 
 #### If a Windows update is killed mid-replace
 
-Windows refuses to overwrite a running executable, so the update renames it aside and renames the new one into place. A process killed between those two renames leaves no `alpacon.exe`—only `alpacon.exe.old.<timestamp>` beside it. Nothing recovers automatically, because the binary that would run the next update is the one that went missing. Rename the preserved copy back:
+Windows refuses to overwrite a running executable, so the update copies the new binary in as `alpacon.exe.staged.<timestamp>`, renames the old one aside as `alpacon.exe.old.<timestamp>`, and renames the staged copy into place. A process killed between those two renames leaves no `alpacon.exe` and both of the others beside it. Nothing recovers automatically, because the binary that would run the next update is the one that went missing.
+
+The staged copy is the new release and was already checksum-verified, so finishing the update is usually what you want:
 
 ```powershell
-Rename-Item alpacon.exe.old.<timestamp> alpacon.exe
+Rename-Item alpacon.exe.staged.<timestamp> alpacon.exe
+Remove-Item alpacon.exe.old.<timestamp>
 ```
+
+To go back to the version you had instead, rename `alpacon.exe.old.<timestamp>` and delete the staged copy. Either way the next update sweeps whichever one you leave.
 
 ## Quick start
 
