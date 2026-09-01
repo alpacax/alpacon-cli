@@ -14,7 +14,7 @@ import (
 
 var purposeCmd = &cobra.Command{
 	Use:   "purpose JOB_ID PURPOSE",
-	Short: "State what a held command is for, and send it back for judgment",
+	Short: "State what a held command is for",
 	Long: `State what a held command is for, and send it back for judgment.
 
 When a command an agent submitted draws a verdict that would queue it for a
@@ -57,16 +57,20 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		jobID, purpose := args[0], args[1]
 
+		// Exit 1, not ExitCodeUsageError: 2 is reserved for work-session, event
+		// wait/watch, and utils.RequirePositiveInt (README "Exit codes"). Every
+		// other command exits 1 on its own argument validation, `exec logs`
+		// included, and a script must not read 2 here as a usage-only surface.
 		if !utils.IsUUID(jobID) {
-			utils.CliErrorWithExitCode(utils.ExitCodeUsageError, "invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
 			return
 		}
 		if strings.TrimSpace(purpose) == "" {
-			utils.CliErrorWithExitCode(utils.ExitCodeUsageError, "PURPOSE cannot be empty: the server refuses a blank answer and the command only gets one demand")
+			utils.CliErrorWithExit("PURPOSE cannot be empty: the server refuses a blank answer and the command only gets one demand")
 			return
 		}
 		if len(purpose) > PurposeMaxLength {
-			utils.CliErrorWithExitCode(utils.ExitCodeUsageError, "PURPOSE is limited to %d characters; the server refuses a longer one", PurposeMaxLength)
+			utils.CliErrorWithExit("PURPOSE is limited to %d characters; the server refuses a longer one", PurposeMaxLength)
 			return
 		}
 
