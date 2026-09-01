@@ -14,8 +14,18 @@ permissions:
 
 jobs:
   golangci-lint:
-    name: golangci-lint
+    name: golangci-lint (${{ matrix.goos }})
     runs-on: ubuntu-latest
+
+    # The self-update path has a file per platform; linting one GOOS leaves the
+    # other's unread.
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, windows]
+
+    env:
+      GOOS: ${{ matrix.goos }}
 
     steps:
       - name: Check out code
