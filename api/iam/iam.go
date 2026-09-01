@@ -230,6 +230,25 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 	return response.Results[0].ID, nil
 }
 
+// GetUsernamesByID maps every visible user's id to their username.
+//
+// The nested user object embedded in a role binding carries a display name, not
+// the username the other commands accept, so any list of principals that an
+// operator is meant to type back into another command has to join against this.
+func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
+	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	usernames := make(map[string]string, len(users))
+	for _, user := range users {
+		usernames[user.ID] = user.Username
+	}
+
+	return usernames, nil
+}
+
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
 	params := map[string]string{
 		"name": groupName,
