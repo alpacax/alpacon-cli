@@ -51,8 +51,10 @@ list was narrowed.`,
 			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
+		// Skip the directory walk when there is nobody to label: GetUsernamesByID pages
+		// /api/iam/users/ 100 at a time, which is a lot of round trips to name no one.
 		var usernames map[string]string
-		if noResolve, _ := cmd.Flags().GetBool("no-resolve-names"); !noResolve {
+		if noResolve, _ := cmd.Flags().GetBool("no-resolve-names"); !noResolve && len(holders) > 0 {
 			usernames, err = iam.GetUsernamesByID(alpaconClient)
 			if err != nil {
 				utils.CliErrorWithExit("Failed to resolve the holders' usernames: %s.", err)

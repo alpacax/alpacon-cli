@@ -445,6 +445,10 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 // want a justification take it there rather than in a query parameter, so it stays
 // out of access logs, proxy logs and shell history. createRequest sets the content
 // type only for the methods that always carry a body, so this sets it here.
+//
+// A DELETE entity-body is legal but unusual, and an intermediary that strips one
+// drops the justification without saying so: the request still answers 204 and the
+// audit row records an empty reason. Nothing on this path can detect that.
 func (ac *AlpaconClient) SendDeleteRequestWithBody(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {

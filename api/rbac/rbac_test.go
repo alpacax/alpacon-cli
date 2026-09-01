@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -292,7 +293,7 @@ func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	binding, err := GrantRole(newTestClient(ts), BindingCreateRequest{
+	err := GrantRole(newTestClient(ts), BindingCreateRequest{
 		User:   userID,
 		Role:   adminRoleID,
 		Reason: "SEC-1421",
@@ -301,7 +302,6 @@ func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
 
 	assert.Equal(t, http.MethodPost, gotMethod)
 	assert.JSONEq(t, `{"user":"`+userID+`","role":"`+adminRoleID+`","reason":"SEC-1421"}`, string(gotBody))
-	assert.Equal(t, "admin", binding.Role.Name)
 }
 
 func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
@@ -313,7 +313,7 @@ func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := GrantRole(newTestClient(ts), BindingCreateRequest{User: userID, Role: adminRoleID})
+	err := GrantRole(newTestClient(ts), BindingCreateRequest{User: userID, Role: adminRoleID})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"user":"`+userID+`","role":"`+adminRoleID+`"}`, string(gotBody))
 }
@@ -390,4 +390,95 @@ func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 	missing := HolderAttributesFrom(bindings, map[string]string{"someone-else": "bob"})
 	require.Len(t, missing, 1)
 	assert.Equal(t, "Jane Doe", missing[0].User)
+}
+
+// The server's bulk branch answers 201 with an empty body. No caller reads the body,
+// so an empty one must not turn a successful write into an error.
+func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer ts.Close()
+
+	assert.NoError(t, GrantRole(newTestClient(ts), BindingCreateRequest{User: userID, Role: adminRoleID}))
+}
+
+// The three IAM-hosted reads had no coverage: a renamed field on the check endpoint
+// would decode to false, so can-i would print "no" and -q would exit 1 - fail-closed,
+// but silently wrong. The scopes path is built by concatenation and nothing pinned it.
+func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		call     func(ac *client.AlpaconClient) error
+		wantPath string
+		wantQry  string
+		body     string
+	}{
+		{
+			name:     "check mode sends the permission and reads allowed",
+			wantPath: "/api/iam/users/-/permissions/",
+			wantQry:  "server:update",
+			body:     `{"allowed": true}`,
+			call: func(ac *client.AlpaconClient) error {
+				allowed, err := CheckPermission(ac, "-", "server:update")
+				if err == nil && !allowed {
+					return errors.New("allowed decoded as false")
+				}
+				return err
+			},
+		},
+		{
+			name:     "list mode buckets the patterns by scope",
+			wantPath: "/api/iam/users/-/permissions/",
+			body:     `{"global": ["server:read"], "object_scoped": ["note:update"]}`,
+			call: func(ac *client.AlpaconClient) error {
+				patterns, err := GetPermissionPatterns(ac, "-")
+				if err == nil && (len(patterns.Global) != 1 || len(patterns.ObjectScoped) != 1) {
+					return errors.New("buckets did not decode")
+				}
+				return err
+			},
+		},
+		{
+			name:     "effective permissions reads the provenance",
+			wantPath: "/api/iam/users/-/effective-permissions/",
+			body:     `{"user":{"id":"u"},"summary":{"role_count":1},"roles":[{"role":{"name":"admin"},"source":"user","scope":"global"}],"permissions":{"resources":[],"wildcards":["*"]}}`,
+			call: func(ac *client.AlpaconClient) error {
+				effective, err := GetEffectivePermissions(ac, "-")
+				if err == nil && (len(effective.Roles) != 1 || effective.Roles[0].Role.Name != "admin") {
+					return errors.New("roles did not decode")
+				}
+				return err
+			},
+		},
+		{
+			name:     "role scopes is a detail action, not a query",
+			wantPath: "/api/rbac/roles/" + adminRoleID + "/scopes/",
+			body:     `{"resources":[{"name":"server","actions":["read"],"acl":[]}],"wildcards":[]}`,
+			call: func(ac *client.AlpaconClient) error {
+				scopes, err := GetRoleScopes(ac, adminRoleID)
+				if err == nil && len(scopes.Resources) != 1 {
+					return errors.New("resources did not decode")
+				}
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath, gotQry string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotQry = r.URL.Query().Get("permission")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			require.NoError(t, tt.call(newTestClient(ts)))
+			assert.Equal(t, tt.wantPath, gotPath)
+			assert.Equal(t, tt.wantQry, gotQry)
+		})
+	}
 }

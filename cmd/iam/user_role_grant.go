@@ -72,8 +72,7 @@ catalog' to see the names this workspace defines.`,
 		}
 
 		grant := func() error {
-			_, grantErr := rbac.GrantRole(alpaconClient, request)
-			return grantErr
+			return rbac.GrantRole(alpaconClient, request)
 		}
 
 		if err = grant(); err != nil {
