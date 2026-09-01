@@ -8,8 +8,8 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Error codes this surface can receive. All but permission_denied come from the binding
-// endpoints; that one is the troubleshoot read.
+// Codes this surface receives. All but permission_denied come from the binding endpoints;
+// that one is the troubleshoot read.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -43,8 +43,7 @@ const (
 type rbacGate int
 
 // rewritten keeps the server's error in the chain—utils.HTTPStatusCode and
-// ParseErrorResponse walk it—while Error() prints only the actionable message: the
-// refusal it replaces is a bare code or DRF's generic sentence.
+// ParseErrorResponse walk it—while Error() prints only the actionable message.
 type rewritten struct {
 	message string
 	cause   error
@@ -74,8 +73,7 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		return rewrite(err, "that role is already bound to the user at this scope")
 	case codeBulkLimitExceeded:
 		return rewrite(err, "the server refused the request as a bulk operation; this is a bug in the CLI, which binds one role to one user per request")
-	// invalid_input is generic and reaches every call site, so it cannot name the
-	// binding scope the way a write-only code could.
+	// invalid_input reaches every call site, so the message cannot name the binding scope.
 	case codeInvalidInput:
 		return rewrite(err, "the server rejected one of the request's values")
 	case codeWorkspaceSuspended:
@@ -90,9 +88,8 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 			return rewrite(err, "reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
 		case gate == gatePermissionIntrospect:
 			return rewrite(err, "this endpoint pins no permission of its own, so a cross-account read of it is satisfied only by a wildcard grant—in practice the superuser role. Your own permissions are always readable; run the command without a USER argument")
-		// The auditor limit is applied as silent queryset narrowing—a short list, not a
-		// refusal—so the missing scope is the only thing that can 403 here. A bearer
-		// cannot be refused by the scope gate at all and falls through to the default.
+		// A narrowed audit view comes back as a short list, not a refusal, so a missing scope
+		// is the only 403 left here; a bearer, which that gate cannot refuse, hits the default.
 		case gate == gateAuditRead && !ac.IsBearerAuth():
 			return rewrite(err, "this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
@@ -100,8 +97,7 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		case gate == gateRoleWrite:
 			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			// Lead with the reading that holds on both deployments: the credential refusal happens
-			// on Alpacon Cloud only, and a self-hosted workspace accepts the token.
+			// Lead with the reading that holds on both deployments: only Alpacon Cloud refuses the token.
 			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
 		default:
 			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")

@@ -51,8 +51,8 @@ list was narrowed.`,
 			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		// GetUsernamesByID walks every page of /api/iam/users/, 100 at a time, so skip it
-		// when there is nobody to label.
+		// GetUsernamesByID walks every page of the user list, so skip it when there is
+		// nobody to label.
 		var usernames map[string]string
 		if noResolve, _ := cmd.Flags().GetBool("no-resolve-names"); !noResolve && len(holders) > 0 {
 			usernames, err = iam.GetUsernamesByID(alpaconClient)

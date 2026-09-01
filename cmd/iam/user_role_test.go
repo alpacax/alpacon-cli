@@ -157,9 +157,8 @@ func TestUserSubcommandsAreRegistered(t *testing.T) {
 	}
 }
 
-// Within 'alpacon user' the RBAC role is always positional, so --role means only the
-// group-membership tier. The walk cannot start at RootCmd (cmd imports cmd/iam, not the
-// reverse), so GroupCmd's --role is asserted here as the one intended holder.
+// The walk cannot start at RootCmd (cmd imports cmd/iam, not the reverse), so GroupCmd's
+// --role is asserted here as the one intended holder.
 func TestRoleFlagKeepsOneMeaning(t *testing.T) {
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
@@ -298,8 +297,8 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 
 func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 	ac := &client.AlpaconClient{Token: "alpat-token"}
-	// The JSON envelope: ParseErrorResponse reads "code: X" only when the prefix starts
-	// its own "; " segment, which a status-prefixed message never does.
+	// ParseErrorResponse reads "code: X" only when the prefix starts its own "; " segment,
+	// which a status-prefixed message never does—hence the JSON envelope.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 
 	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead, gatePermissionIntrospect} {
@@ -418,9 +417,8 @@ func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 	assert.NotContains(t, got.Error(), "forbidden", "the raw refusal must not pad the operator's line")
 	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(got))
 
-	// The code has to survive the rewrite too. Nothing consumes it downstream today -
-	// HandleCommonErrors and IsDuplicateBinding both see the raw error and the rewrite
-	// runs after them - so this pins a forward contract, not a live path.
+	// Nothing consumes the code downstream today—HandleCommonErrors and IsDuplicateBinding
+	// both see the raw error and the rewrite runs after them—so this pins a forward contract.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 	code, _ := utils.ParseErrorResponse(describeRBACError(ac, gateRoleWrite, coded))
 	assert.Equal(t, codeSuperuserLastRemoval, code)

@@ -80,9 +80,9 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 	}
 }
 
-// WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: no username
-// handling, and a workspace-scoped MFA link. A workspace-wide setting or role binding
-// names no server, so the server-scoped link's lookup would be handed an empty name.
+// WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: a workspace-wide
+// setting or role binding names no server, so the server-scoped MFA link's lookup would be
+// handed an empty name. No username handling: such a change never asks for a system user.
 func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(_ string) error {

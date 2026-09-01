@@ -55,8 +55,7 @@ catalog' to see the names this workspace defines.`,
 
 		request := rbac.BindingCreateRequest{User: subj.ID, Role: role.ID, Reason: reason}
 
-		// Disclose before the dry-run returns, not after: the companion binding and the
-		// missing justification are what someone reaches for --dry-run to see.
+		// Disclose before the dry-run returns, not after: this is what --dry-run is for.
 		if rbac.IsPlatformTier(role.Name) {
 			if role.Name == rbac.RoleSuperuser {
 				utils.CliInfo("The server also creates a companion workspace-wide admin binding for a superuser grant.")

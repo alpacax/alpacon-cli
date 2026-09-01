@@ -38,8 +38,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 			utils.CliErrorWithExit("Failed to update the user info: %s.", err)
 		}
 
-		// Report the privilege edits before anything is sent, so the guidance survives a
-		// failed patch.
+		// Report the privilege edits first, so the guidance survives a failed patch.
 		for _, privilege := range edit.Privileges {
 			utils.CliWarning("%s is a read-only projection of %s's RBAC roles and was not sent.",
 				privilege.Field, userName)
@@ -60,8 +59,7 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 
 		utils.PrintJson(userDetail)
 
-		// Non-zero exit: part of what the operator typed was not applied, and a wrapper
-		// reading 0 would carry on as though the promotion had landed.
+		// Non-zero exit: a wrapper reading 0 would carry on as though the promotion had landed.
 		if len(edit.Privileges) > 0 {
 			utils.CliErrorWithExit("The other edits were applied, but the privilege flags were not sent. Run the 'alpacon user role' command above to change them.")
 		}
@@ -70,10 +68,10 @@ one of them never exits 0, whether or not the rest of the edit was applied.`,
 	},
 }
 
-// roleCommandFor maps a privilege-flag edit to the equivalent 'alpacon user role'
-// command. The mapping is the server's: admin is what is_staff projects, superuser what
-// is_superuser projects. Clearing is_superuser revokes without --cascade—the edit asked
-// to drop superuser only, leaving the companion admin binding.
+// roleCommandFor maps a privilege-flag edit to the equivalent 'alpacon user role' command.
+// The mapping is the server's: is_superuser is superuser, every other privilege flag admin.
+// No --cascade on a revoke: the edit asked to drop superuser only, leaving the companion
+// admin binding.
 func roleCommandFor(userName string, privilege iam.PrivilegeEdit) utils.NextAction {
 	role := rbac.RoleAdmin
 	if privilege.Field == "is_superuser" {

@@ -69,7 +69,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 				subj.Label, next.PlainText())
 		}
 
-		// Same ordering as grant: what --dry-run is for is seeing these before the write.
+		// Same ordering as grant: --dry-run exists to show these before the write.
 		if rbac.IsPlatformTier(role.Name) {
 			if role.Name == rbac.RoleSuperuser && !cascade && rbac.HoldsWorkspaceRole(bindings, rbac.RoleAdmin) {
 				utils.CliInfo("The companion admin binding stays, so %s remains a workspace administrator; --cascade removes both.", subj.Label)
@@ -123,12 +123,11 @@ func init() {
 	userRoleRevokeCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }
 
-// plannedRevocations lists the bindings to delete, in delete order.
-//
-// The companion is planned only when the named binding was found: an admin-only user is
-// indistinguishable from a cascade interrupted after the first delete, so treating that
-// state as a resume would let 'revoke USER superuser --cascade' strip admin from someone
-// who was never a superuser. Resuming stays explicit via 'revoke USER admin'.
+// plannedRevocations lists the bindings to delete, in delete order. The companion is planned
+// only when the named binding was found: an admin-only user is indistinguishable from a cascade
+// interrupted after the first delete, so treating that as a resume would let 'revoke USER
+// superuser --cascade' strip admin from someone who was never a superuser. Resuming stays
+// explicit via 'revoke USER admin'.
 func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, cascade bool) []rbac.UserRoleResponse {
 	target := rbac.FindWorkspaceBindingByName(bindings, roleName)
 	if target == nil {
@@ -146,8 +145,8 @@ func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, casca
 }
 
 // The admin-while-superuser case: the server accepts the delete, then re-forces is_staff
-// because is_superuser still stands, so both platform flags survive while the account
-// stops registering as an admin.
+// because is_superuser stands, so both platform flags survive while the account stops
+// registering as an admin.
 func wouldStrandThePlatformFlags(bindings []rbac.UserRoleResponse, roleName string, targets []rbac.UserRoleResponse) bool {
 	return roleName == rbac.RoleAdmin &&
 		len(targets) > 0 &&

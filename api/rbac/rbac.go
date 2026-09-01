@@ -23,9 +23,9 @@ const (
 
 	timeLayout = "2006-01-02 15:04"
 
-	// Platform tiers. The server mirrors them onto the legacy is_staff/is_superuser
-	// flags, refuses to leave a workspace without a holder of either, and creates the
-	// admin companion itself when superuser is granted.
+	// Platform tiers: the server mirrors them onto the legacy is_staff/is_superuser flags,
+	// creates the admin companion when superuser is granted, and refuses to leave a workspace
+	// without a holder of either.
 	RoleAdmin     = "admin"
 	RoleSuperuser = "superuser"
 
@@ -44,9 +44,9 @@ func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleRespons
 	return api.FetchAllPages[RoleResponse](ac, rolesURL, params)
 }
 
-// The name filter is exact and case-sensitive, and role lists are narrowed to what
-// the caller may see rather than refused, so an invisible role yields an empty page
-// and never a 403—the not-found message has to cover both readings.
+// The name filter is exact and case-sensitive. Role lists are narrowed to what the caller
+// may see rather than refused, so an invisible role yields an empty page and never a 403—the
+// not-found message covers both readings.
 func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, error) {
 	if utils.IsUUID(nameOrID) {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
@@ -61,7 +61,7 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 		return &role, nil
 	}
 
-	// One page: the name filter is exact, so a second would be a wasted round trip.
+	// The name filter is exact, so a second round trip would be wasted.
 	roles, err := api.FetchPagesUpTo[RoleResponse](ac, rolesURL, map[string]string{"name": nameOrID}, 1)
 	if err != nil {
 		return nil, err
@@ -87,9 +87,9 @@ func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse
 	return &scopes, nil
 }
 
-// No content_type filter: the server offers no isnull or object_id lookup, so the
-// workspace-wide row is picked out here. The list is also narrowed to what the caller
-// may see and answered 200, never 403, so an empty page and "holds nothing" look alike.
+// The endpoint offers no scope filter, so the workspace-wide row is picked out here. The
+// list is also narrowed to what the caller may see and answered 200, never 403, so an empty
+// result reads exactly like "holds nothing"—no caller may take it as proof of absence.
 func GetUserBindings(ac *client.AlpaconClient, userID string) ([]UserRoleResponse, error) {
 	return api.FetchAllPages[UserRoleResponse](ac, userRolesURL, map[string]string{"user": userID})
 }
@@ -101,13 +101,13 @@ func GetRoleHolders(ac *client.AlpaconClient, roleID string) ([]UserRoleResponse
 func GetRoleHistory(ac *client.AlpaconClient, userID string, limit int) ([]RoleAuditLogResponse, error) {
 	params := map[string]string{"user": userID}
 
-	// The view pins ordering to '-added_at, -id' and exposes no ordering_fields, so the
-	// newest rows come first and any ordering param would be dropped.
+	// The newest rows come first, tie-broken by id so a paged walk cannot repeat or skip one,
+	// and any ordering parameter would be dropped.
 	return api.FetchPagesUpTo[RoleAuditLogResponse](ac, roleAuditLogsURL, params, limit)
 }
 
-// At most one workspace-wide binding per role can exist: a partial unique constraint
-// covers the rows whose scope columns are both null.
+// The server refuses a second binding of the same role with both scope fields unset, so the
+// first workspace-wide match is the only one.
 func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.ID == roleID && bindings[i].IsWorkspaceWide() {
@@ -118,8 +118,7 @@ func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleR
 	return nil
 }
 
-// A binding carries its role's name, so matching by name is what lets a revoke find
-// the admin companion without resolving a second role.
+// Matching by name lets a revoke find the admin companion without resolving a second role.
 func FindWorkspaceBindingByName(bindings []UserRoleResponse, roleName string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.Name == roleName && bindings[i].IsWorkspaceWide() {
@@ -175,9 +174,8 @@ func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
 	return result
 }
 
-// A nil usernames map means names were not resolved, so the column carries the user id,
-// the one value other commands accept; the nested display name is a fallback only when
-// resolution was attempted and missed this holder.
+// A nil usernames map means names were never resolved, so the id—the value other commands
+// accept—stands in; the display name is a fallback only when resolution ran and missed.
 func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]string) []RoleHolderAttributes {
 	var result []RoleHolderAttributes
 	for _, binding := range bindings {
@@ -238,8 +236,6 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 	return result
 }
 
-// The 201 body is discarded: no caller reads it, and the server's bulk branch answers
-// 201 with an empty body.
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 	_, err := ac.SendPostRequest(userRolesURL, request)
 
@@ -263,8 +259,8 @@ func IsDuplicateBinding(err error) bool {
 	return code == CodeRoleAssignmentDuplicate
 }
 
-// Served by the IAM user endpoint rather than /api/rbac/, so an API token reaches it
-// on workspaces where the RBAC routes refuse one.
+// The IAM user endpoint, not /api/rbac/: an API token reaches it where the RBAC routes
+// refuse one.
 func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*EffectivePermissionsResponse, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/effective-permissions", nil))
 	if err != nil {
@@ -346,9 +342,8 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 	return result
 }
 
-// localTimestamp renders a server timestamp in the operator's own zone, and renders a
-// missing one as blank: a zero time.Time formats as "0001-01-01 00:00", a date that reads
-// like an answer to "when was this granted" and is not one.
+// localTimestamp blanks a missing timestamp: a zero time.Time formats as "0001-01-01 00:00",
+// which reads like a real grant date.
 func localTimestamp(at time.Time) string {
 	if at.IsZero() {
 		return ""
@@ -356,10 +351,8 @@ func localTimestamp(at time.Time) string {
 	return at.Local().Format(timeLayout)
 }
 
-// tierLabel renders a scope tier the server names without ids. The binding rows say
-// "workspace" or "type:42/web-01" because they carry the pair; these sources carry only
-// the tier, so they say the tier in words—and "global" becomes the "workspace" every
-// command in this group prints.
+// tierLabel names a scope tier for the sources that carry no id pair and so cannot use
+// ScopeLabel: "global" prints as the "workspace" every command in this group shows.
 func tierLabel(scope string) string {
 	switch scope {
 	case "global":

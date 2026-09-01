@@ -481,10 +481,10 @@ func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	}
 }
 
-// The three time columns are the audit log's "when", and nothing else asserts them: a
-// changed timeLayout, a dropped .Local(), or a null added_at all render silently. The
-// zone is pinned rather than read, so the UTC instant below has one correct rendering
-// on every machine and a render that skipped the conversion prints 03:04 instead.
+// Nothing else in the repo asserts these rendered timestamps: a changed timeLayout, a
+// dropped .Local(), or a null added_at all render silently. The zone is pinned rather than
+// read, so the UTC instant below has one correct rendering on every machine, and a render
+// that skipped the conversion prints 03:04 instead.
 func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 	restore := time.Local
 	t.Cleanup(func() { time.Local = restore })
@@ -517,10 +517,8 @@ func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 	assert.Empty(t, audit[1].At)
 }
 
-// The audit and effective-role rows carry a scope tier with no ids, so their column says
-// the tier in words while a binding row says "workspace" or "type:42/web-01". "global" is
-// the one that has to be translated: every command in this group calls that tier the
-// workspace.
+// "global" is the server's word for the workspace-wide tier, and every command in this
+// group calls that tier the workspace.
 func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "workspace", tierLabel("global"))
 	assert.Equal(t, "content-type", tierLabel("content_type"))

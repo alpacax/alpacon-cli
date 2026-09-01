@@ -20,8 +20,7 @@ type RoleNested struct {
 	Name string `json:"name"`
 }
 
-// ContentType and ObjectID are the scope pair; only a workspace-wide binding makes
-// someone an admin or a superuser.
+// Only a workspace-wide binding makes someone an admin or a superuser.
 type UserRoleResponse struct {
 	ID          string            `json:"id"`
 	User        types.UserSummary `json:"user"`
@@ -43,9 +42,9 @@ type RoleScopeResource struct {
 	ACL     []string `json:"acl"`
 }
 
-// The only surface carrying the justification and the actor; a binding read carries
+// The only surface carrying the justification and the actor—a binding read carries
 // neither. Role, Principal and ChangedBy answer null where there is nothing left to
-// name—the row keeps value snapshots that survive deletion of what they point at.
+// name, so the row keeps value snapshots like RoleName.
 type RoleAuditLogResponse struct {
 	ID          string          `json:"id"`
 	RecordClass string          `json:"record_class"`
@@ -71,10 +70,9 @@ type AuditActor struct {
 }
 
 // User and Role are scalars on purpose: more than one value in any of the three fields
-// flips the server onto a bulk path that answers 201 with an empty body whether or not
-// it created anything, and never reports a duplicate.
-// ContentType and ObjectID are unset by every command so far, kept for later
-// object-scoped writes.
+// flips the server onto a bulk path that answers 201 with an empty body even when it
+// created nothing, and never reports a duplicate.
+// ContentType and ObjectID are unset for now, kept for later object-scoped writes.
 type BindingCreateRequest struct {
 	User        string   `json:"user"`
 	Role        string   `json:"role"`
@@ -84,7 +82,7 @@ type BindingCreateRequest struct {
 }
 
 // The justification rides the DELETE body, not a query parameter, so it stays out of
-// access logs, proxy logs and shell history.
+// access and proxy logs.
 type BindingRevokeRequest struct {
 	Reason string `json:"reason"`
 }
@@ -121,8 +119,8 @@ type RoleAuditAttributes struct {
 	At        string `json:"at"`
 }
 
-// Roles lists global and content-type-wide bindings only: an owner role is one row per
-// object, so including object-scoped ones would make this an unbounded payload.
+// Roles omits object-scoped bindings: an owner role is one row per object, so the payload
+// would be unbounded.
 type EffectivePermissionsResponse struct {
 	User        types.UserSummary  `json:"user"`
 	Summary     EffectiveSummary   `json:"summary"`
@@ -151,15 +149,13 @@ type GroupNested struct {
 	DisplayName string `json:"display_name"`
 }
 
-// ObjectScoped patterns are reachable only through a narrower binding: the user holds
-// them somewhere, but the endpoint does not say on what.
+// ObjectScoped says the user holds the pattern somewhere, never on what object.
 type PermissionPatternsResponse struct {
 	Global       []string `json:"global"`
 	ObjectScoped []string `json:"object_scoped"`
 }
 
-// What GET /api/iam/users/{id}/permissions/ returns instead when a permission query
-// parameter is sent.
+// GET /api/iam/users/{id}/permissions/ answers this when a permission query parameter is sent.
 type PermissionCheckResponse struct {
 	Allowed bool `json:"allowed"`
 }
@@ -182,7 +178,7 @@ type PermissionPatternAttributes struct {
 	Scope      string `json:"scope"`
 }
 
-// The scope columns are nullable and blankable, so an empty ObjectID counts as unscoped too.
+// An unscoped binding answers null or an empty ObjectID, so a nil check alone would miss one.
 func (b UserRoleResponse) IsWorkspaceWide() bool {
 	return b.ContentType == nil && (b.ObjectID == nil || *b.ObjectID == "")
 }

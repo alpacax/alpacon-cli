@@ -58,8 +58,7 @@ second group says the user holds the permission somewhere without saying on what
 		capabilityRows := rbac.ScopeAttributesFrom(&effective.Permissions)
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			// The table's own two projections, not the raw response, so both output modes answer
-			// the same question.
+			// The same projections the table prints, so both output modes answer the same question.
 			combined := map[string]any{
 				"user":        effective.User,
 				"summary":     effective.Summary,

@@ -30,9 +30,8 @@ const (
 // UsernameSetSuccessFmt is the confirmation format shown after a username is set.
 const UsernameSetSuccessFmt = "Username set to %q"
 
-// privilegeFlagFields are read-only projections of the account's roles: a PATCH naming
-// one is answered 200 with the flag unchanged, never an error, so the CLI has to catch
-// the edit itself.
+// These mirror the account's roles and are read-only: a PATCH naming one is answered
+// 200 with the flag unchanged, never an error, so the CLI has to catch the edit itself.
 var privilegeFlagFields = []string{"is_staff", "is_superuser"}
 
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
@@ -237,8 +236,7 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 	return response.Results[0].ID, nil
 }
 
-// GetUsernamesByID joins ids to usernames: the user object embedded in a role binding
-// carries a display name, not the username other commands accept.
+// A role binding embeds a display name, not the username other commands accept.
 func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
 	if err != nil {
@@ -320,11 +318,9 @@ func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
 	return responseBody, nil
 }
 
-// PrepareUserUpdate opens the user's detail in an editor and reports what changed. It
-// sends nothing.
-//
-// The patch is sparse so untouched fields are not re-submitted: is_ldap_user is
-// writable, and forwarding an unchanged copy makes the server run a live LDAP bind.
+// PrepareUserUpdate opens the user's detail in an editor and reports what changed; it
+// sends nothing. The patch is sparse so untouched fields are not re-submitted:
+// forwarding an unchanged is_ldap_user makes the server run a live LDAP bind.
 func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *UserEdit, error) {
 	userID, err := GetUserIDByName(ac, userName)
 	if err != nil {
@@ -353,8 +349,8 @@ func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) 
 	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
 }
 
-// diffEditedUser: a key the operator deleted counts as untouched—a PATCH names what to
-// change, and nothing spells "unset" that the server would honour.
+// A key the operator deleted counts as untouched—a PATCH names what to change, and
+// nothing spells "unset" that the server would honour.
 func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 	var before map[string]any
 	if err := json.Unmarshal(original, &before); err != nil {

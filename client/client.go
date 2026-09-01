@@ -441,10 +441,10 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
-// SendDeleteRequestWithBody sends a DELETE carrying a JSON body. Endpoints that
-// want a justification take it there rather than in a query parameter, so it stays
-// out of access logs, proxy logs and shell history. createRequest sets the content
-// type only for the methods that always carry a body, so this sets it here.
+// SendDeleteRequestWithBody sends a DELETE carrying a JSON body: an endpoint wanting a
+// justification takes it there rather than in a query parameter, so it stays out of access
+// logs, proxy logs and shell history. createRequest sets the content type only for methods
+// that always carry a body, so this sets it here.
 //
 // A DELETE entity-body is legal but unusual: an intermediary that strips one still
 // leaves a 204 and an audit row with an empty reason, undetectable from here.

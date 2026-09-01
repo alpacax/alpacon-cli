@@ -18,11 +18,12 @@ func TestWorkspaceErrorCallbacks_WiresEveryField(t *testing.T) {
 	cb := WorkspaceErrorCallbacks(ac, func() error { retried = true; return nil })
 
 	assert.NotNil(t, cb.OnMFARequired)
-	// A nil CheckMFACompleted silently drops both update commands onto the
-	// legacy retry loop in utils.HandleCommonErrors—no compile error, no failure.
+	// A nil CheckMFACompleted silently drops the caller onto the legacy retry loop in
+	// utils.HandleCommonErrors—no compile error, no failure.
 	assert.NotNil(t, cb.CheckMFACompleted)
 	assert.NotNil(t, cb.RefreshToken)
-	// A workspace-level change takes no username, unlike ErrorCallbacks.
+	// The one field left nil on purpose—a workspace-level change takes no username,
+	// unlike ErrorCallbacks.
 	assert.Nil(t, cb.OnUsernameRequired)
 
 	require.NotNil(t, cb.RetryOperation)
