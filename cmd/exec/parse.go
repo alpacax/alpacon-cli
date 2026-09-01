@@ -16,22 +16,29 @@ import (
 const PurposeMaxLength = 2000
 
 // checkPurpose validates a stated purpose against the server's rules, returning
-// an empty string when it passes. subject names the thing being validated—the
-// flag for `exec --purpose`, the argument for `exec purpose`—so one ceiling and
-// one wording serve both.
+// the value to send and an empty string when it passes. subject names the thing
+// being validated—the flag for `exec --purpose`, the argument for
+// `exec purpose`—so one ceiling and one wording serve both.
+//
+// Surrounding whitespace is trimmed, and the ceiling is counted on what is
+// actually sent, so the length checked is the length that travels. Trimming is
+// not sanitizing: stripping control characters out of a purpose would falsify a
+// statement the assessor and the audit record attribute to the requester, so
+// the text itself reaches the server as typed.
 //
 // The ceiling is counted in runes, not bytes. The server validates with DRF's
 // CharField(max_length=...), which counts characters, so len() would refuse a
 // Korean purpose at roughly 666 of them—while telling the caller the server
 // would refuse it, which at that length is untrue.
-func checkPurpose(subject, purpose string) string {
-	if strings.TrimSpace(purpose) == "" {
-		return subject + " requires a value describing what this command is for"
+func checkPurpose(subject, purpose string) (string, string) {
+	trimmed := strings.TrimSpace(purpose)
+	if trimmed == "" {
+		return "", subject + " requires a value describing what this command is for"
 	}
-	if utf8.RuneCountInString(purpose) > PurposeMaxLength {
-		return fmt.Sprintf("%s is limited to %d characters; the server refuses a longer one", subject, PurposeMaxLength)
+	if utf8.RuneCountInString(trimmed) > PurposeMaxLength {
+		return "", fmt.Sprintf("%s is limited to %d characters; the server refuses a longer one", subject, PurposeMaxLength)
 	}
-	return ""
+	return trimmed, ""
 }
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
@@ -136,7 +143,8 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
-			if msg := checkPurpose("--purpose", purpose); msg != "" {
+			var msg string
+			if purpose, msg = checkPurpose("--purpose", purpose); msg != "" {
 				return RemoteExecArgs{Err: msg}
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):

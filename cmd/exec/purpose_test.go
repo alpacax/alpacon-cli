@@ -150,3 +150,68 @@ func TestExecPurposeAnswersTheDemand(t *testing.T) {
 	assert.Contains(t, stderr, "alpacon exec logs "+purposeJobID)
 	assert.NotContains(t, stderr, "re-run")
 }
+
+// TestExecPurposeTrimsBeforeSending pins that the value checked is the value
+// sent: `--purpose '  x  '` must not be stored, judged, and written to the
+// approver's card with the padding intact.
+func TestExecPurposeTrimsBeforeSending(t *testing.T) {
+	var body atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/"+purposeJobID+"/purpose/" {
+			var payload map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			body.Store(payload)
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+	runExecPurposeOK(t, home, purposeJobID, "  clock skew  ")
+
+	sent, ok := body.Load().(map[string]any)
+	require.True(t, ok, "no purpose answer captured")
+	assert.Equal(t, "clock skew", sent["purpose"])
+}
+
+// TestExecLogsShowsTheStatedPurpose gives EventDetails.Purpose its reader. A
+// field parsed into nothing is a promise no surface keeps.
+func TestExecLogsShowsTheStatedPurpose(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+purposeJobID+"/" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      purposeJobID,
+				"status":  "success",
+				"success": true,
+				"result":  "ok",
+				// Server-supplied text written by one principal, printed to
+				// another's terminal—so the escape must not survive (#364).
+				"purpose": "chronyd drifted 40s\x1b[31m",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	writeExecCommandTestConfig(t, home, ts.URL)
+	helper := osexec.Command(os.Args[0],
+		"-test.run=^TestExecLogsHelperProcess$", "--", execLogsHelperMarker, purposeJobID)
+	helper.Env = append(os.Environ(),
+		"ALPACON_WORK_SESSION=", "HOME="+home, "GO_WANT_EXEC_LOGS_HELPER=1")
+	var outBuf, errBuf bytes.Buffer
+	helper.Stdout = &outBuf
+	helper.Stderr = &errBuf
+	require.NoError(t, helper.Run(), "stderr: %s", errBuf.String())
+
+	assert.Contains(t, errBuf.String(), "Stated purpose: chronyd drifted 40s")
+	assert.NotContains(t, errBuf.String(), "\x1b[31m")
+	// stdout stays the command's own output.
+	assert.Contains(t, outBuf.String(), "ok")
+	assert.NotContains(t, outBuf.String(), "Stated purpose")
+}

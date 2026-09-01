@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -65,7 +64,8 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 			return
 		}
 		// Same ceiling and wording as --purpose, counted the same way.
-		if msg := checkPurpose("PURPOSE", purpose); msg != "" {
+		purpose, msg := checkPurpose("PURPOSE", purpose)
+		if msg != "" {
 			utils.CliErrorWithExit("%s", msg)
 			return
 		}
@@ -80,19 +80,17 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 
 		if err = event.AnswerPurposeDemand(alpaconClient, jobID, purpose); err != nil {
 			utils.HandleWorkSessionError(err, "command", "", authMethod, "")
-			utils.CliErrorWithExit(
-				"failed to state the purpose for %s: %s. The demand may have expired, it may already have been answered, "+
-					"or this credential may not be the one that submitted the command. Read the command's state with "+
-					"`alpacon exec logs %s`—do not re-submit it, which would create a second command.",
-				jobID, err, jobID,
-			)
+			// The server answers a settled command and a bystander's answer with
+			// one code, so this cannot say which happened—which is exactly the
+			// branch a machine consumer needs a field rather than prose for.
+			utils.PrintPurposeRefused(jobID, err)
+			os.Exit(utils.ExitCodeGeneralError)
 			return
 		}
 
 		// The command re-enters judgment on the worker, so there is no verdict to
 		// report here; naming where to read it keeps the caller off a resubmit.
-		fmt.Fprintf(os.Stderr, "Purpose recorded. The command is being judged again with it in hand.\n")
-		fmt.Fprintf(os.Stderr, "  alpacon exec logs %s  # read the outcome\n", utils.SanitizeTerminalText(jobID))
+		utils.PrintPurposeAccepted(jobID)
 	},
 }
 

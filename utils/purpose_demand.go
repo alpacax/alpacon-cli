@@ -22,7 +22,8 @@ const PurposeDeadlineAssumed = 60 * time.Second
 // open demand. `exec` and `exec logs` differ only in what they add after it, so
 // keeping the shared half here stops one from being reworded without the other.
 const PurposeDemandLead = "Purpose required—the verification gate held this command and is asking what it is for. " +
-	"No approver has been notified: state the purpose and it is judged again, once, with that in hand."
+	"No approver has been notified: state the purpose and it is judged again, once, with that in hand. " +
+	"Stay silent and the command is not blocked—it takes the ordinary path when the demand expires."
 
 // purposeGuidance says what makes a purpose worth stating. It travels in the
 // response rather than living only in help text: an agent reads the answer to
@@ -130,8 +131,87 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	if remaining != nil {
 		fmt.Fprintf(os.Stderr, "  About %ds left to answer.\n", *remaining)
 	}
-	fmt.Fprintf(os.Stderr, "  %s\n", SanitizeTerminalText(purposeGuidance))
+	fmt.Fprintf(os.Stderr, "  %s\n", purposeGuidance)
 	for _, action := range purposeNextActions(commandID) {
 		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
 	}
+}
+
+// purposeAnswerJSON is the envelope `alpacon exec purpose` prints under
+// --output json. ADR 0052 is an agent-facing flow end to end: `exec` and
+// `exec logs` both emit a machine-readable result, and the command that answers
+// them has to as well, or an agent that branched on exit 7 and answered has the
+// exit code and nothing else.
+type purposeAnswerJSON struct {
+	OK          bool         `json:"ok"`
+	Status      string       `json:"status"`
+	ExitCode    int          `json:"exit_code"`
+	Message     string       `json:"message"`
+	CommandID   string       `json:"command_id"`
+	NextActions []NextAction `json:"next_actions,omitempty"`
+}
+
+// PrintPurposeAccepted reports a recorded purpose. There is no verdict yet—the
+// command re-enters judgment on the worker—so the result names where to read
+// the outcome rather than pretending to carry it.
+func PrintPurposeAccepted(commandID string) {
+	commandID = SanitizeTerminalText(commandID)
+	next := NextAction{
+		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
+		Description: "Read the outcome; the command is being judged again",
+	}
+	message := "Purpose recorded. The command is being judged again with it in hand."
+
+	if OutputFormat == OutputFormatJSON {
+		envelope := purposeAnswerJSON{
+			OK:          true,
+			Status:      "purpose_recorded",
+			Message:     message,
+			CommandID:   commandID,
+			NextActions: []NextAction{next},
+		}
+		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
+			_, _ = fmt.Fprintf(os.Stdout, `{"ok":true,"status":"purpose_recorded"}`+"\n")
+		}
+		return
+	}
+
+	fmt.Fprintf(os.Stderr, "%s\n", message)
+	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
+}
+
+// PrintPurposeRefused reports a rejected answer. The server answers a settled
+// command and an answer from the wrong principal with one code, so neither this
+// message nor the envelope can say which happened—hence the pointer at the
+// command's own state rather than a guess, and never at a resubmission.
+// It never exits; the caller owns the exit-code contract.
+func PrintPurposeRefused(commandID string, cause error) {
+	commandID = SanitizeTerminalText(commandID)
+	message := fmt.Sprintf(
+		"failed to state the purpose for %s: %s. The demand may have expired, it may already have been answered, "+
+			"or this credential may not be the one that submitted the command.",
+		commandID, cause,
+	)
+	next := NextAction{
+		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
+		Description: "Read the command's state; do not re-submit it, which would create a second command",
+	}
+
+	if OutputFormat == OutputFormatJSON {
+		envelope := purposeAnswerJSON{
+			OK:          false,
+			Status:      "purpose_refused",
+			ExitCode:    ExitCodeGeneralError,
+			Message:     message,
+			CommandID:   commandID,
+			NextActions: []NextAction{next},
+		}
+		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
+			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":"purpose_refused"}`+"\n")
+		}
+		return
+	}
+
+	CliWarning("%s", message)
+	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
 }

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,6 +30,16 @@ type purposeRequiredSignal struct {
 		CommandID       string `json:"command_id"`
 		DeadlineSeconds *int   `json:"deadline_seconds"`
 	} `json:"context"`
+	NextActions []NextAction `json:"next_actions"`
+}
+
+// purposeAnswerSignal is the envelope `exec purpose` prints.
+type purposeAnswerSignal struct {
+	OK          bool         `json:"ok"`
+	Status      string       `json:"status"`
+	ExitCode    int          `json:"exit_code"`
+	Message     string       `json:"message"`
+	CommandID   string       `json:"command_id"`
 	NextActions []NextAction `json:"next_actions"`
 }
 
@@ -132,4 +143,66 @@ func TestPrintPurposeDemand_SanitizesTheServerSuppliedID(t *testing.T) {
 
 	assert.NotContains(t, stderr, "\x1b[31m")
 	assert.NotContains(t, stderr, "\x07")
+}
+
+func TestPrintPurposeAccepted_JSONNamesWhereToReadTheOutcome(t *testing.T) {
+	// There is no verdict yet—the command re-enters judgment on the worker—so
+	// the result must point at the outcome rather than imply it carries one.
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() {
+			PrintPurposeAccepted(purposeTestCommandID)
+		})
+	})
+
+	var got purposeAnswerSignal
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.True(t, got.OK)
+	assert.Equal(t, "purpose_recorded", got.Status)
+	assert.Equal(t, purposeTestCommandID, got.CommandID)
+	require.Len(t, got.NextActions, 1)
+	assert.Contains(t, got.NextActions[0].Command, "alpacon exec logs "+purposeTestCommandID)
+}
+
+func TestPrintPurposeRefused_JSONDoesNotSendTheCallerToResubmit(t *testing.T) {
+	// A settled command and a bystander's answer share one server code, so the
+	// envelope cannot say which happened—and must not turn that uncertainty
+	// into a resubmission, which would create a second command.
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() {
+			PrintPurposeRefused(purposeTestCommandID, errors.New("400 Bad Request"))
+		})
+	})
+
+	var got purposeAnswerSignal
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.False(t, got.OK)
+	assert.Equal(t, "purpose_refused", got.Status)
+	assert.Equal(t, ExitCodeGeneralError, got.ExitCode)
+	assert.Equal(t, purposeTestCommandID, got.CommandID)
+	require.Len(t, got.NextActions, 1)
+	assert.Contains(t, got.NextActions[0].Command, "alpacon exec logs")
+	assert.Contains(t, got.NextActions[0].Description, "do not re-submit")
+}
+
+func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
+	var stdout, stderr string
+	withFormat(OutputFormatTable, func() {
+		stdout, stderr = testutil.CaptureOutput(t, func() {
+			PrintPurposeAccepted(purposeTestCommandID)
+		})
+	})
+
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Purpose recorded")
+}
+
+func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
+	// Both surfaces read the expiry behaviour off this one string, so they
+	// cannot describe it differently. A caller who arrives through `exec logs`
+	// found the demand late by definition, and needs to know the command is not
+	// blocked by the window closing.
+	assert.Contains(t, PurposeDemandLead, "not blocked")
+	assert.Contains(t, PurposeDemandLead, "ordinary path")
 }

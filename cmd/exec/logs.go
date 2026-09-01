@@ -80,6 +80,15 @@ Run the command again later to check for completion.`,
 			details.Result = output
 		}
 
+		// What the requester said the command was for, ahead of the outcome and
+		// on stderr so stdout stays the command's own output. Sanitized here
+		// and not at the API boundary: this is text one principal wrote that
+		// now reaches another principal's terminal (#364).
+		if details.Purpose != "" {
+			fmt.Fprintf(os.Stderr, "Stated purpose: %s\n",
+				utils.SanitizeTerminalText(details.Purpose))
+		}
+
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
