@@ -60,7 +60,8 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 		return &role, nil
 	}
 
-	roles, err := api.FetchAllPages[RoleResponse](ac, rolesURL, map[string]string{"name": nameOrID})
+	// One page: the name filter is exact, so a second would be a wasted round trip.
+	roles, err := api.FetchPagesUpTo[RoleResponse](ac, rolesURL, map[string]string{"name": nameOrID}, 1)
 	if err != nil {
 		return nil, err
 	}
