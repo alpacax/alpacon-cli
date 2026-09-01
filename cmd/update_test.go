@@ -185,7 +185,7 @@ func TestUpdateCommandRefusesADevBuild(t *testing.T) {
 	assert.NotContains(t, stderr, "Successfully updated")
 }
 
-func TestUpdateCommandCheckExitsSevenWhenANewerReleaseExists(t *testing.T) {
+func TestUpdateCommandCheckExitsEightWhenANewerReleaseExists(t *testing.T) {
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update", "--check"},
 		"ALPACON_TEST_CURRENT_VERSION=1.0.0",
 		"ALPACON_TEST_LATEST_RELEASE=9.9.9",

@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultReleaseAPIURL is a var so a test can point a real alpacon process at a
-// stub. Exit code 7 is only observable in a process that actually exits, and a
+// stub. Exit code 8 is only observable in a process that actually exits, and a
 // child process cannot be handed a different endpoint any other way.
 var DefaultReleaseAPIURL = "https://api.github.com/repos/alpacax/alpacon-cli/releases/latest"
 

@@ -12,9 +12,10 @@ import (
 // refuses to overwrite or delete a running executable but allows renaming it.
 // The copy runs first, so a Ctrl-C during it leaves the install path untouched.
 // The gap is between the two renames—the restore covers a second rename that
-// reports failure, but a process killed there leaves the install path empty with
-// only the preserved copy beside it. That copy is swept on the next update,
-// since it can stay locked for as long as this process lives.
+// reports failure, but a process killed there leaves only
+// alpacon.exe.old.<timestamp>. Nothing recovers that: the binary that would run
+// the next update is the missing one, so README tells the operator to rename it
+// back by hand.
 func ReplaceBinary(targetPath, newBinaryPath string) error {
 	now := time.Now()
 	stagedPath := StagedName(targetPath, now)
