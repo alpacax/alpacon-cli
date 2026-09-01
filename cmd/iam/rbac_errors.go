@@ -74,8 +74,10 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		return rewrite(err, "that role is already bound to the user at this scope")
 	case codeBulkLimitExceeded:
 		return rewrite(err, "the server refused the request as a bulk operation; this is a bug in the CLI, which binds one role to one user per request")
+	// invalid_input is generic and reaches every call site, so it cannot name the
+	// binding scope the way a write-only code could.
 	case codeInvalidInput:
-		return rewrite(err, "the server rejected the binding scope")
+		return rewrite(err, "the server rejected one of the request's values")
 	case codeWorkspaceSuspended:
 		return rewrite(err, "this workspace is suspended, so it accepts no changes")
 	case codePermissionDenied:
@@ -88,10 +90,11 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 			return rewrite(err, "reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
 		case gate == gatePermissionIntrospect:
 			return rewrite(err, "this endpoint pins no permission of its own, so a cross-account read of it is satisfied only by a wildcard grant—in practice the superuser role. Your own permissions are always readable; run the command without a USER argument")
+		// The auditor limit is applied as silent queryset narrowing—a short list, not a
+		// refusal—so the missing scope is the only thing that can 403 here. A bearer
+		// cannot be refused by the scope gate at all and falls through to the default.
 		case gate == gateAuditRead && !ac.IsBearerAuth():
-			return rewrite(err, "the role history is limited to an auditor of the whole workspace; everyone else sees only the changes naming them. An API token additionally needs the role_audit_log:read scope")
-		case gate == gateAuditRead:
-			return rewrite(err, "reading another account's role history requires an auditor of the whole workspace; everyone else sees only the changes naming them")
+			return rewrite(err, "this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session")
 		case gate == gateRoleWrite && !ac.IsBearerAuth():
 			return rewrite(err, "a role-binding write requires the superuser role, and this credential may be refused outright: the RBAC API accepts no API token on an Alpacon Cloud workspace. Run 'alpacon login' to authenticate through the browser")
 		case gate == gateRoleWrite:

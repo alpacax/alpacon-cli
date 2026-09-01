@@ -254,17 +254,12 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
 		},
 		{
-			// A token that already holds the scope must not be told it lacks it.
-			name: "the audit log leads with the reach limit, then the scope",
+			// The auditor limit narrows silently and never 403s, so the scope is the only
+			// cause this arm can name.
+			name: "the audit log names the missing scope, not the auditor limit",
 			ac:   apiToken, gate: gateAuditRead,
-			wantSaid:    []string{"auditor", "role_audit_log:read"},
-			wantNotSaid: []string{"superuser role", "refuses API tokens"},
-		},
-		{
-			name: "the audit log with a bearer names the audit reach",
-			ac:   bearer, gate: gateAuditRead,
-			wantSaid:    []string{"auditor"},
-			wantNotSaid: []string{"superuser role", "role_audit_log:read"},
+			wantSaid:    []string{"role_audit_log:read"},
+			wantNotSaid: []string{"superuser role", "auditor"},
 		},
 		{
 			name: "a role read with a bearer says visibility, not privilege",
