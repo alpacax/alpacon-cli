@@ -49,7 +49,7 @@ Run the command again later to check for completion.`,
 		// the verdict, so --detach cannot see it at submission time.
 		if event.IsAwaitingPurposeStatus(details.Status) {
 			utils.PrintPurposeDemand(
-				utils.PurposeDemandLead, details.ID, details.PurposeRequestedAt,
+				utils.PurposeDemandLead, details.ID, details.PurposeExpiresAt,
 			)
 			os.Exit(utils.ExitCodePurposeRequired)
 		}

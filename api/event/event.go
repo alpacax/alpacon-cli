@@ -646,7 +646,7 @@ func errorFromDetails(d EventDetails) error {
 	// A switch case cannot call a predicate, so the two approval statuses are
 	// matched ahead of it—a server-side rename then lands in types.go alone.
 	if IsAwaitingPurposeStatus(d.Status) {
-		return &AwaitingPurposeError{CommandID: d.ID, RequestedAt: d.PurposeRequestedAt}
+		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
 		return &PendingApprovalError{CommandID: d.ID}

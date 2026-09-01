@@ -53,12 +53,12 @@ type CommandRejectedError struct {
 // command that gets its own demand and may run twice.
 type AwaitingPurposeError struct {
 	CommandID string
-	// When the server issued the demand. Nil when the field is absent—an older
-	// server, or a command that was never asked. The reporter states the
-	// remaining window only when this is present: COMMAND_PURPOSE_DEADLINE is
-	// env-overridable, so a hard-coded 60 would be a deadline that does not
-	// exist on a workspace which raised it.
-	RequestedAt *time.Time
+	// When the demand stops being answerable, as the server computed it. Nil
+	// when absent—an older server, or a command that was never asked. The
+	// reporter states the remaining window only when this is present:
+	// COMMAND_PURPOSE_DEADLINE is env-overridable and no endpoint publishes it,
+	// so a client deriving this itself would be guessing the window's length.
+	ExpiresAt *time.Time
 }
 
 type EventAttributes struct {
@@ -86,12 +86,15 @@ type EventDetails struct {
 	AddedAt       time.Time           `json:"added_at"`
 	Server        types.ServerSummary `json:"server"`
 	RequestedBy   types.UserSummary   `json:"requested_by"`
-	// What the requester said this command is for, and when the gate asked
-	// (ADR 0052). Both are absent on a server predating the read exposure, and
-	// on any command nobody was asked—which is every command until the gate is
-	// enabled, so nil and empty are the ordinary shapes here.
+	// What the requester said this command is for, when the gate asked, and
+	// when the ask expires (ADR 0052). All three are absent on a server
+	// predating the read exposure, and on any command nobody was asked—which is
+	// every command until the gate is enabled, so nil and empty are the
+	// ordinary shapes here. The expiry is server-derived: the window's length
+	// is a setting no endpoint publishes.
 	Purpose            string     `json:"purpose"`
 	PurposeRequestedAt *time.Time `json:"purpose_requested_at"`
+	PurposeExpiresAt   *time.Time `json:"purpose_expires_at"`
 }
 
 type CommandRequest struct {

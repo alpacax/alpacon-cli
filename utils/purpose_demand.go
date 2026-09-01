@@ -63,14 +63,16 @@ type purposeRequiredJSON struct {
 }
 
 // remainingPurposeWindow reports the seconds left before the demand expires, or
-// nil when requestedAt is absent. A window already elapsed reports 0 rather than
-// a negative: the answer is late either way, and a negative number invites a
-// consumer to do arithmetic with it.
-func remainingPurposeWindow(requestedAt *time.Time) *int {
-	if requestedAt == nil {
+// nil when the server sent no expiry. The expiry is server-derived because the
+// window's length is COMMAND_PURPOSE_DEADLINE and no endpoint publishes it, so
+// there is no length for this client to assume and nothing here can be wrong
+// about one. A window already elapsed reports 0 rather than a negative: the
+// answer is late either way, and a negative invites arithmetic on it.
+func remainingPurposeWindow(expiresAt *time.Time) *int {
+	if expiresAt == nil {
 		return nil
 	}
-	left := int(math.Max(0, time.Until(requestedAt.Add(PurposeDeadlineAssumed)).Seconds()))
+	left := int(math.Max(0, time.Until(*expiresAt).Seconds()))
 	return &left
 }
 
@@ -93,15 +95,15 @@ func purposeNextActions(commandID string) []NextAction {
 // PrintPurposeDemand emits the structured "state the purpose" feedback for a
 // command the gate parked. Under --output json it writes a
 // {"status":"purpose_required", ...} envelope to stdout; otherwise it writes an
-// actionable message to stderr. requestedAt may be nil, in which case no
-// deadline is reported rather than one being invented.
+// actionable message to stderr. expiresAt may be nil, in which case no deadline
+// is reported rather than one being invented.
 // It never exits—the caller owns process exit so the exit-code contract stays in
 // one place.
-func PrintPurposeDemand(message, commandID string, requestedAt *time.Time) {
+func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 	// Sanitized once, here: the id is server-supplied and every line below
 	// interpolates it into text written straight to the terminal (#364).
 	commandID = SanitizeTerminalText(commandID)
-	remaining := remainingPurposeWindow(requestedAt)
+	remaining := remainingPurposeWindow(expiresAt)
 
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeRequiredJSON{

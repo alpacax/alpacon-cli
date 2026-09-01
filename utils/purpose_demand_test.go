@@ -32,12 +32,12 @@ type purposeRequiredSignal struct {
 	NextActions []NextAction `json:"next_actions"`
 }
 
-func capturePurposeJSON(t *testing.T, requestedAt *time.Time) purposeRequiredSignal {
+func capturePurposeJSON(t *testing.T, expiresAt *time.Time) purposeRequiredSignal {
 	t.Helper()
 	var out string
 	withFormat(OutputFormatJSON, func() {
 		out = testutil.CaptureStdout(t, func() {
-			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, requestedAt)
+			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, expiresAt)
 		})
 	})
 	var got purposeRequiredSignal
@@ -46,8 +46,8 @@ func capturePurposeJSON(t *testing.T, requestedAt *time.Time) purposeRequiredSig
 }
 
 func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
-	now := time.Now()
-	got := capturePurposeJSON(t, &now)
+	expires := time.Now().Add(45 * time.Second)
+	got := capturePurposeJSON(t, &expires)
 
 	assert.False(t, got.OK)
 	assert.Equal(t, PurposeRequiredStatus, got.Status)
@@ -73,11 +73,12 @@ func TestPrintPurposeDemand_EnvelopeCarriesTheWholeContract(t *testing.T) {
 	assert.Contains(t, got.NextActions[1].Description, "do not re-submit")
 }
 
-func TestPrintPurposeDemand_DeadlineCountsFromTheServersTimestamp(t *testing.T) {
-	// Half the window already gone. Reporting a flat 60 here is the error the
-	// timestamp exists to remove.
-	elapsed := time.Now().Add(-30 * time.Second)
-	got := capturePurposeJSON(t, &elapsed)
+func TestPrintPurposeDemand_DeadlineMeasuresAgainstTheServersExpiry(t *testing.T) {
+	// The server derives the expiry because the window's length is a setting no
+	// endpoint publishes—so this client has no length to assume and cannot be
+	// wrong about one.
+	expires := time.Now().Add(30 * time.Second)
+	got := capturePurposeJSON(t, &expires)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
 	assert.InDelta(t, 30, *got.Context.DeadlineSeconds, 2)
@@ -86,17 +87,16 @@ func TestPrintPurposeDemand_DeadlineCountsFromTheServersTimestamp(t *testing.T) 
 func TestPrintPurposeDemand_AnExpiredWindowReportsZeroNotNegative(t *testing.T) {
 	// The answer is late either way, and a negative number invites a consumer
 	// to do arithmetic with it.
-	long := time.Now().Add(-10 * time.Minute)
-	got := capturePurposeJSON(t, &long)
+	past := time.Now().Add(-10 * time.Minute)
+	got := capturePurposeJSON(t, &past)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
 	assert.Equal(t, 0, *got.Context.DeadlineSeconds)
 }
 
-func TestPrintPurposeDemand_NoTimestampReportsNoDeadline(t *testing.T) {
-	// An older server sends no timestamp. COMMAND_PURPOSE_DEADLINE is
-	// env-overridable, so inventing 60 here would publish a deadline that does
-	// not exist on a workspace which raised it.
+func TestPrintPurposeDemand_NoExpiryReportsNoDeadline(t *testing.T) {
+	// An older server sends no expiry. Inventing one would publish a deadline
+	// that does not exist on a workspace which raised COMMAND_PURPOSE_DEADLINE.
 	got := capturePurposeJSON(t, nil)
 
 	assert.Nil(t, got.Context.DeadlineSeconds)
@@ -104,11 +104,11 @@ func TestPrintPurposeDemand_NoTimestampReportsNoDeadline(t *testing.T) {
 
 func TestPrintPurposeDemand_TableModeIsActionableOnStderr(t *testing.T) {
 	// The default path—no --output json—had no coverage at all.
-	now := time.Now()
+	expires := time.Now().Add(45 * time.Second)
 	var stdout, stderr string
 	withFormat(OutputFormatTable, func() {
 		stdout, stderr = testutil.CaptureOutput(t, func() {
-			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, &now)
+			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, &expires)
 		})
 	})
 

@@ -611,7 +611,7 @@ func HandlePurposeDemand(err error) bool {
 	utils.PrintPurposeDemand(
 		utils.PurposeDemandLead+" Stay silent and it takes the ordinary path when the demand expires.",
 		purposeErr.CommandID,
-		purposeErr.RequestedAt,
+		purposeErr.ExpiresAt,
 	)
 	os.Exit(utils.ExitCodePurposeRequired)
 	return true

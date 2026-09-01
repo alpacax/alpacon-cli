@@ -51,9 +51,9 @@ func newAwaitingPurposeServer(submitted *atomic.Value) *httptest.Server {
 			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":                   "cmd-1",
-				"status":               "awaiting_purpose",
-				"purpose_requested_at": time.Now().UTC().Format(time.RFC3339),
+				"id":                 "cmd-1",
+				"status":             "awaiting_purpose",
+				"purpose_expires_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
 			})
 		default:
 			http.NotFound(w, r)
@@ -135,9 +135,9 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+purposeJobID+"/" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":                   purposeJobID,
-				"status":               "awaiting_purpose",
-				"purpose_requested_at": time.Now().UTC().Format(time.RFC3339),
+				"id":                 purposeJobID,
+				"status":             "awaiting_purpose",
+				"purpose_expires_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
 			})
 			return
 		}
