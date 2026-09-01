@@ -81,7 +81,7 @@ func roleCommandFor(userName string, privilege iam.PrivilegeEdit) utils.NextActi
 	}
 
 	verb := "revoke"
-	if privilege.Want {
+	if privilege.Enable {
 		verb = "grant"
 	}
 

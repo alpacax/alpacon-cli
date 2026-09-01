@@ -377,7 +377,7 @@ func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 		if !isBool {
 			return nil, fmt.Errorf("%s must be true or false", field)
 		}
-		edit.Privileges = append(edit.Privileges, PrivilegeEdit{Field: field, Want: want})
+		edit.Privileges = append(edit.Privileges, PrivilegeEdit{Field: field, Enable: want})
 	}
 
 	for field, value := range after {

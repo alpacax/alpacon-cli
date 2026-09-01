@@ -149,12 +149,14 @@ type SetUsernameResponse struct {
 	Username string `json:"username"`
 }
 
+// Not a wire type: nothing marshals it, so it carries no JSON tags. cmd/iam passes
+// Changes to PatchUser, which marshals the map alone.
 type UserEdit struct {
-	Changes    map[string]any  `json:"changes"`
-	Privileges []PrivilegeEdit `json:"privileges"`
+	Changes    map[string]any
+	Privileges []PrivilegeEdit
 }
 
 type PrivilegeEdit struct {
-	Field string `json:"field"`
-	Want  bool   `json:"want"`
+	Field  string
+	Enable bool
 }

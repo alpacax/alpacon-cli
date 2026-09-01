@@ -105,10 +105,10 @@ func TestRoleCommandFor(t *testing.T) {
 		privilege iam.PrivilegeEdit
 		want      string
 	}{
-		{"setting is_staff grants admin", iam.PrivilegeEdit{Field: "is_staff", Want: true}, "alpacon user role grant john admin"},
-		{"clearing is_staff revokes admin", iam.PrivilegeEdit{Field: "is_staff", Want: false}, "alpacon user role revoke john admin"},
-		{"setting is_superuser grants superuser", iam.PrivilegeEdit{Field: "is_superuser", Want: true}, "alpacon user role grant john superuser"},
-		{"clearing is_superuser revokes superuser", iam.PrivilegeEdit{Field: "is_superuser", Want: false}, "alpacon user role revoke john superuser"},
+		{"setting is_staff grants admin", iam.PrivilegeEdit{Field: "is_staff", Enable: true}, "alpacon user role grant john admin"},
+		{"clearing is_staff revokes admin", iam.PrivilegeEdit{Field: "is_staff", Enable: false}, "alpacon user role revoke john admin"},
+		{"setting is_superuser grants superuser", iam.PrivilegeEdit{Field: "is_superuser", Enable: true}, "alpacon user role grant john superuser"},
+		{"clearing is_superuser revokes superuser", iam.PrivilegeEdit{Field: "is_superuser", Enable: false}, "alpacon user role revoke john superuser"},
 	}
 
 	for _, tt := range tests {
