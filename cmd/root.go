@@ -85,6 +85,9 @@ func init() {
 	// version
 	RootCmd.AddCommand(versionCmd)
 
+	// update
+	RootCmd.AddCommand(updateCmd)
+
 	// login
 	RootCmd.AddCommand(loginCmd)
 
