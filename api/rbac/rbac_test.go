@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -478,4 +479,51 @@ func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 			assert.Equal(t, tt.wantQry, gotQry)
 		})
 	}
+}
+
+// The three time columns are the audit log's "when", and nothing else asserts them: a
+// changed timeLayout, a dropped .Local(), or a null added_at all render silently. The
+// zone is pinned rather than read, so the UTC instant below has one correct rendering
+// on every machine and a render that skipped the conversion prints 03:04 instead.
+func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
+	restore := time.Local
+	t.Cleanup(func() { time.Local = restore })
+	time.Local = time.FixedZone("KST", 9*60*60)
+
+	granted := time.Date(2026, 3, 4, 3, 4, 5, 0, time.UTC)
+	const rendered = "2026-03-04 12:04"
+
+	bindings := []UserRoleResponse{
+		{User: types.UserSummary{ID: userID}, Role: RoleNested{Name: "admin"}, AddedAt: granted},
+		{User: types.UserSummary{ID: userID}, Role: RoleNested{Name: "operator"}},
+	}
+
+	roles := BindingAttributesFrom(bindings)
+	require.Len(t, roles, 2)
+	assert.Equal(t, rendered, roles[0].GrantedAt)
+	assert.Empty(t, roles[1].GrantedAt, "a missing added_at must not render as year 1")
+
+	holders := HolderAttributesFrom(bindings, nil)
+	require.Len(t, holders, 2)
+	assert.Equal(t, rendered, holders[0].GrantedAt)
+	assert.Empty(t, holders[1].GrantedAt)
+
+	audit := AuditAttributesFrom([]RoleAuditLogResponse{
+		{Action: "granted", RoleName: "admin", AddedAt: granted},
+		{Action: "revoked", RoleName: "admin"},
+	})
+	require.Len(t, audit, 2)
+	assert.Equal(t, rendered, audit[0].At)
+	assert.Empty(t, audit[1].At)
+}
+
+// The audit and effective-role rows carry a scope tier with no ids, so their column says
+// the tier in words while a binding row says "workspace" or "type:42/web-01". "global" is
+// the one that has to be translated: every command in this group calls that tier the
+// workspace.
+func TestTierLabel(t *testing.T) {
+	assert.Equal(t, "workspace", tierLabel("global"))
+	assert.Equal(t, "content-type", tierLabel("content_type"))
+	assert.Equal(t, "object", tierLabel("object"))
+	assert.Equal(t, "", tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
 }

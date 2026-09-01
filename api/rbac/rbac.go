@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -167,7 +168,7 @@ func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
 		result = append(result, UserRoleAttributes{
 			Role:      binding.Role.Name,
 			Scope:     binding.ScopeLabel(),
-			GrantedAt: binding.AddedAt.Local().Format(timeLayout),
+			GrantedAt: localTimestamp(binding.AddedAt),
 		})
 	}
 
@@ -192,7 +193,7 @@ func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]stri
 		result = append(result, RoleHolderAttributes{
 			User:      user,
 			Scope:     binding.ScopeLabel(),
-			GrantedAt: binding.AddedAt.Local().Format(timeLayout),
+			GrantedAt: localTimestamp(binding.AddedAt),
 		})
 	}
 
@@ -227,10 +228,10 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 		result = append(result, RoleAuditAttributes{
 			Action:    entry.Action,
 			Role:      entry.RoleName,
-			Scope:     auditScopeLabel(entry.Scope),
+			Scope:     tierLabel(entry.Scope),
 			ChangedBy: changedBy,
 			Reason:    entry.Reason,
-			At:        entry.AddedAt.Local().Format(timeLayout),
+			At:        localTimestamp(entry.AddedAt),
 		})
 	}
 
@@ -326,7 +327,7 @@ func EffectiveRoleAttributesFrom(roles []EffectiveRole) []EffectiveRoleAttribute
 			Role:   role.Role.Name,
 			Source: role.Source,
 			Group:  group,
-			Scope:  role.Scope,
+			Scope:  tierLabel(role.Scope),
 		})
 	}
 
@@ -345,12 +346,27 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 	return result
 }
 
-// auditScopeLabel renames the audit log's "global" to the "workspace" every other
-// command in this group prints, so one SCOPE column does not mean two vocabularies.
-func auditScopeLabel(scope string) string {
-	if scope == "global" {
-		return "workspace"
+// localTimestamp renders a server timestamp in the operator's own zone, and renders a
+// missing one as blank: a zero time.Time formats as "0001-01-01 00:00", a date that reads
+// like an answer to "when was this granted" and is not one.
+func localTimestamp(at time.Time) string {
+	if at.IsZero() {
+		return ""
 	}
+	return at.Local().Format(timeLayout)
+}
 
-	return scope
+// tierLabel renders a scope tier the server names without ids. The binding rows say
+// "workspace" or "type:42/web-01" because they carry the pair; these sources carry only
+// the tier, so they say the tier in words—and "global" becomes the "workspace" every
+// command in this group prints.
+func tierLabel(scope string) string {
+	switch scope {
+	case "global":
+		return "workspace"
+	case "content_type":
+		return "content-type"
+	default:
+		return scope
+	}
 }
