@@ -1,8 +1,10 @@
 package selfupdate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +20,7 @@ func updateFixture(t *testing.T, runner CommandRunner) (Options, string) {
 	t.Helper()
 
 	dir := t.TempDir()
-	_, release := releaseServer(t, dir, false)
+	release := releaseServer(t, dir, false)
 
 	installDir := t.TempDir()
 	executable := filepath.Join(installDir, "alpacon")
@@ -117,7 +119,7 @@ func TestRunRefusesWhileAnotherUpdateHoldsTheLock(t *testing.T) {
 	opts, _ := updateFixture(t, noOwnerRunner)
 	held, err := AcquireLock(LockPath(opts.ExecutablePath))
 	require.NoError(t, err)
-	defer func() { _ = held.Release() }()
+	t.Cleanup(func() { _ = held.Release() })
 
 	_, err = Run(opts)
 
@@ -192,4 +194,63 @@ func TestRunRefusesABuildThatMatchesNoRelease(t *testing.T) {
 	content, readErr := os.ReadFile(executable)
 	require.NoError(t, readErr)
 	assert.Equal(t, "old binary", string(content))
+}
+
+// The run that clears a Windows leftover is usually one with nothing to install.
+func TestRunSweepsEvenWhenThereIsNothingToInstall(t *testing.T) {
+	opts, executable := updateFixture(t, noOwnerRunner)
+	opts.CurrentVersion = "1.4.0"
+	installDir := filepath.Dir(executable)
+	leftover := filepath.Join(installDir, "alpacon.old.1735689600000000000")
+	require.NoError(t, os.WriteFile(leftover, []byte("x"), 0600))
+
+	result, err := Run(opts)
+
+	require.NoError(t, err)
+	assert.Equal(t, Result{AlreadyCurrent: true}, result)
+	_, statErr := os.Stat(leftover)
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+// Not knowing is not permission: overwriting an rpm-owned binary leaves the
+// database pointing at the version it replaced.
+func TestRunLeavesTheBinaryAloneWhenItCannotTellWhoOwnsIt(t *testing.T) {
+	stalled := func(name string, args ...string) ([]byte, error) {
+		return nil, fmt.Errorf("%w: %s: %w", ErrOwnerUnknown, name, context.DeadlineExceeded)
+	}
+	opts, executable := updateFixture(t, stalled)
+
+	_, err := Run(opts)
+
+	require.ErrorIs(t, err, ErrOwnerUnknown)
+	content, readErr := os.ReadFile(executable)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old binary", string(content))
+}
+
+// The lock file outlives the run, and an install another tool owns never has
+// anything to sweep—so a run that finds nothing must leave the directory alone.
+func TestRunWritesNoLockFileWhenThereIsNothingToSweep(t *testing.T) {
+	opts, executable := updateFixture(t, noOwnerRunner)
+	opts.CurrentVersion = "1.4.0"
+
+	_, err := Run(opts)
+
+	require.NoError(t, err)
+	_, statErr := os.Stat(LockPath(executable))
+	assert.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+// Options.Runner has a zero value, and a caller who leaves it there must not
+// get "nobody owns it" for free—the real query answers instead.
+func TestRunAsksTheRealQueryWhenTheCallerSuppliedNone(t *testing.T) {
+	opts, executable := updateFixture(t, nil)
+
+	result, err := Run(opts)
+
+	require.NoError(t, err, "a nil runner must not surface as ErrOwnerUnknown")
+	assert.Equal(t, InstallManual, result.Kind, "no package owns a binary in a temp directory")
+	content, readErr := os.ReadFile(executable)
+	require.NoError(t, readErr)
+	assert.Equal(t, "new binary", string(content))
 }

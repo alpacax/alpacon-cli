@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"runtime"
 	"testing"
 
@@ -208,26 +206,9 @@ func TestUpdateCommandCheckExitsZeroWhenAlreadyCurrent(t *testing.T) {
 func runUpdateCommandHelper(t *testing.T, args []string, env ...string) (stderr string, exitCode int) {
 	t.Helper()
 
-	helperArgs := append(
-		[]string{"-test.run=^TestUpdateCommandHelperProcess$", "--", "update-helper"},
-		args...,
-	)
-	helper := osexec.Command(os.Args[0], helperArgs...)
-	helper.Env = append(os.Environ(), "GO_WANT_UPDATE_HELPER=1", homeEnvVar()+"="+t.TempDir())
-	helper.Env = append(helper.Env, env...)
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	helper.Stdout = &stdoutBuf
-	helper.Stderr = &stderrBuf
-
-	err := helper.Run()
-	exitCode = 0
-	if err != nil {
-		var exitErr *osexec.ExitError
-		require.ErrorAs(t, err, &exitErr)
-		exitCode = exitErr.ExitCode()
-	}
-	return stderrBuf.String(), exitCode
+	helperEnv := append([]string{"GO_WANT_UPDATE_HELPER=1", homeEnvVar() + "=" + t.TempDir()}, env...)
+	_, stderr, exitCode = runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args, helperEnv...)
+	return stderr, exitCode
 }
 
 func TestUpdateCommandHelperProcess(t *testing.T) {
@@ -252,4 +233,12 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestUpdateFailureMessageSaysWhyTheBinaryWasLeftAlone(t *testing.T) {
+	message := updateFailureMessage(fmt.Errorf("%w: rpm: context deadline exceeded", selfupdate.ErrOwnerUnknown))
+
+	assert.Contains(t, message, "left alone")
+	assert.Contains(t, message, "package manager")
+	assert.NotContains(t, message, "sudo alpacon update", "a stalled rpm query is not a permission problem")
 }

@@ -25,10 +25,10 @@ func allowAssetsFrom(t *testing.T, rawURL string) {
 	require.NoError(t, err)
 	original := allowedAssetOrigins
 	t.Cleanup(func() { allowedAssetOrigins = original })
-	allowedAssetOrigins = []string{parsed.Scheme + "://" + parsed.Host}
+	allowedAssetOrigins = []string{assetOrigin(parsed)}
 }
 
-func releaseServer(t *testing.T, dir string, corrupt bool) (*httptest.Server, *Release) {
+func releaseServer(t *testing.T, dir string, corrupt bool) *Release {
 	t.Helper()
 
 	archivePath := filepath.Join(dir, "source.tar.gz")
@@ -50,7 +50,7 @@ func releaseServer(t *testing.T, dir string, corrupt bool) (*httptest.Server, *R
 	t.Cleanup(ts.Close)
 	allowAssetsFrom(t, ts.URL)
 
-	return ts, &Release{
+	return &Release{
 		Version: "1.4.0",
 		Assets: []Asset{
 			{Name: ArchiveName("1.4.0", "linux", "amd64"), DownloadURL: ts.URL + "/archive"},
@@ -61,7 +61,7 @@ func releaseServer(t *testing.T, dir string, corrupt bool) (*httptest.Server, *R
 
 func TestFetchVerifiedBinaryExtractsAVerifiedArchive(t *testing.T) {
 	dir := t.TempDir()
-	_, release := releaseServer(t, dir, false)
+	release := releaseServer(t, dir, false)
 
 	path, err := FetchVerifiedBinary(release, "linux", "amd64", "alpacon", dir)
 
@@ -73,7 +73,7 @@ func TestFetchVerifiedBinaryExtractsAVerifiedArchive(t *testing.T) {
 
 func TestFetchVerifiedBinaryRefusesAMismatchedChecksum(t *testing.T) {
 	dir := t.TempDir()
-	_, release := releaseServer(t, dir, true)
+	release := releaseServer(t, dir, true)
 
 	_, err := FetchVerifiedBinary(release, "linux", "amd64", "alpacon", dir)
 
@@ -84,7 +84,7 @@ func TestFetchVerifiedBinaryRefusesAMismatchedChecksum(t *testing.T) {
 
 func TestFetchVerifiedBinaryFailsWhenThePlatformHasNoAsset(t *testing.T) {
 	dir := t.TempDir()
-	_, release := releaseServer(t, dir, false)
+	release := releaseServer(t, dir, false)
 
 	_, err := FetchVerifiedBinary(release, "windows", "arm64", "alpacon.exe", dir)
 
@@ -179,4 +179,17 @@ func TestCheckAssetOriginAcceptsThePinnedGitHubOrigins(t *testing.T) {
 	for _, origin := range allowedAssetOrigins {
 		assert.NoError(t, checkAssetOrigin(origin+"/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"), "%s is where releases actually come from", origin)
 	}
+}
+
+// url.Parse hands back the host as written, so a pin comparing it raw would
+// refuse a release that is fine.
+func TestCheckAssetOriginAcceptsAPinnedOriginSpelledDifferently(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://GitHub.com/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
+		"https://github.com:443/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
+		"HTTPS://github.com/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
+	} {
+		assert.NoError(t, checkAssetOrigin(rawURL), rawURL)
+	}
+	assert.Error(t, checkAssetOrigin("https://github.com:8443/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"), "a non-default port is a different endpoint, not a spelling")
 }

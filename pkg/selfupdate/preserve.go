@@ -11,6 +11,14 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
+// staleTempAge is how long a utils.SaveStreamAtomic temp file must have sat
+// before the sweep will take it. The update lock is no help: 'alpacon cp' and
+// 'alpacon package download' write the same name shape into whatever directory
+// they were pointed at, and take no lock. Age is what separates a killed run's
+// litter from a download still streaming—a leftover is permanent, so collecting
+// it a day late costs nothing.
+const staleTempAge = 24 * time.Hour
+
 const (
 	preservedSuffix = "old"
 	stagedSuffix    = "staged"
@@ -61,25 +69,47 @@ func copyPreserved(preservedPath, targetPath string) error {
 // SweepPreserved clears what an earlier update could not delete: on Windows the
 // preserved copy is the executable that was running then, and a staging or
 // utils.SaveStreamAtomic temp file outlives a run killed while writing it.
-// Callers hold the update lock, which is what keeps a live write safe.
 func SweepPreserved(dir, binaryName string) int {
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(binaryName) + `\.(` + preservedSuffix + `|` + stagedSuffix + `)\.\d+$`)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-
 	removed := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || (!pattern.MatchString(name) && !utils.IsReplacementTempName(name)) {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err == nil {
+	for _, entry := range sweepableEntries(dir, binaryName) {
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err == nil {
 			removed++
 		}
 	}
 	return removed
+}
+
+// hasSweepableEntry lets a caller find out before taking the lock, which
+// outlives the run as a file in the install directory.
+func hasSweepableEntry(dir, binaryName string) bool {
+	return len(sweepableEntries(dir, binaryName)) > 0
+}
+
+func sweepableEntries(dir, binaryName string) []os.DirEntry {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(binaryName) + `\.(` + preservedSuffix + `|` + stagedSuffix + `)\.\d+$`)
+	var matched []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if pattern.MatchString(entry.Name()) || staleReplacementTemp(entry) {
+			matched = append(matched, entry)
+		}
+	}
+	return matched
+}
+
+func staleReplacementTemp(entry os.DirEntry) bool {
+	if !utils.IsReplacementTempName(entry.Name()) {
+		return false
+	}
+	info, err := entry.Info()
+	return err == nil && time.Since(info.ModTime()) > staleTempAge
 }
 
 func copyFile(sourcePath, destPath string) error {
@@ -98,10 +128,29 @@ func copyFile(sourcePath, destPath string) error {
 	if err != nil {
 		return err
 	}
+	// A truncated copy in the install directory looks exactly like a preserved
+	// binary worth restoring.
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(destPath)
+		}
+	}()
+
+	// O_CREATE only asks; the umask narrows. A rollback renames this copy over
+	// the install, so a trimmed mode would silently re-permission it.
+	chmodErr := dest.Chmod(info.Mode().Perm())
 	_, copyErr := io.Copy(dest, source)
 	closeErr := dest.Close()
 	if copyErr != nil {
 		return copyErr
 	}
-	return closeErr
+	if chmodErr != nil {
+		return chmodErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	cleanup = false
+	return nil
 }

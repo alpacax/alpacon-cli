@@ -21,14 +21,9 @@ type InstallKind string
 // ClassifyPath reads the path before the ownership answer: a Homebrew Cellar
 // path is unambiguous, while /usr/local/bin is shared by the deb, the rpm, and
 // a hand-placed binary, which only the ownership query separates.
-func ClassifyPath(realPath, packageOwner string) InstallKind {
-	for _, segment := range strings.Split(filepath.ToSlash(realPath), "/") {
-		switch segment {
-		case "Cellar":
-			return InstallHomebrew
-		case "mise", ".asdf":
-			return InstallVersionManager
-		}
+func ClassifyPath(executablePath, packageOwner string) InstallKind {
+	if kind := classifyByPath(executablePath); kind != "" {
+		return kind
 	}
 
 	switch {
@@ -40,8 +35,30 @@ func ClassifyPath(realPath, packageOwner string) InstallKind {
 	return InstallManual
 }
 
-func DetectInstallKind(run CommandRunner, realPath string) InstallKind { // Keeps the two halves together: a caller that asks only one of them gets a different verdict from the other's.
-	return ClassifyPath(realPath, PackageOwner(run, realPath))
+// classifyByPath answers only where the path settles it on its own, and "" when
+// it does not.
+func classifyByPath(executablePath string) InstallKind {
+	for segment := range strings.SplitSeq(filepath.ToSlash(executablePath), "/") {
+		switch segment {
+		case "Cellar":
+			return InstallHomebrew
+		case "mise", ".asdf":
+			return InstallVersionManager
+		}
+	}
+	return ""
+}
+
+func DetectInstallKind(run CommandRunner, executablePath string) (InstallKind, error) { // Keeps the two halves together: a caller that asks only one of them gets a different verdict from the other's.
+	if kind := classifyByPath(executablePath); kind != "" { // Two subprocess spawns, up to packageQueryTimeout each, for an answer the path already gave.
+		return kind, nil
+	}
+
+	owner, err := PackageOwner(run, executablePath)
+	if err != nil {
+		return "", err
+	}
+	return ClassifyPath(executablePath, owner), nil
 }
 
 func ResolveExecutablePath() (string, error) {

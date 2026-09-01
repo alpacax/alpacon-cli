@@ -19,8 +19,8 @@ const stagingPerm = 0600
 var replacementTempPattern = regexp.MustCompile(`^\.alpacon-\d+-\d+-\d+\.tmp$`)
 
 // IsReplacementTempName reports whether name is a createReplacementTempFile
-// staging file, which only a killed process leaves behind. A live write wears
-// the same name, so sweep one only while holding the directory's writer lock.
+// staging file. A write still in flight wears the same name and takes no lock
+// any sweeper can see, so a caller must age one out rather than trust a lock.
 func IsReplacementTempName(name string) bool {
 	return replacementTempPattern.MatchString(name)
 }

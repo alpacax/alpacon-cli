@@ -12,24 +12,22 @@ import (
 // refuses to overwrite or delete a running executable but allows renaming it.
 // The copy runs first, so a Ctrl-C during it leaves the install path untouched.
 // The gap is between the two renames—the restore covers a second rename that
-// reports failure, but a process killed there leaves only
-// alpacon.exe.old.<timestamp>. Nothing recovers that: the binary that would run
-// the next update is the missing one, so README tells the operator to rename it
-// back by hand.
+// reports failure, but a process killed there leaves no executable and both
+// copies beside it. Nothing recovers that, since the binary that would run the
+// next update is the missing one, so README says which one to rename back.
 func ReplaceBinary(targetPath, newBinaryPath string) error {
 	now := time.Now()
 	stagedPath := StagedName(targetPath, now)
-	if err := copyFile(newBinaryPath, stagedPath); err != nil {
-		_ = os.Remove(stagedPath)
+	if err := copyFile(newBinaryPath, stagedPath); err != nil { // copyFile removes its own partial file, as the unix twin also relies on.
 		return err
 	}
 
 	preservedPath := PreservedName(targetPath, now)
-	if err := os.Rename(targetPath, preservedPath); err != nil {
+	if err := osRename(targetPath, preservedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return err
 	}
-	if err := os.Rename(stagedPath, targetPath); err != nil {
+	if err := osRename(stagedPath, targetPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return errors.Join(err, RestorePreserved(preservedPath, targetPath))
 	}

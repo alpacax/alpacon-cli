@@ -44,11 +44,14 @@ func TestRestorePreservedPutsTheBinaryBack(t *testing.T) {
 
 func TestSweepPreservedRemovesOnlyTimestampedCopies(t *testing.T) {
 	dir := t.TempDir()
-	keep := []string{"alpacon", "alpacon.old", "alpacon.old.notanumber", "other.old.123", "alpacon.staged", ".alpacon-.tmp", ".alpacon-1-2-3.tmp.bak"}
-	remove := []string{"alpacon.old.1", "alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000", ".alpacon-4242-1735689600000000000-0.tmp"}
+	keep := []string{"alpacon", "alpacon.old", "alpacon.old.notanumber", "other.old.123", "alpacon.staged", ".alpacon-.tmp", ".alpacon-1-2-3.tmp.bak", ".alpacon-4242-1735689600000000000-0.tmp"}
+	remove := []string{"alpacon.old.1", "alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000", ".alpacon-99-1735689600000000000-0.tmp"}
 	for _, name := range append(append([]string{}, keep...), remove...) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("x"), 0600))
 	}
+	// The kept temp is a write still in flight; only the aged one is litter.
+	aged := time.Now().Add(-staleTempAge - time.Minute)
+	require.NoError(t, os.Chtimes(filepath.Join(dir, ".alpacon-99-1735689600000000000-0.tmp"), aged, aged))
 
 	removed := SweepPreserved(dir, "alpacon")
 
@@ -96,4 +99,17 @@ func TestCopyFileRefusesToWriteOverAnExistingFile(t *testing.T) {
 	content, readErr := os.ReadFile(dest)
 	require.NoError(t, readErr)
 	assert.Equal(t, "someone else's file", string(content))
+}
+
+// A directory opens fine and fails on the first Read—the shape of ENOSPC.
+func TestCopyFileLeavesNothingBehindWhenTheCopyFails(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "not-a-file")
+	require.NoError(t, os.Mkdir(source, 0755))
+	dest := filepath.Join(dir, "alpacon.old.1735689600000000000")
+
+	require.Error(t, copyFile(source, dest))
+
+	_, statErr := os.Stat(dest)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "a truncated copy in the install directory looks like a preserved binary worth restoring")
 }

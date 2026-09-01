@@ -68,11 +68,14 @@ never has to parse prose:
 		}
 
 		message, code := reportResult(result, utils.Version)
-		if code == 0 {
+		switch {
+		case code != 0:
+			utils.CliErrorWithExitCode(code, "%s", message)
+		case result.AlreadyCurrent:
 			utils.CliInfo("%s", message)
-			return
+		default:
+			utils.CliSuccess("%s", message) // The binary was replaced; Info would read exactly like the "already up to date" line above.
 		}
-		utils.CliErrorWithExitCode(code, "%s", message)
 	},
 }
 
@@ -91,24 +94,31 @@ func checkOutcome(current, latest string) (string, int) {
 	return fmt.Sprintf("A newer release is available: %s -> %s.", current, latest), utils.ExitCodeUpdateAvailable
 }
 
-func installKind() selfupdate.InstallKind { // The update itself would fail on a binary that cannot be found, so the check has nothing better to say than manual.
+func installKind() selfupdate.InstallKind { // --check installs nothing, so a binary it cannot find or place has nothing better to say than manual—'alpacon update' is where not knowing has to stop the work.
 	executable, err := selfupdate.ResolveExecutablePath()
 	if err != nil {
 		return selfupdate.InstallManual
 	}
-	return selfupdate.DetectInstallKind(selfupdate.ExecRunner, executable)
+	kind, err := selfupdate.DetectInstallKind(selfupdate.ExecRunner, executable)
+	if err != nil {
+		return selfupdate.InstallManual
+	}
+	return kind
 }
 
-func checkAction(kind selfupdate.InstallKind) string { // Never names 'alpacon update' for a binary a package manager owns: that command can only exit 1 on such a binary.
-	if guidance := selfupdate.UpgradeGuidance(kind); guidance != "" {
-		return guidance
+func checkAction(kind selfupdate.InstallKind) string { // Reads Kind rather than Guidance, for the reason reportResult gives below: an install kind whose wording nobody wrote must not be told to run 'alpacon update', which can only exit 1 on it.
+	if kind == selfupdate.InstallManual {
+		return "Run 'alpacon update' to install it."
 	}
-	return "Run 'alpacon update' to install it."
+	return selfupdate.UpgradeGuidance(kind)
 }
 
 func updateFailureMessage(err error) string {
 	if hint := permissionHint(err); hint != "" {
 		return fmt.Sprintf("%s (%s)", hint, err)
+	}
+	if errors.Is(err, selfupdate.ErrOwnerUnknown) {
+		return fmt.Sprintf("Could not tell whether a package manager owns this binary, so it was left alone. Try again once any package transaction has finished, or update through your package manager. (%s)", err)
 	}
 	return fmt.Sprintf("Update failed: %s", err)
 }
@@ -121,6 +131,10 @@ func permissionHint(err error) string {
 		return ""
 	}
 	if errors.Is(err, selfupdate.ErrWorkDirUnavailable) { // The temp directory is nobody's install location, so sudo is not the answer: the variable naming it belongs to the user who set it.
+		tempDirEnvVar := "TMPDIR"
+		if runtime.GOOS == "windows" { // os.TempDir calls GetTempPath there, which reads TMP, TEMP and USERPROFILE and never TMPDIR.
+			tempDirEnvVar = "TMP"
+		}
 		return fmt.Sprintf("The temporary directory is not writable by this user. Point %s at a writable directory and try again.", tempDirEnvVar)
 	}
 	if runtime.GOOS == "windows" {

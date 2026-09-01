@@ -94,9 +94,9 @@ func TestReplaceBinaryRollsBackWhenTheWriteIsRefused(t *testing.T) {
 	// Today's SaveStreamAtomic cannot damage the target—its last act is the
 	// rename—but the contract ReplaceBinary owes is that a reported failure
 	// leaves the old binary installed, and only the rollback can keep it.
-	original := saveStream
-	t.Cleanup(func() { saveStream = original })
-	saveStream = func(name string, _ io.Reader, perm os.FileMode) (int64, error) {
+	original := writeReplacement
+	t.Cleanup(func() { writeReplacement = original })
+	writeReplacement = func(name string, _ io.Reader, perm os.FileMode) (int64, error) {
 		require.NoError(t, os.WriteFile(name, []byte("half-written binary"), perm))
 		return 0, os.ErrPermission
 	}
@@ -114,4 +114,69 @@ func TestReplaceBinaryRollsBackWhenTheWriteIsRefused(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "old binary", string(content))
 	assert.Equal(t, 0, SweepPreserved(dir, "alpacon"), "a rolled-back replace must leave no preserved copy behind")
+}
+
+// The install path is resolved through EvalSymlinks before the download; a link
+// planted in the gap would send a root write wherever it points.
+func TestReplaceBinaryRefusesATargetThatBecameASymlink(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	require.NoError(t, os.WriteFile(victim, []byte("someone else's file"), 0600))
+	target := filepath.Join(dir, "alpacon")
+	require.NoError(t, os.Symlink(victim, target))
+	replacement := filepath.Join(dir, "alpacon.new")
+	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
+
+	original := writeReplacement
+	t.Cleanup(func() { writeReplacement = original })
+	writeReplacement = func(string, io.Reader, os.FileMode) (int64, error) {
+		t.Error("the write must not run against a symlinked target")
+		return 0, nil
+	}
+
+	err := ReplaceBinary(target, replacement)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
+	content, readErr := os.ReadFile(victim)
+	require.NoError(t, readErr)
+	assert.Equal(t, "someone else's file", string(content))
+}
+
+// The file bits are clean here, and the binary is still swappable: replacing a
+// file is a rename, which needs permission on the directory and none on the file.
+func TestReplaceBinaryWarnsWhenTheInstallDirectoryIsTheWritableOne(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0775))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	target := filepath.Join(dir, "alpacon")
+	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
+	replacement := filepath.Join(dir, "alpacon.new")
+	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		require.NoError(t, ReplaceBinary(target, replacement))
+	})
+
+	assert.Contains(t, stderr, dir)
+	assert.Contains(t, stderr, "needs no permission on the file itself")
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0775), info.Mode().Perm(), "the warning replaces a chmod; it must not become one")
+}
+
+func TestReplaceBinaryStaysQuietOnAStickyWritableDirectory(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, os.ModeSticky|0777))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	target := filepath.Join(dir, "alpacon")
+	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
+	replacement := filepath.Join(dir, "alpacon.new")
+	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		require.NoError(t, ReplaceBinary(target, replacement))
+	})
+
+	assert.Empty(t, stderr, "sticky stops a non-owner renaming over somebody else's file, so there is nothing to warn about")
 }

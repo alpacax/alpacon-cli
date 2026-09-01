@@ -2,9 +2,12 @@ package selfupdate
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPackageOwner(t *testing.T) {
@@ -62,11 +65,59 @@ func TestPackageOwner(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, PackageOwner(tt.run, "/usr/local/bin/alpacon"))
+			owner, err := PackageOwner(tt.run, "/usr/local/bin/alpacon")
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, owner)
 		})
 	}
 }
 
-func TestPackageOwnerTreatsANilRunnerAsNoOwner(t *testing.T) {
-	assert.Empty(t, PackageOwner(nil, "/usr/local/bin/alpacon"), "a caller with no way to ask has a manual install")
+// No querier is the strongest form of "the query could not answer", and
+// answering "" would have ClassifyPath call it a manual install.
+func TestPackageOwnerRefusesAnAnswerWithNoWayToAsk(t *testing.T) {
+	owner, err := PackageOwner(nil, "/usr/local/bin/alpacon")
+
+	require.ErrorIs(t, err, ErrOwnerUnknown)
+	assert.Empty(t, owner)
+}
+
+// A query that could not answer must not read as "nobody owns it": ClassifyPath
+// turns that into a manual install, which is permission to overwrite the file.
+func TestPackageOwnerRefusesToGuessWhenTheQueryCannotAnswer(t *testing.T) {
+	for _, stalled := range []string{"dpkg", "rpm"} {
+		t.Run(stalled, func(t *testing.T) {
+			run := func(name string, args ...string) ([]byte, error) {
+				if name == stalled {
+					return nil, fmt.Errorf("%w: %s: signal: killed", ErrOwnerUnknown, name)
+				}
+				return nil, errors.New("exit status 1")
+			}
+
+			owner, err := PackageOwner(run, "/usr/local/bin/alpacon")
+
+			require.ErrorIs(t, err, ErrOwnerUnknown)
+			assert.Empty(t, owner)
+
+			_, kindErr := DetectInstallKind(run, "/usr/local/bin/alpacon")
+			assert.ErrorIs(t, kindErr, ErrOwnerUnknown)
+		})
+	}
+}
+
+// $PATH must never name the manager: 'sudo alpacon update' carries the
+// operator's PATH wherever sudoers has no secure_path.
+func TestResolvePackageManagerNeverLeavesTheNameToThePath(t *testing.T) {
+	for _, name := range []string{"dpkg", "rpm"} {
+		path, installed := resolvePackageManager(name)
+		if installed {
+			assert.True(t, strings.HasPrefix(path, "/"), "%s must resolve to an absolute path, got %q", name, path)
+		} else {
+			assert.Empty(t, path)
+		}
+	}
+
+	path, installed := resolvePackageManager("/bin/sh")
+	assert.True(t, installed, "a name this map does not pin is passed through for the tests that use one")
+	assert.Equal(t, "/bin/sh", path)
 }

@@ -19,7 +19,7 @@ type Options struct {
 	GOOS           string
 	GOARCH         string
 	ExecutablePath string
-	Runner         CommandRunner
+	Runner         CommandRunner // Defaults to ExecRunner: a zero value that skipped the ownership question would read as permission to overwrite.
 }
 
 type Result struct {
@@ -27,6 +27,24 @@ type Result struct {
 	Guidance       string
 	UpdatedTo      string
 	AlreadyCurrent bool
+}
+
+// Windows leaves the replaced executable behind on every update, and the run
+// that clears it is usually one with nothing to install—so waiting for the next
+// release can mean months. A refused lock is somebody else's install.
+func sweepIfPossible(executablePath string) {
+	installDir, binaryName := filepath.Dir(executablePath), filepath.Base(executablePath)
+	if !hasSweepableEntry(installDir, binaryName) { // The lock file stays behind, and an install another tool owns never has anything to sweep.
+		return
+	}
+
+	lock, err := AcquireLock(LockPath(executablePath))
+	if err != nil {
+		return
+	}
+	defer func() { _ = lock.Release() }()
+
+	SweepPreserved(installDir, binaryName)
 }
 
 func Run(opts Options) (Result, error) {
@@ -39,10 +57,19 @@ func Run(opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if !IsOutdated(opts.CurrentVersion, release.Version) {
+		sweepIfPossible(opts.ExecutablePath)
 		return Result{AlreadyCurrent: true}, nil
 	}
 
-	kind := DetectInstallKind(opts.Runner, opts.ExecutablePath)
+	runner := opts.Runner
+	if runner == nil {
+		runner = ExecRunner
+	}
+
+	kind, err := DetectInstallKind(runner, opts.ExecutablePath)
+	if err != nil { // Not knowing is not permission: overwriting an rpm-owned binary leaves the database pointing at the version it replaced.
+		return Result{}, err
+	}
 	if kind != InstallManual {
 		return Result{Kind: kind, Guidance: UpgradeGuidance(kind)}, nil
 	}
