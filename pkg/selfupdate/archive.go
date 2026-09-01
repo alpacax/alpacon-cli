@@ -13,6 +13,10 @@ import (
 
 var maxReleaseFileSize int64 = 512 << 20 // Nothing in a release comes near it—it stops a malformed or endless stream, not anything real.
 
+// maxReleaseFileSize bounds the entry written and the archive downloaded, not
+// the bytes gzip inflates while the scan looks for that entry.
+var maxArchiveStreamSize int64 = 1 << 30
+
 func ExtractBinary(archivePath, binaryName, destDir string) (string, error) {
 	destPath := filepath.Join(destDir, binaryName+".new")
 	extract := extractFromTarGz
@@ -38,7 +42,7 @@ func extractFromTarGz(archivePath, binaryName, destPath string) error {
 	}
 	defer func() { _ = gzipReader.Close() }()
 
-	reader := tar.NewReader(gzipReader)
+	reader := tar.NewReader(io.LimitReader(gzipReader, maxArchiveStreamSize))
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {

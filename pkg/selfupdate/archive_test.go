@@ -177,3 +177,35 @@ func TestExtractBinaryAcceptsAnEntryExactlyAtTheSizeBound(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, content, string(extracted))
 }
+
+// Structurally impossible today, which is why it is pinned: a refactor that
+// starts honoring header.Name would pass every other test in this file.
+func TestExtractBinaryNeverWritesOutsideTheDestinationDirectory(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "work")
+	require.NoError(t, os.Mkdir(dir, 0755))
+	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
+	writeTarGz(t, archivePath, map[string]string{"../../evil/alpacon": "payload"})
+
+	extracted, err := ExtractBinary(archivePath, "alpacon", dir)
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "alpacon.new"), extracted)
+	_, statErr := os.Stat(filepath.Join(parent, "evil"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "an archive must not decide where its entry lands")
+}
+
+func TestExtractBinaryRefusesATarStreamThatKeepsInflating(t *testing.T) {
+	original := maxArchiveStreamSize
+	t.Cleanup(func() { maxArchiveStreamSize = original })
+	maxArchiveStreamSize = 64 // Smaller than one tar block, so the scan is cut off before it reaches any header.
+
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
+	writeTarGz(t, archivePath, map[string]string{"alpacon": "binary content"})
+
+	_, err := ExtractBinary(archivePath, "alpacon", dir)
+
+	require.Error(t, err, "the entry bound caps what is written, never what gzip inflates while scanning")
+	assert.NotContains(t, err.Error(), "no entry named", "a truncated scan must not read as an archive missing its binary")
+}
