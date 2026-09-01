@@ -8,8 +8,8 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Error codes this surface can receive (alpacon-server utils/error_codes.py). All but
-// permission_denied come from the binding endpoints; that one is the troubleshoot read.
+// Error codes this surface can receive. All but permission_denied come from the binding
+// endpoints; that one is the troubleshoot read.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -28,8 +28,8 @@ const (
 	gateRoleRead rbacGate = iota
 	// gateRoleWrite is a binding write: the superuser role, plus the same token refusal.
 	gateRoleWrite
-	// gateAuditRead: the audit log is the one /api/rbac/ route exempt from the Auth0 gate, so
-	// an API token reaches it and is refused only for missing role_audit_log:read.
+	// gateAuditRead: the audit log is the one /api/rbac/ route that accepts an API token on
+	// every deployment, so its only refusal is a missing role_audit_log:read scope.
 	gateAuditRead
 	// gateUserRead: /api/iam/users/{id}/effective-permissions/ pins user:read, and API tokens
 	// are accepted on the IAM routes, so a refusal is about the permission, not the credential.
@@ -100,8 +100,8 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		case gate == gateRoleWrite:
 			return rewrite(err, "a role-binding write requires the superuser role")
 		case !ac.IsBearerAuth():
-			// Lead with the reading that holds on both deployments: the credential refusal exists
-			// only where the Auth0 gate is installed, and self-hosted does not install it.
+			// Lead with the reading that holds on both deployments: the credential refusal happens
+			// on Alpacon Cloud only, and a self-hosted workspace accepts the token.
 			return rewrite(err, "your account may not see the account or role named. On an Alpacon Cloud workspace the cause is the credential instead: the RBAC API refuses API tokens there, so run 'alpacon login' to authenticate through the browser")
 		default:
 			return rewrite(err, "this workspace refused the read without stating a reason, which usually means your account may not see the account or role named")

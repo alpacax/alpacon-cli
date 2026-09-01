@@ -59,10 +59,10 @@ role_audit_log:read scope, on either deployment.`,
 }
 
 // subject is who a command is acting on. PK addresses the user in the path: the self
-// form sends "-", the server's own self route, which UserViewSet.get_object
-// short-circuits before the object permission check (an own UUID passes that check
-// too, via the auto-granted user:owner role). ID is the resolved UUID, for endpoints
-// taking the user in a query filter or a body, where "-" is not a value the server accepts.
+// form sends "-", the server's own self route, which resolves before the object
+// permission check runs (an own UUID passes that check too, via the auto-granted
+// user:owner role). ID is the resolved UUID, for endpoints taking the user in a query
+// filter or a body, where "-" is not a value the server accepts.
 type subject struct {
 	PK    string
 	ID    string
@@ -101,9 +101,9 @@ func resolveSubject(ac *client.AlpaconClient, args []string) subject {
 }
 
 // canonicalUUID dashes and lowercases what IsUUID also accepts un-dashed and in
-// either case. The audit log's ?user= is a plain CharFilter over a varchar holding the
-// canonical form, so a non-canonical value matches nothing and 'user role history'
-// prints an empty table and exits 0. The binding list's filter coerces the value itself.
+// either case. The audit log's ?user= is an exact string compare against the canonical
+// form, so a non-canonical value matches nothing and 'user role history' prints an empty
+// table and exits 0. The binding list's filter coerces the value itself.
 func canonicalUUID(id string) string {
 	hex := strings.ToLower(strings.ReplaceAll(id, "-", ""))
 	if len(hex) != 32 {

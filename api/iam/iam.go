@@ -30,9 +30,9 @@ const (
 // UsernameSetSuccessFmt is the confirmation format shown after a username is set.
 const UsernameSetSuccessFmt = "Username set to %q"
 
-// privilegeFlagFields are read-only projections of the RBAC roles (ADR 0009): a PATCH
-// naming one is answered 200 with the flag unchanged, never an error, so the CLI has
-// to catch the edit itself.
+// privilegeFlagFields are read-only projections of the account's roles: a PATCH naming
+// one is answered 200 with the flag unchanged, never an error, so the CLI has to catch
+// the edit itself.
 var privilegeFlagFields = []string{"is_staff", "is_superuser"}
 
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
