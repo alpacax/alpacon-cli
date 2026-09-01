@@ -15,9 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  # No `name:` on purpose: the check context is then the job id, which the
-  # matrix splits in two where a flat `build-and-test` context expects one.
-  build-and-test:
+  # A matrix reports one check context per leg, and the org ruleset on main
+  # requires the flat `build-and-test`. The job below is what reports it.
+  test:
     runs-on: ${{ matrix.os }}
 
     # Windows is not a portability formality: the files that replace a running
@@ -60,3 +60,13 @@ jobs:
 
       - name: Run Tests
         run: go test -race -v ${{ matrix.packages }}
+
+  # success only if every leg was.
+  build-and-test:
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fail unless every matrix leg passed
+        run: '[ "${{ needs.test.result }}" = "success" ]'
