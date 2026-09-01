@@ -7,11 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The detail body the editor opens always carries is_staff and is_superuser, so the
-// only thing separating "the operator asked for a promotion" from "the operator left
-// the flags alone" is the diff. Getting this wrong is the defect: the server answers
-// 200 and drops the flags, so a client that forwards them reports a change it did
-// not make.
 func TestDiffEditedUser(t *testing.T) {
 	original := []byte(`{
 	  "id": "u-1",
@@ -76,9 +71,8 @@ func TestDiffEditedUser(t *testing.T) {
 	}
 }
 
-// is_ldap_user is writable, so re-submitting an untouched copy makes the server run
-// a live LDAP bind and lookup for a field nobody edited—and fail the whole update if
-// the directory is unreachable.
+// Re-submitting an untouched is_ldap_user makes the server run a live LDAP bind, so an
+// unreachable directory would fail an edit that never touched the field.
 func TestDiffEditedUser_DoesNotResubmitUntouchedLDAPFlag(t *testing.T) {
 	original := []byte(`{"phone": "", "is_ldap_user": true}`)
 

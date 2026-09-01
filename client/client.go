@@ -570,10 +570,8 @@ func (ac *AlpaconClient) accessToken() string {
 }
 
 // IsBearerAuth reports whether requests carry an Auth0 bearer token rather than a
-// legacy API key. Some endpoints refuse the API key outright, and their refusal
-// arrives with no error code, so a caller rewriting that refusal has to know which
-// credential it sent. Reading the field directly would race the mid-flight renewal
-// in sendRequest.
+// legacy API key. Some endpoints refuse the API key outright, and their refusal arrives
+// with no error code, so a caller rewriting it has to know which credential it sent.
 func (ac *AlpaconClient) IsBearerAuth() bool {
 	return ac.accessToken() != ""
 }

@@ -9,10 +9,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Error codes returned by the RBAC binding endpoints (alpacon-server
-// utils/error_codes.py). The server's envelope on these is a bare {"code": "..."}
-// with no human detail, so every one of them has to be rewritten here or the
-// operator sees the raw code.
+// Error codes returned by the RBAC binding endpoints (alpacon-server utils/error_codes.py).
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codeSuperuserLastRemoval = "rbac_superuser_last_removal_forbidden"
@@ -21,49 +18,36 @@ const (
 	codeWorkspaceSuspended   = "workspace_suspended"
 )
 
-// Gate identifiers for describeRBACError. Kept in the const block above the type so
-// the zero value is the read gate, which is the safe default for a caller that
-// forgets to say.
+// Gates for describeRBACError. gateRoleRead is first so the zero value is the safest gate.
 const (
 	// gateRoleRead is a read on /api/rbac/. An API token is refused outright on an
-	// Alpacon Cloud workspace. A caller who simply cannot see the target is narrowed to
-	// 200 rather than refused, so a 403 here is never about visibility.
+	// Alpacon Cloud workspace. The role and binding reads narrow a caller who cannot see
+	// the target to 200 rather than refusing, so an uncoded 403 from them is unexpected;
+	// the troubleshoot read is the exception, and it refuses with a code.
 	gateRoleRead rbacGate = iota
 	// gateRoleWrite is a binding write: the superuser role, plus the same token refusal.
 	gateRoleWrite
-	// gateAuditRead is the role audit log, the one /api/rbac/ route exempt from the
-	// Auth0 gate. An API token reaches it on every deployment and is refused only for
-	// missing the role_audit_log:read scope - the opposite failure from gateRoleRead,
-	// which is why it cannot share that message.
+	// gateAuditRead: the audit log is the one /api/rbac/ route exempt from the Auth0 gate, so
+	// an API token reaches it and is refused only for missing role_audit_log:read.
 	gateAuditRead
-	// gateUserRead is /api/iam/users/{id}/effective-permissions/, which pins user:read
-	// through RBACPermission's required_permission escape. API tokens are accepted on
-	// the IAM user routes, so a refusal here is about the permission, not the credential.
+	// gateUserRead: /api/iam/users/{id}/effective-permissions/ pins user:read, and API tokens
+	// are accepted on the IAM routes, so a refusal is about the permission, not the credential.
 	gateUserRead
-	// gatePermissionIntrospect is /api/iam/users/{id}/permissions/, which pins no scope
-	// of its own. Addressed by UUID it auto-resolves to an orphan 'user:permissions'
-	// that no role or preset grants, so only the superuser wildcard satisfies it — a
-	// workspace admin is refused a cross-account read. Self-reads go through the "-"
-	// alias instead and never reach the check (see the subject type).
+	// gatePermissionIntrospect: /api/iam/users/{id}/permissions/ pins no scope, so by UUID it
+	// auto-resolves to an orphan 'user:permissions' that only the superuser wildcard grants;
+	// the "-" self alias skips the check entirely.
 	gatePermissionIntrospect
 )
 
-// rbacGate names which gate a refused request went through.
 type rbacGate int
 
-// describeRBACError rewrites what the RBAC endpoints answer into something an
-// operator can act on.
+// describeRBACError rewrites RBAC refusals into something an operator can act on: the
+// coded ones carry no human detail, and the likeliest refusal is a 403 with no code,
+// which needs both the gate and the credential to name a fix that can work.
 //
-// Two things make the raw error unhelpful. The coded refusals carry no human
-// detail, so they surface as a bare snake_case token. And the refusal an operator
-// is most likely to hit arrives as a 403 with no code at all.
-//
-// That codeless 403 needs both the gate the request went through and the credential
-// it carried, because the three surfaces fail for three different reasons and
-// naming the wrong one sends the operator after a fix that cannot work. The
-// credential kind has to come off the client: config.IsSaaS reports only whether an
-// access token is stored, which cannot separate an Alpacon Cloud token session,
-// which is refused, from a self-hosted one, which works.
+// The credential kind must come off the client: config.IsSaaS only reports that an
+// access token is stored, which cannot separate a refused Alpacon Cloud token session
+// from a working self-hosted one.
 func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error {
 	if err == nil {
 		return nil
@@ -75,8 +59,8 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		return errors.New("this is the workspace's last admin, and a workspace cannot be left without one; grant 'admin' to someone else first")
 	case codeSuperuserLastRemoval:
 		return errors.New("this is the workspace's last superuser, and a workspace cannot be left without one; grant 'superuser' to someone else first")
-	// 'grant' absorbs this one as convergence and never reaches here; the branch
-	// covers any later caller that writes a binding without doing the same.
+	// Unreachable from 'grant', which absorbs duplicates as convergence; kept for any later
+	// caller that writes a binding without doing the same.
 	case rbac.CodeRoleAssignmentDuplicate:
 		return errors.New("that role is already bound to the user at this scope")
 	case codeBulkLimitExceeded:

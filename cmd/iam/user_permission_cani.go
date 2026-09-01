@@ -87,26 +87,19 @@ func init() {
 	userPermissionCanICmd.Flags().BoolP("quiet", "q", false, "Print nothing; the exit code is the answer (0 allowed, 1 denied or the check failed)")
 	userPermissionCanICmd.Flags().Bool("explain", false, "Print the server's account of how the decision was reached")
 
-	// --explain answers with an account rather than a yes or no, so there is no
-	// boolean for --quiet to turn into an exit code. Refusing the pair is better than
-	// silently honouring one of them.
+	// --explain answers with an account rather than a boolean, so there is nothing for
+	// --quiet to turn into an exit code.
 	userPermissionCanICmd.MarkFlagsMutuallyExclusive("quiet", "explain")
 }
 
-// splitCanIArgs separates the optional subject from the permission.
-//
-// One rule decides both forms, so the same string is accepted or refused wherever it
-// is typed: a permission carries a ':' or a '*' and a username carries neither.
-// The wildcard half matters—'*' is a real permission, and asking whether someone
-// holds it is a reasonable question.
 func splitCanIArgs(args []string) ([]string, string) {
 	if len(args) == 1 {
 		requirePermission(args[0])
 		return nil, args[0]
 	}
 
-	// Most CLIs in this space put the subject last or not at all, so a transposed
-	// command line is worth naming rather than sending as a permission nobody holds.
+	// Other CLIs put the subject last or not at all, so a transposed command line is worth
+	// naming rather than sending as a permission nobody holds.
 	if looksLikePermission(args[0]) && !looksLikePermission(args[1]) {
 		utils.CliErrorWithExit("The user comes first: 'alpacon user permission can-i %s %s'.", args[1], args[0])
 	}

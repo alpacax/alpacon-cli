@@ -9,8 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// selfUserPK is the alias the IAM user routes take in place of a UUID to mean the
-// requesting user. See the subject type for why the distinction matters.
+// selfUserPK is the alias the IAM user routes accept in place of a UUID to mean the caller.
 const selfUserPK = "-"
 
 var userRoleCmd = &cobra.Command{
@@ -58,19 +57,11 @@ role_audit_log:read scope, on either deployment.`,
 	},
 }
 
-// subject is who a command is acting on.
-//
-// PK and ID differ for the self form on purpose. The IAM user routes take "-" as
-// "me", and UserViewSet.get_object short-circuits on it and returns the request user
-// without running the object permission check. That check is the only thing standing
-// between an operator and their own permissions: /api/iam/users/{id}/permissions/
-// pins no scope of its own, so addressing it by UUID auto-resolves to an orphan
-// 'user:permissions' that nothing short of the superuser wildcard grants, and
-// /effective-permissions/ pins 'user:read', which the baseline member role does not
-// carry. Addressed by UUID, both refuse a caller reading their own account.
-//
-// ID is the resolved UUID, for the endpoints that take the user in a query filter or
-// a request body, where "-" is not a value the server accepts.
+// subject is who a command is acting on. PK and ID differ on purpose: the self form
+// sends "-", which UserViewSet.get_object short-circuits before the object permission
+// check, and that check is what refuses a caller reading their own permissions by UUID
+// (see gatePermissionIntrospect). ID is the resolved UUID, for the endpoints that take
+// the user in a query filter or a body, where "-" is not a value the server accepts.
 type subject struct {
 	PK    string
 	ID    string
@@ -86,10 +77,6 @@ func init() {
 	userRoleCmd.AddCommand(userRoleHistoryCmd)
 }
 
-// resolveSubject turns an optional USER argument into the subject to act on. With no
-// argument the subject is the caller, so 'alpacon user role ls' answers "what do I
-// hold" without the operator knowing their own username—the same shape 'kubectl auth
-// can-i' takes.
 func resolveSubject(ac *client.AlpaconClient, args []string) subject {
 	if len(args) == 0 {
 		current, err := iam.GetCurrentUser(ac)

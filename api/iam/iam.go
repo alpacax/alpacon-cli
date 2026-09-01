@@ -30,10 +30,9 @@ const (
 // UsernameSetSuccessFmt is the confirmation format shown after a username is set.
 const UsernameSetSuccessFmt = "Username set to %q"
 
-// privilegeFlagFields are the user fields the server turned into read-only
-// projections of the RBAC roles (ADR 0009). A PATCH naming one is answered 200 with
-// the flag unchanged, never an error, so the CLI has to notice the edit itself and
-// send the operator to 'alpacon user role' instead of reporting a change.
+// privilegeFlagFields are read-only projections of the RBAC roles (ADR 0009): a PATCH
+// naming one is answered 200 with the flag unchanged, never an error, so the CLI has
+// to catch the edit itself.
 var privilegeFlagFields = []string{"is_staff", "is_superuser"}
 
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
@@ -238,11 +237,8 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 	return response.Results[0].ID, nil
 }
 
-// GetUsernamesByID maps every visible user's id to their username.
-//
-// The nested user object embedded in a role binding carries a display name, not
-// the username the other commands accept, so any list of principals that an
-// operator is meant to type back into another command has to join against this.
+// GetUsernamesByID joins ids to usernames: the user object embedded in a role binding
+// carries a display name, not the username other commands accept.
 func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
 	if err != nil {
@@ -324,16 +320,11 @@ func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
 	return responseBody, nil
 }
 
-// PrepareUserUpdate opens the user's detail in an editor and reports what the
-// session changed. It sends nothing.
+// PrepareUserUpdate opens the user's detail in an editor and reports what changed. It
+// sends nothing.
 //
-// The patch it returns is sparse—only the fields the editor actually changed—
-// rather than the whole edited object. Two things depend on that. The privilege
-// flags can be told apart from the untouched copies of themselves the detail
-// response always carries, which is what makes reporting them exact. And
-// is_ldap_user stops being re-submitted on every edit: it is writable, so
-// forwarding an untouched copy makes the server run a live LDAP bind and lookup
-// for a field nobody touched.
+// The patch is sparse so untouched fields are not re-submitted: is_ldap_user is
+// writable, and forwarding an unchanged copy makes the server run a live LDAP bind.
 func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *UserEdit, error) {
 	userID, err := GetUserIDByName(ac, userName)
 	if err != nil {
@@ -358,16 +349,12 @@ func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *User
 	return userID, edit, nil
 }
 
-// PatchUser sends a sparse patch to the user endpoint.
 func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) ([]byte, error) {
 	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
 }
 
-// diffEditedUser splits an edited detail body into the fields worth sending and the
-// privilege edits that cannot be sent.
-//
-// A key the operator deleted is treated as untouched: a PATCH names what to change,
-// and there is no way to spell "unset" that the server would honour anyway.
+// diffEditedUser: a key the operator deleted counts as untouched—a PATCH names what to
+// change, and nothing spells "unset" that the server would honour.
 func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
 	var before map[string]any
 	if err := json.Unmarshal(original, &before); err != nil {

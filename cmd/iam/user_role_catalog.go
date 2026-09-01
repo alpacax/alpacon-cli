@@ -30,9 +30,8 @@ which every account holds.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// Send the filter only to hide. An explicit --hide-object-roles=false asks for
-		// the whole catalog, not for auto_assigned=true, which would return nothing but
-		// the object-scoped roles.
+		// Filter only when hiding: --hide-object-roles=false asks for the whole catalog, and
+		// auto_assigned=true would return nothing but the object-scoped roles.
 		var autoAssigned *bool
 		if hide, _ := cmd.Flags().GetBool("hide-object-roles"); hide {
 			value := false

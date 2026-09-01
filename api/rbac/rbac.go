@@ -18,37 +18,22 @@ const (
 	roleAuditLogsURL = "/api/rbac/role-audit-logs/"
 	troubleshootURL  = "/api/rbac/troubleshoot/"
 
-	// usersURL is the IAM user endpoint, which carries the RBAC introspection
-	// actions: a user's effective permissions hang off the principal rather than off
-	// /api/rbac/.
 	usersURL = "/api/iam/users/"
 
-	// timeLayout matches the other list projections in api/.
 	timeLayout = "2006-01-02 15:04"
 
-	// RoleAdmin and RoleSuperuser are the two platform tiers: the global roles that
-	// say what an account is rather than what it may do. The server mirrors them onto
-	// the legacy is_staff and is_superuser flags, refuses to let a workspace run out
-	// of holders of either, and creates the admin companion itself whenever superuser
-	// is granted.
+	// Platform tiers. The server mirrors them onto the legacy is_staff/is_superuser
+	// flags, refuses to leave a workspace without a holder of either, and creates the
+	// admin companion itself when superuser is granted.
 	RoleAdmin     = "admin"
 	RoleSuperuser = "superuser"
 
-	// CodeRoleAssignmentDuplicate is the server's refusal of a grant the user already
-	// holds at the same scope. Exported because both the grant path, which absorbs it,
-	// and the error rewriting in cmd/ have to name it—and a wire string with two copies
-	// is a wire string with one stale copy.
 	CodeRoleAssignmentDuplicate = "rbac_role_assignment_duplicate"
 )
 
-// GetRoleCatalog lists the workspace's roles. When autoAssigned is non-nil the
-// server's auto_assigned filter is sent; nil sends none.
-//
-// The filter is a suffix match on ':owner', ':master', ':member' and ':manager',
-// not a judgement about whether a role is worth granting—it hides
-// service_token:manager, which is granted by hand, and keeps member, which every
-// account holds. Callers should describe it as hiding the object-scoped plumbing
-// roles rather than as listing the assignable ones.
+// auto_assigned is a name-suffix match on ':owner', ':master', ':member' and
+// ':manager', not a judgement of assignability: true returns nothing but the
+// object-scoped plumbing roles, and false also hides hand-granted service_token:manager.
 func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleResponse, error) {
 	var params map[string]string
 	if autoAssigned != nil {
@@ -58,12 +43,9 @@ func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleRespons
 	return api.FetchAllPages[RoleResponse](ac, rolesURL, params)
 }
 
-// ResolveRole turns a role name or UUID into the role itself.
-//
-// The server's name filter is an exact, case-sensitive match, and both the role
-// list and the binding list are narrowed to what the caller can see rather than
-// refused—so a non-admin asking about a role they do not hold gets an empty page,
-// never a 403. The not-found message has to cover both readings.
+// The name filter is exact and case-sensitive, and role lists are narrowed to what
+// the caller may see rather than refused, so an invisible role yields an empty page
+// and never a 403 - the not-found message has to cover both readings.
 func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, error) {
 	if utils.IsUUID(nameOrID) {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
@@ -89,7 +71,6 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 	return &roles[0], nil
 }
 
-// GetRoleScopes reports what a role grants.
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, roleID+"/scopes", nil))
 	if err != nil {
@@ -104,41 +85,27 @@ func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse
 	return &scopes, nil
 }
 
-// GetUserBindings lists the role bindings a user holds, at every scope tier.
-//
-// The content_type filter is deliberately not sent: the server offers no isnull
-// lookup and no object_id filter, so the workspace-wide row is selected here rather
-// than asked for.
-//
-// The result is what the caller may see, not necessarily the whole truth. A
-// non-admin is narrowed to their own bindings and answered 200, never 403, so an
-// empty page reads the same as "this user holds nothing".
+// No content_type filter: the server offers no isnull or object_id lookup, so the
+// workspace-wide row is picked out here. The list is also narrowed to what the caller
+// may see and answered 200, never 403, so an empty page and "holds nothing" look alike.
 func GetUserBindings(ac *client.AlpaconClient, userID string) ([]UserRoleResponse, error) {
 	return api.FetchAllPages[UserRoleResponse](ac, userRolesURL, map[string]string{"user": userID})
 }
 
-// GetRoleHolders lists the holders of a role, at every scope tier — subject to the
-// same narrowing as GetUserBindings, so a non-admin sees only their own binding and
-// is not told the list was cut.
 func GetRoleHolders(ac *client.AlpaconClient, roleID string) ([]UserRoleResponse, error) {
 	return api.FetchAllPages[UserRoleResponse](ac, userRolesURL, map[string]string{"role": roleID})
 }
 
-// GetRoleHistory reports the grants and revocations recorded against a user,
-// newest first. This is the only surface carrying the justification and the actor;
-// a binding read carries neither.
 func GetRoleHistory(ac *client.AlpaconClient, userID string, limit int) ([]RoleAuditLogResponse, error) {
 	params := map[string]string{"user": userID}
 
-	// No ordering parameter: the view pins ordering to '-added_at, -id' and exposes
-	// no ordering_fields, so the newest rows already come first and anything sent
-	// here would be dropped.
+	// The view pins ordering to '-added_at, -id' and exposes no ordering_fields, so the
+	// newest rows come first and any ordering param would be dropped.
 	return api.FetchPagesUpTo[RoleAuditLogResponse](ac, roleAuditLogsURL, params, limit)
 }
 
-// FindWorkspaceBinding returns the caller's workspace-wide binding for roleID, or
-// nil. At most one can exist: a partial unique constraint covers the rows whose
-// scope columns are both null.
+// At most one workspace-wide binding per role can exist: a partial unique constraint
+// covers the rows whose scope columns are both null.
 func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.ID == roleID && bindings[i].IsWorkspaceWide() {
@@ -149,10 +116,8 @@ func FindWorkspaceBinding(bindings []UserRoleResponse, roleID string) *UserRoleR
 	return nil
 }
 
-// FindWorkspaceBindingByName is FindWorkspaceBinding for a caller holding the role's
-// name rather than its id. The nested role object on a binding carries the name, so
-// this costs no extra request—which is what lets a revoke find the admin companion
-// without resolving a second role.
+// A binding carries its role's name, so matching by name is what lets a revoke find
+// the admin companion without resolving a second role.
 func FindWorkspaceBindingByName(bindings []UserRoleResponse, roleName string) *UserRoleResponse {
 	for i := range bindings {
 		if bindings[i].Role.Name == roleName && bindings[i].IsWorkspaceWide() {
@@ -163,22 +128,14 @@ func FindWorkspaceBindingByName(bindings []UserRoleResponse, roleName string) *U
 	return nil
 }
 
-// HoldsWorkspaceRole reports whether the bindings include a workspace-wide grant of
-// the named role.
 func HoldsWorkspaceRole(bindings []UserRoleResponse, roleName string) bool {
 	return FindWorkspaceBindingByName(bindings, roleName) != nil
 }
 
-// IsPlatformTier reports whether roleName is one of the two tiers. Their grants are
-// what a confirmation prompt and a missing justification are worth warning about;
-// the capability roles are ordinary.
 func IsPlatformTier(roleName string) bool {
 	return roleName == RoleAdmin || roleName == RoleSuperuser
 }
 
-// WorkspaceRoleNames lists, sorted, the workspace-wide roles the bindings carry. It
-// is what a write reports after re-reading, so the admin companion the server
-// created for a superuser grant is observed rather than assumed.
 func WorkspaceRoleNames(bindings []UserRoleResponse) []string {
 	var names []string
 	for _, binding := range bindings {
@@ -216,14 +173,9 @@ func BindingAttributesFrom(bindings []UserRoleResponse) []UserRoleAttributes {
 	return result
 }
 
-// HolderAttributesFrom projects a role's holders.
-//
-// A nil usernames map means the caller chose not to resolve names, and the column
-// then carries the user id—the one value another command always accepts. A non-nil
-// map resolves, falling back to the nested display name only for a holder the map
-// does not contain. The distinction matters: the nested user object carries a
-// display name, so falling back to it when resolution was skipped would print
-// something no other command takes.
+// A nil usernames map means names were not resolved, so the column carries the user id,
+// the one value other commands accept; the nested display name is a fallback only when
+// resolution was attempted and missed this holder.
 func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]string) []RoleHolderAttributes {
 	var result []RoleHolderAttributes
 	for _, binding := range bindings {
@@ -246,8 +198,7 @@ func HolderAttributesFrom(bindings []UserRoleResponse, usernames map[string]stri
 	return result
 }
 
-// ScopeAttributesFrom flattens a role's permissions for the table. Wildcards come
-// first: they subsume the concrete rows below them.
+// Wildcards first: they subsume the concrete rows below them.
 func ScopeAttributesFrom(scopes *RoleScopesResponse) []RoleScopeAttributes {
 	var result []RoleScopeAttributes
 	for _, wildcard := range scopes.Wildcards {
@@ -285,10 +236,6 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 	return result
 }
 
-// GrantRole binds a role to a user. The request carries scalars, which is what
-// keeps the server on the single-row path: the bulk path answers 201 with an empty
-// body whether or not it created anything, and only the single-row path reports a
-// duplicate.
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) (*UserRoleResponse, error) {
 	responseBody, err := ac.SendPostRequest(userRolesURL, request)
 	if err != nil {
@@ -303,8 +250,6 @@ func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) (*UserRol
 	return &binding, nil
 }
 
-// RevokeRole deletes one binding by its own id. Bindings carry no update path, so
-// this is the only way a grant is taken back.
 func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
 	url := utils.BuildURL(userRolesURL, bindingID, nil)
 
@@ -317,17 +262,13 @@ func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
 	return err
 }
 
-// IsDuplicateBinding reports whether err is the server refusing a grant the user
-// already holds. A grant that finds the binding already there has converged, so
-// this is success rather than failure.
 func IsDuplicateBinding(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == CodeRoleAssignmentDuplicate
 }
 
-// GetEffectivePermissions reports where a user's authority comes from and what it
-// adds up to. It lives on the user endpoint rather than under /api/rbac/, so it
-// answers for an API token on workspaces where the RBAC routes do not.
+// Served by the IAM user endpoint rather than /api/rbac/, so an API token reaches it
+// on workspaces where the RBAC routes refuse one.
 func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*EffectivePermissionsResponse, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/effective-permissions", nil))
 	if err != nil {
@@ -342,8 +283,6 @@ func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*Effectiv
 	return &effective, nil
 }
 
-// GetPermissionPatterns lists the raw permission patterns a user holds, split by
-// how widely they were granted.
 func GetPermissionPatterns(ac *client.AlpaconClient, userID string) (*PermissionPatternsResponse, error) {
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/permissions", nil))
 	if err != nil {
@@ -358,10 +297,8 @@ func GetPermissionPatterns(ac *client.AlpaconClient, userID string) (*Permission
 	return &patterns, nil
 }
 
-// CheckPermission answers whether one permission is allowed workspace-wide.
-//
-// The question is the global one: a permission the user holds only through an
-// object-scoped binding answers false here, because no object was named.
+// Workspace-wide question only: a permission held through an object-scoped binding
+// answers false here, because no object is named.
 func CheckPermission(ac *client.AlpaconClient, userID, permission string) (bool, error) {
 	params := map[string]string{"permission": permission}
 
@@ -378,8 +315,6 @@ func CheckPermission(ac *client.AlpaconClient, userID, permission string) (bool,
 	return check.Allowed, nil
 }
 
-// ExplainPermission returns the server's account of how a permission decision was
-// reached, as raw JSON for the caller to print.
 func ExplainPermission(ac *client.AlpaconClient, userID, permission string) ([]byte, error) {
 	return ac.SendPostRequest(troubleshootURL, TroubleshootRequest{UserID: userID, Permission: permission})
 }

@@ -80,14 +80,9 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 	}
 }
 
-// WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: no
-// username handling, and a workspace-scoped MFA link instead of a server-scoped
-// one. A workspace-wide setting or role binding names no server, so the
-// server-scoped link's lookup would be handed an empty name and fail.
-//
-// The workspace name comes off ac, pinned there beside BaseURL. Reading config at
-// the MFA prompt instead would let another shell's 'alpacon ws use' point the link
-// at a workspace this client is not talking to.
+// WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: no username
+// handling, and a workspace-scoped MFA link. A workspace-wide setting or role binding
+// names no server, so the server-scoped link's lookup would be handed an empty name.
 func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(_ string) error {

@@ -51,8 +51,6 @@ list was narrowed.`,
 			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		// One list request resolves every holder's username. The nested user object on
-		// a binding carries a display name, which is not what 'user role grant' takes.
 		var usernames map[string]string
 		if noResolve, _ := cmd.Flags().GetBool("no-resolve-names"); !noResolve {
 			usernames, err = iam.GetUsernamesByID(alpaconClient)

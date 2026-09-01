@@ -25,9 +25,6 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 }
 
-// The binding serializer replaces the role primary key with a nested {id, name}
-// object, and leaves both scope columns null on a workspace-wide binding. A struct
-// that typed either as a plain string would fail to decode the real response.
 func TestGetUserBindings_DecodesNestedRoleAndNullScope(t *testing.T) {
 	body := `{
 	  "count": 2, "current": 1, "next": 0, "previous": 0, "last": 1,
@@ -97,8 +94,6 @@ func TestScopeLabel(t *testing.T) {
 	}
 }
 
-// The name filter is exact and case-sensitive, and a role the caller cannot see
-// comes back as an empty page rather than a 403, so both readings share one error.
 func TestResolveRole_ByName(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -137,8 +132,6 @@ func TestResolveRole_ByName(t *testing.T) {
 	}
 }
 
-// A UUID skips the list entirely: the detail route answers a bare object, not a
-// paginated envelope.
 func TestResolveRole_ByUUID(t *testing.T) {
 	var gotPath string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,8 +147,6 @@ func TestResolveRole_ByUUID(t *testing.T) {
 	assert.Equal(t, "admin", role.Name)
 }
 
-// auto_assigned=true would return only the object-scoped plumbing roles, so the
-// filter is sent to hide them and never otherwise.
 func TestGetRoleCatalog_SendsFilterOnlyWhenAsked(t *testing.T) {
 	hide := false
 
@@ -188,8 +179,6 @@ func TestGetRoleCatalog_SendsFilterOnlyWhenAsked(t *testing.T) {
 	}
 }
 
-// The server caps page_size at 100 and there are 22 seeded roles against a default
-// page of 15, so the catalog has to be walked rather than read once.
 func TestGetRoleCatalog_WalksEveryPage(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
@@ -234,13 +223,10 @@ func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
 	assert.Len(t, entries, 2)
 
 	assert.Equal(t, userID, query.Get("user"))
-	// The view pins its own ordering and exposes no ordering_fields, so sending one
-	// would be dead weight the reader would have to explain.
 	assert.NotContains(t, query, "ordering")
 }
 
-// changed_by is null for a token or application actor, and the role FK is cleared
-// when the role itself is deleted; the projection has to survive both.
+// changed_by is null when the actor was a token or an application.
 func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
 	rows := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", Scope: "global", ChangedBy: nil, Reason: ""},
@@ -254,8 +240,6 @@ func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
 	assert.Equal(t, "rotated off", rows[1].Reason)
 }
 
-// Only the workspace-wide row decides admin and superuser status, and the server
-// offers no isnull filter, so the selection happens here.
 func TestFindWorkspaceBindingIgnoresObjectScopedRows(t *testing.T) {
 	contentType := 42
 	objectID := "web-01"
@@ -296,11 +280,6 @@ func TestScopeAttributesFrom_ListsWildcardsFirst(t *testing.T) {
 	assert.Equal(t, "command", rows[1].ACL)
 }
 
-// The single-row path is the whole reason grant takes one user and one role: a list
-// of more than one value anywhere flips the server into a bulk create that answers
-// 201 with an empty body whether or not it wrote a thing. One JSONEq over the whole
-// body pins the shape, because a per-field assert would not notice user or role
-// turning into an array.
 func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
 	var gotBody []byte
 	var gotMethod string
@@ -325,8 +304,6 @@ func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
 	assert.Equal(t, "admin", binding.Role.Name)
 }
 
-// An omitted reason must not put a blank one on the wire, so the server records the
-// omission rather than an empty justification.
 func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -341,8 +318,6 @@ func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
 	assert.JSONEq(t, `{"user":"`+userID+`","role":"`+adminRoleID+`"}`, string(gotBody))
 }
 
-// The justification rides the DELETE body rather than a query parameter so it stays
-// out of access logs; a revoke without one sends no body at all.
 func TestRevokeRole_CarriesTheReasonInTheBody(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -399,9 +374,6 @@ func TestIsPlatformTier(t *testing.T) {
 	assert.False(t, IsPlatformTier("operator"), "a capability role is not a platform tier")
 }
 
-// The flag that skips name resolution has to produce identifiers another command
-// accepts. Falling back to the nested display name there would print something
-// 'user role revoke' cannot take.
 func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 	bindings := []UserRoleResponse{
 		{User: types.UserSummary{ID: userID, Name: "Jane Doe", Email: "jane@example.com"}, Role: RoleNested{Name: "admin"}},
@@ -415,8 +387,6 @@ func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 	require.Len(t, resolved, 1)
 	assert.Equal(t, "jane", resolved[0].User)
 
-	// A holder the map does not carry keeps the display name: the lookup ran, so the
-	// absence is about that row rather than about the caller's intent.
 	missing := HolderAttributesFrom(bindings, map[string]string{"someone-else": "bob"})
 	require.Len(t, missing, 1)
 	assert.Equal(t, "Jane Doe", missing[0].User)

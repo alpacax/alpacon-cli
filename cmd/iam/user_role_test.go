@@ -20,9 +20,6 @@ func workspaceBinding(id, roleName string) rbac.UserRoleResponse {
 	return rbac.UserRoleResponse{ID: id, Role: rbac.RoleNested{ID: id + "-role", Name: roleName}}
 }
 
-// Superuser first is not a preference. Deleting admin first would leave the
-// superuser binding standing over an account that no longer registers as an admin,
-// and an interruption there fails open.
 func TestPlannedRevocations(t *testing.T) {
 	contentType := 42
 	scopedAdmin := rbac.UserRoleResponse{ID: "scoped", Role: rbac.RoleNested{Name: rbac.RoleAdmin}, ContentType: &contentType}
@@ -48,9 +45,6 @@ func TestPlannedRevocations(t *testing.T) {
 			wantIDs:  []string{"su", "adm"},
 		},
 		{
-			// The regression that matters: a plain admin has the same binding list as a
-			// user whose cascade was interrupted, so treating this as a resume would
-			// strip administrator access from someone who was never a superuser.
 			name:     "a cascade plans nothing when the named binding is absent",
 			bindings: []rbac.UserRoleResponse{workspaceBinding("adm", rbac.RoleAdmin)},
 			roleName: rbac.RoleSuperuser,
@@ -103,8 +97,6 @@ func TestDescribeTargets(t *testing.T) {
 	}))
 }
 
-// The command an operator is sent to must perform what their editor edit asked for,
-// including the direction: setting a flag grants, clearing it revokes.
 func TestRoleCommandFor(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -124,9 +116,6 @@ func TestRoleCommandFor(t *testing.T) {
 	}
 }
 
-// One argument is the permission and the subject is the caller; two are the user
-// then the permission. A username cannot contain a colon, which is what makes the
-// one-argument form unambiguous.
 func TestSplitCanIArgs(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -149,8 +138,6 @@ func TestSplitCanIArgs(t *testing.T) {
 	}
 }
 
-// The commands must stay registered under 'alpacon user', because that is the only
-// place an operator looking for them will think to check.
 func TestUserSubcommandsAreRegistered(t *testing.T) {
 	for _, path := range [][]string{
 		{"role", "ls"},
@@ -168,11 +155,9 @@ func TestUserSubcommandsAreRegistered(t *testing.T) {
 	}
 }
 
-// Within 'alpacon user', --role means the group-membership tier and nothing else:
-// the RBAC role is always a positional. The walk covers every subcommand rather
-// than a list, so a leaf added later is held to the same rule. It cannot reach
-// RootCmd—cmd imports cmd/iam, not the other way round—so 'alpacon group member
-// add --role' is asserted here directly as the one intended holder of the name.
+// Within 'alpacon user' the RBAC role is always positional, so --role means only the
+// group-membership tier. The walk cannot start at RootCmd (cmd imports cmd/iam, not the
+// reverse), so GroupCmd's --role is asserted here as the one intended holder.
 func TestRoleFlagKeepsOneMeaning(t *testing.T) {
 	var walk func(cmd *cobra.Command)
 	walk = func(cmd *cobra.Command) {
@@ -189,9 +174,6 @@ func TestRoleFlagKeepsOneMeaning(t *testing.T) {
 	assert.NotNil(t, memberAdd.Flags().Lookup("role"), "group membership is where --role belongs")
 }
 
-// A permission carries a colon or a wildcard; a username carries neither. One rule
-// decides both argument forms, so the same string is accepted or refused wherever it
-// is typed—and a bare '*' stays a legal question.
 func TestLooksLikePermission(t *testing.T) {
 	tests := []struct {
 		arg  string
@@ -213,10 +195,6 @@ func TestLooksLikePermission(t *testing.T) {
 	}
 }
 
-// The warning judges the trimmed value, so the wire has to carry the trimmed value
-// too. A whitespace-only justification sent as-is would warn the operator that the
-// audit entry carries nothing while filling it with blanks, which also keeps the
-// server's own unjustified-grant warning quiet.
 func TestReasonFlagTrimsOnce(t *testing.T) {
 	tests := []struct {
 		name string
@@ -240,18 +218,11 @@ func TestReasonFlagTrimsOnce(t *testing.T) {
 	}
 }
 
-// statusOnlyError is a 403 carrying no error code, which is what the authority and
-// credential gates actually answer. utils.HTTPStatusCode walks the chain for this
-// interface, so a local type is enough to drive the rewrite.
 type statusOnlyError struct{ status int }
 
 func (e statusOnlyError) Error() string       { return "forbidden" }
 func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
-// The codeless 403 is the refusal an operator is most likely to hit, and the three
-// surfaces fail for three different reasons. Naming the wrong one sends them after a
-// fix that cannot work - re-running 'alpacon login' does not grant a superuser role,
-// and holding one does not make an Alpacon Cloud workspace accept an API token.
 func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 	bearer := &client.AlpaconClient{AccessToken: "bearer-token"}
 	apiToken := &client.AlpaconClient{Token: "alpat-token"}
@@ -275,8 +246,6 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantSaid: []string{"superuser role", "API token", "alpacon login"},
 		},
 		{
-			// One message per gate, so neither has to walk back what it just said: this
-			// one refuses the token outright and never mentions a scope.
 			name: "a role read with an api token never mentions a write privilege or a scope",
 			ac:   apiToken, gate: gateRoleRead,
 			wantSaid:    []string{"API token", "alpacon login"},
@@ -307,8 +276,6 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantNotSaid: []string{"superuser role", "alpacon login"},
 		},
 		{
-			// /permissions/ pins no scope, so telling the caller to get user:read would
-			// send a workspace admin after a permission they already hold.
 			name: "the permission introspection read does not name user:read",
 			ac:   apiToken, gate: gatePermissionIntrospect,
 			wantSaid:    []string{"wildcard", "superuser role", "without a USER argument"},
@@ -331,12 +298,10 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 	}
 }
 
-// A coded refusal is the server stating what it wants, so the gate must not change
-// the message - the code already carries the cause.
 func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 	ac := &client.AlpaconClient{Token: "alpat-token"}
-	// The server's own envelope, which is what ParseErrorResponse reads: a prefixed
-	// "code: X" is not parsed, because the prefix has to start its own segment.
+	// The JSON envelope: ParseErrorResponse reads "code: X" only when the prefix starts
+	// its own "; " segment, which a status-prefixed message never does.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 
 	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead, gatePermissionIntrospect} {
@@ -346,9 +311,6 @@ func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 	}
 }
 
-// Refusing a revoke the workspace has nothing to revoke would break this command's
-// own promise that revoking an unheld role succeeds. The invariant only bites when
-// there is a row to delete.
 func TestWouldStrandThePlatformFlags(t *testing.T) {
 	adminRow := workspaceBinding("adm", rbac.RoleAdmin)
 	superRow := workspaceBinding("su", rbac.RoleSuperuser)
@@ -397,12 +359,6 @@ func TestWouldStrandThePlatformFlags(t *testing.T) {
 	}
 }
 
-// The self form must address the IAM user routes by the "-" alias, not by the
-// caller's UUID. The alias is what makes UserViewSet.get_object skip the object
-// permission check, and that check is what refuses an operator their own
-// permissions: /permissions/ pins no scope so a UUID resolves to an orphan
-// 'user:permissions', and /effective-permissions/ pins user:read, which the baseline
-// member role does not carry.
 func TestResolveSubject(t *testing.T) {
 	const (
 		callerID = "11111111-1111-1111-1111-111111111111"

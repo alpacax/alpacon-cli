@@ -39,8 +39,7 @@ catalog' to see the names this workspace defines.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// The role is resolved first so a transposed command line is caught as such:
-		// resolving the user first would fail on the role name and never reach the hint.
+		// Role first: resolving the user first would fail before the transposed-argument hint fires.
 		role := resolveRoleForBinding(alpaconClient, "grant", args[0], args[1])
 		subj := resolveSubject(alpaconClient, args[:1])
 
@@ -80,8 +79,7 @@ catalog' to see the names this workspace defines.`,
 		if err = grant(); err != nil {
 			err = utils.HandleCommonErrors(err, "", mfa.WorkspaceErrorCallbacks(alpaconClient, grant))
 		}
-		// A duplicate means another writer got there first. The end state is the one
-		// asked for, so report it as reached rather than as a failure.
+		// A duplicate means another writer won the race; the asked-for end state holds.
 		if err != nil && !rbac.IsDuplicateBinding(err) {
 			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 		}
@@ -97,10 +95,8 @@ func init() {
 	userRoleGrantCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }
 
-// resolveRoleForBinding resolves the ROLE argument, and on failure checks whether
-// the two arguments were typed the other way round before giving up. Most CLIs in
-// this space put the role first, so 'grant admin john' is the mistake an operator
-// arriving from one of them makes.
+// On failure, check for transposed arguments first: most CLIs in this space put the role
+// before the user, so 'grant admin john' is the mistake an operator arrives with.
 func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg string) *rbac.RoleResponse {
 	role, err := rbac.ResolveRole(ac, roleArg)
 	if err == nil {
@@ -116,27 +112,22 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 	return nil
 }
 
-// reasonFlag reads --reason and trims it once, so the value the warning judges is the
-// value the server records. Sending a whitespace-only reason would fill the audit
-// entry with blanks while the server's own unjustified-grant warning stayed quiet,
-// which is worse than the honest omission the operator meant.
+// Trim once, so the value warnMissingReason judges is the value the server records.
 func reasonFlag(cmd *cobra.Command) string {
 	reason, _ := cmd.Flags().GetString("reason")
 
 	return strings.TrimSpace(reason)
 }
 
-// warnMissingReason says what an unjustified platform-tier change costs. The server
-// accepts a blank justification and records the omission; it does not refuse.
+// The server accepts a blank justification and records the omission, so warn, never refuse.
 func warnMissingReason(reason string) {
 	if reason == "" {
 		utils.CliWarning("No --reason given, so the audit entry for this change will carry no justification.")
 	}
 }
 
-// reportWorkspaceRoles re-reads the user's bindings and prints what they now hold.
-// A 2xx is not evidence on its own here: the superuser grant creates a second
-// binding the client never asked for, and the revoke path can leave one behind.
+// Re-read rather than trust the 2xx: a superuser grant creates a second binding the
+// client never asked for, and revoke can leave one behind.
 func reportWorkspaceRoles(ac *client.AlpaconClient, userID, userLabel string) {
 	bindings, err := rbac.GetUserBindings(ac, userID)
 	if err != nil {

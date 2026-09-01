@@ -44,8 +44,6 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// The role is resolved first so a transposed command line is caught as such:
-		// resolving the user first would fail on the role name and never reach the hint.
 		role := resolveRoleForBinding(alpaconClient, "revoke", args[0], args[1])
 		subj := resolveSubject(alpaconClient, args[:1])
 
@@ -53,15 +51,12 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			utils.CliErrorWithExit("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
 		}
 
-		// One read serves the invariant check, the target lookup and the cascade.
 		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
-		// Nothing-to-do outranks the invariant guard. A user holding superuser but no
-		// admin binding has nothing for 'revoke admin' to delete, so refusing there
-		// would break this command's own promise that revoking an unheld role succeeds.
+		// Nothing-to-do is checked before the invariant guard: revoking an unheld role must succeed.
 		targets := plannedRevocations(bindings, role.Name, cascade)
 		if len(targets) == 0 {
 			utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", subj.Label, role.Name)
@@ -88,9 +83,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 			}
 		}
 
-		// Superuser first. The reverse order would clear the admin binding while the
-		// superuser one still stands, which is the half-state this command exists to
-		// avoid, and an interruption there fails open rather than closed.
+		// Superuser first: the reverse order fails open, leaving superuser standing once admin is gone.
 		for index, target := range targets {
 			revoke := func() error {
 				return rbac.RevokeRole(alpaconClient, target.ID, reason)
@@ -125,15 +118,12 @@ func init() {
 	userRoleRevokeCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")
 }
 
-// plannedRevocations lists the bindings to delete, in the order to delete them.
+// plannedRevocations lists the bindings to delete, in delete order.
 //
-// The companion is planned only when the named binding was found. A user who holds
-// admin and never held superuser has the same binding list as one whose cascade was
-// interrupted after the first delete, so treating that state as a resume would let
-// 'revoke USER superuser --cascade' strip workspace administrator access from
-// someone who was never a superuser. Resuming stays available and stays explicit:
-// once the superuser binding is gone the invariant guard no longer applies, so
-// 'revoke USER admin' finishes the job.
+// The companion is planned only when the named binding was found: an admin-only user is
+// indistinguishable from a cascade interrupted after the first delete, so treating that
+// state as a resume would let 'revoke USER superuser --cascade' strip admin from someone
+// who was never a superuser. Resuming stays explicit via 'revoke USER admin'.
 func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, cascade bool) []rbac.UserRoleResponse {
 	target := rbac.FindWorkspaceBindingByName(bindings, roleName)
 	if target == nil {
@@ -150,14 +140,9 @@ func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, casca
 	return targets
 }
 
-// wouldStrandThePlatformFlags reports whether the planned revocation would delete a
-// row and leave the account's platform flags untouched.
-//
-// It is the admin-while-superuser case: the server accepts the delete, then re-forces
-// is_staff because is_superuser still stands, so both flags survive while the account
-// stops registering as an admin. It takes the planned targets rather than deciding
-// from the role name alone, because a revoke with nothing to delete is a no-op, not a
-// broken invariant.
+// The admin-while-superuser case: the server accepts the delete, then re-forces is_staff
+// because is_superuser still stands, so both platform flags survive while the account
+// stops registering as an admin.
 func wouldStrandThePlatformFlags(bindings []rbac.UserRoleResponse, roleName string, targets []rbac.UserRoleResponse) bool {
 	return roleName == rbac.RoleAdmin &&
 		len(targets) > 0 &&
