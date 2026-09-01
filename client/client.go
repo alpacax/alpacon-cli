@@ -441,6 +441,25 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
+// SendDeleteRequestWithBody sends a DELETE carrying a JSON body. Endpoints that
+// want a justification take it there rather than in a query parameter, so it stays
+// out of access logs, proxy logs and shell history. createRequest sets the content
+// type only for the methods that always carry a body, so this sets it here.
+func (ac *AlpaconClient) SendDeleteRequestWithBody(url string, body any) ([]byte, error) {
+	jsonValue, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := ac.createRequest(http.MethodDelete, url, bytes.NewBuffer(jsonValue))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	return ac.sendRequest(req)
+}
+
 func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
@@ -548,6 +567,15 @@ func (ac *AlpaconClient) accessToken() string {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
 	return ac.AccessToken
+}
+
+// IsBearerAuth reports whether requests carry an Auth0 bearer token rather than a
+// legacy API key. Some endpoints refuse the API key outright, and their refusal
+// arrives with no error code, so a caller rewriting that refusal has to know which
+// credential it sent. Reading the field directly would race the mid-flight renewal
+// in sendRequest.
+func (ac *AlpaconClient) IsBearerAuth() bool {
+	return ac.accessToken() != ""
 }
 
 // setAccessToken installs the token every later request carries.
