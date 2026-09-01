@@ -91,6 +91,19 @@ const (
 	// outcome is still open, 6 means it settled without the grant. Scripts and AI
 	// agents branch on it to stop retrying rather than keep re-requesting approval.
 	ExitCodeNotApproved = 6
+
+	// ExitCodePurposeRequired is the process exit code for a command the
+	// verification gate parked while it asks what the command is for (ADR 0052).
+	// It is deliberately not ExitCodePendingApproval (4): nothing is pending on a
+	// human, no approval request exists, and the next move belongs to the caller
+	// that submitted the command. Scripts and AI agents branch on it to answer
+	// with 'alpacon exec purpose' rather than to wait or to give up—and the
+	// window is about a minute, so waiting loses it.
+	ExitCodePurposeRequired = 7
+
+	// PurposeRequiredStatus is the stable machine-readable status string emitted
+	// under --output json when a command is parked awaiting its purpose.
+	PurposeRequiredStatus = "purpose_required"
 )
 
 type ErrorResponse struct {

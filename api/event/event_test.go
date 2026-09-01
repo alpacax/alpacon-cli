@@ -274,7 +274,7 @@ func TestSubmitCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "ses-abc")
+	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "ses-abc", "")
 	require.NoError(t, err)
 
 	hadKey, ws, _ := capture.snapshot()
@@ -289,7 +289,7 @@ func TestSubmitCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "")
+	_, err := SubmitCommand(ac, "server-x", "ls", "", "", nil, "", "")
 	require.NoError(t, err)
 
 	hadKey, _, _ := capture.snapshot()
@@ -755,7 +755,7 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "")
+	resp, err := SubmitCommand(ac, "server-x", "apt upgrade", "", "", nil, "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "job-abc-123", resp.ID)
 }
@@ -829,7 +829,7 @@ func TestSubmitCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := SubmitCommand(ac, "server-x", "id", "root", "", nil, "ses-abc")
+	_, err := SubmitCommand(ac, "server-x", "id", "root", "", nil, "ses-abc", "")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "denied by policy")
@@ -847,7 +847,7 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
@@ -950,7 +950,7 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", &bytes.Buffer{})
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
 	require.NoError(t, err)
 
 	mu.Lock()
@@ -1048,7 +1048,7 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1080,7 +1080,7 @@ func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1101,7 +1101,7 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1118,7 +1118,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
@@ -1154,7 +1154,7 @@ func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1223,7 +1223,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
@@ -1274,7 +1274,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
 }
@@ -1319,7 +1319,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
@@ -1364,7 +1364,7 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
 }
@@ -1514,7 +1514,7 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 
 	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
@@ -1592,7 +1592,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				runningPolls: 1,
 				terminal:     tt.terminal,
 			})
-			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 			tt.check(t, err)
 		})
 	}
@@ -1617,7 +1617,7 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1634,7 +1634,7 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", stdoutBuf)
+	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }

@@ -221,7 +221,7 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 	return eventList, nil
 }
 
-func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID string) (CommandResponse, error) {
+func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return CommandResponse{}, err
@@ -235,6 +235,11 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 		Server:      serverID,
 		RunAfter:    []string{},
 		WorkSession: workSessionID,
+		Purpose:     purpose,
+		// Declared on every submission, including --detach: the demand is
+		// reported to the caller the moment it is seen rather than waited out,
+		// so nothing here can be left stalling for an answer it cannot give.
+		PurposeDemandSupported: true,
 	}
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
@@ -248,6 +253,20 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 		return CommandResponse{}, fmt.Errorf("server returned empty command list")
 	}
 	return cmdResponse[0], nil
+}
+
+// AnswerPurposeDemand states what a parked command is for and sends it back
+// through verification (ADR 0052). The server re-judges it once with the purpose
+// in hand; whatever that second verdict is—run, hold for a human, or deny—is
+// reached by exactly the path an un-parked command takes.
+//
+// The server refuses a command that is not parked, and refuses an answer from
+// anyone but the requester, with the same error either way: whether a given
+// command is parked is not something a bystander needs to learn. So a failure
+// here cannot be read as "the deadline passed" specifically.
+func AnswerPurposeDemand(ac *client.AlpaconClient, cmdID, purpose string) error {
+	_, err := ac.SendPostRequest(utils.BuildURL(getEventURL, cmdID+"/purpose", nil), CommandPurposeRequest{Purpose: purpose})
+	return err
 }
 
 func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
@@ -371,19 +390,19 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 
 // RunCommandStreaming runs a command and streams its output to out over the
 // event WebSocket, falling back to polling (runCommandFallback) when WS setup fails.
-func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
-	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, out)
+func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	return runCommandStreamingWithWriter(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
-func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer) error {
+func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
 	listener := NewCommandOutputListener(ac)
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, out, listenerFailure(listener))
+		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, purpose, out, listenerFailure(listener))
 	}
 
-	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
+	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
 	if err != nil {
 		listener.Stop()
 		return err
@@ -626,6 +645,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 func errorFromDetails(d EventDetails) error {
 	// A switch case cannot call a predicate, so the two approval statuses are
 	// matched ahead of it—a server-side rename then lands in types.go alone.
+	if IsAwaitingPurposeStatus(d.Status) {
+		return &AwaitingPurposeError{CommandID: d.ID}
+	}
 	if IsAwaitingApprovalStatus(d.Status) {
 		return &PendingApprovalError{CommandID: d.ID}
 	}
@@ -661,8 +683,8 @@ func errorFromDetails(d EventDetails) error {
 }
 
 // runCommandFallback warns the user and delegates to the existing polling flow.
-func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID string, out io.Writer, cause error) error {
-	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID)
+func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer, cause error) error {
+	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
 	if err != nil {
 		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err

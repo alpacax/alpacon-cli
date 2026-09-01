@@ -1,12 +1,18 @@
 package exec
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// PurposeMaxLength is the server's ceiling on a stated purpose (ADR 0052).
+// Checked here so an over-long one is a usage error rather than a 400 that
+// costs a parked command its one demand.
+const PurposeMaxLength = 2000
 
 // RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
@@ -16,6 +22,9 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
+	// What this command is for (ADR 0052). Sent on submission, so the assessor
+	// judges with it on the first pass and no demand is issued.
+	Purpose string
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
 	// WebshInvocation, and exec leaves it empty, which the hint reads as exec.
@@ -44,6 +53,7 @@ type RemoteExecArgs struct {
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
+		purpose                                                  string
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
@@ -98,6 +108,19 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			workSessionID, i, errMsg = extractFlagValue(args, i, "--work-session")
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
+			}
+		case arg == "--purpose" || strings.HasPrefix(arg, "--purpose="):
+			var errMsg string
+			// No short form: pass the long name as sentinel to disable attached-value parsing.
+			purpose, i, errMsg = extractFlagValue(args, i, "--purpose")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			if strings.TrimSpace(purpose) == "" {
+				return RemoteExecArgs{Err: "--purpose requires a value describing what this command is for"}
+			}
+			if len(purpose) > PurposeMaxLength {
+				return RemoteExecArgs{Err: fmt.Sprintf("--purpose is limited to %d characters; the server refuses a longer one", PurposeMaxLength)}
 			}
 		case arg == "--output" || strings.HasPrefix(arg, "--output="):
 			var errMsg string
@@ -165,6 +188,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		OutputFormat:  outputFormat,
 		Server:        server,
 		Command:       ShellJoin(commandParts),
+		Purpose:       purpose,
 		Env:           env,
 		WaitApproval:  waitApproval,
 		Detach:        detach,

@@ -31,8 +31,9 @@ intended for the remote command (e.g., -U, -d) are not interpreted as alpacon fl
 
 All flags must be placed before the server name.
 
-Subcommand names (ls, logs) win over a server of the same name. To reach a server
-literally named 'ls' or 'logs', put -- before it: alpacon exec -- ls uptime
+Subcommand names (ls, logs, purpose) win over a server of the same name. To reach
+a server literally named 'ls', 'logs' or 'purpose', put -- before it:
+alpacon exec -- ls uptime
 
 Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
@@ -52,6 +53,14 @@ Flags:
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
+  --purpose "TEXT"              State what this command is for (max 2000 chars).
+                                The assessor judges the command with it in hand,
+                                so a command that would otherwise queue for a
+                                human may clear on its own. State a fact local to
+                                this host that the session description does not
+                                already imply; general knowledge adds nothing the
+                                assessor lacks, and a purpose cannot lower a
+                                command's intrinsic risk.
   --detach                      Submit the command and return immediately without
                                 waiting for completion. Prints the job ID to stdout.
                                 Use 'alpacon exec logs JOB_ID' to retrieve the result.
@@ -67,6 +76,12 @@ Exit code 4 indicates the sudo command is pending human approval (approve it in
 the Alpacon console, then re-run, or pass --wait to block—--wait-approval
 DURATION to block with a longer timeout); --output json emits
 {"status":"pending_approval", ...} on stdout.
+Exit code 7 indicates the verification gate held the command and is asking what
+it is for. Nobody has been notified and no approval request exists: answer with
+'alpacon exec purpose JOB_ID "..."' within about a minute, or pass --purpose up
+front and skip the demand. --wait does not apply—the answer is yours to give,
+not somebody else's to grant. --output json emits {"status":"purpose_required",
+...} on stdout, carrying the command id and what makes a purpose useful.
 The server rejects a command whose command line carries a credential—a
 -p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
 user:pass@host connection string—before it runs, with exit code 1. Pass the
@@ -96,7 +111,11 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec logs <JOB_ID>
 
   # Block up to 30 minutes for a reviewer to approve a sudo command
-  alpacon exec --wait-approval 30m root@prod-docker -- systemctl restart nginx`,
+  alpacon exec --wait-approval 30m root@prod-docker -- systemctl restart nginx
+
+  # State what the command is for, so it is judged with that in hand
+  alpacon exec --purpose 'chronyd drifted 40s; the renewed cert reads as future-dated' \
+    prod-web -- systemctl restart chronyd`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.
@@ -152,10 +171,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	env := parsed.Env
 
 	if parsed.Detach {
-		resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+		resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
 		if err != nil {
 			err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(alpaconClient, func() error {
-				resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID)
+				resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
 				return err
 			}))
 		}
@@ -188,8 +207,14 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		out = buf
 	}
 
-	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.WaitTimeout(), out)
+	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+	// A command parked for its purpose is reported first: it has no approval
+	// request yet, so the pending-approval path below would name a queue it is
+	// not in (ADR 0052).
+	if HandlePurposeDemand(err) {
+		return
+	}
 	// A sudo command left pending human approval, not waited on, emits a
 	// machine-readable pending signal and exits before the normal result
 	// handling treats the denial as a plain failure.
