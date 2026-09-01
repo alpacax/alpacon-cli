@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -379,7 +380,7 @@ func TestResolveSubject(t *testing.T) {
 	}{
 		{"no argument addresses the caller by alias", nil, "-", callerID, "root"},
 		{"a username resolves to its uuid", []string{"john"}, otherID, otherID, "john"},
-		{"a uuid is taken as given", []string{otherID}, otherID, otherID, otherID},
+		{"a canonical uuid passes through unchanged", []string{otherID}, otherID, otherID, otherID},
 	}
 
 	for _, tt := range tests {
@@ -429,4 +430,32 @@ func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 
 	assert.NotContains(t, got.Error(), "forbidden", "the raw refusal must not pad the operator's line")
 	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(got))
+
+	// The code has to survive too: ParseErrorResponse walks the chain, and a rewrite
+	// that swallowed it would take the MFA and duplicate routing with it.
+	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
+	code, _ := utils.ParseErrorResponse(describeRBACError(ac, gateRoleWrite, coded))
+	assert.Equal(t, codeSuperuserLastRemoval, code)
+}
+
+// A non-canonical UUID matches nothing on the audit log's varchar filter, and an empty
+// audit read is indistinguishable from an account nobody ever touched.
+func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
+	const canonical = "2222222a-2222-2222-2222-22222222222b"
+
+	for _, typed := range []string{
+		canonical,
+		"2222222A-2222-2222-2222-22222222222B",
+		"2222222a222222222222222222222 22b",
+	} {
+		typed := strings.ReplaceAll(typed, " ", "")
+		t.Run(typed, func(t *testing.T) {
+			require.True(t, utils.IsUUID(typed), "the fast path only fires for what IsUUID accepts: %q", typed)
+
+			got := resolveSubject(nil, []string{typed})
+			assert.Equal(t, canonical, got.PK)
+			assert.Equal(t, canonical, got.ID)
+			assert.Equal(t, typed, got.Label, "the label echoes what the operator typed")
+		})
+	}
 }
