@@ -13,7 +13,7 @@ var ErrChecksumMismatch = errors.New("checksum mismatch")
 
 func ParseChecksums(data []byte) map[string]string { // Each line is "<sha256>  <file name>", the shape goreleaser writes.
 	sums := make(map[string]string)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
 			continue

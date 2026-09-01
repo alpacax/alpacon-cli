@@ -12,23 +12,23 @@ import (
 
 func TestClassifyPath(t *testing.T) {
 	tests := []struct {
-		name         string
-		realPath     string
-		packageOwner string
-		want         InstallKind
+		name           string
+		executablePath string
+		packageOwner   string
+		want           InstallKind
 	}{
-		{name: "homebrew cellar", realPath: "/opt/homebrew/Cellar/alpacon-cli/1.4.0/bin/alpacon", packageOwner: "", want: InstallHomebrew},
-		{name: "intel homebrew cellar", realPath: "/usr/local/Cellar/alpacon-cli/1.4.0/bin/alpacon", packageOwner: "", want: InstallHomebrew},
-		{name: "mise shim", realPath: "/home/dev/.local/share/mise/installs/alpacon/1.4.0/alpacon", packageOwner: "", want: InstallVersionManager},
-		{name: "asdf install", realPath: "/home/dev/.asdf/installs/alpacon/1.4.0/bin/alpacon", packageOwner: "", want: InstallVersionManager},
-		{name: "owned by a deb package", realPath: "/usr/local/bin/alpacon", packageOwner: "deb:alpacon", want: InstallDeb},
-		{name: "owned by an rpm package", realPath: "/usr/local/bin/alpacon", packageOwner: "rpm:alpacon", want: InstallRPM},
-		{name: "same path with no owner is manual", realPath: "/usr/local/bin/alpacon", packageOwner: "", want: InstallManual},
-		{name: "home directory install is manual", realPath: "/home/dev/.local/bin/alpacon", packageOwner: "", want: InstallManual},
+		{name: "homebrew cellar", executablePath: "/opt/homebrew/Cellar/alpacon-cli/1.4.0/bin/alpacon", packageOwner: "", want: InstallHomebrew},
+		{name: "intel homebrew cellar", executablePath: "/usr/local/Cellar/alpacon-cli/1.4.0/bin/alpacon", packageOwner: "", want: InstallHomebrew},
+		{name: "mise shim", executablePath: "/home/dev/.local/share/mise/installs/alpacon/1.4.0/alpacon", packageOwner: "", want: InstallVersionManager},
+		{name: "asdf install", executablePath: "/home/dev/.asdf/installs/alpacon/1.4.0/bin/alpacon", packageOwner: "", want: InstallVersionManager},
+		{name: "owned by a deb package", executablePath: "/usr/local/bin/alpacon", packageOwner: "deb:alpacon", want: InstallDeb},
+		{name: "owned by an rpm package", executablePath: "/usr/local/bin/alpacon", packageOwner: "rpm:alpacon", want: InstallRPM},
+		{name: "same path with no owner is manual", executablePath: "/usr/local/bin/alpacon", packageOwner: "", want: InstallManual},
+		{name: "home directory install is manual", executablePath: "/home/dev/.local/bin/alpacon", packageOwner: "", want: InstallManual},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, ClassifyPath(tt.realPath, tt.packageOwner))
+			assert.Equal(t, tt.want, ClassifyPath(tt.executablePath, tt.packageOwner))
 		})
 	}
 }

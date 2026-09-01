@@ -82,7 +82,7 @@ func TestAssetNamesStillMatchTheGoreleaserTemplates(t *testing.T) {
 func goreleaserSection(config, key string) []string {
 	var lines []string
 	inside := false
-	for _, raw := range strings.Split(config, "\n") {
+	for raw := range strings.SplitSeq(config, "\n") {
 		line := strings.TrimRight(raw, "\r")
 		trimmed := strings.TrimSpace(line)
 		switch {

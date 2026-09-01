@@ -13,8 +13,9 @@ import (
 
 var maxReleaseFileSize int64 = 512 << 20 // Nothing in a release comes near it—it stops a malformed or endless stream, not anything real.
 
-// maxReleaseFileSize bounds the entry written and the archive downloaded, not
-// the bytes gzip inflates while the scan looks for that entry.
+// maxArchiveStreamSize bounds what gzip inflates while the scan looks for its
+// entry. maxReleaseFileSize bounds only the entry written and the archive
+// downloaded, neither of which counts decompressed bytes.
 var maxArchiveStreamSize int64 = 1 << 30
 
 func ExtractBinary(archivePath, binaryName, destDir string) (string, error) {
@@ -56,7 +57,7 @@ func extractFromTarGz(archivePath, binaryName, destPath string) error {
 		}
 		return writeExtracted(destPath, reader)
 	}
-	return fmt.Errorf("archive %s carries no entry named %s", filepath.Base(archivePath), binaryName)
+	return errNoSuchEntry(archivePath, binaryName)
 }
 
 func extractFromZip(archivePath, binaryName, destPath string) error {
@@ -78,6 +79,10 @@ func extractFromZip(archivePath, binaryName, destPath string) error {
 		_ = opened.Close()
 		return writeErr
 	}
+	return errNoSuchEntry(archivePath, binaryName)
+}
+
+func errNoSuchEntry(archivePath, binaryName string) error {
 	return fmt.Errorf("archive %s carries no entry named %s", filepath.Base(archivePath), binaryName)
 }
 
@@ -86,13 +91,12 @@ func writeExtracted(destPath string, src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(out, io.LimitReader(src, maxReleaseFileSize+1))
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
+	overLimit, err := writeBounded(out, src, maxReleaseFileSize)
+	if err != nil {
+		return err
 	}
-	if written > maxReleaseFileSize {
+	if overLimit {
 		return fmt.Errorf("archive entry %s exceeds %d bytes", filepath.Base(destPath), maxReleaseFileSize)
 	}
-	return closeErr
+	return nil
 }

@@ -13,6 +13,14 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
+// maxReleaseMetadataSize bounds the release JSON, which is a page of text even
+// for a release carrying every platform's asset.
+const maxReleaseMetadataSize = 1 << 20
+
+// releaseMetadataTimeout is what 'alpacon version' already waited: one small
+// JSON fetch, on a client that never sees the archive download.
+const releaseMetadataTimeout = 5 * time.Second
+
 // DefaultReleaseAPIURL is a var so a test can point a real alpacon process at a
 // stub. Exit code 8 is only observable in a process that actually exits, and a
 // child process cannot be handed a different endpoint any other way.
@@ -44,7 +52,7 @@ type githubRelease struct {
 }
 
 func LatestRelease(apiURL string) (*Release, error) {
-	client := newHTTPClient(5 * time.Second) // Five seconds is what 'alpacon version' already waited: one small JSON fetch, on a client that never sees the archive download.
+	client := newHTTPClient(releaseMetadataTimeout)
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -63,7 +71,7 @@ func LatestRelease(apiURL string) (*Release, error) {
 	}
 
 	var raw githubRelease
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&raw); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseMetadataSize)).Decode(&raw); err != nil {
 		return nil, err
 	}
 

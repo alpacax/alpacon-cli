@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -778,28 +777,10 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 	home := t.TempDir()
 	writeLoginCommandTestConfig(t, home)
 
-	helperArgs := append(
-		[]string{"-test.run=^TestLoginCommandHelperProcess$", "--", "login-helper"},
-		args...,
-	)
-	helper := osexec.Command(os.Args[0], helperArgs...)
-	helper.Env = append(os.Environ(),
+	return runHelperProcess(t, "TestLoginCommandHelperProcess", "login-helper", args,
 		"GO_WANT_LOGIN_HELPER=1",
 		homeEnvVar()+"="+home,
 	)
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	helper.Stdout = &stdoutBuf
-	helper.Stderr = &stderrBuf
-
-	err := helper.Run()
-	exitCode = 0
-	if err != nil {
-		var exitErr *osexec.ExitError
-		require.ErrorAs(t, err, &exitErr)
-		exitCode = exitErr.ExitCode()
-	}
-	return stdoutBuf.String(), stderrBuf.String(), exitCode
 }
 
 func TestLoginCommandHelperProcess(t *testing.T) {

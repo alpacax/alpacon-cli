@@ -58,10 +58,8 @@ func TestAcquireLockGivesAnUnheldLockToExactlyOneClaimant(t *testing.T) {
 	var held sync.Mutex
 	var locks []*Lock
 	start.Add(1)
-	for i := 0; i < claimants; i++ {
-		done.Add(1)
-		go func() {
-			defer done.Done()
+	for range claimants {
+		done.Go(func() {
 			start.Wait()
 			lock, err := AcquireLock(path)
 			if err != nil {
@@ -70,7 +68,7 @@ func TestAcquireLockGivesAnUnheldLockToExactlyOneClaimant(t *testing.T) {
 			held.Lock()
 			locks = append(locks, lock)
 			held.Unlock()
-		}()
+		})
 	}
 	start.Done()
 	done.Wait()

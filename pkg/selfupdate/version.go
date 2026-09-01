@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"cmp"
 	"strconv"
 	"strings"
 
@@ -60,12 +61,12 @@ func compareVersions(a, b string) int {
 func comparePrerelease(a, b string) int { // Lexically, rc10 sorts below rc2, so an rc series would stop advancing at its tenth build.
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
-	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+	for i := range min(len(aParts), len(bParts)) {
 		if order := compareIdentifier(aParts[i], bParts[i]); order != 0 {
 			return order
 		}
 	}
-	return compareInt(len(aParts), len(bParts))
+	return cmp.Compare(len(aParts), len(bParts))
 }
 
 func compareIdentifier(a, b string) int {
@@ -74,7 +75,7 @@ func compareIdentifier(a, b string) int {
 	if order := strings.Compare(aText, bText); order != 0 {
 		return order
 	}
-	return compareInt(aNumber, bNumber)
+	return cmp.Compare(aNumber, bNumber)
 }
 
 func splitTrailingNumber(identifier string) (string, int) {
@@ -89,21 +90,11 @@ func splitTrailingNumber(identifier string) (string, int) {
 	return identifier[:digits], number
 }
 
-func compareInt(a, b int) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
-}
-
 func compareCore(a, b string) int {
 	aParts := strings.Split(a, ".")
 	bParts := strings.Split(b, ".")
-	for i := 0; i < len(aParts) || i < len(bParts); i++ {
-		if order := compareInt(numberAt(aParts, i), numberAt(bParts, i)); order != 0 {
+	for i := range max(len(aParts), len(bParts)) {
+		if order := cmp.Compare(numberAt(aParts, i), numberAt(bParts, i)); order != 0 {
 			return order
 		}
 	}
