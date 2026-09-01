@@ -785,7 +785,7 @@ func runLoginCommandHelper(t *testing.T, args []string) (stdout, stderr string, 
 	helper := osexec.Command(os.Args[0], helperArgs...)
 	helper.Env = append(os.Environ(),
 		"GO_WANT_LOGIN_HELPER=1",
-		"HOME="+home,
+		homeEnvVar()+"="+home,
 	)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -806,7 +806,7 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_LOGIN_HELPER") != "1" {
 		return
 	}
-	args, ok := loginCommandHelperArgs(os.Args)
+	args, ok := helperArgsAfter(os.Args, "login-helper")
 	if !ok {
 		os.Exit(2)
 	}
@@ -815,15 +815,6 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
-}
-
-func loginCommandHelperArgs(args []string) ([]string, bool) {
-	for i := 0; i < len(args); i++ {
-		if args[i] == "login-helper" {
-			return args[i+1:], true
-		}
-	}
-	return nil, false
 }
 
 func writeLoginCommandTestConfig(t *testing.T, home string) {
