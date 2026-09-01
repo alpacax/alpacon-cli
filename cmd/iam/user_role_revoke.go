@@ -16,17 +16,19 @@ var userRoleRevokeCmd = &cobra.Command{
 	Short: "Revoke a workspace role from a user",
 	Long: `Remove a user's workspace-wide binding to an RBAC role.
 
+Revoking a role the user does not hold changes nothing and succeeds, and that
+outranks everything below: a revoke with no binding to delete is never refused.
+
 Revoking 'superuser' demotes the user to admin: the companion 'admin' binding the
 superuser grant created stays, and so does workspace administrator access. Pass
 --cascade to remove both, superuser first, which is the order that never leaves a
-half-demoted account holding more than it should.
+half-demoted account holding more than it should. With no superuser binding to
+start from, --cascade revokes nothing rather than reaching for the companion.
 
-Revoking 'admin' from someone who still holds 'superuser' is refused before
-anything is sent. The server would accept it and delete the binding, but the
-account would keep every platform flag while no longer registering as an admin.
-Revoke 'superuser' first, or pass --cascade to that command.
-
-Revoking a role the user does not hold changes nothing and succeeds.`,
+Revoking an 'admin' binding from someone who still holds 'superuser' is refused
+before anything is sent. The server would accept it and delete the binding, but
+the account would keep every platform flag while no longer registering as an
+admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 	Example: `  alpacon user role revoke john operator
   alpacon user role revoke john superuser --cascade --reason "rotated off on-call"
   alpacon user role revoke john admin --dry-run`,
@@ -117,7 +119,7 @@ Revoking a role the user does not hold changes nothing and succeeds.`,
 }
 
 func init() {
-	userRoleRevokeCmd.Flags().Bool("cascade", false, "For superuser: also revoke the companion admin binding, superuser first. Ignored if the user holds no superuser binding")
+	userRoleRevokeCmd.Flags().Bool("cascade", false, "For superuser: also revoke the companion admin binding, superuser first. Nothing is revoked if the user holds no superuser binding")
 	userRoleRevokeCmd.Flags().String("reason", "", "Justification recorded on the change, readable with 'alpacon user role history'")
 	userRoleRevokeCmd.Flags().Bool("dry-run", false, "Print what would be deleted and exit without writing")
 	userRoleRevokeCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt")

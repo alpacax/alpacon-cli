@@ -22,9 +22,10 @@ admin or a superuser. Object-scoped bindings such as server:owner appear in
 
 Granting 'superuser' also creates a companion 'admin' binding. Revoking
 'superuser' leaves that companion in place—pass --cascade to remove both,
-superuser first. Revoking 'admin' from someone who still holds 'superuser' is
-refused before anything is sent: it would delete the binding and leave both
-platform flags set.
+superuser first. Revoking an 'admin' binding from someone who still holds
+'superuser' is refused before anything is sent: it would delete the binding and
+leave both platform flags set. Revoking a role a user does not hold is never
+refused—it reports nothing to do.
 
 These are not group membership roles. 'alpacon group member add --role' sets a
 member's tier within a group (owner, manager, member), a different axis from a

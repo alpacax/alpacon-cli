@@ -9,7 +9,7 @@ import (
 
 var userRoleHistoryCmd = &cobra.Command{
 	Use:   "history [USER]",
-	Short: "Show the role grants and revocations recorded for a user",
+	Short: "Show who changed a user's roles, and why",
 	Long: `Show the RBAC role changes recorded against a user, newest first.
 
 This is where the justification passed to --reason and the identity of whoever
