@@ -63,7 +63,7 @@ cmd/                 # Cobra command definitions
 api/                 # API client functions per domain
 client/              # HTTP client wrapper for Alpacon API
 config/              # Configuration management (credentials, workspace)
-pkg/                 # Internal packages (cert, tunnel)
+pkg/                 # Internal packages (cert, selfupdate, tunnel)
 utils/               # Shared utilities (output, prompts, errors, SSH parsing)
 ```
 
@@ -193,5 +193,5 @@ _ = json.NewEncoder(w).Encode(resp)
 - **Config file**: `~/.alpacon/config.json` (dir `0700`, file `0600`). `saveConfig` writes a sibling temp file and renames it over the target—two alpacon processes can be saving a renewed access token at the same moment, and a plain truncate-and-write leaves a config the next command cannot parse. Any new writer must go through `saveConfig`
 - **Alias**: `alpacon` can also be invoked as `ac`
 - **File transfer**: The `cp` command lives in `cmd/ftp/` (package name `ftp`)
-- **Exit codes**: `0` success, `1` general error, `2` usage error (only `work-session`, `event wait`/`watch`, and `utils.RequirePositiveInt`; every other command's own validation and Cobra parse errors still exit `1`), `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted, `7` purpose required—an agent's command held while the gate asks what it is for, answerable by the caller rather than by an approver (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
+- **Exit codes**: `0` success, `1` general error, `2` usage error (only `work-session`, `event wait`/`watch`, and `utils.RequirePositiveInt`; every other command's own validation and Cobra parse errors still exit `1`), `3` WorkSession gate denied, `4` pending approval with the outcome still open, `5` server busy, `6` approval not granted, `7` purpose required—an agent's command held while the gate asks what it is for, answerable by the caller rather than by an approver, `8` a newer release exists (only `alpacon update --check`) (constants in `utils/error.go`). Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit codes".
 - **IAM**: `user` and `group` commands both live in `cmd/iam/`
