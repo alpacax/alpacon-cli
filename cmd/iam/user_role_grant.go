@@ -42,22 +42,22 @@ catalog' to see the names this workspace defines.`,
 		// The role is resolved first so a transposed command line is caught as such:
 		// resolving the user first would fail on the role name and never reach the hint.
 		role := resolveRoleForBinding(alpaconClient, "grant", args[0], args[1])
-		userID, userLabel := resolveSubject(alpaconClient, args[:1])
+		subj := resolveSubject(alpaconClient, args[:1])
 
-		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
+		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, gateRoleRead, err))
+			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		if rbac.FindWorkspaceBinding(bindings, role.ID) != nil {
-			utils.CliInfo("%s already holds %s workspace-wide. Nothing to do.", userLabel, role.Name)
+			utils.CliInfo("%s already holds %s workspace-wide. Nothing to do.", subj.Label, role.Name)
 			return
 		}
 
-		request := rbac.BindingCreateRequest{User: userID, Role: role.ID, Reason: reason}
+		request := rbac.BindingCreateRequest{User: subj.ID, Role: role.ID, Reason: reason}
 
 		if dryRun {
-			utils.CliInfo("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, userLabel, userID, role.ID)
+			utils.CliInfo("Would grant %s to %s (user %s, role %s), workspace-wide.", role.Name, subj.Label, subj.ID, role.ID)
 			return
 		}
 
@@ -65,9 +65,9 @@ catalog' to see the names this workspace defines.`,
 			warnMissingReason(reason)
 			if !yes {
 				if role.Name == rbac.RoleSuperuser {
-					utils.ConfirmAction("Grant %s the superuser role? The server also creates a companion workspace-wide admin binding.", userLabel)
+					utils.ConfirmAction("Grant %s the superuser role? The server also creates a companion workspace-wide admin binding.", subj.Label)
 				} else {
-					utils.ConfirmAction("Grant %s the %s role?", userLabel, role.Name)
+					utils.ConfirmAction("Grant %s the %s role?", subj.Label, role.Name)
 				}
 			}
 		}
@@ -83,11 +83,11 @@ catalog' to see the names this workspace defines.`,
 		// A duplicate means another writer got there first. The end state is the one
 		// asked for, so report it as reached rather than as a failure.
 		if err != nil && !rbac.IsDuplicateBinding(err) {
-			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, userLabel, describeRBACError(alpaconClient, gateRoleWrite, err))
+			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 		}
 
-		utils.CliSuccess("Granted %s to %s.", role.Name, userLabel)
-		reportWorkspaceRoles(alpaconClient, userID, userLabel)
+		utils.CliSuccess("Granted %s to %s.", role.Name, subj.Label)
+		reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
 	},
 }
 

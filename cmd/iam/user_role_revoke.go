@@ -47,16 +47,16 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 		// The role is resolved first so a transposed command line is caught as such:
 		// resolving the user first would fail on the role name and never reach the hint.
 		role := resolveRoleForBinding(alpaconClient, "revoke", args[0], args[1])
-		userID, userLabel := resolveSubject(alpaconClient, args[:1])
+		subj := resolveSubject(alpaconClient, args[:1])
 
 		if cascade && role.Name != rbac.RoleSuperuser {
 			utils.CliErrorWithExit("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
 		}
 
 		// One read serves the invariant check, the target lookup and the cascade.
-		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
+		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, gateRoleRead, err))
+			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", subj.Label, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		// Nothing-to-do outranks the invariant guard. A user holding superuser but no
@@ -64,19 +64,19 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 		// would break this command's own promise that revoking an unheld role succeeds.
 		targets := plannedRevocations(bindings, role.Name, cascade)
 		if len(targets) == 0 {
-			utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", userLabel, role.Name)
+			utils.CliInfo("%s does not hold %s workspace-wide. Nothing to do.", subj.Label, role.Name)
 			return
 		}
 
 		if wouldStrandThePlatformFlags(bindings, role.Name, targets) {
 			next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s superuser --cascade", args[0])}
 			utils.CliErrorWithExit("%s still holds the superuser role, and superuser implies admin. Revoking admin alone would delete the binding and leave every platform flag set. Revoke superuser first: %s",
-				userLabel, next.PlainText())
+				subj.Label, next.PlainText())
 		}
 
 		if dryRun {
 			for _, target := range targets {
-				utils.CliInfo("Would revoke %s from %s (binding %s).", target.Role.Name, userLabel, target.ID)
+				utils.CliInfo("Would revoke %s from %s (binding %s).", target.Role.Name, subj.Label, target.ID)
 			}
 			return
 		}
@@ -84,7 +84,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 		if rbac.IsPlatformTier(role.Name) {
 			warnMissingReason(reason)
 			if !yes {
-				utils.ConfirmAction("Revoke %s from %s?", describeTargets(targets), userLabel)
+				utils.ConfirmAction("Revoke %s from %s?", describeTargets(targets), subj.Label)
 			}
 		}
 
@@ -105,16 +105,16 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 					utils.CliWarning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)
 					utils.CliInfo("To finish: %s", resume.PlainText())
 				}
-				utils.CliErrorWithExit("Failed to revoke %s from %s: %s.", target.Role.Name, userLabel, describeRBACError(alpaconClient, gateRoleWrite, err))
+				utils.CliErrorWithExit("Failed to revoke %s from %s: %s.", target.Role.Name, subj.Label, describeRBACError(alpaconClient, gateRoleWrite, err))
 			}
 		}
 
-		utils.CliSuccess("Revoked %s from %s.", describeTargets(targets), userLabel)
+		utils.CliSuccess("Revoked %s from %s.", describeTargets(targets), subj.Label)
 		if role.Name == rbac.RoleSuperuser && !cascade && rbac.HoldsWorkspaceRole(bindings, rbac.RoleAdmin) {
 			next := utils.NextAction{Command: fmt.Sprintf("alpacon user role revoke %s admin", args[0])}
-			utils.CliInfo("The companion admin binding remains, so %s is still a workspace administrator. To remove it too: %s", userLabel, next.PlainText())
+			utils.CliInfo("The companion admin binding remains, so %s is still a workspace administrator. To remove it too: %s", subj.Label, next.PlainText())
 		}
-		reportWorkspaceRoles(alpaconClient, userID, userLabel)
+		reportWorkspaceRoles(alpaconClient, subj.ID, subj.Label)
 	},
 }
 

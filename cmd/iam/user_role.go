@@ -9,6 +9,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// selfUserPK is the alias the IAM user routes take in place of a UUID to mean the
+// requesting user. See the subject type for why the distinction matters.
+const selfUserPK = "-"
+
 var userRoleCmd = &cobra.Command{
 	Use:   "role",
 	Short: "Manage the workspace roles a user holds",
@@ -54,6 +58,25 @@ role_audit_log:read scope, on either deployment.`,
 	},
 }
 
+// subject is who a command is acting on.
+//
+// PK and ID differ for the self form on purpose. The IAM user routes take "-" as
+// "me", and UserViewSet.get_object short-circuits on it and returns the request user
+// without running the object permission check. That check is the only thing standing
+// between an operator and their own permissions: /api/iam/users/{id}/permissions/
+// pins no scope of its own, so addressing it by UUID auto-resolves to an orphan
+// 'user:permissions' that nothing short of the superuser wildcard grants, and
+// /effective-permissions/ pins 'user:read', which the baseline member role does not
+// carry. Addressed by UUID, both refuse a caller reading their own account.
+//
+// ID is the resolved UUID, for the endpoints that take the user in a query filter or
+// a request body, where "-" is not a value the server accepts.
+type subject struct {
+	PK    string
+	ID    string
+	Label string
+}
+
 func init() {
 	userRoleCmd.AddCommand(userRoleListCmd)
 	userRoleCmd.AddCommand(userRoleCatalogCmd)
@@ -63,21 +86,21 @@ func init() {
 	userRoleCmd.AddCommand(userRoleHistoryCmd)
 }
 
-// resolveSubject turns an optional USER argument into a user id and the label to
-// print alongside it. With no argument the subject is the caller, so 'alpacon user
-// role ls' answers "what do I hold" without the operator knowing their own
-// username—the same shape 'kubectl auth can-i' takes.
-func resolveSubject(ac *client.AlpaconClient, args []string) (string, string) {
+// resolveSubject turns an optional USER argument into the subject to act on. With no
+// argument the subject is the caller, so 'alpacon user role ls' answers "what do I
+// hold" without the operator knowing their own username—the same shape 'kubectl auth
+// can-i' takes.
+func resolveSubject(ac *client.AlpaconClient, args []string) subject {
 	if len(args) == 0 {
 		current, err := iam.GetCurrentUser(ac)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to identify the current user: %s.", err)
 		}
-		return current.ID, current.Username
+		return subject{PK: selfUserPK, ID: current.ID, Label: current.Username}
 	}
 
 	if utils.IsUUID(args[0]) {
-		return args[0], args[0]
+		return subject{PK: args[0], ID: args[0], Label: args[0]}
 	}
 
 	userID, err := iam.GetUserIDByName(ac, args[0])
@@ -85,5 +108,5 @@ func resolveSubject(ac *client.AlpaconClient, args []string) (string, string) {
 		utils.CliErrorWithExit("Failed to resolve the user %q: %s.", args[0], err)
 	}
 
-	return userID, args[0]
+	return subject{PK: userID, ID: userID, Label: args[0]}
 }

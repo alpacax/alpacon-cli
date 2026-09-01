@@ -37,9 +37,9 @@ scope.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		userID, _ := resolveSubject(alpaconClient, args)
+		subj := resolveSubject(alpaconClient, args)
 
-		entries, err := rbac.GetRoleHistory(alpaconClient, userID, tail)
+		entries, err := rbac.GetRoleHistory(alpaconClient, subj.ID, tail)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateAuditRead, err))
 		}

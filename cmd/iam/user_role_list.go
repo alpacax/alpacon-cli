@@ -30,9 +30,9 @@ narrows the answer to your own rather than refusing, so an empty table can mean
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		userID, _ := resolveSubject(alpaconClient, args)
+		subj := resolveSubject(alpaconClient, args)
 
-		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
+		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}

@@ -36,9 +36,16 @@ const (
 	// missing the role_audit_log:read scope - the opposite failure from gateRoleRead,
 	// which is why it cannot share that message.
 	gateAuditRead
-	// gateUserRead is an introspection read hosted on /api/iam/users/. API tokens are
-	// accepted there; reading another account needs user:read on it.
+	// gateUserRead is /api/iam/users/{id}/effective-permissions/, which pins user:read
+	// through RBACPermission's required_permission escape. API tokens are accepted on
+	// the IAM user routes, so a refusal here is about the permission, not the credential.
 	gateUserRead
+	// gatePermissionIntrospect is /api/iam/users/{id}/permissions/, which pins no scope
+	// of its own. Addressed by UUID it auto-resolves to an orphan 'user:permissions'
+	// that no role or preset grants, so only the superuser wildcard satisfies it — a
+	// workspace admin is refused a cross-account read. Self-reads go through the "-"
+	// alias instead and never reach the check (see the subject type).
+	gatePermissionIntrospect
 )
 
 // rbacGate names which gate a refused request went through.
@@ -83,7 +90,9 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	if utils.HTTPStatusCode(err) == http.StatusForbidden && code == "" {
 		switch {
 		case gate == gateUserRead:
-			return errors.New("reading another account's permissions requires the user:read permission on that account; your own are always readable")
+			return errors.New("reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
+		case gate == gatePermissionIntrospect:
+			return errors.New("this endpoint pins no permission of its own, so a cross-account read of it is satisfied only by a wildcard grant—in practice the superuser role. Your own permissions are always readable; run the command without a USER argument")
 		case gate == gateAuditRead && !ac.IsBearerAuth():
 			return errors.New("this API token is missing the role_audit_log:read scope, which the role history requires. Widen the token's scopes, or run 'alpacon login' to read it through a browser session instead")
 		case gate == gateAuditRead:

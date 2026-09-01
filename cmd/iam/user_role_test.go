@@ -1,10 +1,13 @@
 package iam
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
@@ -298,10 +301,18 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 			wantNotSaid: []string{"superuser role", "alpacon login"},
 		},
 		{
-			name: "an iam-hosted read names user:read, whatever the credential",
+			name: "the effective-permissions read names user:read, whatever the credential",
 			ac:   apiToken, gate: gateUserRead,
 			wantSaid:    []string{"user:read"},
 			wantNotSaid: []string{"superuser role", "alpacon login"},
+		},
+		{
+			// /permissions/ pins no scope, so telling the caller to get user:read would
+			// send a workspace admin after a permission they already hold.
+			name: "the permission introspection read does not name user:read",
+			ac:   apiToken, gate: gatePermissionIntrospect,
+			wantSaid:    []string{"wildcard", "superuser role", "without a USER argument"},
+			wantNotSaid: []string{"user:read", "alpacon login"},
 		},
 	}
 
@@ -328,7 +339,7 @@ func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 	// "code: X" is not parsed, because the prefix has to start its own segment.
 	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
 
-	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead} {
+	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead, gatePermissionIntrospect} {
 		got := describeRBACError(ac, gate, coded)
 		require.Error(t, got)
 		assert.Contains(t, got.Error(), "last superuser")
@@ -382,6 +393,53 @@ func TestWouldStrandThePlatformFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, wouldStrandThePlatformFlags(tt.bindings, tt.roleName, tt.targets))
+		})
+	}
+}
+
+// The self form must address the IAM user routes by the "-" alias, not by the
+// caller's UUID. The alias is what makes UserViewSet.get_object skip the object
+// permission check, and that check is what refuses an operator their own
+// permissions: /permissions/ pins no scope so a UUID resolves to an orphan
+// 'user:permissions', and /effective-permissions/ pins user:read, which the baseline
+// member role does not carry.
+func TestResolveSubject(t *testing.T) {
+	const (
+		callerID = "11111111-1111-1111-1111-111111111111"
+		otherID  = "33333333-3333-3333-3333-333333333333"
+	)
+
+	tests := []struct {
+		name      string
+		args      []string
+		wantPK    string
+		wantID    string
+		wantLabel string
+	}{
+		{"no argument addresses the caller by alias", nil, "-", callerID, "root"},
+		{"a username resolves to its uuid", []string{"john"}, otherID, otherID, "john"},
+		{"a uuid is taken as given", []string{otherID}, otherID, otherID, otherID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/iam/users/-/" {
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": callerID, "username": "root"})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(api.ListResponse[map[string]any]{
+					Count:   1,
+					Results: []map[string]any{{"id": otherID, "username": "john"}},
+				})
+			}))
+			defer ts.Close()
+
+			got := resolveSubject(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, tt.args)
+			assert.Equal(t, tt.wantPK, got.PK)
+			assert.Equal(t, tt.wantID, got.ID)
+			assert.Equal(t, tt.wantLabel, got.Label)
 		})
 	}
 }

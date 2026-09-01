@@ -43,10 +43,10 @@ share exit 1—use --output json when a script has to tell them apart.`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		userID, userLabel := resolveSubject(alpaconClient, subjectArgs)
+		subj := resolveSubject(alpaconClient, subjectArgs)
 
 		if explain {
-			explanation, err := rbac.ExplainPermission(alpaconClient, userID, permission)
+			explanation, err := rbac.ExplainPermission(alpaconClient, subj.ID, permission)
 			if err != nil {
 				utils.CliErrorWithExit("Failed to explain the decision: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 			}
@@ -55,9 +55,9 @@ share exit 1—use --output json when a script has to tell them apart.`,
 			return
 		}
 
-		allowed, err := rbac.CheckPermission(alpaconClient, userID, permission)
+		allowed, err := rbac.CheckPermission(alpaconClient, subj.PK, permission)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to check the permission: %s.", describeRBACError(alpaconClient, gateUserRead, err))
+			utils.CliErrorWithExit("Failed to check the permission: %s.", describeRBACError(alpaconClient, gatePermissionIntrospect, err))
 		}
 
 		if quiet {
@@ -68,7 +68,7 @@ share exit 1—use --output json when a script has to tell them apart.`,
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			result := map[string]any{"user": userLabel, "permission": permission, "allowed": allowed}
+			result := map[string]any{"user": subj.Label, "permission": permission, "allowed": allowed}
 			if err = utils.PrintJSONValue(os.Stdout, result); err != nil {
 				utils.CliErrorWithExit("Failed to render the answer: %s.", err)
 			}
