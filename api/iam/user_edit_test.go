@@ -14,7 +14,7 @@ func TestDiffEditedUser(t *testing.T) {
 	  "phone": "",
 	  "is_active": true,
 	  "is_staff": false,
-	  "is_superuser": false,
+	  "is_superuser": true,
 	  "is_ldap_user": true,
 	  "num_groups": 2
 	}`)
@@ -27,7 +27,7 @@ func TestDiffEditedUser(t *testing.T) {
 	}{
 		{
 			name:        "an untouched buffer changes nothing",
-			edited:      map[string]any{"id": "u-1", "username": "john", "phone": "", "is_active": true, "is_staff": false, "is_superuser": false, "is_ldap_user": true, "num_groups": float64(2)},
+			edited:      map[string]any{"id": "u-1", "username": "john", "phone": "", "is_active": true, "is_staff": false, "is_superuser": true, "is_ldap_user": true, "num_groups": float64(2)},
 			wantChanges: map[string]any{},
 		},
 		{
@@ -43,13 +43,19 @@ func TestDiffEditedUser(t *testing.T) {
 		},
 		{
 			name:           "a mixed edit applies the rest and reports the flag",
-			edited:         map[string]any{"phone": "010", "is_superuser": true},
+			edited:         map[string]any{"phone": "010", "is_staff": true},
 			wantChanges:    map[string]any{"phone": "010"},
-			wantPrivileges: []PrivilegeEdit{{Field: "is_superuser", Want: true}},
+			wantPrivileges: []PrivilegeEdit{{Field: "is_staff", Want: true}},
 		},
 		{
 			name:           "clearing a flag is reported the same way",
-			edited:         map[string]any{"is_superuser": false, "is_staff": true},
+			edited:         map[string]any{"is_superuser": false},
+			wantChanges:    map[string]any{},
+			wantPrivileges: []PrivilegeEdit{{Field: "is_superuser", Want: false}},
+		},
+		{
+			name:           "a flag left at its current value is not reported",
+			edited:         map[string]any{"is_superuser": true, "is_staff": true},
 			wantChanges:    map[string]any{},
 			wantPrivileges: []PrivilegeEdit{{Field: "is_staff", Want: true}},
 		},

@@ -45,7 +45,7 @@ type RoleScopeResource struct {
 
 // The only surface carrying the justification and the actor; a binding read carries
 // neither. Role, Principal and ChangedBy answer null where there is nothing left to
-// name - the row keeps value snapshots that survive deletion of what they point at.
+// name—the row keeps value snapshots that survive deletion of what they point at.
 type RoleAuditLogResponse struct {
 	ID          string          `json:"id"`
 	RecordClass string          `json:"record_class"`

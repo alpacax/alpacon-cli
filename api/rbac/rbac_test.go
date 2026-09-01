@@ -404,7 +404,7 @@ func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
 }
 
 // The three IAM-hosted reads had no coverage: a renamed field on the check endpoint
-// would decode to false, so can-i would print "no" and -q would exit 1 - fail-closed,
+// would decode to false, so can-i would print "no" and -q would exit 1—fail-closed,
 // but silently wrong. The scopes path is built by concatenation and nothing pinned it.
 func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	tests := []struct {

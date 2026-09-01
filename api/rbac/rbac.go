@@ -45,7 +45,7 @@ func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleRespons
 
 // The name filter is exact and case-sensitive, and role lists are narrowed to what
 // the caller may see rather than refused, so an invisible role yields an empty page
-// and never a 403 - the not-found message has to cover both readings.
+// and never a 403—the not-found message has to cover both readings.
 func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, error) {
 	if utils.IsUUID(nameOrID) {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
@@ -226,7 +226,7 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 		result = append(result, RoleAuditAttributes{
 			Action:    entry.Action,
 			Role:      entry.RoleName,
-			Scope:     entry.Scope,
+			Scope:     auditScopeLabel(entry.Scope),
 			ChangedBy: changedBy,
 			Reason:    entry.Reason,
 			At:        entry.AddedAt.Local().Format(timeLayout),
@@ -343,4 +343,14 @@ func PermissionPatternAttributesFrom(patterns *PermissionPatternsResponse) []Per
 	}
 
 	return result
+}
+
+// auditScopeLabel renames the audit log's "global" to the "workspace" every other
+// command in this group prints, so one SCOPE column does not mean two vocabularies.
+func auditScopeLabel(scope string) string {
+	if scope == "global" {
+		return "workspace"
+	}
+
+	return scope
 }

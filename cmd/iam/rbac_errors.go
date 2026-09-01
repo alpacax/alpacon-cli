@@ -8,7 +8,9 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// Error codes returned by the RBAC binding endpoints (alpacon-server utils/error_codes.py).
+// Error codes this surface can receive (alpacon-server utils/error_codes.py). All but
+// permission_denied come from the binding endpoints; that one is the troubleshoot read
+// refusing a target that is not the caller.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -33,9 +35,10 @@ const (
 	// gateUserRead: /api/iam/users/{id}/effective-permissions/ pins user:read, and API tokens
 	// are accepted on the IAM routes, so a refusal is about the permission, not the credential.
 	gateUserRead
-	// gatePermissionIntrospect: /api/iam/users/{id}/permissions/ pins no scope, so by UUID it
-	// auto-resolves to an orphan 'user:permissions' that only the superuser wildcard grants;
-	// the "-" self alias skips the check entirely.
+	// gatePermissionIntrospect: /api/iam/users/{id}/permissions/ pins no scope, so it
+	// auto-resolves to an orphan 'user:permissions'. A cross-account read is then satisfied
+	// only by a wildcard grant; a self read passes through the per-account user:owner role,
+	// and the "-" alias skips the check outright.
 	gatePermissionIntrospect
 )
 
