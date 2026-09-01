@@ -25,8 +25,9 @@ object-scoped binding answers no here, because the command names no object; use
 'alpacon user permission ls --patterns' to see those.
 
 Without -q the exit code is 0 for both answers, so a denial is never confused with a
-failed request. With -q there is no output to read, and a denial and a failed check
-share exit 1—use --output json when a script has to tell them apart.`,
+failed request. With -q there is no output at all, --output json included, and a
+denial and a failed check share exit 1. To tell those apart, drop -q and read the
+allowed field of --output json.`,
 	Example: `  alpacon user permission can-i server:update
   alpacon user permission can-i john server:update
   alpacon user permission can-i john rbac:manage --explain

@@ -16,9 +16,10 @@ This is where the justification passed to --reason and the identity of whoever
 made the change are kept; a role binding itself records neither. With no USER the
 subject is you.
 
-What you can read depends on your account: an auditor of the whole workspace sees
-every change within the plan's audit window, while everyone else sees only the
-rows naming them as the subject or the actor.
+This lists the changes recorded against USER, so a grant you made to someone else
+appears in their history rather than yours. What you can read also depends on your
+account: an auditor of the whole workspace sees every change within the plan's
+audit window, and everyone else sees only rows that name them.
 
 This is the one 'alpacon user role' command an API token can reach on an Alpacon
 Cloud workspace. The audit log sits outside the gate that refuses tokens on the
