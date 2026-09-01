@@ -15,8 +15,9 @@ permissions:
   contents: read
 
 jobs:
+  # No `name:` on purpose. The check context is then the job id, which is the
+  # canonical single-segment `build-and-test` the other Go repos already emit.
   build-and-test:
-    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
