@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,6 +15,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// allowAssetsFrom points the origin pin at a test server, which it would
+// otherwise refuse.
+func allowAssetsFrom(t *testing.T, rawURL string) {
+	t.Helper()
+
+	parsed, err := url.Parse(rawURL)
+	require.NoError(t, err)
+	original := allowedAssetOrigins
+	t.Cleanup(func() { allowedAssetOrigins = original })
+	allowedAssetOrigins = []string{parsed.Scheme + "://" + parsed.Host}
+}
 
 func releaseServer(t *testing.T, dir string, corrupt bool) (*httptest.Server, *Release) {
 	t.Helper()
@@ -35,6 +48,7 @@ func releaseServer(t *testing.T, dir string, corrupt bool) (*httptest.Server, *R
 	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(checksums)) })
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
+	allowAssetsFrom(t, ts.URL)
 
 	return ts, &Release{
 		Version: "1.4.0",
@@ -64,6 +78,8 @@ func TestFetchVerifiedBinaryRefusesAMismatchedChecksum(t *testing.T) {
 	_, err := FetchVerifiedBinary(release, "linux", "amd64", "alpacon", dir)
 
 	assert.ErrorIs(t, err, ErrChecksumMismatch)
+	_, statErr := os.Stat(filepath.Join(dir, "alpacon.new"))
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "verification runs before extraction, and only the missing file proves that order")
 }
 
 func TestFetchVerifiedBinaryFailsWhenThePlatformHasNoAsset(t *testing.T) {
@@ -81,6 +97,7 @@ func TestDownloadToRefusesAResponseThatRunsPastTheLimit(t *testing.T) {
 		_, _ = w.Write(make([]byte, 64))
 	}))
 	defer ts.Close()
+	allowAssetsFrom(t, ts.URL)
 	destPath := filepath.Join(t.TempDir(), "archive.tar.gz")
 
 	err := downloadTo(ts.URL, destPath, 16)
@@ -114,6 +131,7 @@ func TestDownloadToAcceptsAResponseExactlyAtTheLimit(t *testing.T) {
 		_, _ = w.Write(body)
 	}))
 	defer ts.Close()
+	allowAssetsFrom(t, ts.URL)
 	destPath := filepath.Join(t.TempDir(), "archive.tar.gz")
 
 	require.NoError(t, downloadTo(ts.URL, destPath, int64(len(body))), "the limit is the largest size allowed, not the first refused")
@@ -132,4 +150,33 @@ func TestRefuseSchemeDowngradeStopsAnEndlessRedirectChain(t *testing.T) {
 
 	assert.Error(t, refuseSchemeDowngrade(secure, via))
 	assert.NoError(t, refuseSchemeDowngrade(secure, via[:9]))
+}
+
+func TestDownloadToRefusesAnAssetOutsideThePinnedOrigins(t *testing.T) {
+	tests := []struct {
+		name     string
+		assetURL string
+	}{
+		{name: "plain text", assetURL: "http://github.com/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"},
+		{name: "another host entirely", assetURL: "https://evil.test/alpacon.tar.gz"},
+		{name: "the pinned host as a subdomain of another", assetURL: "https://github.com.evil.test/alpacon.tar.gz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			destPath := filepath.Join(t.TempDir(), "archive.tar.gz")
+
+			err := downloadTo(tt.assetURL, destPath, 1<<20)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "refusing a release asset")
+			_, statErr := os.Stat(destPath)
+			assert.ErrorIs(t, statErr, os.ErrNotExist, "a refused asset must not reach disk")
+		})
+	}
+}
+
+func TestCheckAssetOriginAcceptsThePinnedGitHubOrigins(t *testing.T) {
+	for _, origin := range allowedAssetOrigins {
+		assert.NoError(t, checkAssetOrigin(origin+"/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"), "%s is where releases actually come from", origin)
+	}
 }

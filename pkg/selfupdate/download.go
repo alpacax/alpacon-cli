@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
@@ -16,6 +18,15 @@ import (
 // Nothing authenticates a download until those checksums are compared, so an
 // endless stream would otherwise fill the temp directory—memory, on tmpfs.
 const maxChecksumsSize = 1 << 20
+
+// The release JSON names both asset URLs, and refuseSchemeDowngrade only
+// inspects a redirect—so an http:// or off-GitHub URL would be fetched as
+// given. Later hops stay unpinned: GitHub's CDN host changes.
+var allowedAssetOrigins = []string{
+	"https://github.com",
+	"https://objects.githubusercontent.com",
+	"https://release-assets.githubusercontent.com",
+}
 
 func FetchVerifiedBinary(release *Release, goos, goarch, binaryName, destDir string) (string, error) {
 	archiveName := ArchiveName(release.Version, goos, goarch)
@@ -48,9 +59,25 @@ func FetchVerifiedBinary(release *Release, goos, goarch, binaryName, destDir str
 	return ExtractBinary(archivePath, binaryName, destDir)
 }
 
-func downloadTo(url, destPath string, maxBytes int64) error {
+func checkAssetOrigin(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("release asset url %q cannot be read: %w", rawURL, err)
+	}
+	origin := parsed.Scheme + "://" + parsed.Host
+	if !slices.Contains(allowedAssetOrigins, origin) {
+		return fmt.Errorf("refusing a release asset served from %s", origin)
+	}
+	return nil
+}
+
+func downloadTo(assetURL, destPath string, maxBytes int64) error {
+	if err := checkAssetOrigin(assetURL); err != nil {
+		return err
+	}
+
 	client := newHTTPClient(10 * time.Minute)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, assetURL, nil)
 	if err != nil {
 		return err
 	}
@@ -63,7 +90,7 @@ func downloadTo(url, destPath string, maxBytes int64) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("downloading %s returned %s", url, resp.Status)
+		return fmt.Errorf("downloading %s returned %s", assetURL, resp.Status)
 	}
 
 	file, err := os.Create(destPath)
@@ -76,7 +103,7 @@ func downloadTo(url, destPath string, maxBytes int64) error {
 		return copyErr
 	}
 	if written > maxBytes {
-		return fmt.Errorf("downloading %s exceeded %d bytes", url, maxBytes)
+		return fmt.Errorf("downloading %s exceeded %d bytes", assetURL, maxBytes)
 	}
 	return closeErr
 }

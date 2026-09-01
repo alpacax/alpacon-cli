@@ -66,6 +66,7 @@ func TestFetchVerifiedBinaryRejectsAnArchiveTheChecksumsNeverName(t *testing.T) 
 		_, _ = w.Write([]byte("archive content"))
 	}))
 	defer server.Close()
+	allowAssetsFrom(t, server.URL)
 	release.Assets = []Asset{
 		{Name: archiveName, DownloadURL: server.URL + "/" + archiveName},
 		{Name: ChecksumsName("1.4.0"), DownloadURL: server.URL + "/" + ChecksumsName("1.4.0")},
