@@ -41,7 +41,7 @@ which every account holds.`,
 
 		roles, err := rbac.GetRoleCatalog(alpaconClient, autoAssigned)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve the role catalog: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		utils.PrintTable(rbac.RoleAttributesFrom(roles))

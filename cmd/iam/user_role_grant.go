@@ -46,7 +46,7 @@ catalog' to see the names this workspace defines.`,
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		if rbac.FindWorkspaceBinding(bindings, role.ID) != nil {
@@ -83,7 +83,7 @@ catalog' to see the names this workspace defines.`,
 		// A duplicate means another writer got there first. The end state is the one
 		// asked for, so report it as reached rather than as a failure.
 		if err != nil && !rbac.IsDuplicateBinding(err) {
-			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, userLabel, describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to grant %s to %s: %s.", role.Name, userLabel, describeRBACError(alpaconClient, gateRoleWrite, err))
 		}
 
 		utils.CliSuccess("Granted %s to %s.", role.Name, userLabel)
@@ -112,7 +112,7 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 			roleArg, userArg, verb, roleArg, userArg)
 	}
 
-	utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(ac, err))
+	utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(ac, gateRoleRead, err))
 	return nil
 }
 
@@ -140,7 +140,7 @@ func warnMissingReason(reason string) {
 func reportWorkspaceRoles(ac *client.AlpaconClient, userID, userLabel string) {
 	bindings, err := rbac.GetUserBindings(ac, userID)
 	if err != nil {
-		utils.CliWarning("The change was accepted, but re-reading %s's roles failed: %s.", userLabel, describeRBACError(ac, err))
+		utils.CliWarning("The change was accepted, but re-reading %s's roles failed: %s.", userLabel, describeRBACError(ac, gateRoleRead, err))
 		return
 	}
 

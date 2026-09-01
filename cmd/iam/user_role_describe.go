@@ -38,17 +38,17 @@ list was narrowed.`,
 
 		role, err := rbac.ResolveRole(alpaconClient, args[0])
 		if err != nil {
-			utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		scopes, err := rbac.GetRoleScopes(alpaconClient, role.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role's permissions: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve the role's permissions: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		holders, err := rbac.GetRoleHolders(alpaconClient, role.ID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve the role's holders: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		// One list request resolves every holder's username. The nested user object on

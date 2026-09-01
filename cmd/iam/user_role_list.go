@@ -34,7 +34,7 @@ narrows the answer to your own rather than refusing, so an empty table can mean
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve the role bindings: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		utils.PrintTable(rbac.BindingAttributesFrom(bindings))

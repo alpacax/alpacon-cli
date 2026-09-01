@@ -1,10 +1,13 @@
 package iam
 
 import (
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/rbac"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -231,5 +234,89 @@ func TestReasonFlagTrimsOnce(t *testing.T) {
 
 			assert.Equal(t, tt.want, reasonFlag(cmd))
 		})
+	}
+}
+
+// statusOnlyError is a 403 carrying no error code, which is what the authority and
+// credential gates actually answer. utils.HTTPStatusCode walks the chain for this
+// interface, so a local type is enough to drive the rewrite.
+type statusOnlyError struct{ status int }
+
+func (e statusOnlyError) Error() string       { return "forbidden" }
+func (e statusOnlyError) HTTPStatusCode() int { return e.status }
+
+// The codeless 403 is the refusal an operator is most likely to hit, and the three
+// surfaces fail for three different reasons. Naming the wrong one sends them after a
+// fix that cannot work - re-running 'alpacon login' does not grant a superuser role,
+// and holding one does not make an Alpacon Cloud workspace accept an API token.
+func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
+	bearer := &client.AlpaconClient{AccessToken: "bearer-token"}
+	apiToken := &client.AlpaconClient{Token: "alpat-token"}
+
+	tests := []struct {
+		name        string
+		ac          *client.AlpaconClient
+		gate        rbacGate
+		wantSaid    []string
+		wantNotSaid []string
+	}{
+		{
+			name: "a write with a bearer names only the superuser role",
+			ac:   bearer, gate: gateRoleWrite,
+			wantSaid:    []string{"superuser role"},
+			wantNotSaid: []string{"alpacon login", "API token"},
+		},
+		{
+			name: "a write with an api token names both, superuser first",
+			ac:   apiToken, gate: gateRoleWrite,
+			wantSaid: []string{"superuser role", "API token", "alpacon login"},
+		},
+		{
+			name: "a role read with an api token never mentions a write privilege",
+			ac:   apiToken, gate: gateRoleRead,
+			wantSaid:    []string{"API token", "alpacon login", "role_audit_log:read"},
+			wantNotSaid: []string{"superuser role", "write"},
+		},
+		{
+			name: "a role read with a bearer says visibility, not privilege",
+			ac:   bearer, gate: gateRoleRead,
+			wantSaid:    []string{"may not see"},
+			wantNotSaid: []string{"superuser role", "alpacon login"},
+		},
+		{
+			name: "an iam-hosted read names user:read, whatever the credential",
+			ac:   apiToken, gate: gateUserRead,
+			wantSaid:    []string{"user:read"},
+			wantNotSaid: []string{"superuser role", "alpacon login"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := describeRBACError(tt.ac, tt.gate, statusOnlyError{status: http.StatusForbidden})
+			require.Error(t, got)
+
+			for _, want := range tt.wantSaid {
+				assert.Contains(t, got.Error(), want)
+			}
+			for _, unwanted := range tt.wantNotSaid {
+				assert.NotContains(t, got.Error(), unwanted)
+			}
+		})
+	}
+}
+
+// A coded refusal is the server stating what it wants, so the gate must not change
+// the message - the code already carries the cause.
+func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
+	ac := &client.AlpaconClient{Token: "alpat-token"}
+	// The server's own envelope, which is what ParseErrorResponse reads: a prefixed
+	// "code: X" is not parsed, because the prefix has to start its own segment.
+	coded := fmt.Errorf("request failed with status 400: {\"code\": %q}", codeSuperuserLastRemoval)
+
+	for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateUserRead} {
+		got := describeRBACError(ac, gate, coded)
+		require.Error(t, got)
+		assert.Contains(t, got.Error(), "last superuser")
 	}
 }

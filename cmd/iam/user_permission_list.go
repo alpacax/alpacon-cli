@@ -42,7 +42,7 @@ second group says the user holds the permission somewhere without saying on what
 		if patternsOnly {
 			patterns, err := rbac.GetPermissionPatterns(alpaconClient, userID)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", userLabel, describeRBACError(alpaconClient, err))
+				utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", userLabel, describeRBACError(alpaconClient, gateUserRead, err))
 			}
 
 			utils.PrintTable(rbac.PermissionPatternAttributesFrom(patterns))
@@ -51,7 +51,7 @@ second group says the user holds the permission somewhere without saying on what
 
 		effective, err := rbac.GetEffectivePermissions(alpaconClient, userID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", userLabel, describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve %s's permissions: %s.", userLabel, describeRBACError(alpaconClient, gateUserRead, err))
 		}
 
 		roleRows := rbac.EffectiveRoleAttributesFrom(effective.Roles)

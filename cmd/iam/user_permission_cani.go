@@ -48,7 +48,7 @@ share exit 1—use --output json when a script has to tell them apart.`,
 		if explain {
 			explanation, err := rbac.ExplainPermission(alpaconClient, userID, permission)
 			if err != nil {
-				utils.CliErrorWithExit("Failed to explain the decision: %s.", describeRBACError(alpaconClient, err))
+				utils.CliErrorWithExit("Failed to explain the decision: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 			}
 
 			utils.PrintJson(explanation)
@@ -57,7 +57,7 @@ share exit 1—use --output json when a script has to tell them apart.`,
 
 		allowed, err := rbac.CheckPermission(alpaconClient, userID, permission)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to check the permission: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to check the permission: %s.", describeRBACError(alpaconClient, gateUserRead, err))
 		}
 
 		if quiet {

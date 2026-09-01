@@ -36,7 +36,7 @@ rows naming them as the subject or the actor.`,
 
 		entries, err := rbac.GetRoleHistory(alpaconClient, userID, tail)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to retrieve the role history: %s.", describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		utils.PrintTable(rbac.AuditAttributesFrom(entries))

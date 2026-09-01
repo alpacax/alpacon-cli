@@ -54,7 +54,7 @@ Revoking a role the user does not hold changes nothing and succeeds.`,
 		// One read serves the invariant check, the target lookup and the cascade.
 		bindings, err := rbac.GetUserBindings(alpaconClient, userID)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, err))
+			utils.CliErrorWithExit("Failed to read %s's current roles: %s.", userLabel, describeRBACError(alpaconClient, gateRoleRead, err))
 		}
 
 		if role.Name == rbac.RoleAdmin && rbac.HoldsWorkspaceRole(bindings, rbac.RoleSuperuser) {
@@ -100,7 +100,7 @@ Revoking a role the user does not hold changes nothing and succeeds.`,
 					utils.CliWarning("Revoked %s, but %s was left in place.", targets[index-1].Role.Name, target.Role.Name)
 					utils.CliInfo("To finish: %s", resume.PlainText())
 				}
-				utils.CliErrorWithExit("Failed to revoke %s from %s: %s.", target.Role.Name, userLabel, describeRBACError(alpaconClient, err))
+				utils.CliErrorWithExit("Failed to revoke %s from %s: %s.", target.Role.Name, userLabel, describeRBACError(alpaconClient, gateRoleWrite, err))
 			}
 		}
 
