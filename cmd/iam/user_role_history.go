@@ -18,7 +18,12 @@ subject is you.
 
 What you can read depends on your account: an auditor of the whole workspace sees
 every change within the plan's audit window, while everyone else sees only the
-rows naming them as the subject or the actor.`,
+rows naming them as the subject or the actor.
+
+This is the one 'alpacon user role' command an API token can reach on an Alpacon
+Cloud workspace. The audit log sits outside the gate that refuses tokens on the
+other RBAC routes, and asks instead for a token carrying the role_audit_log:read
+scope.`,
 	Example: `  alpacon user role history
   alpacon user role history john
   alpacon user role history john --tail 100`,

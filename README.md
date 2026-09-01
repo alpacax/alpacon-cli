@@ -212,7 +212,9 @@ $ alpacon user role history <username>              # who changed what, and why
 $ alpacon user permission can-i <username> server:update
 ```
 
-Granting `superuser` also creates a companion `admin` binding, so revoking `superuser` demotes to admin and leaves that companion in place; `--cascade` removes both. Changing a binding requires a workspace superuser and recent MFA. On Alpacon Cloud workspaces every RBAC request needs an interactive browser login—an API token is refused, reads included.
+Granting `superuser` also creates a companion `admin` binding, so revoking `superuser` demotes to admin and leaves that companion in place; `--cascade` removes both. Changing a binding requires a workspace superuser and recent MFA.
+
+On Alpacon Cloud workspaces an API token is refused on these commands, reads included, so they need a browser login. `alpacon user role history` is the one exception: it reads the audit log, which accepts a token carrying the `role_audit_log:read` scope on either deployment. On self-hosted workspaces a token works throughout and skips the MFA step.
 
 ### API tokens
 ```bash
