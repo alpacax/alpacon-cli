@@ -199,6 +199,21 @@ $ alpacon group member add --group <group> -u <user> --role <role>
 $ alpacon group member rm --group <group> -u <user>
 ```
 
+### Workspace roles
+RBAC roles are the single source of truth for what an account is and may do. Granting `admin` is what makes someone a workspace administrator, and granting `superuser` is what makes someone a platform operator—the `is_staff` and `is_superuser` fields on a user are read-only projections of those roles, so editing them in `alpacon user update` does nothing and the command says so.
+
+```bash
+$ alpacon user role ls <username>                   # roles a user holds, and at what scope
+$ alpacon user role catalog                         # roles this workspace defines
+$ alpacon user role describe <role>                 # what it grants, and who holds it
+$ alpacon user role grant  <username> <role> --reason "<why>"
+$ alpacon user role revoke <username> superuser --cascade
+$ alpacon user role history <username>              # who changed what, and why
+$ alpacon user permission can-i <username> server:update
+```
+
+Granting `superuser` also creates a companion `admin` binding, so revoking `superuser` demotes to admin and leaves that companion in place; `--cascade` removes both. Changing a binding requires a workspace superuser and recent MFA. On Alpacon Cloud workspaces every RBAC request needs an interactive browser login—an API token is refused, reads included.
+
 ### API tokens
 ```bash
 $ alpacon token create -n <name> --expiration-in-days=7
@@ -305,7 +320,7 @@ Also separate from the work session gate: when you authenticate with an API toke
 | Code | Meaning |
 |------|---------|
 | `0`  | Success |
-| `1`  | General error (network failure, server error, etc.), and permanent refusals such as a credential on the command line (`command_inline_credential`)—see "When a command is denied" |
+| `1`  | General error (network failure, server error, etc.), and permanent refusals such as a credential on the command line (`command_inline_credential`)—see "When a command is denied". Also a negative answer from `alpacon user permission can-i -q`, which is indistinguishable from a failed check by exit code alone; read `--output json` when a script has to tell them apart |
 | `2`  | Usage error—a flag or argument rejected by a `work-session` subcommand, by `event wait` / `event watch`, or by the positive-value check behind `--tail`, `--limit`, and `--valid-days` (`utils.ExitCodeUsageError`). Under `--output json` the `work-session` and `event` paths emit an error envelope carrying `error_code` `usage_error`; the positive-value check prints a plain message to stderr. Every other command still exits `1` when it rejects a flag or argument, as do errors Cobra itself rejects while parsing (an unknown flag or subcommand) |
 | `3`  | WorkSession gate denied—the active session does not authorize this action |
 | `4`  | Pending human approval—the action is awaiting an out-of-band approve/reject in the Alpacon console (web/Slack), not refused. For `exec`, re-run the command after approval (or pass `--wait` on the original command to block; `--wait-approval <duration>` raises the wait timeout, default 5m); `websh` command mode has no `--wait`, so re-run via `alpacon exec --wait` to block; for `work-session create` the session already exists—after approval attach it with `alpacon work-session use <id>` (or pass `--wait` on the original create to block; `--wait-approval <duration>` raises the wait timeout, default 5m). Under `--output json`, a `{"status":"pending_approval", ...}` object is emitted. Returned by `exec` (and `websh` when running a command) on a sudo denial that created an approval request (`SUDO_APPROVAL_REQUIRED`, or `SUDO_INTENT_DEVIATION` when the command reads as off-purpose for the work session)—including when `exec --wait` ends with the request still open, whether the window elapsed or the CLI could not reach the server for a bounded run of polls—and by `work-session create` when the session lands pending or when its `--wait` ends with the outcome still open, whether the window elapsed or the CLI could not reach the server for a bounded run of polls. Also returned by `alpacon event wait` when the wait times out or is interrupted, and by `alpacon exec logs` on a job still held for approval—the outcome is still open in both |
