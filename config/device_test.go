@@ -79,7 +79,7 @@ func TestIsValidDeviceID(t *testing.T) {
 func TestNewDeviceID_IsUniqueAndAcceptedByAuth0Pattern(t *testing.T) {
 	t.Parallel()
 	seen := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, err := newDeviceID()
 		require.NoError(t, err)
 		assert.True(t, IsValidDeviceID(id), "generated id must satisfy the Auth0 action pattern: %q", id)
@@ -173,12 +173,15 @@ func TestGetOrCreateDeviceID_SurvivesConfigWrites(t *testing.T) {
 		write func(t *testing.T)
 	}{
 		{"workspace switch", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
 		}},
 		{"access token refresh", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SaveRefreshedAuth0Token("refreshed-access-token", 3600))
 		}},
 		{"active work session", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SetActiveWorkSession("6f1c1d0e-0000-0000-0000-000000000000"))
 		}},
 	}
@@ -355,7 +358,7 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		go func(i int) {
 			defer done.Done()
 			start.Wait()
@@ -401,7 +404,7 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		go func(i int) {
 			defer done.Done()
 			start.Wait()
@@ -536,7 +539,7 @@ func TestGetOrCreateDeviceID_UnreadableFile(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
 
 	deviceID, err := GetOrCreateDeviceID()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, deviceID)
 }
 

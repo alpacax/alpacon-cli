@@ -242,6 +242,7 @@ func TestFetchCursorPages_DoesNotMutateCallerParams(t *testing.T) {
 // (page-1)*page_size, taken from the request itself—so a page_size that changes mid-walk
 // shows up as duplicated and skipped items instead of passing silently.
 func newPageServer(t *testing.T, total int, rec *requestRecorder) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		size, sizeErr := strconv.Atoi(r.URL.Query().Get("page_size"))
 		page, pageErr := strconv.Atoi(r.URL.Query().Get("page"))
@@ -377,7 +378,7 @@ func TestFetchPagesUpTo_SecondPageErrorDiscardsPartial(t *testing.T) {
 
 	require.Error(t, err)
 	// Which page of which endpoint failed is what makes a multi-page walk diagnosable.
-	assert.ErrorContains(t, err, "fetching page 2 from /api/servers/notes/")
+	require.ErrorContains(t, err, "fetching page 2 from /api/servers/notes/")
 	assert.Nil(t, items)
 }
 
@@ -394,7 +395,7 @@ func TestFetchPagesUpTo_MalformedJSON(t *testing.T) {
 	items, err := FetchPagesUpTo[pageItem](ac, "/api/servers/notes/", nil, 10)
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "decoding page 1 from /api/servers/notes/")
+	require.ErrorContains(t, err, "decoding page 1 from /api/servers/notes/")
 	assert.Nil(t, items)
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -33,7 +34,7 @@ func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
 
 	var parsed sudoMFAEvent
 	err = json.Unmarshal(msg, &parsed)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "auth", parsed.Payload.Type)
 	assert.Equal(t, "mfa_request", parsed.Payload.Query)
 	assert.Equal(t, "test-grant-id", parsed.Payload.SudoGrantID)
@@ -195,19 +196,21 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	t.Parallel()
-	sl := NewSudoListener(nil, "", "")
+	synctest.Test(t, func(t *testing.T) {
+		sl := NewSudoListener(nil, "", "")
 
-	start := time.Now()
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		sl.Stop()
-	}()
+		start := time.Now()
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			sl.Stop()
+		}()
 
-	result := sl.pollMFACompletion()
-	elapsed := time.Since(start)
+		result := sl.pollMFACompletion()
+		elapsed := time.Since(start)
 
-	assert.False(t, result, "should return false when stopped")
-	assert.Less(t, elapsed, 2*time.Second, "should exit quickly when stopped")
+		assert.False(t, result, "should return false when stopped")
+		assert.Less(t, elapsed, 2*time.Second, "should exit quickly when stopped")
+	})
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {

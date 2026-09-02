@@ -177,7 +177,7 @@ func TestCheckActionNeverSendsAPackageManagerInstallToTheUpdateCommand(t *testin
 func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
 	require.NotNil(t, updateCmd.Args, "an unvalidated argument makes 'alpacon update check' replace the binary")
 
-	assert.Error(t, updateCmd.Args(updateCmd, []string{"check"}))
+	require.Error(t, updateCmd.Args(updateCmd, []string{"check"}))
 	assert.NoError(t, updateCmd.Args(updateCmd, nil))
 }
 

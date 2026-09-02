@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsRemotePath(t *testing.T) {
@@ -279,7 +280,7 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 			username, err := normalizeArgs(args, "")
 
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectedArgs, args)
 			assert.Equal(t, tt.expectedUser, username)
 		})
@@ -419,12 +420,12 @@ func TestNormalizeArgsUsername(t *testing.T) {
 			user, err := normalizeArgs(tt.args, tt.flagUser)
 			if len(tt.wantErrUsers) > 0 {
 				for _, u := range tt.wantErrUsers {
-					assert.ErrorContains(t, err, u)
+					require.ErrorContains(t, err, u)
 				}
 				assert.Equal(t, tt.wantArgs, tt.args)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantUser, user)
 			assert.Equal(t, tt.wantArgs, tt.args)
 		})

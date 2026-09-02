@@ -543,5 +543,5 @@ func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "workspace", tierLabel("global"))
 	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))
-	assert.Equal(t, "", tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
+	assert.Empty(t, tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
 }

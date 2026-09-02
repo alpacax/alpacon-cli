@@ -81,7 +81,7 @@ func runHelperCommand(mode string) *exec.Cmd {
 }
 
 func parseRunHelperInvocation(args []string) (mode string, ok bool) {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if args[i] == "run-helper" && i+1 < len(args) {
 			return args[i+1], true
 		}

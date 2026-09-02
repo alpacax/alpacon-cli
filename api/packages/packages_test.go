@@ -68,14 +68,14 @@ func TestGetSystemPackageEntry_Pagination(t *testing.T) {
 		var results []SystemPackageDetail
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, SystemPackageDetail{
 					ID:   fmt.Sprintf("spkg-%d", i),
 					Name: fmt.Sprintf("sys-pkg-%d", i),
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, SystemPackageDetail{
 					ID:   fmt.Sprintf("spkg-p2-%d", i),
 					Name: fmt.Sprintf("sys-pkg-p2-%d", i),
@@ -413,14 +413,14 @@ func TestGetPythonPackageEntry_Pagination(t *testing.T) {
 		var results []PythonPackageDetail
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, PythonPackageDetail{
 					ID:   fmt.Sprintf("ppkg-%d", i),
 					Name: fmt.Sprintf("py-pkg-%d", i),
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, PythonPackageDetail{
 					ID:   fmt.Sprintf("ppkg-p2-%d", i),
 					Name: fmt.Sprintf("py-pkg-p2-%d", i),

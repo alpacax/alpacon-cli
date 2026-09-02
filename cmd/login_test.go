@@ -422,7 +422,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://demo.us1.alpacon.io/foo]: ", defaultValue: "https://demo.us1.alpacon.io/foo"},
 		}, calls)
@@ -434,7 +434,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/foo")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -446,7 +446,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=1")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -458,7 +458,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com#frag")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -470,7 +470,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -482,7 +482,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -492,7 +492,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		_, _, _, calls, err := runPromptForLoginTarget(t, config.Config{}, "demo/foo", "")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "workspace must contain only letters, numbers, and hyphens")
+		require.ErrorContains(t, err, "workspace must contain only letters, numbers, and hyphens")
 		assert.Equal(t, []promptCall{
 			{prompt: "Workspace name: ", required: true},
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
@@ -505,7 +505,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "", "us1/foo")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "region must contain only letters, numbers, and hyphens")
+		require.ErrorContains(t, err, "region must contain only letters, numbers, and hyphens")
 		assert.Equal(t, []promptCall{
 			{prompt: "Workspace name [demo]: ", defaultValue: "demo"},
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
@@ -544,7 +544,7 @@ func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
 			err := validateInteractiveLoginTargetPrompt(tt.isInteractive)
 			if tt.wantErr {
 				require.Error(t, err)
-				assert.ErrorContains(t, err, "login target is required in non-interactive mode")
+				require.ErrorContains(t, err, "login target is required in non-interactive mode")
 				assert.ErrorContains(t, err, "--workspace and --region")
 				return
 			}
@@ -644,11 +644,11 @@ func TestResolveLoginTarget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			url, name, domain, ok, err := resolveLoginTarget(tt.args, tt.workspace, tt.region)
 			if tt.wantErrSub != "" {
-				assert.ErrorContains(t, err, tt.wantErrSub)
+				require.ErrorContains(t, err, tt.wantErrSub)
 				assert.False(t, ok)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantOK, ok)
 			if tt.wantOK {
 				assert.Equal(t, tt.wantURL, url)

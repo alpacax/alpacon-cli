@@ -26,7 +26,7 @@ func TestCheckMFACompletion_Completed(t *testing.T) {
 	}
 
 	completed, err := CheckMFACompletion(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, completed)
 }
 
@@ -44,7 +44,7 @@ func TestCheckMFACompletion_NotCompleted(t *testing.T) {
 	}
 
 	completed, err := CheckMFACompletion(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, completed)
 }
 
@@ -85,7 +85,7 @@ func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
 
 	link, err := GetMFALink(ac, "server-id")
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "https://example.com/mfa", link)
 	assert.Equal(t, "cli", query.Get("location"))
 	assert.Equal(t, "server-id", query.Get("server"))
@@ -99,7 +99,7 @@ func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
 
 	link, err := GetMFALink(ac, "server-id")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, link)
 }
 
@@ -109,7 +109,7 @@ func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
 
 	link, err := GetMFALink(ac, "server-id")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, link)
 }
 
@@ -119,7 +119,7 @@ func TestGetWorkspaceSecurityMFALink_SendsNoServerScope(t *testing.T) {
 
 	link, err := GetWorkspaceSecurityMFALink(ac)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "https://example.com/mfa", link)
 	assert.Equal(t, "cli", query.Get("location"))
 	assert.Equal(t, "my-workspace", query.Get("workspace"))
@@ -144,7 +144,7 @@ func TestGetMFALink_ServerErrorIsAnError(t *testing.T) {
 
 	link, err := GetMFALink(ac, "server-id")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, link)
 	assert.True(t, reached, "the error must come from the server, not from a guard before the request")
 }
@@ -164,7 +164,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	assert.NotNil(t, cb.RefreshToken)
 
 	require.NotNil(t, cb.RetryOperation)
-	assert.NoError(t, cb.RetryOperation())
+	require.NoError(t, cb.RetryOperation())
 	assert.True(t, retried, "RetryOperation must be the closure passed in")
 }
 
@@ -180,7 +180,7 @@ func TestGetMFALink_EmptyWorkspaceIsAnErrorBeforeAnyRequest(t *testing.T) {
 
 	link, err := GetMFALink(ac, "server-id")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, link)
 	assert.False(t, called, "an empty workspace must not reach the server")
 }
@@ -228,7 +228,7 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 
 	link, err := GetMFALinkByServerName(ac, "my-server")
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, link)
 	assert.False(t, called, "the name lookup must not run when no workspace can be named")
 }

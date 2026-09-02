@@ -176,7 +176,7 @@ func TestWorkSessionErrorHelperProcess(t *testing.T) {
 }
 
 func workSessionHelperArgs(args []string) ([]string, bool) {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if args[i] == "worksession-error-helper" {
 			return args[i+1:], true
 		}

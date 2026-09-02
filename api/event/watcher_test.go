@@ -195,7 +195,7 @@ func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 		return subscribes.Load() >= 2
 	}, 5*time.Second, 10*time.Millisecond, "expected a rejected re-subscribe")
 
-	assert.NoError(t, w.Err())
+	require.NoError(t, w.Err())
 	select {
 	case <-w.done:
 		t.Fatal("watcher stopped after a post-success subscribe failure")
@@ -204,7 +204,7 @@ func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 
 	select {
 	case failErr := <-w.ReconnectFailed():
-		assert.ErrorContains(t, failErr, "failed to subscribe to work_session events")
+		require.ErrorContains(t, failErr, "failed to subscribe to work_session events")
 	case <-time.After(5 * time.Second):
 		t.Fatal("expected a ReconnectFailed notice after a post-success failure")
 	}
@@ -213,7 +213,7 @@ func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 		return subscribes.Load() >= 3
 	}, 5*time.Second, 10*time.Millisecond, "expected the listener to keep retrying")
 
-	assert.NoError(t, w.Err())
+	require.NoError(t, w.Err())
 	select {
 	case <-w.done:
 		t.Fatal("watcher stopped after a post-success subscribe failure")
@@ -241,7 +241,7 @@ func TestWatcher_DialFailureAfterFirstSuccessIsAnnounced(t *testing.T) {
 
 	select {
 	case failErr := <-w.ReconnectFailed():
-		assert.Error(t, failErr)
+		require.Error(t, failErr)
 	case <-time.After(5 * time.Second):
 		t.Fatal("a dial failure after a first success must be announced")
 	}
@@ -382,7 +382,7 @@ func TestWatcher_SessionCreateRetryableStatusIsRetried(t *testing.T) {
 			defer w.Stop()
 
 			require.True(t, w.WaitConnected(3*time.Second), "a transient session-create failure must be absorbed, not fatal")
-			assert.NoError(t, w.Err())
+			require.NoError(t, w.Err())
 			assert.GreaterOrEqual(t, sessions.Load(), int32(2), "the failed attempt must be retried with a new session")
 		})
 	}

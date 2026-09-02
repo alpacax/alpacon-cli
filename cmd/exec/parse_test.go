@@ -556,7 +556,7 @@ func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
 func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
 	t.Parallel()
 	parsed := ParseRemoteExecArgs([]string{"my-server", "--", "ls", "--work-session", "fake"})
-	assert.Equal(t, "", parsed.WorkSessionID)
+	assert.Empty(t, parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
 	assert.Contains(t, parsed.Command, "--work-session")
 }

@@ -106,7 +106,7 @@ func TestGetWebFTPLogList(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.wantErrContains != "" {
-					assert.ErrorContains(t, err, tt.wantErrContains)
+					require.ErrorContains(t, err, tt.wantErrContains)
 				}
 				return
 			}

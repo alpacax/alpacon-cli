@@ -521,8 +521,8 @@ func TestSplitPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server, path, err := SplitPath(tt.input)
 			if tt.wantErrMsg != "" {
-				assert.ErrorContains(t, err, tt.wantErrMsg)
-				assert.ErrorContains(t, err, fmt.Sprintf("%q", tt.input))
+				require.ErrorContains(t, err, tt.wantErrMsg)
+				require.ErrorContains(t, err, fmt.Sprintf("%q", tt.input))
 			} else {
 				require.NoError(t, err)
 			}

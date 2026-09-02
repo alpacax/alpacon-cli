@@ -261,8 +261,7 @@ func TestJoinWebshSession_InvalidURL(t *testing.T) {
 	t.Parallel()
 	ac := &client.AlpaconClient{}
 	_, err := JoinWebshSession(ac, "https://example.com/no-channel-param", "password")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid URL format")
+	require.ErrorContains(t, err, "invalid URL format")
 }
 
 func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
@@ -295,7 +294,7 @@ func TestGetSessionRecords_FollowsCursor(t *testing.T) {
 	t.Parallel()
 	var gotCursors, gotPageSizes []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "/records/"))
+		assert.Equal(t, "/api/websh/sessions/sess-1/records/", r.URL.Path)
 		gotCursors = append(gotCursors, r.URL.Query().Get("cursor"))
 		gotPageSizes = append(gotPageSizes, r.URL.Query().Get("page_size"))
 		w.Header().Set("Content-Type", "application/json")
@@ -327,7 +326,7 @@ func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "/search/"))
+		assert.Equal(t, "/api/websh/sessions/sess-1/search/", r.URL.Path)
 		gotQuery = r.URL.Query().Get("q")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
@@ -354,6 +353,7 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 		{
 			name: "readUserInput reporting EOF",
 			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				t.Helper()
 				pipeWrite := pipeStdin(t)
 				require.NoError(t, pipeWrite.Close()) // stdin yields EOF right away
 
@@ -363,6 +363,7 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 		{
 			name: "readUserInput sending to inputChan",
 			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				t.Helper()
 				pipeWrite := pipeStdin(t)
 				_, err := pipeWrite.WriteString("x")
 				require.NoError(t, err)
@@ -376,6 +377,7 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 		{
 			name: "writeToServer waiting to flush",
 			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				t.Helper()
 				// Empty, so only the done branch can end the loop: nothing is ever flushed.
 				return func() { wsClient.writeToServer(make(chan string)) }
 			},
@@ -383,6 +385,7 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 		{
 			name: "watchInterrupt waiting for a signal",
 			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				t.Helper()
 				// No signal ever arrives, so only the done branch can release the watcher.
 				return func() { wsClient.watchInterrupt(make(chan os.Signal)) }
 			},
@@ -390,6 +393,7 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 		{
 			name: "readCtrlC waiting for the next byte",
 			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+				t.Helper()
 				pipeWrite := pipeStdin(t)
 				_, err := pipeWrite.WriteString("x") // not Ctrl+C, so the loop goes around
 				require.NoError(t, err)

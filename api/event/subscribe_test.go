@@ -36,7 +36,7 @@ func TestCreateEventSession(t *testing.T) {
 	}
 
 	resp, err := CreateEventSession(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expected.ID, resp.ID)
 	assert.Equal(t, expected.WebsocketURL, resp.WebsocketURL)
 	assert.Equal(t, expected.ChannelID, resp.ChannelID)
@@ -139,7 +139,7 @@ func TestCreateEventSession_ServerError(t *testing.T) {
 	}
 
 	resp, err := CreateEventSession(ac)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, resp)
 }
 

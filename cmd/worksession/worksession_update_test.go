@@ -9,6 +9,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestValidateSessionForSudoUpdate(t *testing.T) {
@@ -20,7 +21,7 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 			Scopes: []string{"command", "sudo"},
 		}
 		err := validateSessionForSudoUpdate(session, session.Scopes)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-pending")
 		assert.Contains(t, err.Error(), "pending")
 		assert.Contains(t, err.Error(), "--sudo")
@@ -33,7 +34,7 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 			Scopes: []string{"command"},
 		}
 		err := validateSessionForSudoUpdate(session, session.Scopes)
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ses-no-sudo")
 		assert.Contains(t, err.Error(), "'sudo' scope")
 		// Guidance must point at the create flag, not at a separate scope flag.
@@ -104,7 +105,7 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{}, []wsapi.SudoPolicyInline{
 		{Commands: []string{"systemctl reload nginx"}, AllowBypassMFA: true},
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.True(t, patchCalled, "PATCH must be issued")
 	assert.Len(t, gotPATCH.SudoPolicies, 2)
 	assert.Equal(t, "pol-old", gotPATCH.SudoPolicies[0].ID)
@@ -132,7 +133,7 @@ func TestApplyWorkSessionUpdate_PendingSessionAbortsBeforePATCH(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-pending", wsapi.WorkSessionUpdateRequest{},
 		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, AllowBypassMFA: true}})
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.False(t, patchCalled, "PATCH must not be issued when the validator rejects")
 }
 
@@ -163,7 +164,7 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 		Servers:  []string{"srv-1", "srv-2"},
 		StartsAt: "2027-01-15T10:00:00Z",
 	}, nil)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.False(t, getCalled, "no GET should be issued when sudo is not touched")
 	assert.True(t, patchCalled)
 	assert.Equal(t, "deploy v2", raw["title"])
@@ -199,7 +200,7 @@ func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {
 	_, err := applyWorkSessionUpdate(ac, "ses-1",
 		wsapi.WorkSessionUpdateRequest{Description: "rollout"},
 		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, AllowBypassMFA: true}})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "rollout", gotPATCH.Description)
 	assert.Len(t, gotPATCH.SudoPolicies, 1)
 }
@@ -207,11 +208,11 @@ func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {
 func TestParseRFC3339Flag(t *testing.T) {
 	t.Parallel()
 	v, err := parseRFC3339Flag("--starts-at", "  2027-01-15T10:00:00Z  ")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "2027-01-15T10:00:00Z", v)
 
 	_, err = parseRFC3339Flag("--starts-at", "2027-01-15 10:00:00")
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--starts-at")
 	assert.Contains(t, err.Error(), "RFC3339")
 }

@@ -39,7 +39,7 @@ func TestResolveAssignedUser(t *testing.T) {
 		calls := 0
 		got, err := resolveAssignedUser("all", func() (string, error) { calls++; return myID, nil })
 		require.NoError(t, err)
-		assert.Equal(t, "", got)
+		assert.Empty(t, got)
 		assert.Equal(t, 0, calls, "current user must not be resolved for --user all")
 	})
 
@@ -47,7 +47,7 @@ func TestResolveAssignedUser(t *testing.T) {
 		calls := 0
 		got, err := resolveAssignedUser("ALL", func() (string, error) { calls++; return myID, nil })
 		require.NoError(t, err)
-		assert.Equal(t, "", got)
+		assert.Empty(t, got)
 		assert.Equal(t, 0, calls)
 	})
 
@@ -84,6 +84,6 @@ func TestResolveAssignedUser(t *testing.T) {
 	t.Run("current user resolution error propagates", func(t *testing.T) {
 		got, err := resolveAssignedUser("", func() (string, error) { return "", errors.New("boom") })
 		require.Error(t, err)
-		assert.Equal(t, "", got)
+		assert.Empty(t, got)
 	})
 }

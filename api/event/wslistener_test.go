@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -37,16 +38,18 @@ func TestWSListener_StopIsIdempotent(t *testing.T) {
 
 func TestWSListener_WaitConnected_Success(t *testing.T) {
 	t.Parallel()
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	// Simulate connection after short delay
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(w.connected)
-	}()
+		// Simulate connection after short delay
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(w.connected)
+		}()
 
-	result := w.WaitConnected(2 * time.Second)
-	assert.True(t, result, "should return true when connected")
+		result := w.WaitConnected(2 * time.Second)
+		assert.True(t, result, "should return true when connected")
+	})
 }
 
 func TestWSListener_WaitConnected_Timeout(t *testing.T) {
@@ -126,19 +129,21 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
 	t.Parallel()
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(w.done)
-	}()
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(w.done)
+		}()
 
-	start := time.Now()
-	result := w.WaitConnected(5 * time.Second)
-	elapsed := time.Since(start)
+		start := time.Now()
+		result := w.WaitConnected(5 * time.Second)
+		elapsed := time.Since(start)
 
-	assert.False(t, result, "should return false when done is closed")
-	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+		assert.False(t, result, "should return false when done is closed")
+		assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+	})
 }
 
 func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {

@@ -31,14 +31,14 @@ func TestGetUserList_Pagination(t *testing.T) {
 		var results []UserResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, UserResponse{
 					ID:       fmt.Sprintf("uid-%d", i),
 					Username: fmt.Sprintf("user-%d", i),
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, UserResponse{
 					ID:       fmt.Sprintf("uid-p2-%d", i),
 					Username: fmt.Sprintf("user-p2-%d", i),
@@ -96,14 +96,14 @@ func TestGetGroupList_Pagination(t *testing.T) {
 		var results []GroupResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, GroupResponse{
 					ID:   fmt.Sprintf("gid-%d", i),
 					Name: fmt.Sprintf("group-%d", i),
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, GroupResponse{
 					ID:   fmt.Sprintf("gid-p2-%d", i),
 					Name: fmt.Sprintf("group-p2-%d", i),

@@ -82,8 +82,9 @@ func TestFetchVerifiedBinaryRejectsAnArchiveTheChecksumsNeverName(t *testing.T) 
 }
 
 func TestVerifyChecksumStopsBeforeItEvenOpensTheFile(t *testing.T) {
+	t.Parallel()
 	err := VerifyChecksum(filepath.Join(t.TempDir(), "never-downloaded.tar.gz"), "")
 
-	assert.ErrorIs(t, err, ErrChecksumMismatch)
+	require.ErrorIs(t, err, ErrChecksumMismatch)
 	assert.NotErrorIs(t, err, fs.ErrNotExist)
 }

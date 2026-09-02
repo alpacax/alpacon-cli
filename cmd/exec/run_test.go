@@ -212,7 +212,7 @@ func TestRunExecWithApprovalWait_ResumePassesRemainingNotFull(t *testing.T) {
 
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// Resume must use the remaining window, not a fresh full timeout—else the wait could reach 2× waitTimeout.
 	assert.Greater(t, gotTimeout, time.Duration(0), "resume should still have time left")
 	assert.Less(t, gotTimeout, waitTimeout, "resume must pass the remaining time, not the full timeout")
@@ -238,7 +238,7 @@ func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {
 
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Greater(t, calls, 1, "the wait loop must re-attempt, not return the first denial")
 }
 
@@ -339,7 +339,7 @@ func TestRunExecWithApprovalWait_TransientPollFailureKeepsWaiting(t *testing.T) 
 
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 3, calls, "the failed tick must not end the wait")
 }
 
@@ -368,7 +368,7 @@ func TestRunExecWithApprovalWait_EachTickWaitsBehindItsOwnWriter(t *testing.T) {
 
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// writers[0] is the first attempt, which runs before any spinner exists.
 	require.Len(t, writers, 4)
 	assert.NotSame(t, writers[1], writers[2], "the second wait needs a writer of its own")
@@ -403,7 +403,7 @@ func TestRunExecWithApprovalWait_EachRestartPrintsTheHeartbeatLine(t *testing.T)
 		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Second, io.Discard)
 	})
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	// One line for the wait's opening Start, one per still-pending tick's restart.
 	assert.Equal(t, 3, strings.Count(stderr, approvalWaitMessage))
 }
@@ -506,7 +506,7 @@ func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWait(t *testing.T) {
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 
 	var status *statusError
-	assert.ErrorAs(t, err, &status)
+	require.ErrorAs(t, err, &status)
 	assert.Equal(t, 2, calls, "a fatal 4xx must not be retried until the deadline")
 }
 
@@ -531,7 +531,7 @@ func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 
 	var rejected *event.CommandRejectedError
-	assert.ErrorAs(t, err, &rejected)
+	require.ErrorAs(t, err, &rejected)
 	assert.Equal(t, 2, calls, "a rejection is an answer, not a failed poll to retry")
 }
 

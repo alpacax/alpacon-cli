@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(server *httptest.Server) *client.AlpaconClient {
@@ -41,7 +42,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 		var results []CSRResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, CSRResponse{
 					ID:         fmt.Sprintf("csr-%d", i),
 					CommonName: fmt.Sprintf("cn-%d", i),
@@ -52,7 +53,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, CSRResponse{
 					ID:         fmt.Sprintf("csr-p2-%d", i),
 					CommonName: fmt.Sprintf("cn-p2-%d", i),
@@ -116,7 +117,7 @@ func TestGetAuthorityIDByName(t *testing.T) {
 		ts := newServer()
 		defer ts.Close()
 		id, err := GetAuthorityIDByName(newTestClient(ts), "Root CA")
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, "aaaa-0000-0000-0000-000000000001", id)
 	})
 
@@ -124,8 +125,7 @@ func TestGetAuthorityIDByName(t *testing.T) {
 		ts := newServer()
 		defer ts.Close()
 		_, err := GetAuthorityIDByName(newTestClient(ts), "Nonexistent CA")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no authority found with name")
+		require.ErrorContains(t, err, "no authority found with name")
 	})
 
 	t.Run("uuid fast-path skips fetch", func(t *testing.T) {
@@ -137,7 +137,7 @@ func TestGetAuthorityIDByName(t *testing.T) {
 		defer ts.Close()
 		uuid := "550e8400-e29b-41d4-a716-446655440000"
 		id, err := GetAuthorityIDByName(newTestClient(ts), uuid)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, uuid, id)
 		assert.False(t, called, "should not call server for UUID input")
 	})
@@ -160,7 +160,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 		var results []AuthorityResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-%d", i),
 					Name: fmt.Sprintf("authority-%d", i),
@@ -170,7 +170,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, AuthorityResponse{
 					ID:   fmt.Sprintf("auth-p2-%d", i),
 					Name: fmt.Sprintf("authority-p2-%d", i),
@@ -231,7 +231,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 		var results []Certificate
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, Certificate{
 					ID: fmt.Sprintf("cert-%d", i),
 					Authority: AuthoritySummary{
@@ -240,7 +240,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, Certificate{
 					ID: fmt.Sprintf("cert-p2-%d", i),
 					Authority: AuthoritySummary{
@@ -292,7 +292,7 @@ func TestCreateSignRequest(t *testing.T) {
 		SubmitURL:  "/api/cert/sign-requests/new-csr-id/submit/",
 	}
 
-	var capturedBody map[string]interface{}
+	var capturedBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.NoError(t, json.NewDecoder(r.Body).Decode(&capturedBody))
@@ -309,7 +309,7 @@ func TestCreateSignRequest(t *testing.T) {
 	}
 
 	resp, err := CreateSignRequest(ac, signReq)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expectedResponse.ID, resp.ID)
 	assert.Equal(t, expectedResponse.CommonName, resp.CommonName)
 	assert.Equal(t, expectedResponse.SubmitURL, resp.SubmitURL)
@@ -354,7 +354,7 @@ func TestApproveCSR(t *testing.T) {
 
 	ac := newTestClient(server)
 	body, err := ApproveCSR(ac, "test-csr-id")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, body)
 }
 
@@ -371,7 +371,7 @@ func TestDenyCSR(t *testing.T) {
 
 	ac := newTestClient(server)
 	body, err := DenyCSR(ac, "test-csr-id")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotNil(t, body)
 }
 
@@ -474,13 +474,12 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 			err := DownloadCertificateByCSR(ac, "test-csr-id", filePath)
 
 			if tt.expectError {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.errorMsg)
+				require.ErrorContains(t, err, tt.errorMsg)
 				assert.NoFileExists(t, filePath)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				content, readErr := os.ReadFile(filePath)
-				assert.NoError(t, readErr)
+				require.NoError(t, readErr)
 				assert.Equal(t, tt.response.CrtText, string(content))
 			}
 		})
@@ -501,7 +500,7 @@ func TestDownloadCertificateByCSR_APIError(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.crt")
 
 	err := DownloadCertificateByCSR(ac, "nonexistent-id", filePath)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.NoFileExists(t, filePath)
 }
 
@@ -565,9 +564,9 @@ func TestDownloadCertificate(t *testing.T) {
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				content, readErr := os.ReadFile(filePath)
-				assert.NoError(t, readErr)
+				require.NoError(t, readErr)
 				assert.Equal(t, tt.response.CrtText, string(content))
 			}
 		})

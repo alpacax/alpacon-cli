@@ -69,6 +69,6 @@ func TestGetPreferences_EmptyResponse(t *testing.T) {
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, got)
 }

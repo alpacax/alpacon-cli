@@ -211,9 +211,9 @@ func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
 	result, err := parseExpiryFlag("2h", "")
 	after := time.Now()
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	parsed, parseErr := time.Parse(time.RFC3339, result)
-	assert.NoError(t, parseErr)
+	require.NoError(t, parseErr)
 	assert.True(t, parsed.After(before.Add(2*time.Hour-time.Second)))
 	assert.True(t, parsed.Before(after.Add(2*time.Hour+time.Second)))
 }
@@ -222,7 +222,7 @@ func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
 	t.Parallel()
 	ts := "2026-12-31T23:59:59Z"
 	result, err := parseExpiryFlag("", ts)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, ts, result)
 }
 
@@ -290,7 +290,7 @@ func TestResolveWaitTimeout(t *testing.T) {
 				assert.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, d)
 		})
 	}

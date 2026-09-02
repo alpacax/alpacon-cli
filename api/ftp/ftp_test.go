@@ -119,8 +119,7 @@ func TestUploadToS3_Failure(t *testing.T) {
 	defer ts.Close()
 
 	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader([]byte("data")), int64(len("data")))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "403")
+	require.ErrorContains(t, err, "403")
 }
 
 func TestExecuteBulkUpload(t *testing.T) {
@@ -649,8 +648,7 @@ func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
 	}
 
 	err := executeSingleUpload(ac, request, bytes.NewReader([]byte("content")), int64(len("content")))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "permission denied")
+	require.ErrorContains(t, err, "permission denied")
 }
 
 func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
@@ -742,8 +740,7 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 	files := []io.Reader{bytes.NewReader([]byte("content"))}
 	sizes := []int64{int64(len("content"))}
 	err := executeBulkUpload(ac, request, files, sizes)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "disk full")
+	require.ErrorContains(t, err, "disk full")
 }
 
 func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
@@ -776,8 +773,7 @@ func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
 	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
 	sizes := []int64{int64(len("content1")), int64(len("content2"))}
 	err := executeBulkUpload(ac, request, files, sizes)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "1 upload slots but 2 files")
+	require.ErrorContains(t, err, "1 upload slots but 2 files")
 }
 
 func TestPollTransferStatus_Timeout(t *testing.T) {
@@ -796,7 +792,7 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 
 	// Use a very short timeout to make the test fast
 	success, _, err := PollTransferStatus(ac, "upload", "test-id", 3*time.Second)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
 }
@@ -1441,7 +1437,7 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	success, _, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.False(t, success)
 	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
 }

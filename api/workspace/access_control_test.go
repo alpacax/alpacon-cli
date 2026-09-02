@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetAccessControl(t *testing.T) {
@@ -31,11 +32,11 @@ func TestGetAccessControl(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetAccessControl(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, true, got["allow_sudo_with_mfa"])
 	assert.Equal(t, false, got["allow_direct_root"])
 	assert.Equal(t, true, got["allow_tunnel_by_default"])
@@ -66,10 +67,10 @@ func TestGetAccessControl_EmptyResponse(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetAccessControl(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, got)
 }

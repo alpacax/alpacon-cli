@@ -6,6 +6,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCsrCommandStructure(t *testing.T) {
@@ -67,7 +68,7 @@ func TestCsrSubcommands(t *testing.T) {
 			assert.True(t, subCmdNames[tt.cmdName], "subcommand %q should be registered", tt.cmdName)
 
 			cmd, _, err := CsrCmd.Find([]string{tt.cmdName})
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.NotNil(t, cmd)
 
 			if tt.aliases != nil {
@@ -93,7 +94,7 @@ func TestSubcommandAliases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cmd, _, err := CsrCmd.Find([]string{tt.alias})
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectCmd, cmd.Name())
 		})
 	}
@@ -101,7 +102,7 @@ func TestSubcommandAliases(t *testing.T) {
 
 func TestListSubcommandFlags(t *testing.T) {
 	cmd, _, err := CsrCmd.Find([]string{"ls"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	statusFlag := cmd.Flags().Lookup("status")
 	assert.NotNil(t, statusFlag, "--status flag should exist")
@@ -110,17 +111,17 @@ func TestListSubcommandFlags(t *testing.T) {
 
 func TestDownloadSubcommandFlags(t *testing.T) {
 	cmd, _, err := CsrCmd.Find([]string{"download-crt"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	outFlag := cmd.Flags().Lookup("out")
 	assert.NotNil(t, outFlag, "--out flag should exist")
 	assert.Equal(t, "o", outFlag.Shorthand, "short flag should be -o")
-	assert.Equal(t, "", outFlag.DefValue, "default value should be empty")
+	assert.Empty(t, outFlag.DefValue, "default value should be empty")
 }
 
 func TestCreateSubcommandFlags(t *testing.T) {
 	cmd, _, err := CsrCmd.Find([]string{"create"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	tests := []struct {
 		flagName  string

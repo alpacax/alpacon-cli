@@ -135,7 +135,7 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 		var results []APITokenResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, APITokenResponse{
 					ID:     fmt.Sprintf("tid-%d", i),
 					Name:   fmt.Sprintf("token-%d", i),
@@ -143,7 +143,7 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				results = append(results, APITokenResponse{
 					ID:   fmt.Sprintf("tid-p2-%d", i),
 					Name: fmt.Sprintf("token-p2-%d", i),

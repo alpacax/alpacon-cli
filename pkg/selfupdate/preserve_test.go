@@ -62,7 +62,7 @@ func TestSweepPreservedRemovesOnlyTimestampedCopies(t *testing.T) {
 	assert.Equal(t, 4, removed)
 	for _, name := range keep {
 		_, err := os.Stat(filepath.Join(dir, name))
-		assert.NoError(t, err, "sweep must not remove %s", name)
+		require.NoError(t, err, "sweep must not remove %s", name)
 	}
 	for _, name := range remove {
 		_, err := os.Stat(filepath.Join(dir, name))

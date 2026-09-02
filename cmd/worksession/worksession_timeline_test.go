@@ -248,7 +248,7 @@ func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
 func TestFormatDetails_Unknown(t *testing.T) {
 	t.Parallel()
 	item := wsapi.TimelineItem{Type: "unknown_event"}
-	assert.Equal(t, "", formatDetails(&item))
+	assert.Empty(t, formatDetails(&item))
 }
 
 func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {

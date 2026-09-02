@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type outputTestItem struct {
@@ -78,7 +79,7 @@ func TestPrintTable_JSONOutput_KeepsControlSequencesEscaped(t *testing.T) {
 			assert.NotContains(t, got, "\x7f")
 
 			var decoded []outputTestItem
-			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			require.NoError(t, json.Unmarshal([]byte(got), &decoded))
 			assert.Equal(t, items, decoded)
 		})
 	}
@@ -164,7 +165,7 @@ func TestPrintJson_JSONOutput_EscapesRawControlBytes(t *testing.T) {
 	assert.NotContains(t, got, "\x7f")
 
 	var decoded map[string]string
-	assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+	require.NoError(t, json.Unmarshal([]byte(got), &decoded))
 	assert.Equal(t, "a\u009b2K\x7fb", decoded["name"])
 }
 
@@ -188,7 +189,7 @@ func TestPrintJson_JSONOutput_EscapesBareC1Byte(t *testing.T) {
 			assert.NotContains(t, got, "\x9b")
 
 			var decoded map[string]string
-			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			require.NoError(t, json.Unmarshal([]byte(got), &decoded))
 			assert.Equal(t, tt.want, decoded["name"])
 		})
 	}
@@ -208,7 +209,7 @@ func TestPrintJson_JSONOutput_EscapesFormatChars(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, err := json.Marshal(map[string]string{"name": tt.raw})
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			var got string
 			withFormat("json", func() {
@@ -218,7 +219,7 @@ func TestPrintJson_JSONOutput_EscapesFormatChars(t *testing.T) {
 			assert.NotContains(t, got, tt.raw)
 
 			var decoded map[string]string
-			assert.NoError(t, json.Unmarshal([]byte(got), &decoded))
+			require.NoError(t, json.Unmarshal([]byte(got), &decoded))
 			assert.Equal(t, tt.raw, decoded["name"])
 		})
 	}
@@ -237,7 +238,7 @@ func TestPrintJson_TableOutput(t *testing.T) {
 func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
 	t.Parallel()
 	got, err := FormatJSON(map[string]string{"next": `alpacon work-session use <ID>`})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Contains(t, got, "<ID>")
 	assert.NotContains(t, got, "\\u003c")
 }

@@ -372,7 +372,7 @@ func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
 	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)
 	assert.Equal(t, "my-server", got.ServerName)
-	assert.Equal(t, "", got.WorkSessionID)
+	assert.Empty(t, got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
 }
 

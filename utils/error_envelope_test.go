@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildCliErrorEnvelope(t *testing.T) {
@@ -24,7 +25,7 @@ func TestBuildCliErrorEnvelope_NoCodeOmitsField(t *testing.T) {
 	env := buildCliErrorEnvelope("use", "", "boom")
 
 	rendered, err := FormatJSON(env)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.NotContains(t, rendered, "error_code")
 	assert.Contains(t, rendered, `"operation": "use"`)
 }

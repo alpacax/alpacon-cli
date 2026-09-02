@@ -89,10 +89,10 @@ func TestCreateConfig_WithBaseDomain(t *testing.T) {
 		"", "", "access-token", "refresh-token",
 		"alpacon.io", 3600, false,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "alpacon.io", cfg.BaseDomain)
 	assert.Equal(t, "myws", cfg.WorkspaceName)
 	assert.Equal(t, "https://myws.us1.alpacon.io", cfg.WorkspaceURL)
@@ -109,11 +109,11 @@ func TestCreateConfig_WithoutBaseDomain(t *testing.T) {
 		"legacy-token", "2025-12-31T00:00:00Z", "", "",
 		"", 0, false,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	cfg, err := LoadConfig()
-	assert.NoError(t, err)
-	assert.Equal(t, "", cfg.BaseDomain)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.BaseDomain)
 	assert.Equal(t, "legacy-token", cfg.Token)
 }
 
@@ -125,16 +125,16 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 		"token", "", "", "",
 		"", 0, false,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Read raw JSON to verify omitempty works
 	homeDir, _ := os.UserHomeDir()
 	data, err := os.ReadFile(filepath.Join(homeDir, ConfigFileDir, ConfigFileName))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var raw map[string]any
 	err = json.Unmarshal(data, &raw)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	_, exists := raw["base_domain"]
 	assert.False(t, exists, "base_domain should be omitted from JSON when empty")
 }
@@ -148,15 +148,15 @@ func TestSwitchWorkspace(t *testing.T) {
 		"", "", "access-token", "refresh-token",
 		"alpacon.io", 3600, false,
 	)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Switch workspace
 	err = SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Verify only URL and name changed
 	cfg, err := LoadConfig()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
 	assert.Equal(t, "ws2", cfg.WorkspaceName)
 	assert.Equal(t, "alpacon.io", cfg.BaseDomain, "BaseDomain should be preserved")
@@ -207,7 +207,7 @@ func TestActiveWorkSession_UnsetRemovesKey(t *testing.T) {
 
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
-	assert.Equal(t, "", got)
+	assert.Empty(t, got)
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
 	require.NoError(t, SwitchWorkspace("https://ws-b.example.com", "ws-b"))
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
-	assert.Equal(t, "", got, "switching workspace should yield empty active session for new workspace")
+	assert.Empty(t, got, "switching workspace should yield empty active session for new workspace")
 
 	require.NoError(t, SetActiveWorkSession("uuid-B"))
 
@@ -340,7 +340,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	for {
 		select {
 		case <-done:
-			assert.NoError(t, errors.Join(writeErrs...))
+			require.NoError(t, errors.Join(writeErrs...))
 			assert.Positive(t, reads, "the reader never got to run, so the test proved nothing")
 			return
 		default:

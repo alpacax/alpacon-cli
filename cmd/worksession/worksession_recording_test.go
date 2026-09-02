@@ -131,12 +131,12 @@ func TestRecordingPreview_Truncates(t *testing.T) {
 
 func TestRecordingPreview_EmptyRaw(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "", recordingPreview(""))
+	assert.Empty(t, recordingPreview(""))
 }
 
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
+	assert.Empty(t, recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
 }
 
 func TestRecordingPreview_StripsBidiOverride(t *testing.T) {

@@ -380,8 +380,8 @@ func TestFormatAdjustments(t *testing.T) {
 
 func TestFormatRecommendations(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "", formatRecommendations(nil))
-	assert.Equal(t, "", formatRecommendations([]wsapi.Recommendation{}))
+	assert.Empty(t, formatRecommendations(nil))
+	assert.Empty(t, formatRecommendations([]wsapi.Recommendation{}))
 
 	got := formatRecommendations([]wsapi.Recommendation{
 		{Severity: "high", Text: "Rotate the key"},

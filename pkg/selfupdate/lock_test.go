@@ -18,7 +18,7 @@ func TestAcquireLockRefusesASecondHolder(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = AcquireLock(path)
-	assert.ErrorIs(t, err, ErrUpdateInProgress)
+	require.ErrorIs(t, err, ErrUpdateInProgress)
 
 	require.NoError(t, first.Release())
 

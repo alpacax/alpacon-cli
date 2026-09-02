@@ -28,7 +28,7 @@ func TestWorkspaceErrorCallbacks_WiresEveryField(t *testing.T) {
 	assert.Nil(t, cb.OnUsernameRequired)
 
 	require.NotNil(t, cb.RetryOperation)
-	assert.NoError(t, cb.RetryOperation())
+	require.NoError(t, cb.RetryOperation())
 	assert.True(t, retried, "RetryOperation must be the closure passed in")
 }
 
@@ -67,6 +67,6 @@ func TestWorkspaceErrorCallbacks_EmptyWorkspaceFailsInsteadOfPrintingALink(t *te
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	cb := WorkspaceErrorCallbacks(ac, func() error { return nil })
 
-	assert.Error(t, cb.OnMFARequired(""))
+	require.Error(t, cb.OnMFARequired(""))
 	assert.False(t, called, "an empty workspace must not reach the server")
 }

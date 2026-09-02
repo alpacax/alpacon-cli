@@ -77,7 +77,7 @@ func TestFetchVerifiedBinaryRefusesAMismatchedChecksum(t *testing.T) {
 
 	_, err := FetchVerifiedBinary(release, "linux", "amd64", "alpacon", dir)
 
-	assert.ErrorIs(t, err, ErrChecksumMismatch)
+	require.ErrorIs(t, err, ErrChecksumMismatch)
 	_, statErr := os.Stat(filepath.Join(dir, "alpacon.new"))
 	assert.ErrorIs(t, statErr, os.ErrNotExist, "verification runs before extraction, and only the missing file proves that order")
 }
@@ -111,7 +111,7 @@ func TestRefuseSchemeDowngrade(t *testing.T) {
 	secure := httptest.NewRequest(http.MethodGet, "https://example.test/archive.tar.gz", nil)
 	plain := httptest.NewRequest(http.MethodGet, "http://example.test/archive.tar.gz", nil)
 
-	assert.Error(t, refuseSchemeDowngrade(plain, []*http.Request{secure}))
+	require.Error(t, refuseSchemeDowngrade(plain, []*http.Request{secure}))
 	assert.NoError(t, refuseSchemeDowngrade(secure, []*http.Request{secure}))
 	assert.NoError(t, refuseSchemeDowngrade(plain, []*http.Request{plain}), "a plain-text start was never a promise to keep")
 }
@@ -151,7 +151,7 @@ func TestRefuseSchemeDowngradeStopsAnEndlessRedirectChain(t *testing.T) {
 		via[i] = secure
 	}
 
-	assert.Error(t, refuseSchemeDowngrade(secure, via))
+	require.Error(t, refuseSchemeDowngrade(secure, via))
 	assert.NoError(t, refuseSchemeDowngrade(secure, via[:9]))
 }
 
@@ -195,7 +195,7 @@ func TestCheckAssetOriginAcceptsAPinnedOriginSpelledDifferently(t *testing.T) {
 		"https://github.com:443/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
 		"HTTPS://github.com/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
 	} {
-		assert.NoError(t, checkAssetOrigin(rawURL), rawURL)
+		require.NoError(t, checkAssetOrigin(rawURL), rawURL)
 	}
 	assert.Error(t, checkAssetOrigin("https://github.com:8443/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"), "a non-default port is a different endpoint, not a spelling")
 }

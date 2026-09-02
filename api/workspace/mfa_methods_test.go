@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetMFAMethods(t *testing.T) {
@@ -28,11 +29,11 @@ func TestGetMFAMethods(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetMFAMethods(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []any{"email", "otp"}, got["allowed_mfa_methods"])
 	assert.Equal(t, false, got["passkey_as_mfa"])
 }
@@ -60,10 +61,10 @@ func TestGetMFAMethods_EmptyResponse(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	body, err := GetMFAMethods(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	var got map[string]any
 	err = json.Unmarshal(body, &got)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, got)
 }

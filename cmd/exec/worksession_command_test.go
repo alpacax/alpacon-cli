@@ -119,7 +119,7 @@ func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
 
 // helperArgsAfter returns the args after marker—the helper's, not go test's.
 func helperArgsAfter(args []string, marker string) ([]string, bool) {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if args[i] == marker {
 			return args[i+1:], true
 		}

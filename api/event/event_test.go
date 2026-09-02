@@ -1655,6 +1655,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "success false returns RemoteCommandError with exit code",
 			terminal: EventDetails{Status: "completed", Success: boolPtr(false), ExitCode: intPtr(7)},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				var re *RemoteCommandError
 				require.ErrorAs(t, err, &re)
 				assert.Equal(t, 7, re.ExitCode)
@@ -1664,6 +1665,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "stuck status without phase keeps legacy message",
 			terminal: EventDetails{Status: "stuck"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: stuck")
 			},
@@ -1672,6 +1674,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "error status without phase keeps legacy message",
 			terminal: EventDetails{Status: "error"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: error")
 			},
@@ -1680,6 +1683,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "cancelled status without phase keeps legacy message",
 			terminal: EventDetails{Status: "cancelled"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: cancelled")
 			},
@@ -1688,6 +1692,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "stuck status with phase carries phase identifier",
 			terminal: EventDetails{Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "[agent_timeout]")
 				assert.Contains(t, err.Error(), "status=stuck")
@@ -1697,6 +1702,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "unrecognized status returns unexpected-status error",
 			terminal: EventDetails{Status: "denied"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "unexpected command status")
 			},

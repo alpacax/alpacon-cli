@@ -29,7 +29,7 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 		var results []WebhookResponse
 		switch page {
 		case "1", "":
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				results = append(results, WebhookResponse{
 					ID:    fmt.Sprintf("wh-id-%d", i),
 					Name:  fmt.Sprintf("webhook-%d", i),
@@ -37,7 +37,7 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 				})
 			}
 		case "2":
-			for i := 0; i < 40; i++ {
+			for i := range 40 {
 				results = append(results, WebhookResponse{
 					ID:    fmt.Sprintf("wh-p2-%d", i),
 					Name:  fmt.Sprintf("webhook-p2-%d", i),

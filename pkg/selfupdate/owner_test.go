@@ -68,7 +68,7 @@ func TestPackageOwner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			owner, err := PackageOwner(tt.run, "/usr/local/bin/alpacon")
 
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, owner)
 		})
 	}

@@ -23,7 +23,7 @@ func TestRunCurrent_NoActive_ReturnsEmpty(t *testing.T) {
 
 	uuid, ws, err := worksession.RunCurrent(ac)
 	require.NoError(t, err)
-	assert.Equal(t, "", uuid)
+	assert.Empty(t, uuid)
 	assert.Nil(t, ws)
 }
 

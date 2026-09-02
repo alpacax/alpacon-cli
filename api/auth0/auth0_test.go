@@ -215,7 +215,7 @@ func TestFetchAuthEnv(t *testing.T) {
 			defer ts.Close()
 
 			envInfo, err := FetchAuthEnv(ts.URL, ts.Client())
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, "auth0", envInfo.Auth0.Method)
 			assert.Equal(t, "client123", envInfo.Auth0.ClientID)
 			assert.Equal(t, tt.expectSchemaName, envInfo.Auth0.SchemaName)
@@ -250,7 +250,7 @@ func TestExtractSubdomain(t *testing.T) {
 				assert.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, subdomain)
 		})
 	}

@@ -103,7 +103,7 @@ func TestParseEditTarget(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "prod", target.Server)
 	assert.Equal(t, "/tmp/alice@example.com", target.RemotePath)
-	assert.Equal(t, "", target.Username)
+	assert.Empty(t, target.Username)
 }
 
 func TestParseEditTargetRejectsInvalidTargets(t *testing.T) {

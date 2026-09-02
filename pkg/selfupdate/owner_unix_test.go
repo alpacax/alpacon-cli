@@ -28,7 +28,7 @@ func TestExecRunnerSeparatesAnAnswerFromAQueryThatCouldNotAnswer(t *testing.T) {
 
 	_, notOwned := ExecRunner("/bin/sh", "-c", "exit 1")
 	require.Error(t, notOwned)
-	assert.NotErrorIs(t, notOwned, ErrOwnerUnknown, "a non-zero exit is the answer 'this manager does not own it'")
+	require.NotErrorIs(t, notOwned, ErrOwnerUnknown, "a non-zero exit is the answer 'this manager does not own it'")
 
 	_, missing := ExecRunner("alpacon-no-such-package-manager", "-qf", "/usr/local/bin/alpacon")
 	require.Error(t, missing)

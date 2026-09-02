@@ -171,7 +171,7 @@ func keptModeIsWider(keptPerm, newFilePerm os.FileMode) bool {
 // operates on the underlying file rather than the symlink itself.
 func resolveWritePath(fileName string) (string, error) {
 	targetName := fileName
-	for i := 0; i < 255; i++ {
+	for range 255 {
 		info, err := os.Lstat(targetName)
 		if os.IsNotExist(err) {
 			return targetName, nil
@@ -196,7 +196,7 @@ func resolveWritePath(fileName string) (string, error) {
 }
 
 func createReplacementTempFile(dir string, perm os.FileMode) (*os.File, error) {
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		name := filepath.Join(dir, fmt.Sprintf(".alpacon-%d-%d-%d.tmp", os.Getpid(), time.Now().UnixNano(), i))
 		file, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
 		if os.IsExist(err) {

@@ -1,19 +1,22 @@
 version: "2"
 
+issues:
+  # The defaults stop at 50 per linter and 3 per issue type, which hides the
+  # size of a sweep; report everything.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
   enable:
     - errcheck
     - govet
     - ineffassign
+    - intrange
     - staticcheck
     - testifylint
+    - thelper
     - unused
   settings:
-    testifylint:
-      disable:
-        # Pending cleanups tracked in issue #320; enable as each lands.
-        - require-error # 175 sites
-        - empty         # 29 sites, conversion still undecided
     errcheck:
       exclude-functions:
         - fmt.Fprintf

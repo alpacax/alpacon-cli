@@ -12,8 +12,8 @@ import (
 func TestParseErrorResponse_NilError(t *testing.T) {
 	t.Parallel()
 	code, source := ParseErrorResponse(nil)
-	assert.Equal(t, "", code)
-	assert.Equal(t, "", source)
+	assert.Empty(t, code)
+	assert.Empty(t, source)
 }
 
 func TestParseErrorResponse_JSONFormat(t *testing.T) {
@@ -99,8 +99,8 @@ func TestParseErrorResponse_TextFormat(t *testing.T) {
 func TestParseErrorResponse_NoMatch(t *testing.T) {
 	t.Parallel()
 	code, source := ParseErrorResponse(errors.New("connection refused"))
-	assert.Equal(t, "", code)
-	assert.Equal(t, "", source)
+	assert.Empty(t, code)
+	assert.Empty(t, source)
 }
 
 func TestParseErrorResponse_WrappedJSONFormat(t *testing.T) {
