@@ -23,12 +23,14 @@ func TestValidateStatusFilter(t *testing.T) {
 		{"active", true},
 	}
 	for _, tc := range cases {
-		err := validateStatusFilter(tc.input)
-		if tc.wantErr {
-			assert.Error(t, err, "input: %q", tc.input)
-		} else {
-			assert.NoError(t, err, "input: %q", tc.input)
-		}
+		t.Run(tc.input, func(t *testing.T) {
+			err := validateStatusFilter(tc.input)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }
 
@@ -52,11 +54,13 @@ func TestValidateTypeFilter(t *testing.T) {
 		{"WorkSession", true},
 	}
 	for _, tc := range cases {
-		err := validateTypeFilter(tc.input)
-		if tc.wantErr {
-			assert.Error(t, err, "input: %q", tc.input)
-		} else {
-			assert.NoError(t, err, "input: %q", tc.input)
-		}
+		t.Run(tc.input, func(t *testing.T) {
+			err := validateTypeFilter(tc.input)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }
