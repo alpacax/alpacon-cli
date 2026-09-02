@@ -390,6 +390,9 @@ func Unzip(src string, dest string) error {
 	}
 	defer func() { _ = r.Close() }()
 
+	// CodeQL's go/zipslip accepts only this prefix form; TrimSuffix keeps a root dest off "//".
+	destPrefix := strings.TrimSuffix(filepath.Clean(dest), string(os.PathSeparator)) + string(os.PathSeparator)
+
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
 		// Reject absolute paths
@@ -399,9 +402,7 @@ func Unzip(src string, dest string) error {
 
 		fpath := filepath.Join(dest, f.Name)
 
-		// Use filepath.Rel to safely validate the path is within destination
-		rel, err := filepath.Rel(dest, fpath)
-		if err != nil || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		if !strings.HasPrefix(fpath, destPrefix) {
 			return fmt.Errorf("invalid file path: %s", f.Name)
 		}
 

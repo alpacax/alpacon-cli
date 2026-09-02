@@ -93,6 +93,11 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:     "sibling directory sharing the destination prefix",
+			filename: "../extract-evil/file.txt",
+			wantErr:  true,
+		},
+		{
 			name:     "valid file with dots in name",
 			filename: "file..txt",
 			wantErr:  false,
