@@ -20,6 +20,7 @@ import (
 )
 
 func TestClientTimeoutLine(t *testing.T) {
+	t.Parallel()
 	line := clientTimeoutLine()
 	assert.Contains(t, line, "[client_timeout]", "stderr should carry the phase id in brackets")
 	assert.Contains(t, line, event.DescribePhase("client_timeout"),
@@ -28,6 +29,7 @@ func TestClientTimeoutLine(t *testing.T) {
 }
 
 func TestAsPhasedError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		err     error
@@ -54,6 +56,7 @@ func TestAsPhasedError(t *testing.T) {
 }
 
 func TestRemoteCommandOutcome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		remoteErr        *event.RemoteCommandError
@@ -127,6 +130,7 @@ func TestRemoteCommandOutcome(t *testing.T) {
 // the raw phase, so a payload that only becomes a known phase after sanitizing
 // still renders as an identifier and cannot borrow that phase's description.
 func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		phase      string
@@ -160,6 +164,7 @@ func TestRemoteCommandOutcomeSanitizesPhase(t *testing.T) {
 }
 
 func TestDetachResultLines(t *testing.T) {
+	t.Parallel()
 	line1, line2 := detachResultLines("a1b2c3d4-1234-5678-abcd-000000000000")
 	assert.Equal(t, "Job submitted: a1b2c3d4-1234-5678-abcd-000000000000", line1)
 	assert.Equal(t, "Run `alpacon exec logs a1b2c3d4-1234-5678-abcd-000000000000` to check the result.", line2)
@@ -168,6 +173,7 @@ func TestDetachResultLines(t *testing.T) {
 // The job id comes from the server's submit response and both lines are written
 // raw (stdout and stderr), outside the Cli* helpers—same class as #364.
 func TestDetachResultLinesSanitizesJobID(t *testing.T) {
+	t.Parallel()
 	line1, line2 := detachResultLines("job-1\x1b[2K\u202e")
 
 	assert.Equal(t, "Job submitted: job-1", line1)
@@ -264,6 +270,7 @@ func (e *statusError) Error() string       { return fmt.Sprintf("server said %d"
 func (e *statusError) HTTPStatusCode() int { return e.status }
 
 func TestIsPollFailure(t *testing.T) {
+	t.Parallel()
 	// What a proxy error page under a JSON content type leaves the caller with.
 	unparseableBody := json.Unmarshal([]byte(`<html>502 Bad Gateway</html>`), &struct{}{})
 	// A body that is JSON but not the response shape: parses, answers nothing.

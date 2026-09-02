@@ -154,7 +154,8 @@ _ = json.NewEncoder(w).Encode(resp)
 
 ### Test patterns
 
-- Table-driven tests with `testify/assert`
+- Table-driven tests with `testify/assert`. Every table loop runs each case under `t.Run` so a failure names the case and `-run 'TestX/case'` can select one
+- Every test calls `t.Parallel()` first unless it touches process-wide state or reads a package-level Cobra command. Process-wide state is `t.Setenv` (Go panics when a test calls both), an `os.Stdout`/`os.Stderr` swap including `testutil.CaptureOutput`, `utils.OutputFormat`, and any package-level seam a test reassigns (`runPresenceStepUp`, `approvalWaitPollInterval`, `maxGapWidth`). Cobra commands are out because `Commands()` and `Find()` sort and build flag sets lazily, so even a read-only test races with its neighbor. Serial tests run to completion before the parallel ones start, so a serial test may reassign a global as long as it restores it
 - API tests use `httptest.NewServer` with a minimal `*client.AlpaconClient` pointing at `ts.URL`
 - Command logic is extracted to unexported helpers (e.g., `parseExecArgs`) for direct unit testing
 

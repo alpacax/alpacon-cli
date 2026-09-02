@@ -28,6 +28,7 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 }
 
 func TestGetUserBindings_DecodesNestedRoleAndNullScope(t *testing.T) {
+	t.Parallel()
 	body := `{
 	  "count": 2, "current": 1, "next": 0, "previous": 0, "last": 1,
 	  "results": [
@@ -74,6 +75,7 @@ func TestGetUserBindings_DecodesNestedRoleAndNullScope(t *testing.T) {
 }
 
 func TestScopeLabel(t *testing.T) {
+	t.Parallel()
 	contentType := 42
 	objectID := "web-01"
 	blank := ""
@@ -97,6 +99,7 @@ func TestScopeLabel(t *testing.T) {
 }
 
 func TestResolveRole_ByName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		count   int
@@ -135,6 +138,7 @@ func TestResolveRole_ByName(t *testing.T) {
 }
 
 func TestResolveRole_ByUUID(t *testing.T) {
+	t.Parallel()
 	var gotPath string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -150,6 +154,7 @@ func TestResolveRole_ByUUID(t *testing.T) {
 }
 
 func TestGetRoleCatalog_SendsFilterOnlyWhenAsked(t *testing.T) {
+	t.Parallel()
 	hide := false
 
 	tests := []struct {
@@ -182,6 +187,7 @@ func TestGetRoleCatalog_SendsFilterOnlyWhenAsked(t *testing.T) {
 }
 
 func TestGetRoleCatalog_WalksEveryPage(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 		if page == 0 {
@@ -205,6 +211,7 @@ func TestGetRoleCatalog_WalksEveryPage(t *testing.T) {
 }
 
 func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
+	t.Parallel()
 	var query url.Values
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		query = r.URL.Query()
@@ -230,6 +237,7 @@ func TestGetRoleHistory_StopsAtTailAndSendsNoOrdering(t *testing.T) {
 
 // changed_by is null when the actor was a token or an application.
 func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
+	t.Parallel()
 	rows := AuditAttributesFrom([]RoleAuditLogResponse{
 		{Action: "granted", RoleName: "admin", Scope: "global", ChangedBy: nil, Reason: ""},
 		{Action: "revoked", RoleName: "operator", Scope: "global", ChangedBy: &AuditActor{Label: "Jane Doe"}, Reason: "rotated off"},
@@ -243,6 +251,7 @@ func TestAuditAttributesFrom_ToleratesMissingActorAndRole(t *testing.T) {
 }
 
 func TestFindWorkspaceBindingIgnoresObjectScopedRows(t *testing.T) {
+	t.Parallel()
 	contentType := 42
 	objectID := "web-01"
 	bindings := []UserRoleResponse{
@@ -260,6 +269,7 @@ func TestFindWorkspaceBindingIgnoresObjectScopedRows(t *testing.T) {
 }
 
 func TestHoldsWorkspaceRoleIgnoresObjectScopedRows(t *testing.T) {
+	t.Parallel()
 	contentType := 42
 	bindings := []UserRoleResponse{
 		{Role: RoleNested{ID: adminRoleID, Name: "admin"}, ContentType: &contentType},
@@ -269,6 +279,7 @@ func TestHoldsWorkspaceRoleIgnoresObjectScopedRows(t *testing.T) {
 }
 
 func TestScopeAttributesFrom_ListsWildcardsFirst(t *testing.T) {
+	t.Parallel()
 	rows := ScopeAttributesFrom(&RoleScopesResponse{
 		Wildcards: []string{"*"},
 		Resources: []RoleScopeResource{{Name: "server", Actions: []string{"read", "update"}, ACL: []string{"command"}}},
@@ -283,6 +294,7 @@ func TestScopeAttributesFrom_ListsWildcardsFirst(t *testing.T) {
 }
 
 func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
+	t.Parallel()
 	var gotBody []byte
 	var gotMethod string
 
@@ -306,6 +318,7 @@ func TestGrantRole_SendsScalarsAndNoEmptyScope(t *testing.T) {
 }
 
 func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
+	t.Parallel()
 	var gotBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotBody, _ = io.ReadAll(r.Body)
@@ -320,6 +333,7 @@ func TestGrantRole_OmitsAnEmptyReason(t *testing.T) {
 }
 
 func TestRevokeRole_CarriesTheReasonInTheBody(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		reason   string
@@ -359,6 +373,7 @@ func TestRevokeRole_CarriesTheReasonInTheBody(t *testing.T) {
 }
 
 func TestWorkspaceRoleNames_SortsAndSkipsObjectScopedRows(t *testing.T) {
+	t.Parallel()
 	contentType := 42
 	names := WorkspaceRoleNames([]UserRoleResponse{
 		{Role: RoleNested{Name: "superuser"}},
@@ -370,12 +385,14 @@ func TestWorkspaceRoleNames_SortsAndSkipsObjectScopedRows(t *testing.T) {
 }
 
 func TestIsPlatformTier(t *testing.T) {
+	t.Parallel()
 	assert.True(t, IsPlatformTier(RoleAdmin), "admin is a platform tier")
 	assert.True(t, IsPlatformTier(RoleSuperuser), "superuser is a platform tier")
 	assert.False(t, IsPlatformTier("operator"), "a capability role is not a platform tier")
 }
 
 func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
+	t.Parallel()
 	bindings := []UserRoleResponse{
 		{User: types.UserSummary{ID: userID, Name: "Jane Doe", Email: "jane@example.com"}, Role: RoleNested{Name: "admin"}},
 	}
@@ -394,6 +411,7 @@ func TestHolderAttributesFrom_NilMapPrintsIDs(t *testing.T) {
 }
 
 func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -405,6 +423,7 @@ func TestGrantRole_ToleratesAnEmptyCreatedBody(t *testing.T) {
 // A renamed field on the check endpoint would decode to false: can-i prints "no" and
 // -q exits 1—fail-closed, but silently wrong.
 func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		call     func(ac *client.AlpaconClient) error
@@ -520,6 +539,7 @@ func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 // Both translations must match what ScopeLabel prints for the same tier, or one tier reads
 // as two down the SCOPE column of 'user role ls' beside 'user role history'.
 func TestTierLabel(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "workspace", tierLabel("global"))
 	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))

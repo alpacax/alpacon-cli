@@ -18,6 +18,7 @@ import (
 const testReconnectBaseDelay = 10 * time.Millisecond
 
 func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	assert.PanicsWithValue(t, "event: wsListener.handleFrame must be assigned before Start", func() {
@@ -26,6 +27,7 @@ func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
 }
 
 func TestWSListener_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	w.Stop()
@@ -34,6 +36,7 @@ func TestWSListener_StopIsIdempotent(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Success(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	// Simulate connection after short delay
@@ -47,6 +50,7 @@ func TestWSListener_WaitConnected_Success(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Timeout(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	start := time.Now()
@@ -59,6 +63,7 @@ func TestWSListener_WaitConnected_Timeout(t *testing.T) {
 }
 
 func TestWSListener_NextReconnectDelay(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		delay time.Duration
@@ -78,6 +83,7 @@ func TestWSListener_NextReconnectDelay(t *testing.T) {
 }
 
 func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T) {
+	t.Parallel()
 	// Responds 200 instead of upgrading, so Dial fails with ErrBadHandshake.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
@@ -90,6 +96,7 @@ func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T)
 }
 
 func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
+	t.Parallel()
 	var dialed atomic.Int32
 
 	// Counted at handler entry so the increment happens-before Dial returns.
@@ -118,6 +125,7 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	go func() {
@@ -134,6 +142,7 @@ func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
 }
 
 func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 	var conns atomic.Int32
 
@@ -183,6 +192,7 @@ func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
 }
 
 func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
+	t.Parallel()
 	var provisions atomic.Int32
 
 	w := newProvisionedWSListener(nil, func() (string, error) {
@@ -197,6 +207,7 @@ func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
 }
 
 func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +244,7 @@ func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
 }
 
 func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,7 @@ import (
 )
 
 func TestGetNoteList_SendsFilterOrderingAndPinnedParams(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		serverName      string
@@ -108,6 +109,7 @@ func TestGetNoteList_SendsFilterOrderingAndPinnedParams(t *testing.T) {
 // is that tail reaches the helper as its limit, so a server offering endless pages still
 // yields exactly tail notes.
 func TestGetNoteList_PassesTailAsTheLimit(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	requests := 0
 
@@ -144,6 +146,7 @@ func TestGetNoteList_PassesTailAsTheLimit(t *testing.T) {
 }
 
 func TestGetNoteList_MapsResponseFields(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		results := []NoteResponse{{

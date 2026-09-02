@@ -21,6 +21,7 @@ func buildTestJWT(t *testing.T, claims map[string]any) string {
 }
 
 func TestGetWorkspacesFromToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		claims    map[string]any
@@ -81,6 +82,7 @@ func TestGetWorkspacesFromToken(t *testing.T) {
 }
 
 func TestGetWorkspacesFromToken_FieldValues(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "production", "auth0_id": "org_123", "region": "ap1"},
@@ -96,6 +98,7 @@ func TestGetWorkspacesFromToken_FieldValues(t *testing.T) {
 }
 
 func TestGetWorkspaceList(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -148,6 +151,7 @@ func TestGetWorkspaceList(t *testing.T) {
 }
 
 func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "only-ws", "auth0_id": "org_abc", "region": "ap1"},
@@ -168,6 +172,7 @@ func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
 }
 
 func TestResolveWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -220,6 +225,7 @@ func TestResolveWorkspaceURL(t *testing.T) {
 }
 
 func TestValidateAndBuildWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -286,6 +292,7 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 }
 
 func TestValidateAndBuildWorkspaceURL_InvalidToken(t *testing.T) {
+	t.Parallel()
 	cfg := config.Config{
 		AccessToken: "not-a-jwt",
 		BaseDomain:  "alpacon.io",

@@ -7,6 +7,7 @@ import (
 )
 
 func TestRemoteFileName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		remotePath string

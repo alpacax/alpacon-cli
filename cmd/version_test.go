@@ -8,6 +8,7 @@ import (
 )
 
 func TestUpgradeNoticeNamesBothVersionsAndTheUpdateCommand(t *testing.T) {
+	t.Parallel()
 	notice := upgradeNotice("1.3.0", "1.4.0", "https://example.test/notes")
 
 	assert.Contains(t, notice, "1.3.0")
@@ -17,6 +18,7 @@ func TestUpgradeNoticeNamesBothVersionsAndTheUpdateCommand(t *testing.T) {
 }
 
 func TestUpgradeNoticeDoesNotSendALocalBuildToTheUpdateCommand(t *testing.T) {
+	t.Parallel()
 	notice := upgradeNotice(utils.DevVersion, "1.4.0", "https://example.test/notes")
 
 	assert.NotContains(t, notice, "alpacon update", "'alpacon update' refuses a local build, so the notice must not name it")
@@ -24,6 +26,7 @@ func TestUpgradeNoticeDoesNotSendALocalBuildToTheUpdateCommand(t *testing.T) {
 }
 
 func TestUpgradeNoticeSaysWhatAManagedInstallWillGetInstead(t *testing.T) {
+	t.Parallel()
 	notice := upgradeNotice("1.3.0", "1.4.0", "https://example.test/notes")
 
 	assert.Contains(t, notice, "an install another tool owns")

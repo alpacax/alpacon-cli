@@ -22,6 +22,7 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 }
 
 func TestGetWorkSessionList(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	sessions := []WorkSession{
 		{
@@ -52,6 +53,7 @@ func TestGetWorkSessionList(t *testing.T) {
 }
 
 func TestGetWorkSessionList_StatusFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "pending", r.URL.Query().Get("status"))
 		w.Header().Set("Content-Type", "application/json")
@@ -64,6 +66,7 @@ func TestGetWorkSessionList_StatusFilter(t *testing.T) {
 }
 
 func TestGetWorkSessionList_AssignedUserFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "6eaa827d-616a-4fa9-ad42-4fbb67bb007b", r.URL.Query().Get("assigned_user"))
 		w.Header().Set("Content-Type", "application/json")
@@ -76,6 +79,7 @@ func TestGetWorkSessionList_AssignedUserFilter(t *testing.T) {
 }
 
 func TestCreateWorkSession(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -106,6 +110,7 @@ func TestCreateWorkSession(t *testing.T) {
 }
 
 func TestGetWorkSession(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/"))
@@ -121,6 +126,7 @@ func TestGetWorkSession(t *testing.T) {
 }
 
 func TestActivateWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/activate/"))
@@ -134,6 +140,7 @@ func TestActivateWorkSession(t *testing.T) {
 }
 
 func TestCompleteWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/complete/"))
@@ -147,6 +154,7 @@ func TestCompleteWorkSession(t *testing.T) {
 }
 
 func TestExtendWorkSession(t *testing.T) {
+	t.Parallel()
 	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -166,6 +174,7 @@ func TestExtendWorkSession(t *testing.T) {
 }
 
 func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "agent", r.URL.Query().Get("requester_type"))
 		w.Header().Set("Content-Type", "application/json")
@@ -178,6 +187,7 @@ func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
 }
 
 func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	sessions := []WorkSession{
 		{ID: "s1", Scopes: []string{"command", "websh", "webftp"}, ExpiresAt: now},
@@ -194,6 +204,7 @@ func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
 }
 
 func TestRevokeWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/revoke/"))
@@ -207,6 +218,7 @@ func TestRevokeWorkSession(t *testing.T) {
 }
 
 func TestCancelWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/cancel/"))
@@ -220,6 +232,7 @@ func TestCancelWorkSession(t *testing.T) {
 }
 
 func TestGetWorkSessionTimeline(t *testing.T) {
+	t.Parallel()
 	ts := newString("2024-01-15T10:30:00Z")
 	items := []TimelineItem{
 		{Type: "command", Timestamp: ts, Line: "ls -la"},
@@ -242,6 +255,7 @@ func TestGetWorkSessionTimeline(t *testing.T) {
 }
 
 func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-xyz/timeline/"))
 		assert.Equal(t, "false", r.URL.Query().Get("include_records"))
@@ -256,6 +270,7 @@ func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
 }
 
 func TestUpdateWorkSession(t *testing.T) {
+	t.Parallel()
 	var gotBody WorkSessionUpdateRequest
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPatch, r.Method)
@@ -283,6 +298,7 @@ func TestUpdateWorkSession(t *testing.T) {
 func newString(s string) *string { return &s }
 
 func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"id": "ses-1",
 		"status": "approved",
@@ -315,6 +331,7 @@ func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
 }
 
 func TestWorkSessionUnmarshalNoAdjustments(t *testing.T) {
+	t.Parallel()
 	var ws WorkSession
 	assert.NoError(t, json.Unmarshal([]byte(`{"id":"ses-1","adjustments":null,"recommendations":[]}`), &ws))
 	assert.Nil(t, ws.Adjustments)

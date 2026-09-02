@@ -7,6 +7,7 @@ import (
 )
 
 func TestUpgradeGuidance(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		kind         InstallKind
@@ -25,10 +26,12 @@ func TestUpgradeGuidance(t *testing.T) {
 }
 
 func TestUpgradeGuidanceIsEmptyForAManualInstall(t *testing.T) {
+	t.Parallel()
 	assert.Empty(t, UpgradeGuidance(InstallManual), "a manual install is replaced by the CLI, so there is nothing to tell the user to run")
 }
 
 func TestUpgradeGuidanceAlwaysAnswersForANonManualInstall(t *testing.T) {
+	t.Parallel()
 	guidance := UpgradeGuidance(InstallKind("snap"))
 
 	assert.NotEmpty(t, guidance)

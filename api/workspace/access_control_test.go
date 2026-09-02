@@ -11,6 +11,7 @@ import (
 )
 
 func TestGetAccessControl(t *testing.T) {
+	t.Parallel()
 	expected := map[string]any{
 		"allow_sudo_with_mfa":       true,
 		"allow_direct_root":         false,
@@ -43,6 +44,7 @@ func TestGetAccessControl(t *testing.T) {
 }
 
 func TestGetAccessControl_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"detail":"permission denied"}`))
@@ -55,6 +57,7 @@ func TestGetAccessControl_ServerError(t *testing.T) {
 }
 
 func TestGetAccessControl_EmptyResponse(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))

@@ -13,6 +13,7 @@ import (
 )
 
 func TestExtractBinaryFromTarGz(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
 	writeTarGz(t, archivePath, map[string]string{
@@ -29,6 +30,7 @@ func TestExtractBinaryFromTarGz(t *testing.T) {
 }
 
 func TestExtractBinaryFromZip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-windows-amd64.zip")
 	writeZip(t, archivePath, map[string]string{
@@ -45,6 +47,7 @@ func TestExtractBinaryFromZip(t *testing.T) {
 }
 
 func TestExtractBinaryFailsWhenTheEntryIsMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
 	writeTarGz(t, archivePath, map[string]string{"LICENSE": "license text"})
@@ -56,6 +59,7 @@ func TestExtractBinaryFailsWhenTheEntryIsMissing(t *testing.T) {
 }
 
 func TestExtractBinaryFailsWhenTheZipEntryIsMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-windows-amd64.zip")
 	writeZip(t, archivePath, map[string]string{"LICENSE": "license text"})
@@ -100,6 +104,7 @@ func writeZip(t *testing.T, path string, entries map[string]string) {
 }
 
 func TestExtractBinaryReturnsNoPathWhenItFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
 	writeTarGz(t, archivePath, map[string]string{"README": "not the binary"})
@@ -111,6 +116,7 @@ func TestExtractBinaryReturnsNoPathWhenItFails(t *testing.T) {
 }
 
 func TestExtractBinarySkipsAZipEntryThatIsNotAFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-windows-amd64.zip")
 	file, err := os.Create(archivePath)
@@ -128,6 +134,7 @@ func TestExtractBinarySkipsAZipEntryThatIsNotAFile(t *testing.T) {
 }
 
 func TestExtractBinarySkipsATarEntryThatIsNotAFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "alpacon-1.4.0-linux-amd64.tar.gz")
 	file, err := os.Create(archivePath)
@@ -181,6 +188,7 @@ func TestExtractBinaryAcceptsAnEntryExactlyAtTheSizeBound(t *testing.T) {
 // Structurally impossible today, which is why it is pinned: a refactor that
 // starts honoring header.Name would pass every other test in this file.
 func TestExtractBinaryNeverWritesOutsideTheDestinationDirectory(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "work")
 	require.NoError(t, os.Mkdir(dir, 0755))

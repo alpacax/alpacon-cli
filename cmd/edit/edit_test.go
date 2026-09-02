@@ -29,6 +29,7 @@ func TestResolveEditor(t *testing.T) {
 }
 
 func TestRunLocalEditorSupportsQuotedArguments(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "args.log")
 	scriptPath := filepath.Join(dir, "editor.sh")
@@ -45,18 +46,21 @@ func TestRunLocalEditorSupportsQuotedArguments(t *testing.T) {
 }
 
 func TestSplitEditorCommandPreservesWindowsBackslashes(t *testing.T) {
+	t.Parallel()
 	parts, err := splitEditorCommand(`"C:\Program Files\Vim\vim.exe" --wait`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{`C:\Program Files\Vim\vim.exe`, "--wait"}, parts)
 }
 
 func TestSplitEditorCommandPreservesEmptyQuotedArgument(t *testing.T) {
+	t.Parallel()
 	parts, err := splitEditorCommand(`emacsclient -a "" -c`)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"emacsclient", "-a", "", "-c"}, parts)
 }
 
 func TestGuiEditorWaitWarning(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		input string
@@ -84,6 +88,7 @@ func TestGuiEditorWaitWarning(t *testing.T) {
 }
 
 func TestParseEditTarget(t *testing.T) {
+	t.Parallel()
 	target, err := parseEditTarget("root@prod:/etc/nginx/nginx.conf", "")
 	require.NoError(t, err)
 	assert.Equal(t, "prod", target.Server)
@@ -102,6 +107,7 @@ func TestParseEditTarget(t *testing.T) {
 }
 
 func TestParseEditTargetRejectsInvalidTargets(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		input string
@@ -120,6 +126,7 @@ func TestParseEditTargetRejectsInvalidTargets(t *testing.T) {
 }
 
 func TestEditTempPathUniquePerInvocation(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	target := editTarget{Server: "prod", RemotePath: "/etc/app.conf"}
 	first, err := editTempPath(root, target)
@@ -132,6 +139,7 @@ func TestEditTempPathUniquePerInvocation(t *testing.T) {
 }
 
 func TestEditTempPathRejectsInvalidRemoteBasename(t *testing.T) {
+	t.Parallel()
 	for _, remotePath := range []string{"/tmp/..", "/tmp/app.conf/", `/tmp/..\saved`} {
 		t.Run(remotePath, func(t *testing.T) {
 			_, err := editTempPath(t.TempDir(), editTarget{Server: "prod", RemotePath: remotePath})
@@ -142,6 +150,7 @@ func TestEditTempPathRejectsInvalidRemoteBasename(t *testing.T) {
 }
 
 func TestRunEditRestrictsDownloadedFilePermissions(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	var editorPerm os.FileMode
 	deps := editDeps{
@@ -176,6 +185,7 @@ func TestRunEditRestrictsDownloadedFilePermissions(t *testing.T) {
 }
 
 func TestRunEditNoChangesSkipsUploadAndRemovesTemp(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	var uploadCalled bool
 	deps := editDeps{
@@ -211,6 +221,7 @@ func TestRunEditNoChangesSkipsUploadAndRemovesTemp(t *testing.T) {
 }
 
 func TestRunEditSuccessfulUploadRemovesEditorSidecarFiles(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	deps := editDeps{
 		download: func(target editTarget, localPath, workSessionID string) (ftpapi.DownloadedFile, error) {
@@ -244,6 +255,7 @@ func TestRunEditSuccessfulUploadRemovesEditorSidecarFiles(t *testing.T) {
 }
 
 func TestRunEditUploadFailurePreservesTempPath(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	uploadErr := errors.New("upload failed")
 	deps := editDeps{
@@ -276,6 +288,7 @@ func TestRunEditUploadFailurePreservesTempPath(t *testing.T) {
 }
 
 func TestRunEditEditorFailureWithoutChangeRemovesTemp(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	editorErr := errors.New("editor exited 1")
 	deps := editDeps{
@@ -306,6 +319,7 @@ func TestRunEditEditorFailureWithoutChangeRemovesTemp(t *testing.T) {
 }
 
 func TestRunEditEditorFailureAfterChangePreservesTemp(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	editorErr := errors.New("editor exited 1")
 	deps := editDeps{
@@ -338,6 +352,7 @@ func TestRunEditEditorFailureAfterChangePreservesTemp(t *testing.T) {
 }
 
 func TestRunEditLargeFileDeclineRemovesTempAndSkipsEditor(t *testing.T) {
+	t.Parallel()
 	tempRoot := t.TempDir()
 	var editorCalled bool
 	deps := editDeps{

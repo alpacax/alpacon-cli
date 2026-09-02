@@ -29,6 +29,7 @@ func captureOutput(t *testing.T, fn func(stdout *os.File)) string {
 }
 
 func TestWriteToPager_NonTerminal(t *testing.T) {
+	t.Parallel()
 	want := "hello\nworld\n"
 
 	got := captureOutput(t, func(stdout *os.File) {
@@ -43,6 +44,7 @@ func TestWriteToPager_NonTerminal(t *testing.T) {
 }
 
 func TestWriteToPager_TerminalShortOutput(t *testing.T) {
+	t.Parallel()
 	want := "line1\nline2\nline3\n"
 
 	got := captureOutput(t, func(stdout *os.File) {

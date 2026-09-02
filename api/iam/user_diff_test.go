@@ -8,6 +8,7 @@ import (
 )
 
 func TestDiffEditedUser(t *testing.T) {
+	t.Parallel()
 	original := []byte(`{
 	  "id": "u-1",
 	  "username": "john",
@@ -80,6 +81,7 @@ func TestDiffEditedUser(t *testing.T) {
 // Re-submitting an untouched is_ldap_user makes the server run a live LDAP bind, so an
 // unreachable directory would fail an edit that never touched the field.
 func TestDiffEditedUser_DoesNotResubmitUntouchedLDAPFlag(t *testing.T) {
+	t.Parallel()
 	original := []byte(`{"phone": "", "is_ldap_user": true}`)
 
 	edit, err := diffEditedUser(original, map[string]any{"phone": "010", "is_ldap_user": true})
@@ -90,6 +92,7 @@ func TestDiffEditedUser_DoesNotResubmitUntouchedLDAPFlag(t *testing.T) {
 }
 
 func TestDiffEditedUser_RejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		edited any

@@ -17,6 +17,7 @@ type groupListItem struct {
 }
 
 func TestResolveGroupIDs_UUID_PassThrough(t *testing.T) {
+	t.Parallel()
 	// UUIDs should pass through without any HTTP call.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
@@ -44,6 +45,7 @@ func TestResolveGroupIDs_UUID_PassThrough(t *testing.T) {
 }
 
 func TestResolveGroupIDs_NameResolved(t *testing.T) {
+	t.Parallel()
 	const wantID = "aaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +73,7 @@ func TestResolveGroupIDs_NameResolved(t *testing.T) {
 }
 
 func TestResolveGroupIDs_NameNotFound(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := api.ListResponse[groupListItem]{Count: 0, Results: []groupListItem{}}
 		w.Header().Set("Content-Type", "application/json")
@@ -87,6 +90,7 @@ func TestResolveGroupIDs_NameNotFound(t *testing.T) {
 }
 
 func TestResolveGroupIDs_Empty(t *testing.T) {
+	t.Parallel()
 	// Empty input should return empty slice without any HTTP call.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)

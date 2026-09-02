@@ -11,6 +11,7 @@ import (
 )
 
 func TestClassifyPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		executablePath string

@@ -34,6 +34,7 @@ const (
 // GetSessionList is that tail reaches the helper as its limit, so a tail larger than the
 // server's 100-item page cap still yields exactly tail sessions.
 func TestGetSessionList_PassesTailAsTheLimit(t *testing.T) {
+	t.Parallel()
 	// Twice the pages the tail needs, so a walk that ignored the limit comes back with 500
 	// and fails the length assertion instead of running until the test timeout.
 	const lastPage = 5
@@ -68,6 +69,7 @@ func TestGetSessionList_PassesTailAsTheLimit(t *testing.T) {
 }
 
 func TestGetSessionList(t *testing.T) {
+	t.Parallel()
 	closedTime := "2026-03-01T00:00:00Z"
 
 	sessions := []SessionDetailResponse{
@@ -121,6 +123,7 @@ func TestGetSessionList(t *testing.T) {
 }
 
 func TestGetSessionDetail(t *testing.T) {
+	t.Parallel()
 	detail := SessionDetailResponse{
 		ID:       "sess-abc",
 		Server:   types.ServerSummary{Name: "test-server"},
@@ -148,6 +151,7 @@ func TestGetSessionDetail(t *testing.T) {
 }
 
 func TestCloseSession(t *testing.T) {
+	t.Parallel()
 	var called bool
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,6 +169,7 @@ func TestCloseSession(t *testing.T) {
 }
 
 func TestForceCloseSession(t *testing.T) {
+	t.Parallel()
 	var called bool
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +187,7 @@ func TestForceCloseSession(t *testing.T) {
 }
 
 func TestConnectToSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 
@@ -204,6 +210,7 @@ func TestConnectToSession(t *testing.T) {
 }
 
 func TestInviteToSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "sess-abc/invite")
@@ -223,6 +230,7 @@ func TestInviteToSession(t *testing.T) {
 }
 
 func TestJoinWebshSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "chan-id-123/join")
@@ -244,6 +252,7 @@ func TestJoinWebshSession(t *testing.T) {
 }
 
 func TestJoinWebshSession_InvalidURL(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{}
 	_, err := JoinWebshSession(ac, "https://example.com/no-channel-param", "password")
 	assert.Error(t, err)
@@ -251,6 +260,7 @@ func TestJoinWebshSession_InvalidURL(t *testing.T) {
 }
 
 func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
+	t.Parallel()
 	req := BuildSessionRequest("srv-1", "alice", "ops", 24, 80, "")
 	assert.Empty(t, req.WorkSession)
 	assert.Equal(t, "srv-1", req.Server)
@@ -266,6 +276,7 @@ func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
 }
 
 func TestBuildSessionRequest_IncludesWorkSession(t *testing.T) {
+	t.Parallel()
 	req := BuildSessionRequest("srv-1", "", "", 24, 80, "ses-abc")
 	assert.Equal(t, "ses-abc", req.WorkSession)
 
@@ -275,6 +286,7 @@ func TestBuildSessionRequest_IncludesWorkSession(t *testing.T) {
 }
 
 func TestGetSessionRecords_FollowsCursor(t *testing.T) {
+	t.Parallel()
 	var gotCursors, gotPageSizes []string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "/records/"))
@@ -306,6 +318,7 @@ func TestGetSessionRecords_FollowsCursor(t *testing.T) {
 }
 
 func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
+	t.Parallel()
 	var gotQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "/search/"))
@@ -419,6 +432,7 @@ func TestReadCtrlC_EndsTheSessionOnCtrlC(t *testing.T) {
 }
 
 func TestWriteToServer_ReportsWriteFailure(t *testing.T) {
+	t.Parallel()
 	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later WriteMessage fails
 
@@ -437,6 +451,7 @@ func TestWriteToServer_ReportsWriteFailure(t *testing.T) {
 }
 
 func TestReadFromServer_ReportsReadFailure(t *testing.T) {
+	t.Parallel()
 	conn, _ := dialTestServer(t)
 	require.NoError(t, conn.Close()) // every later ReadMessage fails
 
@@ -488,6 +503,7 @@ func TestReadUserInput_ForwardsToTheWriter(t *testing.T) {
 }
 
 func TestWriteToServer_FlushesBufferedInput(t *testing.T) {
+	t.Parallel()
 	conn, received := dialTestServer(t)
 
 	wsClient := newWebsocketClient(nil)
@@ -513,6 +529,7 @@ func TestWriteToServer_FlushesBufferedInput(t *testing.T) {
 }
 
 func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
+	t.Parallel()
 	wsClient := newWebsocketClient(nil)
 
 	sigChan := make(chan os.Signal, 1)
@@ -527,6 +544,7 @@ func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
 }
 
 func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
+	t.Parallel()
 	wsClient := newWebsocketClient(nil)
 
 	first := errors.New("remote closed the session")
@@ -538,6 +556,7 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 }
 
 func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		reported  error
@@ -638,6 +657,7 @@ func TestRunWsClient_ReportsTerminalSetupFailure(t *testing.T) {
 }
 
 func TestDial_ReportsTheHandshakeStatus(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "denied", http.StatusUnauthorized)
 	}))

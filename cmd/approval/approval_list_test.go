@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidateStatusFilter(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input   string
 		wantErr bool
@@ -32,6 +33,7 @@ func TestValidateStatusFilter(t *testing.T) {
 }
 
 func TestValidateTypeFilter(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input   string
 		wantErr bool

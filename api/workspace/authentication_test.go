@@ -12,6 +12,7 @@ import (
 )
 
 func TestGetAuthentication(t *testing.T) {
+	t.Parallel()
 	expected := map[string]any{
 		"mfa_required":         true,
 		"mfa_timeout":          300,
@@ -39,6 +40,7 @@ func TestGetAuthentication(t *testing.T) {
 }
 
 func TestGetAuthentication_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"detail":"permission denied"}`))
@@ -51,6 +53,7 @@ func TestGetAuthentication_ServerError(t *testing.T) {
 }
 
 func TestGetAuthentication_EmptyResponse(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))

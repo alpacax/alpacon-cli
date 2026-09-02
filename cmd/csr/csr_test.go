@@ -147,6 +147,7 @@ func TestCreateSubcommandFlags(t *testing.T) {
 }
 
 func TestSplitAndTrim(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -168,6 +169,7 @@ func TestSplitAndTrim(t *testing.T) {
 }
 
 func TestFirstOf(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		a, b []string
@@ -186,6 +188,7 @@ func TestFirstOf(t *testing.T) {
 }
 
 func TestEnsureSecureConnection_HTTPS(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{
 		HTTPClient: &http.Client{},
 		BaseURL:    "https://secure.example.com",

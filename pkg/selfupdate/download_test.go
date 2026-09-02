@@ -107,6 +107,7 @@ func TestDownloadToRefusesAResponseThatRunsPastTheLimit(t *testing.T) {
 }
 
 func TestRefuseSchemeDowngrade(t *testing.T) {
+	t.Parallel()
 	secure := httptest.NewRequest(http.MethodGet, "https://example.test/archive.tar.gz", nil)
 	plain := httptest.NewRequest(http.MethodGet, "http://example.test/archive.tar.gz", nil)
 
@@ -116,6 +117,7 @@ func TestRefuseSchemeDowngrade(t *testing.T) {
 }
 
 func TestReleaseHTTPClientRefusesToLeaveHTTPS(t *testing.T) {
+	t.Parallel()
 	client := newHTTPClient(time.Second)
 	require.NotNil(t, client.CheckRedirect, "both release requests build their client here")
 
@@ -142,6 +144,7 @@ func TestDownloadToAcceptsAResponseExactlyAtTheLimit(t *testing.T) {
 }
 
 func TestRefuseSchemeDowngradeStopsAnEndlessRedirectChain(t *testing.T) {
+	t.Parallel()
 	secure := httptest.NewRequest(http.MethodGet, "https://example.test/archive.tar.gz", nil) // Replacing the default policy replaced its redirect cap too, so this one has to carry it.
 	via := make([]*http.Request, 10)
 	for i := range via {
@@ -153,6 +156,7 @@ func TestRefuseSchemeDowngradeStopsAnEndlessRedirectChain(t *testing.T) {
 }
 
 func TestDownloadToRefusesAnAssetOutsideThePinnedOrigins(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		assetURL string
@@ -176,6 +180,7 @@ func TestDownloadToRefusesAnAssetOutsideThePinnedOrigins(t *testing.T) {
 }
 
 func TestCheckAssetOriginAcceptsThePinnedGitHubOrigins(t *testing.T) {
+	t.Parallel()
 	for _, origin := range allowedAssetOrigins {
 		assert.NoError(t, checkAssetOrigin(origin+"/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz"), "%s is where releases actually come from", origin)
 	}
@@ -184,6 +189,7 @@ func TestCheckAssetOriginAcceptsThePinnedGitHubOrigins(t *testing.T) {
 // url.Parse hands back the host as written, so a pin comparing it raw would
 // refuse a release that is fine.
 func TestCheckAssetOriginAcceptsAPinnedOriginSpelledDifferently(t *testing.T) {
+	t.Parallel()
 	for _, rawURL := range []string{
 		"https://GitHub.com/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",
 		"https://github.com:443/alpacax/alpacon-cli/releases/download/v1.4.0/alpacon.tar.gz",

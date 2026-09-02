@@ -55,6 +55,7 @@ func (rec *requestRecorder) queried(key string) []string {
 }
 
 func TestFetchCursorPages_SinglePageNullNext(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
@@ -72,6 +73,7 @@ func TestFetchCursorPages_SinglePageNullNext(t *testing.T) {
 }
 
 func TestFetchCursorPages_FollowsCursorAndCaps(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
@@ -98,6 +100,7 @@ func TestFetchCursorPages_FollowsCursorAndCaps(t *testing.T) {
 }
 
 func TestFetchCursorPages_PageSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		limit        int
 		wantPageSize string
@@ -124,6 +127,7 @@ func TestFetchCursorPages_PageSize(t *testing.T) {
 }
 
 func TestFetchCursorPages_NonPositiveLimit(t *testing.T) {
+	t.Parallel()
 	for _, limit := range []int{0, -1} {
 		t.Run(strconv.Itoa(limit), func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
@@ -140,6 +144,7 @@ func TestFetchCursorPages_NonPositiveLimit(t *testing.T) {
 }
 
 func TestFetchCursorPages_SecondPageErrorDiscardsPartial(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
@@ -161,6 +166,7 @@ func TestFetchCursorPages_SecondPageErrorDiscardsPartial(t *testing.T) {
 }
 
 func TestFetchCursorPages_MalformedJSON(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results": [`))
@@ -174,6 +180,7 @@ func TestFetchCursorPages_MalformedJSON(t *testing.T) {
 }
 
 func TestFetchCursorPages_StopsOnEmptyResults(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
@@ -191,6 +198,7 @@ func TestFetchCursorPages_StopsOnEmptyResults(t *testing.T) {
 }
 
 func TestFetchCursorPages_IgnoresStaleCursorParam(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
@@ -208,6 +216,7 @@ func TestFetchCursorPages_IgnoresStaleCursorParam(t *testing.T) {
 }
 
 func TestFetchCursorPages_DoesNotMutateCallerParams(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
@@ -279,6 +288,7 @@ func servedIDs(items []pageItem) []string {
 }
 
 func TestFetchPagesUpTo_WalksPagesWithoutGapsOrDuplicates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		total         int
@@ -332,6 +342,7 @@ func TestFetchPagesUpTo_WalksPagesWithoutGapsOrDuplicates(t *testing.T) {
 }
 
 func TestFetchPagesUpTo_TruncatesWhenServerOverServes(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"count":5,"next":0,"results":[{"id":"0"},{"id":"1"},{"id":"2"},{"id":"3"},{"id":"4"}]}`))
@@ -348,6 +359,7 @@ func TestFetchPagesUpTo_TruncatesWhenServerOverServes(t *testing.T) {
 }
 
 func TestFetchPagesUpTo_SecondPageErrorDiscardsPartial(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("page") == "1" {
@@ -370,6 +382,7 @@ func TestFetchPagesUpTo_SecondPageErrorDiscardsPartial(t *testing.T) {
 }
 
 func TestFetchPagesUpTo_MalformedJSON(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results": [`))
@@ -386,6 +399,7 @@ func TestFetchPagesUpTo_MalformedJSON(t *testing.T) {
 }
 
 func TestFetchPagesUpTo_DoesNotMutateCallerParams(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := newPageServer(t, 10, rec)
 	defer ts.Close()
@@ -400,6 +414,7 @@ func TestFetchPagesUpTo_DoesNotMutateCallerParams(t *testing.T) {
 }
 
 func TestFetchPagesUpTo_NonPositiveLimit(t *testing.T) {
+	t.Parallel()
 	for _, limit := range []int{0, -1} {
 		t.Run(strconv.Itoa(limit), func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +435,7 @@ func TestFetchPagesUpTo_NonPositiveLimit(t *testing.T) {
 
 // A server that keeps claiming a next page while returning nothing would spin the loop forever.
 func TestFetchPagesUpTo_StopsOnEmptyResults(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
@@ -438,6 +454,7 @@ func TestFetchPagesUpTo_StopsOnEmptyResults(t *testing.T) {
 }
 
 func TestFetchAllPages_WalksEveryPageAtTheCap(t *testing.T) {
+	t.Parallel()
 	rec := &requestRecorder{}
 	ts := newPageServer(t, 250, rec)
 	defer ts.Close()

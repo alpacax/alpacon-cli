@@ -8,6 +8,7 @@ import (
 )
 
 func TestBuildCliErrorEnvelope(t *testing.T) {
+	t.Parallel()
 	env := buildCliErrorEnvelope("extend", "work_session_not_usable", "Failed to extend work session: refused.")
 
 	assert.False(t, env.OK)
@@ -19,6 +20,7 @@ func TestBuildCliErrorEnvelope(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelope_NoCodeOmitsField(t *testing.T) {
+	t.Parallel()
 	env := buildCliErrorEnvelope("use", "", "boom")
 
 	rendered, err := FormatJSON(env)
@@ -28,6 +30,7 @@ func TestBuildCliErrorEnvelope_NoCodeOmitsField(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelopeFromErr_ExtractsServerCode(t *testing.T) {
+	t.Parallel()
 	// ParseErrorResponse falls back to parsing the legacy "msg; code: X; source: Y" string form.
 	err := errors.New("WorkSession is not usable; code: work_session_not_usable; source: work_session")
 	env := buildCliErrorEnvelopeFromErr("extend", err, "Failed to extend work session: refused.")
@@ -37,6 +40,7 @@ func TestBuildCliErrorEnvelopeFromErr_ExtractsServerCode(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelopeFromErr_NilErr(t *testing.T) {
+	t.Parallel()
 	env := buildCliErrorEnvelopeFromErr("recording", nil, "No recordings found for session ses-1.")
 
 	assert.Empty(t, env.ErrorCode)
@@ -44,16 +48,19 @@ func TestBuildCliErrorEnvelopeFromErr_NilErr(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelopeFromErr_PlainErr(t *testing.T) {
+	t.Parallel()
 	env := buildCliErrorEnvelopeFromErr("use", errors.New("config write failed"), "config write failed")
 
 	assert.Empty(t, env.ErrorCode)
 }
 
 func TestUsageErrorCodeConstant(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "usage_error", UsageErrorCode)
 }
 
 func TestBuildCliUsageErrorEnvelope_CarriesUsageCodeAndExitTwo(t *testing.T) {
+	t.Parallel()
 	env := buildCliUsageErrorEnvelope("extend", "Either --expires-in or --expires-at is required.")
 
 	assert.False(t, env.OK)
@@ -64,6 +71,7 @@ func TestBuildCliUsageErrorEnvelope_CarriesUsageCodeAndExitTwo(t *testing.T) {
 }
 
 func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
+	t.Parallel()
 	// Pins the default the new helper has to override; without the override the
 	// envelope would claim 1 while the process exits 6.
 	envelope := buildCliErrorEnvelope("work-session create", "", "work session was rejected")

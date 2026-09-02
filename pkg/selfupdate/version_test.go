@@ -7,6 +7,7 @@ import (
 )
 
 func TestIsUnknownVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		version string
@@ -26,11 +27,13 @@ func TestIsUnknownVersion(t *testing.T) {
 }
 
 func TestIsOutdatedIgnoresATagsLeadingV(t *testing.T) {
+	t.Parallel()
 	assert.False(t, IsOutdated("v1.4.0", "1.4.0"), "the release side is already stripped; a v on this side would reinstall the running release forever")
 	assert.True(t, IsOutdated("v1.4.0", "1.5.0"))
 }
 
 func TestIsOutdated(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		current string

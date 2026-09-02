@@ -235,6 +235,7 @@ func TestPrintJson_TableOutput(t *testing.T) {
 }
 
 func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
+	t.Parallel()
 	got, err := FormatJSON(map[string]string{"next": `alpacon work-session use <ID>`})
 	assert.NoError(t, err)
 	assert.Contains(t, got, "<ID>")
@@ -242,6 +243,7 @@ func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
 }
 
 func TestPrintJSONError(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
 		ExitCode:  3,
@@ -266,6 +268,7 @@ func TestPrintJSONError(t *testing.T) {
 // Callers write PlainText raw, outside the Cli* helpers, and interpolate
 // server-returned ids into Command (#364).
 func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
+	t.Parallel()
 	const (
 		command     = "alpacon exec logs job-1\x1b[2K\u202e"
 		description = "after\x1b]0;pwn\x07 approval\u202e"

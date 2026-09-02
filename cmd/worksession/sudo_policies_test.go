@@ -7,6 +7,7 @@ import (
 )
 
 func TestBuildSudoPolicies(t *testing.T) {
+	t.Parallel()
 	t.Run("one policy per --sudo value, commands split on comma", func(t *testing.T) {
 		policies := buildSudoPolicies(
 			[]string{"systemctl restart nginx,systemctl reload nginx", "tail -f /var/log/nginx/*.log"},

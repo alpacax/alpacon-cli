@@ -77,6 +77,7 @@ func alwaysUpgrade(int32) bool { return true }
 func alwaysRejected(int32) int { return http.StatusBadRequest }
 
 func TestWatcher_ForwardsFramesVerbatim(t *testing.T) {
+	t.Parallel()
 	frame := `{"event_type":"work_session","payload":{"category":"status","sub_type":"approved","unknown":1}}`
 
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
@@ -105,6 +106,7 @@ func TestWatcher_ForwardsFramesVerbatim(t *testing.T) {
 }
 
 func TestWatcher_CreatesANewSessionOnReconnect(t *testing.T) {
+	t.Parallel()
 	ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// The token is single-use, so recovering means a whole new session.
@@ -136,6 +138,7 @@ func TestWatcher_CreatesANewSessionOnReconnect(t *testing.T) {
 }
 
 func TestWatcher_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, func(conn *websocket.Conn, _ int32) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -157,6 +160,7 @@ func TestWatcher_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
 }
 
 func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
+	t.Parallel()
 	firstOnly := func(attempt int32) int {
 		if attempt == 1 {
 			return http.StatusCreated
@@ -218,6 +222,7 @@ func TestWatcher_FailureAfterFirstSuccessIsNonFatal(t *testing.T) {
 }
 
 func TestWatcher_DialFailureAfterFirstSuccessIsAnnounced(t *testing.T) {
+	t.Parallel()
 	// A refused handshake is a real dial error, which reaches neither provision nor
 	// subscribe.
 	firstConnOnly := func(attempt int32) bool { return attempt == 1 }
@@ -245,6 +250,7 @@ func TestWatcher_DialFailureAfterFirstSuccessIsAnnounced(t *testing.T) {
 }
 
 func TestWatcher_StaleFailureNoticeIsDroppedOnRecovery(t *testing.T) {
+	t.Parallel()
 	secondOnly := func(attempt int32) int {
 		if attempt == 2 {
 			return http.StatusBadRequest
@@ -292,6 +298,7 @@ func TestWatcher_StaleFailureNoticeIsDroppedOnRecovery(t *testing.T) {
 }
 
 func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
+	t.Parallel()
 	const token = "hunter2"
 	// A DEL byte makes url.Parse fail; left to the dialer that surfaces as a *url.Error
 	// quoting the whole URL, token included.
@@ -321,6 +328,7 @@ func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
 }
 
 func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -339,6 +347,7 @@ func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {
 }
 
 func TestWatcher_SessionCreateRetryableStatusIsRetried(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status int

@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseSSHTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -122,6 +123,7 @@ func TestParseSSHTarget(t *testing.T) {
 }
 
 func TestIsRemoteTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -188,6 +190,7 @@ func TestIsRemoteTarget(t *testing.T) {
 }
 
 func TestIsLocalTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string

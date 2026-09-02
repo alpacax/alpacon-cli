@@ -12,6 +12,7 @@ import (
 )
 
 func TestReplaceBinaryInstallsTheNewBinary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon.exe")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
@@ -26,6 +27,7 @@ func TestReplaceBinaryInstallsTheNewBinary(t *testing.T) {
 }
 
 func TestReplaceBinaryKeepsThePreservedCopyForTheNextSweep(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon.exe")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
@@ -39,6 +41,7 @@ func TestReplaceBinaryKeepsThePreservedCopyForTheNextSweep(t *testing.T) {
 }
 
 func TestReplaceBinaryRestoresTheOldBinaryWhenTheSourceIsMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon.exe")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))

@@ -11,6 +11,7 @@ import (
 )
 
 func TestExecRunnerLeavesStderrOutOfTheAnswer(t *testing.T) {
+	t.Parallel()
 	out, err := ExecRunner("/bin/sh", "-c", `echo "dpkg-query: warning: parsing file" >&2; echo "alpacon: /usr/local/bin/alpacon"`)
 
 	require.NoError(t, err)

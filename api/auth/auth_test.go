@@ -119,6 +119,7 @@ func assertSavedTarget(t *testing.T, wantURL, wantName, wantBaseDomain, wantToke
 }
 
 func TestGetAPITokenList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -187,6 +188,7 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 }
 
 func TestGetAPITokenIDByName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		tokenName string
@@ -231,6 +233,7 @@ func TestGetAPITokenIDByName(t *testing.T) {
 }
 
 func TestResolveTokenID(t *testing.T) {
+	t.Parallel()
 	const (
 		validUUID = "550e8400-e29b-41d4-a716-446655440000"
 		tokenName = "ci-token"
@@ -288,6 +291,7 @@ func TestResolveTokenID(t *testing.T) {
 }
 
 func TestCreateAPIToken(t *testing.T) {
+	t.Parallel()
 	const wantKey = "secret-api-key-xyz"
 
 	tests := []struct {
@@ -354,6 +358,7 @@ func TestCreateAPIToken(t *testing.T) {
 }
 
 func TestDeleteAPIToken(t *testing.T) {
+	t.Parallel()
 	var deleteCalled bool
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -375,6 +380,7 @@ func TestDeleteAPIToken(t *testing.T) {
 }
 
 func TestDuplicateAPIToken(t *testing.T) {
+	t.Parallel()
 	const wantKey = "duplicated-token-key-xyz"
 
 	tests := []struct {
@@ -431,6 +437,7 @@ func TestDuplicateAPIToken(t *testing.T) {
 }
 
 func TestGetTokenScopes(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", r.Method)
@@ -479,6 +486,7 @@ func TestGetTokenScopes(t *testing.T) {
 }
 
 func TestGetWhoamiApplicationPrincipal(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != whoamiURL {
 			t.Errorf("unexpected path %q", r.URL.Path)
@@ -512,6 +520,7 @@ func TestGetWhoamiApplicationPrincipal(t *testing.T) {
 }
 
 func TestGetWhoamiUserPrincipal(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -536,6 +545,7 @@ func TestGetWhoamiUserPrincipal(t *testing.T) {
 }
 
 func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))

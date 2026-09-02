@@ -9,6 +9,7 @@ import (
 )
 
 func TestMarkActive_DecoratesMatchingRow(t *testing.T) {
+	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
 		{ID: "ses-1", Description: "alpha", Status: "active"},
 		{ID: "ses-2", Description: "beta", Status: "active"},
@@ -19,6 +20,7 @@ func TestMarkActive_DecoratesMatchingRow(t *testing.T) {
 }
 
 func TestMarkActive_EmptyActiveUUID_NoChange(t *testing.T) {
+	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
 		{ID: "ses-1", Description: "alpha"},
 		{ID: "ses-2", Description: "beta"},
@@ -29,6 +31,7 @@ func TestMarkActive_EmptyActiveUUID_NoChange(t *testing.T) {
 }
 
 func TestMarkActive_NoMatch_NoChange(t *testing.T) {
+	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{
 		{ID: "ses-1", Description: "alpha"},
 	}
@@ -37,6 +40,7 @@ func TestMarkActive_NoMatch_NoChange(t *testing.T) {
 }
 
 func TestMarkActive_EmptySlice_NoPanic(t *testing.T) {
+	t.Parallel()
 	var rows []wsapi.WorkSessionAttributes
 	assert.NotPanics(t, func() {
 		worksession.MarkActive(rows, "ses-anything")

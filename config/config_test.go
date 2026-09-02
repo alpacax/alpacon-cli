@@ -22,6 +22,7 @@ func setupTestConfig(t *testing.T) {
 }
 
 func TestIsMultiWorkspaceMode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		config   Config
@@ -235,6 +236,7 @@ func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
 }
 
 func TestIsServiceToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		token string
@@ -254,6 +256,7 @@ func TestIsServiceToken(t *testing.T) {
 }
 
 func TestGetAuthMethod(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		cfg      Config

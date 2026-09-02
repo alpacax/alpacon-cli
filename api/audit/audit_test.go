@@ -16,6 +16,7 @@ import (
 
 // Regression for #274: a cursor-token next crashed the old int-typed unmarshal.
 func TestGetAuditLogList_FollowsCursor(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
@@ -39,6 +40,7 @@ func TestGetAuditLogList_FollowsCursor(t *testing.T) {
 }
 
 func TestGetAuditLogList_Filters(t *testing.T) {
+	t.Parallel()
 	var gotQuery url.Values
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

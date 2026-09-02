@@ -199,6 +199,7 @@ func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
 }
 
 func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
+	t.Parallel()
 	// Both surfaces read the expiry behaviour off this one string, so they
 	// cannot describe it differently. A caller who arrives through `exec logs`
 	// found the demand late by definition, and needs to know the command is not

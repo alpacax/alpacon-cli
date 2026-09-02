@@ -13,6 +13,7 @@ import (
 )
 
 func TestSetUsernameErrorText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		err        error

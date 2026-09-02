@@ -22,6 +22,7 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 }
 
 func TestListApprovalRequests(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	requests := []ApprovalRequest{
 		{
@@ -50,6 +51,7 @@ func TestListApprovalRequests(t *testing.T) {
 }
 
 func TestListApprovalRequests_TypeFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "sudo", r.URL.Query().Get("request_type"))
 		w.Header().Set("Content-Type", "application/json")
@@ -62,6 +64,7 @@ func TestListApprovalRequests_TypeFilter(t *testing.T) {
 }
 
 func TestListMyApprovalRequests(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/approvals/approvals/-/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -74,6 +77,7 @@ func TestListMyApprovalRequests(t *testing.T) {
 }
 
 func TestGetApprovalRequest(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/"))
@@ -91,6 +95,7 @@ func TestGetApprovalRequest(t *testing.T) {
 }
 
 func TestCancelRequest(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/cancel/"))
@@ -103,6 +108,7 @@ func TestCancelRequest(t *testing.T) {
 }
 
 func TestCancelRequest_403PropagatesError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

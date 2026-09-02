@@ -75,6 +75,7 @@ func (e *tempNetError) Timeout() bool   { return e.timeout }
 func (e *tempNetError) Temporary() bool { return e.temporary }
 
 func TestShutdownRunsOnce(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("shutdown cause")
 	var listenerCloseCount int32
 	var sessionCloseCount int32
@@ -125,6 +126,7 @@ func TestShutdownRunsOnce(t *testing.T) {
 }
 
 func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
+	t.Parallel()
 	var attempts int32
 	const retryCount = 3
 
@@ -160,6 +162,7 @@ func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 }
 
 func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T) {
+	t.Parallel()
 	var listenerCloseCount int32
 	var sessionCloseCount int32
 
@@ -207,6 +210,7 @@ func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T)
 }
 
 func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
+	t.Parallel()
 	acceptErr := errors.New("accept failure")
 	var listenerCloseCount int32
 	var sessionCloseCount int32
@@ -251,6 +255,7 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 }
 
 func TestSessionCloseChanTriggersShutdown(t *testing.T) {
+	t.Parallel()
 	closeChan := make(chan struct{})
 	var listenerCloseCount int32
 	var sessionCloseCount int32
@@ -298,6 +303,7 @@ func TestSessionCloseChanTriggersShutdown(t *testing.T) {
 }
 
 func TestParsePort(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		value     string
@@ -325,6 +331,7 @@ func TestParsePort(t *testing.T) {
 }
 
 func TestExtractTCPPort(t *testing.T) {
+	t.Parallel()
 	t.Run("tcp address", func(t *testing.T) {
 		port, err := extractTCPPort(&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 5432})
 		if err != nil {
@@ -344,6 +351,7 @@ func TestExtractTCPPort(t *testing.T) {
 }
 
 func TestCheckReadyReturnsErrorWhenRuntimeAlreadyClosed(t *testing.T) {
+	t.Parallel()
 	r := &Runtime{
 		done: make(chan struct{}),
 	}
@@ -365,6 +373,7 @@ func TestCheckReadyReturnsErrorWhenRuntimeAlreadyClosed(t *testing.T) {
 }
 
 func TestCheckReadyReturnsOpenStreamError(t *testing.T) {
+	t.Parallel()
 	r := &Runtime{
 		done: make(chan struct{}),
 		session: &mockSession{
@@ -385,6 +394,7 @@ func TestCheckReadyReturnsOpenStreamError(t *testing.T) {
 }
 
 func TestBuildTunnelMetadata(t *testing.T) {
+	t.Parallel()
 	metadataBytes, err := buildTunnelMetadata("5432")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
