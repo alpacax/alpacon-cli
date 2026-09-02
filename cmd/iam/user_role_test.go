@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -430,9 +429,8 @@ func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
 	for _, typed := range []string{
 		canonical,
 		"2222222A-2222-2222-2222-22222222222B",
-		"2222222a222222222222222222222 22b",
+		"2222222a22222222222222222222222b",
 	} {
-		typed := strings.ReplaceAll(typed, " ", "")
 		t.Run(typed, func(t *testing.T) {
 			require.True(t, utils.IsUUID(typed), "the fast path only fires for what IsUUID accepts: %q", typed)
 

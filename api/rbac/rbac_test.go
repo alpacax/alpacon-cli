@@ -517,11 +517,11 @@ func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 	assert.Empty(t, audit[1].At)
 }
 
-// "global" is the server's word for the workspace-wide tier, and every command in this
-// group calls that tier the workspace.
+// Both translations must match what ScopeLabel prints for the same tier, or one tier reads
+// as two down the SCOPE column of 'user role ls' beside 'user role history'.
 func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "workspace", tierLabel("global"))
-	assert.Equal(t, "content-type", tierLabel("content_type"))
+	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))
 	assert.Equal(t, "", tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
 }

@@ -352,13 +352,15 @@ func localTimestamp(at time.Time) string {
 }
 
 // tierLabel names a scope tier for the sources that carry no id pair and so cannot use
-// ScopeLabel: "global" prints as the "workspace" every command in this group shows.
+// ScopeLabel. Both words match what ScopeLabel prints for the same tier, so one tier never
+// reads as two: "global" becomes "workspace", and "content_type" becomes the "type" that
+// heads ScopeLabel's "type:42".
 func tierLabel(scope string) string {
 	switch scope {
 	case "global":
 		return "workspace"
 	case "content_type":
-		return "content-type"
+		return "type"
 	default:
 		return scope
 	}
