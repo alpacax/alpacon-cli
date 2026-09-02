@@ -441,6 +441,28 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 	return ac.sendRequest(req)
 }
 
+// SendDeleteRequestWithBody sends a DELETE carrying a JSON body: an endpoint wanting a
+// justification takes it there rather than in a query parameter, so it stays out of access
+// logs, proxy logs and shell history. createRequest sets the content type only for methods
+// that always carry a body, so this sets it here.
+//
+// A DELETE entity-body is legal but unusual: an intermediary that strips one still
+// leaves a 204 and an audit row with an empty reason, undetectable from here.
+func (ac *AlpaconClient) SendDeleteRequestWithBody(url string, body any) ([]byte, error) {
+	jsonValue, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := ac.createRequest(http.MethodDelete, url, bytes.NewBuffer(jsonValue))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	return ac.sendRequest(req)
+}
+
 func (ac *AlpaconClient) SendPatchRequest(url string, body any) ([]byte, error) {
 	jsonValue, err := json.Marshal(body)
 	if err != nil {
@@ -548,6 +570,13 @@ func (ac *AlpaconClient) accessToken() string {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
 	return ac.AccessToken
+}
+
+// IsBearerAuth reports whether requests carry an Auth0 bearer token rather than a
+// legacy API key. Some endpoints refuse the API key outright, and their refusal arrives
+// with no error code, so a caller rewriting it has to know which credential it sent.
+func (ac *AlpaconClient) IsBearerAuth() bool {
+	return ac.accessToken() != ""
 }
 
 // setAccessToken installs the token every later request carries.

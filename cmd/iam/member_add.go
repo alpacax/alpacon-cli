@@ -40,7 +40,7 @@ var memberAddCmd = &cobra.Command{
 func init() {
 	memberAddCmd.Flags().StringVarP(&memberRequest.Group, "group", "g", "", "Group")
 	memberAddCmd.Flags().StringVarP(&memberRequest.User, "user", "u", "", "User")
-	memberAddCmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member (owner, manager, member)")
+	memberAddCmd.Flags().StringVarP(&memberRequest.Role, "role", "r", "", "Role of member within the group (owner, manager, member). Not an RBAC workspace role—for those see 'alpacon user role'")
 }
 
 func promptForMembers() {

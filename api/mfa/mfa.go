@@ -80,6 +80,29 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 	}
 }
 
+// WorkspaceErrorCallbacks is ErrorCallbacks for a workspace-level change: a workspace-wide
+// setting or role binding names no server, so the server-scoped MFA link's lookup would be
+// handed an empty name. No username handling: such a change never asks for a system user.
+func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
+	return utils.ErrorHandlerCallbacks{
+		OnMFARequired: func(_ string) error {
+			mfaURL, err := GetWorkspaceSecurityMFALink(ac)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
+			utils.OpenBrowser(mfaURL)
+			return nil
+		},
+		CheckMFACompleted: func() (bool, error) {
+			return CheckMFACompletion(ac)
+		},
+		RefreshToken:   ac.RefreshToken,
+		RetryOperation: retry,
+	}
+}
+
 // GetMFALinkByServerName is for callers holding a name, not an ID. It runs at the
 // MFA prompt, which an editor session or a long transfer puts minutes after the
 // client was built—config by then can name another workspace.

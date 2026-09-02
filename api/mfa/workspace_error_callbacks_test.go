@@ -1,4 +1,4 @@
-package workspace
+package mfa
 
 import (
 	"net/http"
@@ -11,18 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestErrorCallbacks_WiresEveryField(t *testing.T) {
+func TestWorkspaceErrorCallbacks_WiresEveryField(t *testing.T) {
 	ac := &client.AlpaconClient{}
 	retried := false
 
-	cb := errorCallbacks(ac, func() error { retried = true; return nil })
+	cb := WorkspaceErrorCallbacks(ac, func() error { retried = true; return nil })
 
 	assert.NotNil(t, cb.OnMFARequired)
-	// A nil CheckMFACompleted silently drops both update commands onto the
-	// legacy retry loop in utils.HandleCommonErrors—no compile error, no failure.
+	// A nil CheckMFACompleted silently drops the caller onto the legacy retry loop in
+	// utils.HandleCommonErrors—no compile error, no failure.
 	assert.NotNil(t, cb.CheckMFACompleted)
 	assert.NotNil(t, cb.RefreshToken)
-	// These commands take no username, unlike mfa.ErrorCallbacks.
+	// The one field left nil on purpose—a workspace-level change takes no username,
+	// unlike ErrorCallbacks.
 	assert.Nil(t, cb.OnUsernameRequired)
 
 	require.NotNil(t, cb.RetryOperation)
@@ -30,7 +31,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 	assert.True(t, retried, "RetryOperation must be the closure passed in")
 }
 
-func TestErrorCallbacks_MFALinkNamesTheWorkspaceTheClientIsPinnedTo(t *testing.T) {
+func TestWorkspaceErrorCallbacks_MFALinkNamesTheWorkspaceTheClientIsPinnedTo(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 
 	var query url.Values
@@ -42,14 +43,14 @@ func TestErrorCallbacks_MFALinkNamesTheWorkspaceTheClientIsPinnedTo(t *testing.T
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, WorkspaceName: "my-workspace"}
-	cb := errorCallbacks(ac, func() error { return nil })
+	cb := WorkspaceErrorCallbacks(ac, func() error { return nil })
 
 	// A config read here instead of ac would drift from ac.BaseURL across an editor session.
 	require.NoError(t, cb.OnMFARequired(""))
 	assert.Equal(t, "my-workspace", query.Get("workspace"))
 }
 
-func TestErrorCallbacks_EmptyWorkspaceFailsInsteadOfPrintingALink(t *testing.T) {
+func TestWorkspaceErrorCallbacks_EmptyWorkspaceFailsInsteadOfPrintingALink(t *testing.T) {
 	t.Setenv("ALPACON_NO_BROWSER", "1")
 
 	// A usable link, so dropping the guard fails both asserts rather than
@@ -63,7 +64,7 @@ func TestErrorCallbacks_EmptyWorkspaceFailsInsteadOfPrintingALink(t *testing.T) 
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	cb := errorCallbacks(ac, func() error { return nil })
+	cb := WorkspaceErrorCallbacks(ac, func() error { return nil })
 
 	assert.Error(t, cb.OnMFARequired(""))
 	assert.False(t, called, "an empty workspace must not reach the server")

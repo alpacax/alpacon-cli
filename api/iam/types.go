@@ -148,3 +148,14 @@ type SetUsernameResponse struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
 }
+
+// Not a wire type: nothing marshals it, so no JSON tags—only Changes reaches the wire.
+type UserEdit struct {
+	Changes    map[string]any
+	Privileges []PrivilegeEdit
+}
+
+type PrivilegeEdit struct {
+	Field  string
+	Enable bool
+}

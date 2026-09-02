@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -42,7 +43,7 @@ Modify the desired fields, save, and close the editor to apply changes.`,
 		var authenticationDetail []byte
 		authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
 		if err != nil {
-			err = utils.HandleCommonErrors(err, "", errorCallbacks(alpaconClient, func() error {
+			err = utils.HandleCommonErrors(err, "", mfa.WorkspaceErrorCallbacks(alpaconClient, func() error {
 				authenticationDetail, err = workspace.PatchAuthentication(alpaconClient, data)
 				return err
 			}))

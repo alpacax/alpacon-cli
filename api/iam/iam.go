@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"slices"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -27,6 +29,10 @@ const (
 
 // UsernameSetSuccessFmt is the confirmation format shown after a username is set.
 const UsernameSetSuccessFmt = "Username set to %q"
+
+// These mirror the account's roles and are read-only: a PATCH naming one is answered
+// 200 with the flag unchanged, never an error, so the CLI has to catch the edit itself.
+var privilegeFlagFields = []string{"is_staff", "is_superuser"}
 
 // usernameErrors maps each server username error code to its user-facing message and whether re-entering a different name can resolve it.
 var usernameErrors = map[string]struct {
@@ -230,6 +236,21 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 	return response.Results[0].ID, nil
 }
 
+// A role binding embeds a display name, not the username other commands accept.
+func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
+	users, err := api.FetchAllPages[UserResponse](ac, userURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	usernames := make(map[string]string, len(users))
+	for _, user := range users {
+		usernames[user.ID] = user.Username
+	}
+
+	return usernames, nil
+}
+
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
 	params := map[string]string{
 		"name": groupName,
@@ -297,28 +318,74 @@ func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
 	return responseBody, nil
 }
 
-func UpdateUser(ac *client.AlpaconClient, userName string) ([]byte, error) {
-	userId, err := GetUserIDByName(ac, userName)
+// PrepareUserUpdate opens the user's detail in an editor and reports what changed; it
+// sends nothing. The patch is sparse so untouched fields are not re-submitted:
+// forwarding an unchanged is_ldap_user makes the server run a live LDAP bind.
+func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *UserEdit, error) {
+	userID, err := GetUserIDByName(ac, userName)
 	if err != nil {
+		return "", nil, err
+	}
+
+	responseBody, err := GetUserDetail(ac, userID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	edited, err := utils.ProcessEditedData(responseBody)
+	if err != nil {
+		return "", nil, err
+	}
+
+	edit, err := diffEditedUser(responseBody, edited)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return userID, edit, nil
+}
+
+func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) ([]byte, error) {
+	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
+}
+
+// A key the operator deleted counts as untouched—a PATCH names what to change, and
+// nothing spells "unset" that the server would honour.
+func diffEditedUser(original []byte, edited any) (*UserEdit, error) {
+	var before map[string]any
+	if err := json.Unmarshal(original, &before); err != nil {
 		return nil, err
 	}
 
-	responseBody, err := GetUserDetail(ac, userId)
-	if err != nil {
-		return nil, err
+	after, ok := edited.(map[string]any)
+	if !ok {
+		return nil, errors.New("the edited file must contain a JSON object")
 	}
 
-	data, err := utils.ProcessEditedData(responseBody)
-	if err != nil {
-		return nil, err
+	edit := &UserEdit{Changes: map[string]any{}}
+	for _, field := range privilegeFlagFields {
+		value, present := after[field]
+		if !present || reflect.DeepEqual(before[field], value) {
+			continue
+		}
+
+		want, isBool := value.(bool)
+		if !isBool {
+			return nil, fmt.Errorf("%s must be true or false", field)
+		}
+		edit.Privileges = append(edit.Privileges, PrivilegeEdit{Field: field, Enable: want})
 	}
 
-	responseBody, err = ac.SendPatchRequest(utils.BuildURL(userURL, userId, nil), data)
-	if err != nil {
-		return nil, err
+	for field, value := range after {
+		if slices.Contains(privilegeFlagFields, field) {
+			continue
+		}
+		if !reflect.DeepEqual(before[field], value) {
+			edit.Changes[field] = value
+		}
 	}
 
-	return responseBody, nil
+	return edit, nil
 }
 
 func GetCurrentUser(ac *client.AlpaconClient) (*CurrentUserResponse, error) {

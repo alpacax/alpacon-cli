@@ -15,7 +15,7 @@ var UserCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon user ls', 'alpacon user create', 'alpacon user describe', 'alpacon user update', 'alpacon user delete', or 'alpacon user invite'. Run 'alpacon user --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon user ls', 'alpacon user create', 'alpacon user describe', 'alpacon user update', 'alpacon user delete', 'alpacon user invite', 'alpacon user role', or 'alpacon user permission'. Run 'alpacon user --help' for more information")
 	},
 }
 
@@ -26,4 +26,7 @@ func init() {
 	UserCmd.AddCommand(userCreateCmd)
 	UserCmd.AddCommand(userUpdateCmd)
 	UserCmd.AddCommand(userInviteCmd)
+
+	UserCmd.AddCommand(userRoleCmd)
+	UserCmd.AddCommand(userPermissionCmd)
 }
