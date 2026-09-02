@@ -25,6 +25,7 @@ func newTestClient(server *httptest.Server) *client.AlpaconClient {
 }
 
 func TestGetCSRList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +98,7 @@ func TestGetCSRList_Pagination(t *testing.T) {
 }
 
 func TestGetAuthorityIDByName(t *testing.T) {
+	t.Parallel()
 	authorities := []AuthorityResponse{
 		{ID: "aaaa-0000-0000-0000-000000000001", Name: "Root CA"},
 		{ID: "aaaa-0000-0000-0000-000000000002", Name: "Intermediate CA"},
@@ -142,6 +144,7 @@ func TestGetAuthorityIDByName(t *testing.T) {
 }
 
 func TestGetAuthorityList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +215,7 @@ func TestGetAuthorityList_Pagination(t *testing.T) {
 }
 
 func TestGetCertificateList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +284,7 @@ func TestGetCertificateList_Pagination(t *testing.T) {
 }
 
 func TestCreateSignRequest(t *testing.T) {
+	t.Parallel()
 	expectedResponse := SignRequestResponse{
 		ID:         "new-csr-id",
 		CommonName: "example.com",
@@ -315,6 +320,7 @@ func TestCreateSignRequest(t *testing.T) {
 }
 
 func TestSubmitCSR(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPatch, r.Method)
 
@@ -336,6 +342,7 @@ func TestSubmitCSR(t *testing.T) {
 }
 
 func TestApproveCSR(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "approve")
@@ -352,6 +359,7 @@ func TestApproveCSR(t *testing.T) {
 }
 
 func TestDenyCSR(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "deny")
@@ -368,6 +376,7 @@ func TestDenyCSR(t *testing.T) {
 }
 
 func TestDeleteCSR(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodDelete, r.Method)
 		w.WriteHeader(http.StatusNoContent)
@@ -380,6 +389,7 @@ func TestDeleteCSR(t *testing.T) {
 }
 
 func TestDownloadCertificateByCSR(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		response    SignRequestDetail
@@ -478,6 +488,7 @@ func TestDownloadCertificateByCSR(t *testing.T) {
 }
 
 func TestDownloadCertificateByCSR_APIError(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -495,6 +506,7 @@ func TestDownloadCertificateByCSR_APIError(t *testing.T) {
 }
 
 func TestDownloadCertificateByCSR_InvalidJSON(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -511,6 +523,7 @@ func TestDownloadCertificateByCSR_InvalidJSON(t *testing.T) {
 }
 
 func TestDownloadCertificate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		response    Certificate

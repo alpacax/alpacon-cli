@@ -12,6 +12,7 @@ import (
 )
 
 func TestCheckMFACompletion_Completed(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, mfaCompletionURL, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -30,6 +31,7 @@ func TestCheckMFACompletion_Completed(t *testing.T) {
 }
 
 func TestCheckMFACompletion_NotCompleted(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"completed": false}`))
@@ -47,6 +49,7 @@ func TestCheckMFACompletion_NotCompleted(t *testing.T) {
 }
 
 func TestCheckMFACompletion_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"detail": "internal server error"}`))
@@ -77,6 +80,7 @@ func mfaLinkServer(t *testing.T, body string) (*client.AlpaconClient, *url.Value
 }
 
 func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
+	t.Parallel()
 	ac, query := mfaLinkServer(t, `{"mfa_url": "https://example.com/mfa"}`)
 
 	link, err := GetMFALink(ac, "server-id")
@@ -90,6 +94,7 @@ func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
 
 // It used to yield ("", nil), so callers opened a browser on a blank link.
 func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
+	t.Parallel()
 	ac, _ := mfaLinkServer(t, `not json`)
 
 	link, err := GetMFALink(ac, "server-id")
@@ -99,6 +104,7 @@ func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
 }
 
 func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
+	t.Parallel()
 	ac, _ := mfaLinkServer(t, `{"mfa_url": ""}`)
 
 	link, err := GetMFALink(ac, "server-id")
@@ -108,6 +114,7 @@ func TestGetMFALink_EmptyURLIsAnError(t *testing.T) {
 }
 
 func TestGetWorkspaceSecurityMFALink_SendsNoServerScope(t *testing.T) {
+	t.Parallel()
 	ac, query := mfaLinkServer(t, `{"mfa_url": "https://example.com/mfa"}`)
 
 	link, err := GetWorkspaceSecurityMFALink(ac)
@@ -120,6 +127,7 @@ func TestGetWorkspaceSecurityMFALink_SendsNoServerScope(t *testing.T) {
 }
 
 func TestGetMFALink_ServerErrorIsAnError(t *testing.T) {
+	t.Parallel()
 	reached := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
@@ -142,6 +150,7 @@ func TestGetMFALink_ServerErrorIsAnError(t *testing.T) {
 }
 
 func TestErrorCallbacks_WiresEveryField(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{}
 	retried := false
 
@@ -160,6 +169,7 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 }
 
 func TestGetMFALink_EmptyWorkspaceIsAnErrorBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -207,6 +217,7 @@ func TestGetMFALinkByServerName_NamesTheWorkspaceTheClientIsPinnedTo(t *testing.
 }
 
 func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
+	t.Parallel()
 	called := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true

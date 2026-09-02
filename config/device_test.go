@@ -53,6 +53,7 @@ func writeDeviceIDFile(t *testing.T, raw string) {
 }
 
 func TestIsValidDeviceID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		id   string
@@ -76,6 +77,7 @@ func TestIsValidDeviceID(t *testing.T) {
 }
 
 func TestNewDeviceID_IsUniqueAndAcceptedByAuth0Pattern(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
 	for i := 0; i < 100; i++ {
 		id, err := newDeviceID()
@@ -273,6 +275,7 @@ func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
 // no-hard-link fallback on the contract createDeviceID branches on. It gives up
 // atomicity; it must not give up the exclusion.
 func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), DeviceIDFileName)
 	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
 	require.NoError(t, createDeviceIDFileWithoutLink(path, winner))
@@ -291,6 +294,7 @@ func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing
 // probabilistic—the window is one write wide—but one-sided: a publication step
 // with no window cannot fail it, so a failure here is real.
 func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
+	t.Parallel()
 	const rounds = 200
 	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
 

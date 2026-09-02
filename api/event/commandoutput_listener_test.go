@@ -14,6 +14,7 @@ import (
 )
 
 func TestCommandOutputListener_HandleMessage_FiltersAndEmits(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		payload   string
@@ -65,6 +66,7 @@ func TestCommandOutputListener_HandleMessage_FiltersAndEmits(t *testing.T) {
 
 // The fin subscription targets the server, so every command on it reports here.
 func TestCommandOutputListener_HandleMessage_FinishedIsPerCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		payload      string
@@ -106,6 +108,7 @@ func TestCommandOutputListener_HandleMessage_FinishedIsPerCommand(t *testing.T) 
 }
 
 func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
+	t.Parallel()
 	cmdID := "cmd-uuid"
 
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
@@ -155,6 +158,7 @@ func TestCommandOutputListener_Start_DeliversChunks(t *testing.T) {
 }
 
 func TestCommandOutputListener_Reconnects(t *testing.T) {
+	t.Parallel()
 	cmdID := "cmd-uuid"
 
 	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
@@ -201,6 +205,7 @@ func TestCommandOutputListener_Reconnects(t *testing.T) {
 }
 
 func TestCommandOutputListener_CreatesANewSessionAndResubscribesOnReconnect(t *testing.T) {
+	t.Parallel()
 	ts, sessions, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// The token is single-use, so recovering means a whole new session.
@@ -229,6 +234,7 @@ func TestCommandOutputListener_CreatesANewSessionAndResubscribesOnReconnect(t *t
 }
 
 func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
+	t.Parallel()
 	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -247,6 +253,7 @@ func TestCommandOutputListener_FirstConnectSubscribesToNothing(t *testing.T) {
 }
 
 func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -264,10 +271,12 @@ func TestCommandOutputListener_SurfacesAFatalSessionFailure(t *testing.T) {
 }
 
 func TestListenerFailureFallsBackToTheConnectBudget(t *testing.T) {
+	t.Parallel()
 	assert.Contains(t, listenerFailure(NewCommandOutputListener(nil)).Error(), "connect timeout")
 }
 
 func TestCommandOutputListener_KeepsRetryingAfterTheFirstSubscribe(t *testing.T) {
+	t.Parallel()
 	rejectSecond := func(attempt int32) int {
 		if attempt == 2 {
 			return http.StatusUnauthorized
@@ -307,6 +316,7 @@ func TestCommandOutputListener_KeepsRetryingAfterTheFirstSubscribe(t *testing.T)
 }
 
 func TestCommandOutputListener_SubscribeFailsOnAStoppedListener(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -319,6 +329,7 @@ func TestCommandOutputListener_SubscribeFailsOnAStoppedListener(t *testing.T) {
 }
 
 func TestCommandOutputListener_SubscribeCarriesWhyTheListenerStopped(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -336,6 +347,7 @@ func TestCommandOutputListener_SubscribeCarriesWhyTheListenerStopped(t *testing.
 }
 
 func TestCommandOutputListener_SubscribeFailsWhenTheListenerStopsMidSubscription(t *testing.T) {
+	t.Parallel()
 	var l *CommandOutputListener
 	// Stop lands while SubscribeEvent is in flight, which is the window a single check
 	// before the request cannot see.

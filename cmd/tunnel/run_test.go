@@ -154,6 +154,7 @@ func TestExtractRunInvocation(t *testing.T) {
 }
 
 func TestExtractRunInvocationLegacyRunSubcommandRemoved(t *testing.T) {
+	t.Parallel()
 	_, _, err := extractRunInvocation([]string{"run", "prod-db", "psql"}, 2)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -164,6 +165,7 @@ func TestExtractRunInvocationLegacyRunSubcommandRemoved(t *testing.T) {
 }
 
 func TestExitCodeFromProcessError(t *testing.T) {
+	t.Parallel()
 	if code := exitCodeFromProcessError(nil); code != 0 {
 		t.Fatalf("nil error exit code = %d, want 0", code)
 	}
@@ -181,6 +183,7 @@ func TestExitCodeFromProcessError(t *testing.T) {
 }
 
 func TestExitCodeFromProcessErrorHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
@@ -258,6 +261,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 }
 
 func TestRunHelperProcess(t *testing.T) {
+	t.Parallel()
 	mode, ok := parseRunHelperInvocation(os.Args)
 	if !ok {
 		return

@@ -72,6 +72,7 @@ func TestNoteLsParsesFlags(t *testing.T) {
 }
 
 func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
+	t.Parallel()
 	helper := osexec.Command(os.Args[0], "-test.run=^TestNoteLsTailZeroHelperProcess$")
 	helper.Env = append(os.Environ(), "GO_WANT_NOTE_LS_TAIL_HELPER=1")
 
@@ -83,6 +84,7 @@ func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 }
 
 func TestNoteLsTailZeroHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_NOTE_LS_TAIL_HELPER") != "1" {
 		return
 	}

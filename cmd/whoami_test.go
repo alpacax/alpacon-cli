@@ -15,6 +15,7 @@ import (
 )
 
 func TestApplyApplicationPrincipal(t *testing.T) {
+	t.Parallel()
 	who := &auth.WhoamiResponse{
 		PrincipalType: "application",
 		Auth:          auth.WhoamiAuth{Scopes: []string{"server:read", "command:create"}},
@@ -31,6 +32,7 @@ func TestApplyApplicationPrincipal(t *testing.T) {
 }
 
 func TestApplicationFieldsOmittedForUserPrincipal(t *testing.T) {
+	t.Parallel()
 	// A user principal's JSON must not carry application keys (output unchanged).
 	body, err := json.Marshal(whoamiOutput{Username: "alice", AuthMethod: "Browser login"})
 	assert.NoError(t, err)
@@ -44,6 +46,7 @@ func TestApplicationFieldsOmittedForUserPrincipal(t *testing.T) {
 }
 
 func TestGetAuthMethod(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		token    string
@@ -66,6 +69,7 @@ func TestGetAuthMethod(t *testing.T) {
 }
 
 func TestGetAuthClassification(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		cfg      config.Config
@@ -86,6 +90,7 @@ func TestGetAuthClassification(t *testing.T) {
 }
 
 func TestAuthClassificationFromMethod(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		method   string
@@ -105,6 +110,7 @@ func TestAuthClassificationFromMethod(t *testing.T) {
 }
 
 func TestGetRole(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		isStaff     bool
@@ -125,6 +131,7 @@ func TestGetRole(t *testing.T) {
 }
 
 func TestFormatDuration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		d        time.Duration
@@ -144,6 +151,7 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestFormatExpiresHuman(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -169,6 +177,7 @@ func TestFormatExpiresHuman(t *testing.T) {
 }
 
 func TestFormatGroups(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		groups   []iam.GroupMembership
@@ -190,6 +199,7 @@ func TestFormatGroups(t *testing.T) {
 }
 
 func TestFormatWSRequired(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		required bool
@@ -224,6 +234,7 @@ func TestFormatWSRequired(t *testing.T) {
 }
 
 func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                string
 		worksessionRequired bool
@@ -291,6 +302,7 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 }
 
 func TestIsWorksessionRequired(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		cfg  config.Config

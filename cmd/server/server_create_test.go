@@ -11,6 +11,7 @@ import (
 )
 
 func TestPrintTokenChoices_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	printTokenChoices(&buf, []server.RegistrationTokenDetails{
 		{Name: "staging\n  [2] production"},
@@ -27,6 +28,7 @@ func TestPrintTokenChoices_StripsControlSequences(t *testing.T) {
 }
 
 func TestPrintGuideFields_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	printGuideFields(&buf, "Debian\x1b[2K", "web-01\nURL      : https://evil.example.com", "https://demo.alpacon.io")
 
@@ -46,6 +48,7 @@ func captureGuideStderr(t *testing.T, fn func()) string {
 // The guide strings are what the operator pastes into a root shell, so the
 // warning has to name the command it is about—one banner at the top would not.
 func TestPrintGuideCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       string

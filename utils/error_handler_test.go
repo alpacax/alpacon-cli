@@ -24,12 +24,14 @@ func withFastTimeout(t *testing.T) {
 }
 
 func TestHandleCommonErrors_UnknownError(t *testing.T) {
+	t.Parallel()
 	err := errors.New("connection refused")
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
 	assert.Equal(t, err, result)
 }
 
 func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
+	t.Parallel()
 	t.Run("no callback returns original error", func(t *testing.T) {
 		err := errors.New(`{"code": "user_username_required", "source": ""}`)
 		result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
@@ -56,6 +58,7 @@ func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
 }
 
 func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
+	t.Parallel()
 	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
 	assert.Equal(t, err, result)

@@ -14,6 +14,7 @@ func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
 
 func TestIsRunningStatus(t *testing.T) {
+	t.Parallel()
 	running := []string{"queued", "scheduled", "delivered", "verifying", "running", "acked"}
 	for _, s := range running {
 		assert.True(t, event.IsRunningStatus(s), "expected %q to be running", s)
@@ -25,6 +26,7 @@ func TestIsRunningStatus(t *testing.T) {
 }
 
 func TestLogsCommandOutcome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name               string
 		details            event.EventDetails
@@ -180,6 +182,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 // reach the running and failed branches, so ID and ErrorPhase carry the payload
 // there, while the unrecognised-status fallback renders Status itself (#364).
 func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		details    event.EventDetails

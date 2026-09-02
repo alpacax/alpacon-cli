@@ -13,6 +13,7 @@ import (
 )
 
 func TestGetCommandAclList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +80,7 @@ func TestGetCommandAclList_Pagination(t *testing.T) {
 }
 
 func TestGetServerAclList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +149,7 @@ func TestGetServerAclList_Pagination(t *testing.T) {
 }
 
 func TestGetFileAclList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ import (
 )
 
 func TestBoolPointerToString(t *testing.T) {
+	t.Parallel()
 	trueVal := true
 	falseVal := false
 
@@ -28,6 +29,7 @@ func TestBoolPointerToString(t *testing.T) {
 }
 
 func TestTruncateString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		str      string
@@ -48,6 +50,7 @@ func TestTruncateString(t *testing.T) {
 }
 
 func TestIsUUID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -69,6 +72,7 @@ func TestIsUUID(t *testing.T) {
 }
 
 func TestBuildURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		basePath     string
@@ -90,6 +94,7 @@ func TestBuildURL(t *testing.T) {
 }
 
 func TestTimeUtils(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	tests := []struct {
@@ -122,6 +127,7 @@ func TestTimeUtils(t *testing.T) {
 }
 
 func TestExtractWorkspaceName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -141,6 +147,7 @@ func TestExtractWorkspaceName(t *testing.T) {
 }
 
 func TestRemovePrefixBeforeAPI(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -160,6 +167,7 @@ func TestRemovePrefixBeforeAPI(t *testing.T) {
 }
 
 func TestSaveStream(t *testing.T) {
+	t.Parallel()
 	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
 
 	written, err := saveStream(dest, strings.NewReader("hello world"))
@@ -183,6 +191,7 @@ func (r *failingReader) Read(p []byte) (int, error) {
 }
 
 func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
+	t.Parallel()
 	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dest), 0755))
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
@@ -208,6 +217,7 @@ func requireUnixModes(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
+	t.Parallel()
 	requireUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
@@ -248,6 +258,7 @@ func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
 // through the filesystem makes them umask-dependent, and a umask that narrows
 // the setup mode retires the branch instead of testing it.
 func TestKeptModeIsWider(t *testing.T) {
+	t.Parallel()
 	requireUnixModes(t)
 
 	tests := []struct {
@@ -302,6 +313,7 @@ func (r *tempModeReader) Read(p []byte) (int, error) {
 }
 
 func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
+	t.Parallel()
 	requireUnixModes(t)
 
 	dir := t.TempDir()
@@ -330,6 +342,7 @@ func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
+	t.Parallel()
 	requireUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
@@ -350,6 +363,7 @@ func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_WritesThroughExistingSymlink(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated privileges on some Windows environments")
 	}
@@ -378,6 +392,7 @@ func TestSaveStreamAtomic_WritesThroughExistingSymlink(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_WritesThroughDanglingSymlink(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated privileges on some Windows environments")
 	}
@@ -400,6 +415,7 @@ func TestSaveStreamAtomic_WritesThroughDanglingSymlink(t *testing.T) {
 }
 
 func TestSpoolToTempFile_ReopensForReadingAndReportsSize(t *testing.T) {
+	t.Parallel()
 	f, size, err := SpoolToTempFile("alpacon-spool-success-*.tmp", func(w io.Writer) error {
 		_, err := w.Write([]byte("spooled"))
 		return err
@@ -414,6 +430,7 @@ func TestSpoolToTempFile_ReopensForReadingAndReportsSize(t *testing.T) {
 }
 
 func TestSpoolToTempFile_CleansUpOnCallbackError(t *testing.T) {
+	t.Parallel()
 	pattern := "alpacon-spool-cleanup-" + strings.ReplaceAll(t.Name(), "/", "-") + "-*.tmp"
 	wantErr := errors.New("spool failed")
 
@@ -432,6 +449,7 @@ func TestSpoolToTempFile_CleansUpOnCallbackError(t *testing.T) {
 }
 
 func TestZipToWriter(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(root, "file.txt"), []byte("hello"), 0644))
 	require.NoError(t, os.Mkdir(filepath.Join(root, "nested"), 0755))
@@ -462,6 +480,7 @@ func TestZipToWriter(t *testing.T) {
 }
 
 func TestSplitAndTrim(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -483,6 +502,7 @@ func TestSplitAndTrim(t *testing.T) {
 }
 
 func TestSplitPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		input      string
@@ -513,6 +533,7 @@ func TestSplitPath(t *testing.T) {
 }
 
 func TestStripANSIEscapes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -532,6 +553,7 @@ func TestStripANSIEscapes(t *testing.T) {
 }
 
 func TestStripControlChars(t *testing.T) {
+	t.Parallel()
 	// C0, DEL, and C1 (rune 0x85 = NEL) are removed; printable Unicode (é = 0xE9) is kept.
 	assert.Equal(t, "abc", StripControlChars("a\x00b\x7fc"))
 	assert.Equal(t, "ab", StripControlChars("a\u0085b"))
@@ -539,6 +561,7 @@ func TestStripControlChars(t *testing.T) {
 }
 
 func TestStripFormatChars(t *testing.T) {
+	t.Parallel()
 	// Cf carries no control byte, so the control passes leave it behind.
 	assert.Equal(t, "denied approved", StripFormatChars("denied\u202e\u2066 approved"))
 	assert.Equal(t, "abé", StripFormatChars("a\u200dbé"))
@@ -558,6 +581,7 @@ func TestStripFormatChars(t *testing.T) {
 }
 
 func TestSanitizeTerminalText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -575,6 +599,7 @@ func TestSanitizeTerminalText(t *testing.T) {
 }
 
 func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
+	t.Parallel()
 	helper := osexec.Command(os.Args[0], "-test.run=^TestRequirePositiveIntHelperProcess$")
 	helper.Env = append(os.Environ(), "GO_WANT_REQUIRE_POSITIVE_INT_HELPER=1")
 
@@ -586,6 +611,7 @@ func TestRequirePositiveIntExitsWithUsageErrorCode(t *testing.T) {
 }
 
 func TestRequirePositiveIntHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_REQUIRE_POSITIVE_INT_HELPER") != "1" {
 		return
 	}
@@ -593,6 +619,7 @@ func TestRequirePositiveIntHelperProcess(t *testing.T) {
 }
 
 func TestSanitizeTerminalLine(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       string
@@ -645,6 +672,7 @@ func TestSanitizeTerminalLine(t *testing.T) {
 }
 
 func TestSanitizeTerminalBlock(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		input       string

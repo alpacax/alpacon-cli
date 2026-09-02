@@ -15,6 +15,7 @@ import (
 )
 
 func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
+	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
 	var capturedQuery string
 
@@ -52,6 +53,7 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 // TestGetCommandOutput_ConcatenatesChunksInSeqOrder verifies the full output is
 // reconstructed from chunks in seq order regardless of server ordering.
 func TestGetCommandOutput_ConcatenatesChunksInSeqOrder(t *testing.T) {
+	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +80,7 @@ func TestGetCommandOutput_ConcatenatesChunksInSeqOrder(t *testing.T) {
 // TestGetCommandChunks_SortsBySeq verifies out-of-order server results are
 // returned sorted by seq.
 func TestGetCommandChunks_SortsBySeq(t *testing.T) {
+	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +111,7 @@ func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 // TestGetCommandChunks_SendsSeqLteWhenBounded verifies a non-negative toSeq is
 // sent as the seq__lte upper bound.
 func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
+	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
 	tests := []struct {
 		name    string

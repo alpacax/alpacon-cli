@@ -12,6 +12,7 @@ import (
 )
 
 func TestErrorCallbacks_WiresEveryField(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{}
 	retried := false
 

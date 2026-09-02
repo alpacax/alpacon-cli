@@ -19,6 +19,7 @@ import (
 )
 
 func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	payload := sudoMFAEvent{}
 	payload.Payload.Type = "auth"
 	payload.Payload.Query = "mfa_request"
@@ -40,6 +41,7 @@ func TestSudoMFAEvent_JSONRoundTrip(t *testing.T) {
 }
 
 func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		payload string
@@ -72,6 +74,7 @@ func TestSudoListener_HandleMessage_IgnoresNonMFA(t *testing.T) {
 }
 
 func TestSudoListener_HandleSudoMFA_DropsRequestWhenClientIsNil(t *testing.T) {
+	t.Parallel()
 	sl := NewSudoListener(nil, "", "")
 
 	var event sudoMFAEvent
@@ -83,6 +86,7 @@ func TestSudoListener_HandleSudoMFA_DropsRequestWhenClientIsNil(t *testing.T) {
 }
 
 func TestSudoListener_StopClosesConnection(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -111,6 +115,7 @@ func TestSudoListener_StopClosesConnection(t *testing.T) {
 }
 
 func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
+	t.Parallel()
 	clientRead := make(chan struct{})
 
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
@@ -152,6 +157,7 @@ func newTestSudoListener(ts *httptest.Server) *SudoListener {
 }
 
 func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "/api/sudo/grants/grant-123/verify/")
@@ -175,6 +181,7 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 }
 
 func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -187,6 +194,7 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 }
 
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
+	t.Parallel()
 	sl := NewSudoListener(nil, "", "")
 
 	start := time.Now()
@@ -203,6 +211,7 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {
+	t.Parallel()
 	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			// The token is single-use, so recovering means a whole new session.
@@ -228,6 +237,7 @@ func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {
 }
 
 func TestSudoListener_ResubscribesOnReconnect(t *testing.T) {
+	t.Parallel()
 	ts, _, subscribes := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
 		if n == 1 {
 			_ = conn.Close()
@@ -252,6 +262,7 @@ func TestSudoListener_ResubscribesOnReconnect(t *testing.T) {
 }
 
 func TestSudoListener_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, func(conn *websocket.Conn, _ int32) {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -273,6 +284,7 @@ func TestSudoListener_FirstSubscribeFailureStopsAndSurfaces(t *testing.T) {
 }
 
 func TestSudoListener_SessionCreateRetryableStatusIsRetried(t *testing.T) {
+	t.Parallel()
 	failFirst := func(attempt int32) int {
 		if attempt == 1 {
 			return http.StatusServiceUnavailable
@@ -440,6 +452,7 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 }
 
 func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysRejected, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -544,6 +557,7 @@ func TestSudoListener_StaysQuietWhenAFailureLandsAfterStop(t *testing.T) {
 }
 
 func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
+	t.Parallel()
 	alwaysServerError := func(int32) int { return http.StatusInternalServerError }
 
 	ts, _, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
@@ -563,6 +577,7 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 }
 
 func TestSudoListener_TriesOneRefreshBeforeGivingUpOnAnUnauthorizedFirstSession(t *testing.T) {
+	t.Parallel()
 	alwaysUnauthorized := func(int32) int { return http.StatusUnauthorized }
 
 	ts, sessions, _ := newWatcherTestServer(t, alwaysUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})

@@ -8,6 +8,7 @@ import (
 )
 
 func TestUnzip_ValidFiles(t *testing.T) {
+	t.Parallel()
 	// Create a temporary zip file with valid content
 	tmpDir := t.TempDir()
 	zipPath := filepath.Join(tmpDir, "test.zip")
@@ -62,6 +63,7 @@ func TestUnzip_ValidFiles(t *testing.T) {
 }
 
 func TestUnzip_PathTraversalAttack(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		filename string
@@ -161,6 +163,7 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 }
 
 func TestUnzip_DirectoryTraversal(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	zipPath := filepath.Join(tmpDir, "test.zip")
 	extractDir := filepath.Join(tmpDir, "extract")
@@ -196,6 +199,7 @@ func TestUnzip_DirectoryTraversal(t *testing.T) {
 }
 
 func TestUnzip_NonExistentFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	err := Unzip(filepath.Join(tmpDir, "nonexistent.zip"), tmpDir)
 	if err == nil {

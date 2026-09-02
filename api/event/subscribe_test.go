@@ -14,6 +14,7 @@ import (
 )
 
 func TestCreateEventSession(t *testing.T) {
+	t.Parallel()
 	expected := EventSessionResponse{
 		ID:           "session-123",
 		WebsocketURL: "ws://localhost/ws/event/session-123/channel-456/token/",
@@ -42,6 +43,7 @@ func TestCreateEventSession(t *testing.T) {
 }
 
 func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		eventType EventType
@@ -85,6 +87,7 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 }
 
 func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
+	t.Parallel()
 	bodies := make(chan map[string]any, 1)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +117,7 @@ func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 }
 
 func TestCreateEventSession_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -130,6 +134,7 @@ func TestCreateEventSession_ServerError(t *testing.T) {
 }
 
 func TestSubscribeEvent_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -146,6 +151,7 @@ func TestSubscribeEvent_ServerError(t *testing.T) {
 }
 
 func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)

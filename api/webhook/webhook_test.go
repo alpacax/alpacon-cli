@@ -15,6 +15,7 @@ import (
 )
 
 func TestGetWebhookList_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +70,7 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 }
 
 func TestGetWebhookIDByName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		webhookName string
@@ -113,6 +115,7 @@ func TestGetWebhookIDByName(t *testing.T) {
 }
 
 func TestDeleteWebhook(t *testing.T) {
+	t.Parallel()
 	const webhookID = "wh-delete-uuid"
 	var deleteCalled bool
 

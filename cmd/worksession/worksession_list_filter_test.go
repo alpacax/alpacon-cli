@@ -9,6 +9,7 @@ import (
 )
 
 func TestResolveStatusFilter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -31,6 +32,7 @@ func TestResolveStatusFilter(t *testing.T) {
 }
 
 func TestResolveAssignedUser(t *testing.T) {
+	t.Parallel()
 	const myID = "6eaa827d-616a-4fa9-ad42-4fbb67bb007b"
 
 	t.Run("all lists everyone without resolving current user", func(t *testing.T) {

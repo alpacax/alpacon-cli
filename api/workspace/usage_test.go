@@ -11,6 +11,7 @@ import (
 )
 
 func TestGetPaymentAPIBaseURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		workspaceURL string
@@ -33,6 +34,7 @@ func TestGetPaymentAPIBaseURL(t *testing.T) {
 }
 
 func TestGetWorkspaceID(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/workspaces/workspaces/", r.URL.Path)
@@ -55,6 +57,7 @@ func TestGetWorkspaceID(t *testing.T) {
 }
 
 func TestGetWorkspaceID_NotFound(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -73,6 +76,7 @@ func TestGetWorkspaceID_NotFound(t *testing.T) {
 }
 
 func TestGetUsageEstimate(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/workspaces/workspaces/uuid-123/estimate/", r.URL.Path)
@@ -106,6 +110,7 @@ func TestGetUsageEstimate(t *testing.T) {
 }
 
 func TestGetUsageEstimate_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"detail":"permission denied"}`))

@@ -29,6 +29,7 @@ var configReaders = map[string]bool{
 // here can name a workspace the request is no longer going to (issue #401). It
 // walks the AST, so a comment naming config.LoadConfig is not one and an alias is.
 func TestAPILayerNeverReadsConfig(t *testing.T) {
+	t.Parallel()
 	var offenders []string
 
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {

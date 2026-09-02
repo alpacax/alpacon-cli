@@ -52,6 +52,7 @@ func jsonTestResponse(statusCode int, body string) *http.Response {
 }
 
 func TestGetSystemPackageEntry_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +117,7 @@ func TestGetSystemPackageEntry_Pagination(t *testing.T) {
 }
 
 func TestUploadPackage_MultipartFromFile(t *testing.T) {
+	t.Parallel()
 	var uploadedName string
 	var uploadedContent string
 	var contentLength int64
@@ -181,6 +183,7 @@ func TestUploadPackage_MultipartFromFile(t *testing.T) {
 }
 
 func TestDownloadPackage_StreamsToFile(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -222,6 +225,7 @@ func TestDownloadPackage_StreamsToFile(t *testing.T) {
 }
 
 func TestDownloadPackage_StatusErrorDoesNotWriteFile(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -259,6 +263,7 @@ func TestDownloadPackage_StatusErrorDoesNotWriteFile(t *testing.T) {
 }
 
 func TestDownloadPackage_NoContentDoesNotOverwriteExistingFile(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -305,6 +310,7 @@ func TestDownloadPackage_NoContentDoesNotOverwriteExistingFile(t *testing.T) {
 }
 
 func TestDownloadPackage_JSONSuccessDoesNotWriteFile(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -341,6 +347,7 @@ func TestDownloadPackage_JSONSuccessDoesNotWriteFile(t *testing.T) {
 }
 
 func TestDownloadPackage_ReadErrorKeepsExistingFile(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{
 		HTTPClient: &http.Client{
 			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -390,6 +397,7 @@ func TestDownloadPackage_ReadErrorKeepsExistingFile(t *testing.T) {
 }
 
 func TestGetPythonPackageEntry_Pagination(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -16,6 +16,7 @@ import (
 )
 
 func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
+	t.Parallel()
 	// A rejection and a network failure must not collapse into the same exit code:
 	// an agent reading only $? would retry a rejected request forever.
 	tests := []struct {
@@ -51,6 +52,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 }
 
 func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -92,6 +94,7 @@ func TestPollForApproval_GivingUpIsPending(t *testing.T) {
 }
 
 func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {
+	t.Parallel()
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -145,6 +148,7 @@ func TestPollForApproval_WarningSanitizesServerText(t *testing.T) {
 }
 
 func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
+	t.Parallel()
 	requests := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -161,6 +165,7 @@ func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
 }
 
 func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
@@ -182,6 +187,7 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 // Guards the attempt-count regression: at interval=10ms the old logic returned
 // after ~20ms (no sleep after the final attempt) instead of the full 30ms.
 func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ses-p","status":"pending"}`))
@@ -200,6 +206,7 @@ func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
 }
 
 func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
+	t.Parallel()
 	before := time.Now()
 	result, err := parseExpiryFlag("2h", "")
 	after := time.Now()
@@ -212,6 +219,7 @@ func TestParseExpiryFlag_ExpiresIn(t *testing.T) {
 }
 
 func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
+	t.Parallel()
 	ts := "2026-12-31T23:59:59Z"
 	result, err := parseExpiryFlag("", ts)
 	assert.NoError(t, err)
@@ -219,35 +227,41 @@ func TestParseExpiryFlag_ExpiresAt(t *testing.T) {
 }
 
 func TestParseExpiryFlag_BothProvided(t *testing.T) {
+	t.Parallel()
 	_, err := parseExpiryFlag("2h", "2026-12-31T23:59:59Z")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
 }
 
 func TestParseExpiryFlag_NeitherProvided(t *testing.T) {
+	t.Parallel()
 	_, err := parseExpiryFlag("", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "required")
 }
 
 func TestParseExpiryFlag_InvalidDuration(t *testing.T) {
+	t.Parallel()
 	_, err := parseExpiryFlag("2hours", "")
 	assert.Error(t, err)
 }
 
 func TestParseExpiryFlag_ZeroDuration(t *testing.T) {
+	t.Parallel()
 	_, err := parseExpiryFlag("0s", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestParseExpiryFlag_NegativeDuration(t *testing.T) {
+	t.Parallel()
 	_, err := parseExpiryFlag("-1h", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "positive duration")
 }
 
 func TestResolveWaitTimeout(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		wait            bool
@@ -283,22 +297,26 @@ func TestResolveWaitTimeout(t *testing.T) {
 }
 
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
+	t.Parallel()
 	err := validateAgentScopes("agent", []string{"command", "websh"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "\"websh\" is not allowed")
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
+	t.Parallel()
 	err := validateAgentScopes("agent", []string{"command", "webftp"})
 	assert.NoError(t, err)
 }
 
 func TestValidateAgentScopes_UserWithWebsh(t *testing.T) {
+	t.Parallel()
 	err := validateAgentScopes("user", []string{"command", "websh"})
 	assert.NoError(t, err)
 }
 
 func TestValidateScopeEnum(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		scopes      []string
@@ -355,6 +373,7 @@ func TestValidateScopeEnum(t *testing.T) {
 }
 
 func TestDecideUseAction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		status     string

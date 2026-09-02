@@ -70,6 +70,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 }
 
 func TestHostFromURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string

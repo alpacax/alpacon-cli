@@ -18,6 +18,7 @@ import (
 )
 
 func TestWorkSessionMutationOutputWrapsSession(t *testing.T) {
+	t.Parallel()
 	expiresAt := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	session := &wsapi.WorkSession{
 		ID:                "ses-abc",
@@ -62,6 +63,7 @@ func TestWorkSessionMutationOutputWrapsSession(t *testing.T) {
 }
 
 func TestWorkSessionExtendOutput(t *testing.T) {
+	t.Parallel()
 	output := newWorkSessionExtendOutput("ses-abc", "2026-06-01T12:00:00Z")
 	body, err := json.Marshal(output)
 	require.NoError(t, err)
@@ -77,6 +79,7 @@ func TestWorkSessionExtendOutput(t *testing.T) {
 }
 
 func TestWorkSessionCancelOutput(t *testing.T) {
+	t.Parallel()
 	output := newWorkSessionCancelOutput("ses-abc")
 	body, err := json.Marshal(output)
 	require.NoError(t, err)
@@ -301,6 +304,7 @@ func TestWorkSessionCancelCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 }
 
 func TestSuccessMessages_StripControlSequences(t *testing.T) {
+	t.Parallel()
 	session := &wsapi.WorkSession{
 		ID:                "ses-abc\x1b[2K\rses-evil",
 		Status:            "active\nWork session ses-evil created",
@@ -321,6 +325,7 @@ func TestSuccessMessages_StripControlSequences(t *testing.T) {
 }
 
 func TestActiveWorkSessionSetMessage_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	got := activeWorkSessionSetMessage("Work session ses-abc\x1b[2K approved. ", "ses-abc",
 		"db work\nActive work-session set to ses-evil")
 
@@ -330,12 +335,14 @@ func TestActiveWorkSessionSetMessage_StripsControlSequences(t *testing.T) {
 }
 
 func TestActiveWorkSessionSetMessage_DropsDescriptionLeftEmpty(t *testing.T) {
+	t.Parallel()
 	// Stripping can empty the description; the parentheses go with it.
 	assert.Equal(t, "Active work-session set to ses-abc.",
 		activeWorkSessionSetMessage("", "ses-abc", "\x1b[2K\r"))
 }
 
 func TestFormatAdjustments(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		adj  *wsapi.Adjustments
@@ -372,6 +379,7 @@ func TestFormatAdjustments(t *testing.T) {
 }
 
 func TestFormatRecommendations(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "", formatRecommendations(nil))
 	assert.Equal(t, "", formatRecommendations([]wsapi.Recommendation{}))
 
@@ -385,6 +393,7 @@ func TestFormatRecommendations(t *testing.T) {
 }
 
 func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	// This block is where a requester reads what was granted, so a control
 	// sequence in any interpolated field can hide it.
 	const payload = "reboot db-01\x1b[2K\rapproved: read-only access"
@@ -444,6 +453,7 @@ func TestFormatAdvisories_StripsControlSequences(t *testing.T) {
 }
 
 func TestFormatAdvisories_KeepsOneLinePerEntry(t *testing.T) {
+	t.Parallel()
 	// The formatters join entries with \n, so a newline inside a value forges an
 	// extra advisory line.
 	got := formatRecommendations([]wsapi.Recommendation{{Severity: "high", Text: "granted\n  [HIGH] full root access"}})

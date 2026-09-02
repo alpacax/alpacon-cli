@@ -19,6 +19,7 @@ import (
 // must fire only on utils.CommandInlineCredential, never on other codes, a nil
 // err, or a plain error without a code.
 func TestIsCommandInlineCredentialError(t *testing.T) {
+	t.Parallel()
 	t.Run("true when the error carries the inline-credential code", func(t *testing.T) {
 		err := errors.New("code: " + utils.CommandInlineCredential + "; source: command")
 		assert.True(t, isCommandInlineCredentialError(err))
@@ -43,6 +44,7 @@ func TestIsCommandInlineCredentialError(t *testing.T) {
 // to echo—the example is fixed—but this guards against a future edit that starts
 // interpolating the rejected line).
 func TestCredentialInlineHint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		invokedAs Invocation
@@ -86,6 +88,7 @@ func newInlineCredentialDenialServer() *httptest.Server {
 // the envelope carries the server's error_code with a plain (non-special)
 // exit code 1—this refusal is not a WorkSession gate or a pending approval.
 func TestExecInlineCredentialDenialExits1WithJSONErrorCode(t *testing.T) {
+	t.Parallel()
 	ts := newInlineCredentialDenialServer()
 	defer ts.Close()
 
@@ -137,6 +140,7 @@ func TestExecInlineCredentialDenialExits1WithJSONErrorCode(t *testing.T) {
 // default table output and asserts the human-facing error + hint, and that the
 // rejected command line is never echoed.
 func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
+	t.Parallel()
 	ts := newInlineCredentialDenialServer()
 	defer ts.Close()
 
@@ -181,6 +185,7 @@ func TestExecInlineCredentialDenialTablePrintsHint(t *testing.T) {
 // hit the pre-existing generic failure path (plain "Error: ..." line, no
 // credential hint), not the new branch.
 func TestExecNonInlineCredentialErrorFallsThroughUnchanged(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {

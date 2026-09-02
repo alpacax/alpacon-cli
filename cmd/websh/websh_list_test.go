@@ -59,6 +59,7 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 }
 
 func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
+	t.Parallel()
 	helper := osexec.Command(os.Args[0], "-test.run=^TestWebshLsTailZeroHelperProcess$")
 	helper.Env = append(os.Environ(), "GO_WANT_WEBSH_LS_TAIL_HELPER=1")
 
@@ -70,6 +71,7 @@ func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 }
 
 func TestWebshLsTailZeroHelperProcess(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("GO_WANT_WEBSH_LS_TAIL_HELPER") != "1" {
 		return
 	}

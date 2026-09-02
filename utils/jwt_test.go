@@ -20,6 +20,7 @@ func buildTestJWT(t *testing.T, claims map[string]any) string {
 }
 
 func TestDecodeJWTPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		token       string
@@ -95,6 +96,7 @@ func TestDecodeJWTPayload(t *testing.T) {
 }
 
 func TestDecodeJWTPayload_StandardPadding(t *testing.T) {
+	t.Parallel()
 	// Ensure payloads that need base64 padding (=, ==) still decode correctly
 	claims := map[string]any{"a": "b"}
 	token := buildTestJWT(t, claims)
