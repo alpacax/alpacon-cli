@@ -93,6 +93,11 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:     "sibling directory sharing the destination prefix",
+			filename: "../extract-evil/file.txt",
+			wantErr:  true,
+		},
+		{
 			name:     "valid file with dots in name",
 			filename: "file..txt",
 			wantErr:  false,
@@ -200,5 +205,51 @@ func TestUnzip_NonExistentFile(t *testing.T) {
 	err := Unzip(filepath.Join(tmpDir, "nonexistent.zip"), tmpDir)
 	if err == nil {
 		t.Error("Expected error for non-existent zip file, but got none")
+	}
+}
+
+func TestUnzip_RelativeDestination(t *testing.T) {
+	tests := []struct {
+		name string
+		dest string
+	}{
+		{name: "current directory", dest: "."},
+		{name: "relative subdirectory", dest: "out"},
+		{name: "relative subdirectory with trailing separator", dest: "out/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			zipPath := filepath.Join(tmpDir, "test.zip")
+
+			zf, err := os.Create(zipPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			zw := zip.NewWriter(zf)
+			fw, err := zw.Create("file.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fw.Write([]byte("content")); err != nil {
+				t.Fatal(err)
+			}
+			_ = zw.Close()
+			_ = zf.Close()
+
+			workDir := filepath.Join(tmpDir, "work")
+			if err := os.MkdirAll(workDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(workDir)
+
+			if err := Unzip(zipPath, tt.dest); err != nil {
+				t.Fatalf("Unzip into %q failed: %v", tt.dest, err)
+			}
+			if _, err := os.Stat(filepath.Join(workDir, tt.dest, "file.txt")); err != nil {
+				t.Errorf("file.txt was not extracted into %q: %v", tt.dest, err)
+			}
+		})
 	}
 }
