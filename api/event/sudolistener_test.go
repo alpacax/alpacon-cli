@@ -216,6 +216,29 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	})
 }
 
+func TestSudoListener_PollMFACompletion_WidensTheGap(t *testing.T) {
+	var polls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&polls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"completed":false}`))
+	}))
+	defer ts.Close()
+
+	restore := mfaPollingInterval
+	mfaPollingInterval = time.Millisecond
+	defer func() { mfaPollingInterval = restore }()
+	restoreTimeout := mfaPollingTimeout
+	mfaPollingTimeout = 120 * time.Millisecond
+	defer func() { mfaPollingTimeout = restoreTimeout }()
+
+	sl := &SudoListener{ac: &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, wsListener: &wsListener{done: make(chan struct{})}}
+	assert.False(t, sl.pollMFACompletion())
+
+	got := atomic.LoadInt32(&polls)
+	assert.Less(t, got, int32(60), "a fixed 1ms tick would poll about 120 times")
+}
+
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {
 	t.Parallel()
 	ts, sessions, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {

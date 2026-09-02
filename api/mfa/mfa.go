@@ -17,10 +17,12 @@ import (
 const (
 	mfaURL           = "/api/auth0/mfa"
 	mfaCompletionURL = "/api/auth0/mfa/completion/"
+)
 
-	// stepUpPollInterval and stepUpTimeout bound the StepUpForSudo wait. They
-	// mirror the websh sudo listener (api/event/sudolistener.go) so the step-up
-	// feel is consistent across the two terminals.
+// stepUpPollInterval and stepUpTimeout bound the StepUpForSudo wait. They
+// mirror the websh sudo listener (api/event/sudolistener.go) so the step-up
+// feel is consistent across the two terminals. Vars so a test can shorten them.
+var (
 	stepUpPollInterval = 500 * time.Millisecond
 	stepUpTimeout      = 60 * time.Second
 )
@@ -164,20 +166,22 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	spinner := utils.NewSpinner("Waiting for MFA verification...")
 	spinner.Start()
 
-	// Mirror the websh sudo listener: a precise deadline plus a fixed-interval
-	// ticker (api/event/sudolistener.go).
+	// Mirror the websh sudo listener: a precise deadline plus a timer that widens
+	// as the wait ages (api/event/sudolistener.go).
+	started := time.Now()
 	deadline := time.After(stepUpTimeout)
-	ticker := time.NewTicker(stepUpPollInterval)
-	defer ticker.Stop()
+	poll := time.NewTimer(stepUpPollInterval)
+	defer poll.Stop()
 	for {
 		select {
 		case <-deadline:
 			spinner.Stop()
 			return fmt.Errorf("MFA step-up timed out after %v", stepUpTimeout)
-		case <-ticker.C:
+		case <-poll.C:
 			completed, cerr := CheckMFACompletion(ac)
 			if cerr != nil || !completed {
 				// Non-fatal: the endpoint may lag the browser; keep polling.
+				poll.Reset(utils.NextPollTick(stepUpPollInterval, time.Since(started)))
 				continue
 			}
 			spinner.Stop()

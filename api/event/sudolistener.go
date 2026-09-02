@@ -19,19 +19,23 @@ const (
 	// substituted into the path. Replaces the removed self-approve route.
 	sudoVerifyURLFmt = "/api/sudo/grants/%s/verify/"
 
-	// mfaPollingInterval is how often we check if MFA is completed.
-	mfaPollingInterval = 500 * time.Millisecond
-
-	// mfaPollingTimeout is the maximum time to wait for MFA completion.
-	// The server expires the pending sudo grant after a short window; we keep
-	// extra buffer over that so a slow browser MFA does not race the expiry.
-	mfaPollingTimeout = 60 * time.Second
-
 	sudoHandshakeTimeout = 10 * time.Second
 
 	// sudoOutageWarning is asserted on by the tests, so it lives here rather than
 	// inline at the one place that prints it.
 	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
+)
+
+var (
+	// mfaPollingInterval is how often we check if MFA is completed. A var so a
+	// test can shorten it.
+	mfaPollingInterval = 500 * time.Millisecond
+
+	// mfaPollingTimeout is the maximum time to wait for MFA completion.
+	// The server expires the pending sudo grant after a short window; we keep
+	// extra buffer over that so a slow browser MFA does not race the expiry.
+	// A var so a test can shorten it.
+	mfaPollingTimeout = 60 * time.Second
 )
 
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
@@ -288,9 +292,10 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 }
 
 func (sl *SudoListener) pollMFACompletion() bool {
+	started := time.Now()
 	timeout := time.After(mfaPollingTimeout)
-	ticker := time.NewTicker(mfaPollingInterval)
-	defer ticker.Stop()
+	poll := time.NewTimer(mfaPollingInterval)
+	defer poll.Stop()
 
 	for {
 		select {
@@ -298,14 +303,13 @@ func (sl *SudoListener) pollMFACompletion() bool {
 			return false
 		case <-timeout:
 			return false
-		case <-ticker.C:
+		case <-poll.C:
 			completed, err := mfa.CheckMFACompletion(sl.ac)
-			if err != nil {
-				continue
-			}
-			if completed {
+			if err == nil && completed {
 				return true
 			}
+			// The endpoint may lag the browser; a failure here is not an answer.
+			poll.Reset(utils.NextPollTick(mfaPollingInterval, time.Since(started)))
 		}
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
@@ -231,4 +233,41 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, link)
 	assert.False(t, called, "the name lookup must not run when no workspace can be named")
+}
+
+func TestStepUpForSudo_PollWidensTheGap(t *testing.T) {
+	var polls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case mfaURL + "/":
+			_, _ = w.Write([]byte(`{"mfa_url": "https://example.com/mfa"}`))
+		case mfaCompletionURL:
+			atomic.AddInt32(&polls, 1)
+			_, _ = w.Write([]byte(`{"completed": false}`))
+		default:
+			// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "server-id"}]}`))
+		}
+	}))
+	defer ts.Close()
+
+	restoreInterval := stepUpPollInterval
+	stepUpPollInterval = time.Millisecond
+	defer func() { stepUpPollInterval = restoreInterval }()
+	restoreTimeout := stepUpTimeout
+	stepUpTimeout = 120 * time.Millisecond
+	defer func() { stepUpTimeout = restoreTimeout }()
+
+	ac := &client.AlpaconClient{
+		HTTPClient:    ts.Client(),
+		BaseURL:       ts.URL,
+		WorkspaceName: "pinned-ws",
+	}
+
+	err := StepUpForSudo(ac, "my-server")
+
+	require.Error(t, err)
+	got := atomic.LoadInt32(&polls)
+	assert.Less(t, got, int32(60), "a fixed 1ms tick would poll about 120 times")
 }
