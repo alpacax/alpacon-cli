@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,6 +50,40 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 			assert.ErrorAs(t, err, &terminal, "a settled status must be typed so the caller can exit 6")
 		})
 	}
+}
+
+func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
+	var polls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&polls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-1","status":"pending"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	// 1ms base tick: the fast window is the first 10ms, then the gap is 5ms.
+	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
+
+	require.Error(t, err)
+	got := atomic.LoadInt32(&polls)
+	assert.Less(t, got, int32(40), "a fixed 1ms tick would poll about 60 times")
+}
+
+func TestPollForApproval_RejectionNamesTheSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-1","status":"rejected"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
+
+	var terminal *terminalWaitError
+	require.ErrorAs(t, err, &terminal)
+	assert.Equal(t, "ws-1", terminal.sessionID)
+	assert.Contains(t, err.Error(), "ws-1")
 }
 
 func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
@@ -182,6 +217,39 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 	var pending *pendingWaitError
 	assert.ErrorAs(t, err, &pending)
+}
+
+// A 429 must not starve the wait: the session may still be pending, only the
+// status GET refused. Without the deadline extension, the third 429 (arriving
+// right at the original deadline) would end the wait with "timed out" before
+// the fourth request—the one that finally reports "approved"—ever fires.
+func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
+	const timeout = 30 * time.Millisecond
+	const interval = 10 * time.Millisecond
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests < 4 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	start := time.Now()
+	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, "approved", session.Status)
+	assert.Equal(t, 4, requests)
+	assert.GreaterOrEqual(t, elapsed, timeout, "the throttle extension must carry the wait past the original deadline")
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned
@@ -519,4 +587,80 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	assert.Equal(t, []string{"command"}, got.WorkSession.Adjustments.Scopes.New)
 	require.Len(t, got.WorkSession.Recommendations, 1)
 	assert.Equal(t, "high", got.WorkSession.Recommendations[0].Severity)
+}
+
+// rejectedWaitServer answers a create whose first poll comes back rejected, so a
+// --wait run settles without a grant on its first tick.
+func rejectedWaitServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected","expires_at":"2026-06-01T12:00:00Z"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func rejectedWaitArgs() []string {
+	return []string{
+		"create", "--purpose", "incident", "--scope", "command", "--server", "prod",
+		"--expires-at", "2026-06-01T12:00:00Z", "--wait",
+	}
+}
+
+func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
+	ts := rejectedWaitServer()
+	defer ts.Close()
+
+	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, rejectedWaitArgs()...)
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refused wait is settled, not pending; stderr: %s", stderr)
+	assert.Contains(t, stderr, "ses-x")
+	assert.Contains(t, stderr, "alpacon work-session use ses-x")
+	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
+}
+
+func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
+	ts := rejectedWaitServer()
+	defer ts.Close()
+
+	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+
+	var env struct {
+		OK       bool   `json:"ok"`
+		ExitCode int    `json:"exit_code"`
+		Message  string `json:"message"`
+		Context  struct {
+			Operation     string `json:"operation"`
+			WorkSessionID string `json:"work_session_id"`
+		} `json:"context"`
+		NextActions []utils.NextAction `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
+	assert.False(t, env.OK)
+	assert.Equal(t, utils.ExitCodeNotApproved, env.ExitCode)
+	assert.Equal(t, "ses-x", env.Context.WorkSessionID)
+	require.Len(t, env.NextActions, 2)
+	assert.Equal(t, "alpacon work-session use ses-x", env.NextActions[0].Command)
+	assert.Equal(t, "alpacon work-session complete ses-x", env.NextActions[1].Command)
+}
+
+func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
+	terminal := &terminalWaitError{message: "work session was rejected", sessionID: "ses-\x1b[2Kx"}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		printTerminalWaitError(terminal, terminal)
+	})
+
+	assert.NotContains(t, stderr, "\x1b[2K")
+	assert.Contains(t, stderr, "work session was rejected")
 }

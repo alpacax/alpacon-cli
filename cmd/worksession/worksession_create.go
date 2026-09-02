@@ -3,6 +3,7 @@ package worksession
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
@@ -262,7 +263,12 @@ so it is recorded and scoped accordingly.`,
 			// failure falls through to the general-error code.
 			var terminal *terminalWaitError
 			if errors.As(err, &terminal) {
-				utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, opCreate, err, "%s", err)
+				if utils.OutputFormat == utils.OutputFormatJSON {
+					printTerminalWaitErrorJSON(opCreate, terminal, err)
+					os.Exit(utils.ExitCodeNotApproved)
+				}
+				printTerminalWaitError(terminal, err)
+				os.Exit(utils.ExitCodeNotApproved)
 			}
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
@@ -309,9 +315,17 @@ so it is recorded and scoped accordingly.`,
 // that reads only the exit code would otherwise retry a rejected request forever.
 type terminalWaitError struct {
 	message string
+	// sessionID names the session the wait left behind. The session outlives a
+	// refusal, so a caller told only "rejected" has no way back to it.
+	sessionID string
 }
 
-func (e *terminalWaitError) Error() string { return e.message }
+func (e *terminalWaitError) Error() string {
+	if e.sessionID == "" {
+		return e.message
+	}
+	return fmt.Sprintf("%s (work session %s)", e.message, e.sessionID)
+}
 
 // pendingWaitError marks a wait that ended with the outcome still open—the window
 // elapsed, or the CLI could not reach the server for a bounded run of polls. Either
@@ -323,6 +337,56 @@ type pendingWaitError struct {
 }
 
 func (e *pendingWaitError) Error() string { return e.message }
+
+// terminalWaitErrorCtx is the JSON error envelope context for a wait that
+// settled without a grant. WorkSessionID is a structured field here—not only
+// folded into the message text—so a machine consumer can act on it without
+// parsing prose.
+type terminalWaitErrorCtx struct {
+	Operation     string `json:"operation"`
+	WorkSessionID string `json:"work_session_id,omitempty"`
+}
+
+// printTerminalWaitErrorJSON writes the settled-without-a-grant refusal as a
+// structured envelope, with the follow-ups as NextActions rather than folded
+// into the message text.
+func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
+	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
+		OK:          false,
+		ExitCode:    utils.ExitCodeNotApproved,
+		Message:     err.Error(),
+		Context:     terminalWaitErrorCtx{Operation: operation, WorkSessionID: terminal.sessionID},
+		NextActions: terminalWaitNextActions(terminal.sessionID),
+	})
+}
+
+// terminalWaitNextActions is what a caller can still do with the session the
+// refusal left behind: attach it if approval lands out of band, or give it up.
+func terminalWaitNextActions(sessionID string) []utils.NextAction {
+	return []utils.NextAction{
+		{Command: fmt.Sprintf("alpacon work-session use %s", sessionID)},
+		{Command: fmt.Sprintf("alpacon work-session complete %s", sessionID)},
+	}
+}
+
+// printTerminalWaitError writes the refusal and its follow-ups to stderr in the
+// shape every other next-action surface uses. Assembled and written once rather
+// than through CliError, which appends the report-a-bug pointer: a reviewer
+// saying no is the feature working, so the gate refusal (exit 3) leaves that
+// pointer off too.
+func printTerminalWaitError(terminal *terminalWaitError, err error) {
+	var sb strings.Builder
+	// The message carries a server-issued session id, so it takes the sanitizer
+	// CliError would otherwise have applied on the way out.
+	message, _ := utils.SanitizeTerminalBlock(err.Error())
+	fmt.Fprintf(&sb, "%s: %s\n", utils.Red("Error"), message)
+	fmt.Fprintln(&sb)
+	fmt.Fprintln(&sb, "Next:")
+	for _, action := range terminalWaitNextActions(terminal.sessionID) {
+		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
+	}
+	fmt.Fprint(os.Stderr, sb.String())
+}
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
 // and returns an RFC3339 expires_at string.
@@ -440,12 +504,19 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 	deadline := time.Now().Add(timeout)
 	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
 	failures := 0
+	budget := utils.NewThrottleBudget(timeout)
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
 			failures++
 			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
+			}
+			delay := utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))
+			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+				if newDeadline, extended := budget.Extend(deadline, delay); extended {
+					deadline = newDeadline
+				}
 			}
 			remaining := time.Until(deadline)
 			if remaining <= 0 {
@@ -460,10 +531,11 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
-			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
+			pollSleep(remaining, delay)
 			continue
 		}
 		failures = 0
+		budget.Reset()
 		switch s.Status {
 		case activeWorkSessionStatus:
 			return s, nil
@@ -472,15 +544,15 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return s, nil
 			}
 		case rejectedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was rejected"}
+			return nil, &terminalWaitError{message: "work session was rejected", sessionID: id}
 		case expiredWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session expired while waiting for approval"}
+			return nil, &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
 		case revokedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was revoked"}
+			return nil, &terminalWaitError{message: "work session was revoked", sessionID: id}
 		case cancelledWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was cancelled"}
+			return nil, &terminalWaitError{message: "work session was cancelled", sessionID: id}
 		case completedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was completed unexpectedly"}
+			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
 		}
 
 		remaining := time.Until(deadline)
@@ -491,8 +563,9 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
-		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
-		pollSleep(remaining, interval)
+		elapsed := timeout - remaining
+		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), timeout)
+		pollSleep(remaining, utils.NextPollTick(interval, elapsed))
 	}
 }
 
