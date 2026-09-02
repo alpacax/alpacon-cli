@@ -390,8 +390,13 @@ func Unzip(src string, dest string) error {
 	}
 	defer func() { _ = r.Close() }()
 
+	// Absolute so a relative dest such as "." keeps the prefix filepath.Join cleans away.
 	// CodeQL's go/zipslip accepts only this prefix form; TrimSuffix keeps a root dest off "//".
-	destPrefix := strings.TrimSuffix(filepath.Clean(dest), string(os.PathSeparator)) + string(os.PathSeparator)
+	destDir, err := filepath.Abs(dest)
+	if err != nil {
+		return err
+	}
+	destPrefix := strings.TrimSuffix(destDir, string(os.PathSeparator)) + string(os.PathSeparator)
 
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
@@ -400,7 +405,7 @@ func Unzip(src string, dest string) error {
 			return fmt.Errorf("invalid file path (absolute path): %s", f.Name)
 		}
 
-		fpath := filepath.Join(dest, f.Name)
+		fpath := filepath.Join(destDir, f.Name)
 
 		if !strings.HasPrefix(fpath, destPrefix) {
 			return fmt.Errorf("invalid file path: %s", f.Name)
