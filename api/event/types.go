@@ -23,6 +23,11 @@ type RemoteCommandError struct {
 	Output     string
 	ExitCode   int
 	ErrorPhase string
+	// CommandID identifies the job this failure came from, so an approval wait
+	// has something to poll. ApprovalRequestID is filled in by that wait, not
+	// by the server response this error is built from.
+	CommandID         string
+	ApprovalRequestID string
 }
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
@@ -98,6 +103,11 @@ type EventDetails struct {
 	// field read by nothing is a promise no surface keeps.
 	Purpose          string     `json:"purpose"`
 	PurposeExpiresAt *time.Time `json:"purpose_expires_at"`
+	// The server fills these only on the command detail; the list response omits
+	// them, and this struct decodes both. Pointers so an absent field stays
+	// distinguishable from a status the server deliberately left empty.
+	SudoApprovalRequestID *string `json:"sudo_approval_request_id"`
+	SudoGrantStatus       *string `json:"sudo_grant_status"`
 }
 
 type CommandRequest struct {

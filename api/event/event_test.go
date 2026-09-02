@@ -633,7 +633,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 		elapsed += d
 	}
 	// The loop never waits past its deadline, so the waits sum to it exactly.
-	assert.Equal(t, timeout+pollMaxThrottleExtensions*(utils.PollMaxBackoffTick*tick), elapsed,
+	assert.Equal(t, timeout+utils.PollMaxThrottleExtensions*(utils.PollMaxBackoffTick*tick), elapsed,
 		"the deadline must grow by the capped number of grants, not by the whole duration budget")
 }
 
@@ -677,12 +677,12 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	const tick = 100 * time.Microsecond
 	// One timeout is worth exactly one round of capped grants, so a second round is
 	// only reachable through the reset.
-	const timeout = pollMaxThrottleExtensions * (utils.PollMaxBackoffTick * tick)
+	const timeout = utils.PollMaxThrottleExtensions * (utils.PollMaxBackoffTick * tick)
 
 	reqCount := &atomic.Int32{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if reqCount.Add(1) == pollMaxThrottleExtensions+1 {
+		if reqCount.Add(1) == utils.PollMaxThrottleExtensions+1 {
 			_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "running"})
 			return
 		}
@@ -2218,4 +2218,54 @@ func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing
 	})
 
 	assert.Equal(t, "c1\nc4\n", out.String(), "only skipped seqs emitted, extra tail ignored")
+}
+
+func TestErrorFromDetails_RemoteCommandErrorCarriesCommandID(t *testing.T) {
+	exitCode := 1
+	success := false
+	details := EventDetails{
+		ID:       "cmd-1",
+		Status:   "failed",
+		Result:   "sudo: approval required",
+		Success:  &success,
+		ExitCode: &exitCode,
+	}
+
+	err := errorFromDetails(details)
+
+	var remoteErr *RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Equal(t, "cmd-1", remoteErr.CommandID)
+}
+
+func TestGetCommandByID_ReadsSudoGrantFields(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"failed","sudo_approval_request_id":"req-9","sudo_grant_status":"pending_approval"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	details, err := GetCommandByID(ac, "cmd-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, details.SudoGrantStatus)
+	assert.Equal(t, "pending_approval", *details.SudoGrantStatus)
+	require.NotNil(t, details.SudoApprovalRequestID)
+	assert.Equal(t, "req-9", *details.SudoApprovalRequestID)
+}
+
+func TestGetCommandByID_MissingSudoFieldsStayNil(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"failed"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	details, err := GetCommandByID(ac, "cmd-1")
+
+	require.NoError(t, err)
+	assert.Nil(t, details.SudoGrantStatus)
+	assert.Nil(t, details.SudoApprovalRequestID)
 }

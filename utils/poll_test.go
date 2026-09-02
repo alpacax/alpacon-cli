@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNextPollTick(t *testing.T) {
@@ -54,4 +55,44 @@ func TestNextPollBackoff(t *testing.T) {
 			assert.Equal(t, tt.want, NextPollBackoff(base, tt.attempt, tt.retryAfter))
 		})
 	}
+}
+
+func TestThrottleBudget_ExtendsUntilTheDurationRunsOut(t *testing.T) {
+	budget := NewThrottleBudget(10 * time.Second)
+	deadline := time.Now()
+
+	for range 3 {
+		moved, extended := budget.Extend(deadline, 4*time.Second)
+		require.True(t, extended, "an extension is granted while the budget is not yet spent")
+		assert.Equal(t, deadline.Add(4*time.Second), moved)
+		deadline = moved
+	}
+
+	moved, extended := budget.Extend(deadline, 4*time.Second)
+	assert.False(t, extended, "12s already spent against a 10s budget")
+	assert.Equal(t, deadline, moved)
+}
+
+func TestThrottleBudget_ExtendsUntilTheCountRunsOut(t *testing.T) {
+	budget := NewThrottleBudget(time.Hour)
+	deadline := time.Now()
+
+	for range PollMaxThrottleExtensions {
+		var extended bool
+		deadline, extended = budget.Extend(deadline, time.Millisecond)
+		require.True(t, extended)
+	}
+
+	_, extended := budget.Extend(deadline, time.Millisecond)
+	assert.False(t, extended)
+}
+
+func TestThrottleBudget_WarnsOnceUntilReset(t *testing.T) {
+	budget := NewThrottleBudget(time.Minute)
+
+	assert.True(t, budget.ShouldWarn())
+	assert.False(t, budget.ShouldWarn())
+
+	budget.Reset()
+	assert.True(t, budget.ShouldWarn(), "progress restores the warning")
 }
