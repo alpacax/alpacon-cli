@@ -3,6 +3,7 @@ package worksession
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,9 @@ func TestFormatTimestamp(t *testing.T) {
 		{"2024-01-15 10:30:00", "2024-01-15 10:30:00"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatTimestamp(tc.input), tc.input)
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatTimestamp(tc.input))
+		})
 	}
 }
 
@@ -55,7 +58,9 @@ func TestFormatType(t *testing.T) {
 		{"unknown_type", "unknown_type"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatType(tc.input), tc.input)
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatType(tc.input))
+		})
 	}
 }
 
@@ -74,7 +79,9 @@ func TestFormatSize(t *testing.T) {
 		{1073741824, "1.0 GB"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatSize(tc.bytes), "%d bytes", tc.bytes)
+		t.Run(fmt.Sprintf("%d bytes", tc.bytes), func(t *testing.T) {
+			assert.Equal(t, tc.want, formatSize(tc.bytes))
+		})
 	}
 }
 
@@ -117,7 +124,9 @@ func TestFormatDetails_Command(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
@@ -158,7 +167,9 @@ func TestFormatDetails_Sessions(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
@@ -181,7 +192,9 @@ func TestFormatDetails_Files(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
@@ -211,7 +224,9 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
