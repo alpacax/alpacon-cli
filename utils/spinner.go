@@ -85,9 +85,9 @@ func (s *Spinner) Start() {
 
 	if !s.enabled {
 		// Print a static message so users still see progress in non-TTY output.
-		// Deliberately printed again on every restart: a long approval wait
-		// restarts the spinner each poll tick, and the repeated line is the
-		// heartbeat a redirected log gets from an otherwise silent wait.
+		// Printed on every Start, so a caller that restarts the spinner prints
+		// again; no caller does that on a timer any more, and a long wait shows
+		// one line in a redirected log rather than a heartbeat.
 		fmt.Fprintln(os.Stderr, msg)
 		return
 	}
