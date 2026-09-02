@@ -30,22 +30,25 @@ For production usage, see the [official documentation](https://docs.alpacax.com/
 ### macOS (Homebrew)
 ```bash
 brew install alpacax/alpacon/alpacon-cli
+brew upgrade alpacon-cli   # update
 ```
 
 ### Linux (Debian / Ubuntu)
 ```bash
 curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.deb.sh?any=true | sudo bash
 sudo apt-get install alpacon
+sudo apt-get update && sudo apt-get install --only-upgrade alpacon   # update
 ```
 
 ### Linux (RHEL / Rocky / AlmaLinux)
 ```bash
 curl -s https://packagecloud.io/install/repositories/alpacax/alpacon/script.rpm.sh?any=true | sudo bash
 sudo yum install alpacon
+sudo yum update alpacon   # update
 ```
 
 ### Windows
-Download the latest `.zip` from [Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your `PATH`.
+Download the latest `.zip` from [Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your `PATH`. Update it in place with `alpacon update`.
 
 ### Docker
 ```bash
@@ -58,6 +61,38 @@ git clone https://github.com/alpacax/alpacon-cli.git
 cd alpacon-cli
 go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 ```
+
+### Updating
+
+`alpacon update` brings the CLI to the latest release. A binary built from source carries the version `dev`, which matches no release, so the command refuses it and says so—build with GoReleaser or install a released build to use it. A binary you placed yourself is downloaded, verified against the release's SHA-256 checksums, and replaced in place; the old binary is kept beside it until the replacement succeeds—on Windows, where a running executable stays locked, it is kept as `alpacon.exe.old.<timestamp>` and removed by the next update. A binary a package manager or a version manager owns is never overwritten—the command prints how to update through that tool and exits `1`, leaving the upgrade to you. If the ownership question cannot be answered at all—`rpm -qf` takes a read lock on the rpm database, so it is killed when another package transaction holds it—the binary is left alone rather than assumed unowned, and the command says to retry once that transaction has finished. Homebrew, deb and rpm get the exact command; mise and asdf are named without one, since the command depends on how the tool was set up. While it runs it holds `.alpacon-update.lock` beside the binary, so two updates cannot replace the same file at once; the file stays there afterwards and is safe to leave alone. The command only moves forward: a build ahead of the latest release, such as a release candidate, is left alone rather than downgraded. `alpacon update --check` reports whether a newer release exists and installs nothing, exiting `8` when there is one.
+
+If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
+
+#### What the checksum does and does not prove
+
+Releases are checksum-verified but **unsigned**. The SHA-256 comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release and no signature is attached. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and verification would pass. Signing the checksums against a pinned identity is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
+
+To check out of band, compare `alpacon version` against the [Releases](https://github.com/alpacax/alpacon-cli/releases) page, and verify the archive yourself before installing it:
+
+```bash
+# The archive is .tar.gz everywhere but Windows, which ships .zip.
+curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-<os>-<arch>.tar.gz
+curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-checksums.sha256
+sha256sum --check --ignore-missing alpacon-<version>-checksums.sha256
+```
+
+#### If a Windows update is killed mid-replace
+
+Windows refuses to overwrite a running executable, so the update copies the new binary in as `alpacon.exe.staged.<timestamp>`, renames the old one aside as `alpacon.exe.old.<timestamp>`, and renames the staged copy into place. A process killed between those two renames leaves no `alpacon.exe` and both of the others beside it. Nothing recovers automatically, because the binary that would run the next update is the one that went missing.
+
+The staged copy is the new release and was already checksum-verified, so finishing the update is usually what you want:
+
+```powershell
+Rename-Item alpacon.exe.staged.<timestamp> alpacon.exe
+Remove-Item alpacon.exe.old.<timestamp>
+```
+
+To go back to the version you had instead, rename `alpacon.exe.old.<timestamp>` and delete the staged copy. Either way the next update sweeps whichever one you leave.
 
 ## Quick start
 
@@ -330,6 +365,7 @@ Also separate from the work session gate: when you authenticate with an API toke
 | `5`  | Server busy with active user work—a disruptive `server` action (`reboot`, `shutdown`, `upgrade`) was refused because the server has an open Websh/WebFTP session or in-flight command. Transient and retryable: retry when idle, or re-run with `--force` to override |
 | `6`  | Approval not granted—an awaited approval settled without being granted (rejected, expired, revoked, cancelled, or completed). Distinct from `4`: the outcome is final, so retrying the same request only generates another approval request. Returned by `alpacon event wait`, by `work-session create --wait`, and—when a reviewer rejected the command itself—by `exec`, by `websh` command mode, and by `alpacon exec logs`. Under `--output json` these paths emit an error envelope carrying the same `exit_code` |
 | `7`  | Purpose required—the verification gate held an agent's command and is asking what it is for, before any approval request exists (ADR 0052). Distinct from `4`: nothing is pending on a human, nobody has been notified, and the next move belongs to the caller that submitted the command. Answer with `alpacon exec purpose <JOB_ID> "..."` within about a minute; `--wait` does not apply, because the answer is yours to give rather than somebody else's to grant. Pass `--purpose` on the original `exec` to state it up front and skip the demand entirely. One demand per command: on silence the command takes the ordinary path, and a late or second answer is refused. Under `--output json`, a `{"status":"purpose_required", ...}` object is emitted carrying the command id, the seconds left (when the server reports the demand's expiry), and what makes a purpose useful. `alpacon exec purpose` answers on the same contract, emitting `purpose_recorded` on success and `purpose_refused` (exit `1`) when the demand is already settled or the credential is not the one that submitted the command. Returned by `exec`, by `websh` command mode (which reaches the same handler through `RunRemoteExec` but has no `--purpose`, so a demand there can only be answered with `alpacon exec purpose`), and by `alpacon exec logs` — the only sight `--detach` has of a demand, and worth knowing because a held command sits for the length of the window before taking the ordinary path |
+| `8`  | A newer release is available—returned only by `alpacon update --check`, which reports the newer version and installs nothing. Distinct from `1`: `1` means the check itself failed, `8` means it succeeded and found a newer version. The check prints what to run: `alpacon update` for a binary you placed yourself, and for one another tool owns, how to update through that tool |
 
 ## Contributing
 

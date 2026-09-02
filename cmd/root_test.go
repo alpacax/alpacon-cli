@@ -11,7 +11,7 @@ import (
 
 func TestBuildWelcomeLines(t *testing.T) {
 	t.Run("not logged in (no config file)", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setTestHome(t, t.TempDir())
 		lines := buildWelcomeLines()
 		require.Len(t, lines, 3)
 		assert.Contains(t, lines[0], "alpacon")
@@ -21,7 +21,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 
 	t.Run("logged in via Auth0 — workspace host shown", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHome(t, home)
 		cfgDir := filepath.Join(home, ".alpacon")
 		require.NoError(t, os.MkdirAll(cfgDir, 0700))
 		cfg := `{"workspace_url":"https://myws.us1.alpacon.io","workspace_name":"myws","access_token":"a"}`
@@ -34,7 +34,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 
 	t.Run("logged in via legacy token — workspace host shown", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHome(t, home)
 		cfgDir := filepath.Join(home, ".alpacon")
 		require.NoError(t, os.MkdirAll(cfgDir, 0700))
 		cfg := `{"workspace_url":"https://myws.alpacon.io","workspace_name":"myws","token":"t"}`
@@ -46,7 +46,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 
 	t.Run("config malformed — surfaces config error, not 'not logged in'", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHome(t, home)
 		cfgDir := filepath.Join(home, ".alpacon")
 		require.NoError(t, os.MkdirAll(cfgDir, 0700))
 		require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte("{not-json"), 0600))
@@ -58,7 +58,7 @@ func TestBuildWelcomeLines(t *testing.T) {
 
 	t.Run("config exists but no tokens — treated as not logged in", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestHome(t, home)
 		cfgDir := filepath.Join(home, ".alpacon")
 		require.NoError(t, os.MkdirAll(cfgDir, 0700))
 		cfg := `{"workspace_url":"https://x.alpacon.io","workspace_name":"x"}`

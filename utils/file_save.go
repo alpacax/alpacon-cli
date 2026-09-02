@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"time"
 )
@@ -14,6 +15,15 @@ import (
 // stagingPerm is the mode a replacement is written under, never a final mode:
 // it hides partial content from other local accounts until the write completes.
 const stagingPerm = 0600
+
+var replacementTempPattern = regexp.MustCompile(`^\.alpacon-\d+-\d+-\d+\.tmp$`)
+
+// IsReplacementTempName reports whether name is a createReplacementTempFile
+// staging file. A write still in flight wears the same name and takes no lock
+// any sweeper can see, so a caller must age one out rather than trust a lock.
+func IsReplacementTempName(name string) bool {
+	return replacementTempPattern.MatchString(name)
+}
 
 func SaveFile(fileName string, data []byte) error {
 	_, err := saveStream(fileName, bytes.NewReader(data))

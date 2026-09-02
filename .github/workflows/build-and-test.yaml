@@ -15,10 +15,27 @@ permissions:
   contents: read
 
 jobs:
-  # No `name:` on purpose. The check context is then the job id, which is the
-  # canonical single-segment `build-and-test` the other Go repos already emit.
-  build-and-test:
-    runs-on: ubuntu-latest
+  # A matrix reports one check context per leg, and the org ruleset on main
+  # requires the flat `build-and-test`. The job below is what reports it.
+  test:
+    runs-on: ${{ matrix.os }}
+
+    # Windows is not a portability formality: the files that replace a running
+    # executable are compiled out everywhere else and would ship untested without
+    # this runner. It runs only the packages that carry them—the rest of the
+    # suite asserts Unix file modes in tests that predate this job.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            packages: ./...
+          - os: windows-latest
+            packages: ./pkg/selfupdate/... ./cmd
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Check out code
@@ -33,6 +50,7 @@ jobs:
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Verify go.mod and go.sum are tidy
+        if: runner.os == 'Linux'
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
@@ -41,4 +59,14 @@ jobs:
         run: go build -v .
 
       - name: Run Tests
-        run: go test -race -v ./...
+        run: go test -race -v ${{ matrix.packages }}
+
+  # success only if every leg was.
+  build-and-test:
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fail unless every matrix leg passed
+        run: '[ "${{ needs.test.result }}" = "success" ]'

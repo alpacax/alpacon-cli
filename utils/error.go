@@ -104,6 +104,12 @@ const (
 	// PurposeRequiredStatus is the stable machine-readable status string emitted
 	// under --output json when a command is parked awaiting its purpose.
 	PurposeRequiredStatus = "purpose_required"
+
+	// ExitCodeUpdateAvailable is the process exit code for `alpacon update --check`
+	// finding a newer release. It is distinct from ExitCodeGeneralError (1): 1 means
+	// the check itself failed, 8 means the check succeeded and a newer version
+	// exists. Scripts and CI branch on it to schedule an update.
+	ExitCodeUpdateAvailable = 8
 )
 
 type ErrorResponse struct {
