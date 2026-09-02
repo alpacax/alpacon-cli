@@ -751,9 +751,79 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, pollSeams{})
+	// A fake clock, or the deadline is real time: the loop sleeps a tick before it
+	// checks, and a scheduling hiccup longer than the timeout times the poll out
+	// before it ever sends a request.
+	seams, _ := fakePollClock()
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
+}
+
+// A cancelled poll is the stream's only way to stop one it no longer reads. The
+// check at the top of the loop is what a caller that cancels before the first
+// wait relies on: the command may already be over, and a request for it is one
+// the throttle budget pays for and nobody reads.
+func TestPollCommandExecution_CancelledBeforeTheFirstWaitNeverRequests(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// Terminal, so a poll that ignores the cancel ends on the response instead
+		// of running out the package timeout: a running status refreshes the
+		// deadline on every answer and no wall clock ever stops it.
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	cancel := make(chan struct{})
+	close(cancel)
+
+	// A deadline the loop would reach quickly, so a poll that ignores the cancel
+	// fails here instead of running until the package timeout.
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
+
+	require.ErrorIs(t, err, errPollCancelled)
+	assert.Zero(t, calls.Load(), "a poll cancelled before its first wait must not request at all")
+}
+
+// The other half: a cancel that lands while the loop is parked in its backoff wait.
+// The seam's timer never fires, so only the cancel branch can end this poll—no
+// sleep, and nothing for a loaded machine to stretch.
+func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// Terminal, so a poll that ignores the cancel ends on the response instead
+		// of running out the package timeout: a running status refreshes the
+		// deadline on every answer and no wall clock ever stops it.
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	cancel := make(chan struct{})
+	var once sync.Once
+	seams := pollSeams{
+		cancel: cancel,
+		after: func(time.Duration) <-chan time.Time {
+			once.Do(func() { close(cancel) })
+			// Cancel is closed before this timer is handed back, so the wait can
+			// only end on cancel. The two seconds are the far side of that race:
+			// long enough that no scheduling delay reaches them, short enough that
+			// a poll ignoring the cancel fails here rather than hanging.
+			return time.After(2 * time.Second)
+		},
+	}
+
+	_, err := pollCommandExecution(ac, "cmd-1", 3*time.Second, time.Millisecond, false, seams)
+
+	require.ErrorIs(t, err, errPollCancelled)
+	assert.Zero(t, calls.Load(), "the wait was cancelled, so no request follows it")
 }
 
 func TestSubmitCommand_ReturnsJobID(t *testing.T) {
@@ -955,9 +1025,14 @@ func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, tick, false))
 	require.NoError(t, err)
 
+	// Cancel can land while a request is already out, and pollSeams says the poll
+	// outlives its stream by exactly that one. What must not happen is another
+	// tick's worth: a poll still running would spend one request per tick over
+	// the window below.
 	atEnd := details.Load()
-	time.Sleep(5 * tick)
-	assert.Equal(t, atEnd, details.Load(), "the poll must stop with the run, not keep requesting")
+	time.Sleep(10 * tick)
+	assert.LessOrEqual(t, details.Load()-atEnd, int32(1),
+		"the poll must stop with the run, not keep requesting")
 }
 
 // The fin channel is the command's server, which on this path only the submit
