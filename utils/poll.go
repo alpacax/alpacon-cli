@@ -45,15 +45,15 @@ func NewThrottleBudget(timeout time.Duration) *ThrottleBudget {
 	return &ThrottleBudget{limit: timeout}
 }
 
-// Extend grows deadline by delay when the count budget allows it and the
-// cumulative duration either still has room for delay or has not been spent at
-// all yet, and reports whether it did.
+// Extend grows deadline by delay when the budget allows it, and reports whether
+// it did. An extension is granted while the time spent so far is still under
+// limit and the count is still under PollMaxThrottleExtensions.
 //
-// The very first extension in a window is granted whole even when delay alone
-// overshoots limit: a zero-length grant would leave the poll no time to finish
-// the wait a throttled server itself just handed it. Every extension after
-// that must fit inside what remains, so one oversized grant cannot be
-// followed by an unbounded run of further ones.
+// The grant that carries the total past limit is taken whole rather than
+// trimmed, since a clipped grant would leave the poll no time to serve the wait
+// the throttled server itself just asked for. That overshoot is one delay wide,
+// which the caller caps at PollMaxBackoffTick times its base tick, and no
+// further extension follows it.
 func (b *ThrottleBudget) Extend(deadline time.Time, delay time.Duration) (time.Time, bool) {
 	if b.spent >= b.limit || b.extensions >= PollMaxThrottleExtensions {
 		return deadline, false
