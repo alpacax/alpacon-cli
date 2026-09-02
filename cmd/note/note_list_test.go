@@ -83,8 +83,9 @@ func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestNoteLsTailZeroHelperProcess(t *testing.T) {
-	t.Parallel()
 	if os.Getenv("GO_WANT_NOTE_LS_TAIL_HELPER") != "1" {
 		return
 	}

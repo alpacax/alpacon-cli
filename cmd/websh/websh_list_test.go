@@ -70,8 +70,9 @@ func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestWebshLsTailZeroHelperProcess(t *testing.T) {
-	t.Parallel()
 	if os.Getenv("GO_WANT_WEBSH_LS_TAIL_HELPER") != "1" {
 		return
 	}

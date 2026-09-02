@@ -90,6 +90,7 @@ func parseRunHelperInvocation(args []string) (mode string, ok bool) {
 }
 
 func TestExtractRunInvocation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		args      []string
@@ -182,8 +183,9 @@ func TestExitCodeFromProcessError(t *testing.T) {
 	}
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestExitCodeFromProcessErrorHelperProcess(t *testing.T) {
-	t.Parallel()
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
@@ -260,8 +262,9 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	}
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestRunHelperProcess(t *testing.T) {
-	t.Parallel()
 	mode, ok := parseRunHelperInvocation(os.Args)
 	if !ok {
 		return

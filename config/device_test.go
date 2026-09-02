@@ -293,8 +293,9 @@ func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing
 // line passes that one too, while the path exists holding nothing. The catch is
 // probabilistic—the window is one write wide—but one-sided: a publication step
 // with no window cannot fail it, so a failure here is real.
+// Serial: the reader below spins without sleeping, and the window it watches is
+// one write wide. Sharing a core with parallel neighbours only narrows it.
 func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
-	t.Parallel()
 	const rounds = 200
 	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
 

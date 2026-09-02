@@ -6,6 +6,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// filterCaseName keeps the empty filter identifiable. t.Run("") names the subtest
+// #00, which says nothing about the row that failed, and the case that matters
+// most here is exactly the empty one: it is what an unset flag sends.
+func filterCaseName(input string) string {
+	if input == "" {
+		return "empty"
+	}
+	return input
+}
+
 func TestValidateStatusFilter(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -23,7 +33,7 @@ func TestValidateStatusFilter(t *testing.T) {
 		{"active", true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.input, func(t *testing.T) {
+		t.Run(filterCaseName(tc.input), func(t *testing.T) {
 			err := validateStatusFilter(tc.input)
 			if tc.wantErr {
 				assert.Error(t, err)
@@ -54,7 +64,7 @@ func TestValidateTypeFilter(t *testing.T) {
 		{"WorkSession", true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.input, func(t *testing.T) {
+		t.Run(filterCaseName(tc.input), func(t *testing.T) {
 			err := validateTypeFilter(tc.input)
 			if tc.wantErr {
 				assert.Error(t, err)

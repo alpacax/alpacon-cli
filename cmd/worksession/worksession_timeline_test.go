@@ -118,7 +118,7 @@ func TestFormatDetails_Command(t *testing.T) {
 			"[denied] sudo su",
 		},
 		{
-			"unknown (nil success)",
+			"unknown nil success",
 			wsapi.TimelineItem{Type: "command", Line: "some-cmd"},
 			"[unknown] some-cmd",
 		},
@@ -199,6 +199,7 @@ func TestFormatDetails_Files(t *testing.T) {
 }
 
 func TestFormatDetails_SudoGrant(t *testing.T) {
+	t.Parallel()
 	cmd := "apt-get install vim"
 	emptyCmd := ""
 

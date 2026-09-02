@@ -644,6 +644,7 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		args           []string
