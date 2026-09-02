@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -250,6 +251,64 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	assert.Equal(t, "approved", session.Status)
 	assert.Equal(t, 4, requests)
 	assert.GreaterOrEqual(t, elapsed, timeout, "the throttle extension must carry the wait past the original deadline")
+}
+
+// A run of 429s must not end the wait through the failed-poll cap. That cap is
+// for a server the CLI cannot reach; a 429 is the server answering, and the
+// throttle budget plus the deadline are what bound it.
+func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	const interval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= throttled {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, throttled+1, requests)
+}
+
+// The per-poll "Poll failed" line belongs to failures the cap still counts. A
+// throttled run is uncapped, so it warns once and then holds its peace.
+func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	const interval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= throttled {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
+	assert.NotContains(t, stderr, "Poll failed")
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned

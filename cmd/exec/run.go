@@ -533,6 +533,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 	poll := time.NewTimer(approvalWaitPollInterval)
 	defer poll.Stop()
 	failures := 0
+	throttles := 0
 	lastRequestID := ""
 	budget := utils.NewThrottleBudget(waitTimeout)
 	for {
@@ -546,6 +547,23 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			outcome, requestID, err := pollApprovalOnce(ac, cmdID)
 			switch {
 			case err != nil && isPollFailure(err):
+				// A 429 says the server is answering, so it is not counted toward
+				// the cap below—the throttle budget and the deadline bound it
+				// instead, and counting it would end the wait before the budget it
+				// just spent could carry it anywhere.
+				if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+					delay := utils.NextPollBackoff(approvalWaitPollInterval, throttles, utils.RetryAfter(err))
+					throttles++
+					if newDeadline, extended := budget.Extend(deadline, delay); extended {
+						deadline = newDeadline
+						if !timer.Stop() {
+							<-timer.C
+						}
+						timer.Reset(time.Until(deadline))
+					}
+					poll.Reset(delay)
+					continue
+				}
 				failures++
 				if failures >= utils.MaxConsecutivePollFailures {
 					spinner.Stop()
@@ -556,23 +574,14 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 					utils.CliWarning("Approval wait gave up after %d failed polls (%s); the command is still pending.", failures, err)
 					return pendingWithRequestID(pendingDenial, lastRequestID)
 				}
-				delay := utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err))
-				if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
-					if newDeadline, extended := budget.Extend(deadline, delay); extended {
-						deadline = newDeadline
-						if !timer.Stop() {
-							<-timer.C
-						}
-						timer.Reset(time.Until(deadline))
-					}
-				}
-				poll.Reset(delay)
+				poll.Reset(utils.NextPollBackoff(approvalWaitPollInterval, failures-1, utils.RetryAfter(err)))
 				continue
 			case err != nil:
 				spinner.Stop()
 				return err
 			}
 			failures = 0
+			throttles = 0
 			budget.Reset()
 			if requestID != "" {
 				lastRequestID = requestID
@@ -624,8 +633,9 @@ func pendingWithRequestID(denial error, requestID string) error {
 // isPollFailure separates a status read that carried no usable answer from one
 // that did: a network error, an undecodable body, or a retryable HTTP status
 // (any but a fatal 4xx, so 429/5xx keep the wait alive). It costs nothing to be
-// liberal here—the poll only reads the command detail, so a false retry wastes
-// at most MaxConsecutivePollFailures ticks, never re-runs the command.
+// liberal here—the poll only reads the command detail, so a false retry wastes a
+// tick, never a re-run of the command. A run of them is capped at
+// MaxConsecutivePollFailures, except for 429s: the throttle budget bounds those.
 //
 // *url.Error satisfies net.Error, so one errors.As covers both the dial and the
 // round-trip failure—neither reached the server. *json.SyntaxError and

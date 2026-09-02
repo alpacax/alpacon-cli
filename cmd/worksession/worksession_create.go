@@ -499,25 +499,42 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // auto-activates). Deadline-based rather than attempt-count-based so a timeout
 // under one interval (e.g. --wait-approval 15s) still waits the full duration.
 // A failed poll does not end the wait—one 429 would otherwise discard a
-// half-hour wait—unless it will repeat (a fatal 4xx) or already has.
+// half-hour wait. A fatal 4xx ends it at once and a run of other transient
+// failures ends it at MaxConsecutivePollFailures, but a run of 429s does not:
+// the throttle budget and the deadline bound that instead.
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
 	deadline := time.Now().Add(timeout)
 	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
 	failures := 0
+	throttles := 0
 	budget := utils.NewThrottleBudget(timeout)
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
-			failures++
 			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
 			}
-			delay := utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))
+			// A 429 says the server is answering, so it is not counted toward the
+			// cap below—the throttle budget and the deadline bound it instead, and
+			// counting it would end the wait before the budget it just spent could
+			// carry it anywhere. Uncapped, it also warns once rather than per poll.
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+				delay := utils.NextPollBackoff(interval, throttles, utils.RetryAfter(err))
+				throttles++
+				if budget.ShouldWarn() {
+					utils.CliWarning("rate limited by the server, retrying in %s", delay)
+				}
 				if newDeadline, extended := budget.Extend(deadline, delay); extended {
 					deadline = newDeadline
 				}
+				remaining := time.Until(deadline)
+				if remaining <= 0 {
+					return nil, timedOut
+				}
+				pollSleep(remaining, delay)
+				continue
 			}
+			failures++
 			remaining := time.Until(deadline)
 			if remaining <= 0 {
 				return nil, timedOut
@@ -531,10 +548,11 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
-			pollSleep(remaining, delay)
+			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
 			continue
 		}
 		failures = 0
+		throttles = 0
 		budget.Reset()
 		switch s.Status {
 		case activeWorkSessionStatus:

@@ -586,6 +586,44 @@ func TestRunExecWithApprovalWait_ThrottleExtendsTheDeadline(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, waitTimeout, "the throttle extension must carry the wait past the original deadline")
 }
 
+// A run of 429s must not end the wait through the failed-poll cap. That cap is
+// for a server the CLI cannot reach; a 429 is the server answering, and the
+// throttle budget plus the deadline are what bound it.
+func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
+	const waitTimeout = 150 * time.Millisecond
+	const pollInterval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+
+	submits := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		submits++
+		if submits == 1 {
+			return denial
+		}
+		return nil
+	}
+	polls := 0
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		polls++
+		if polls <= throttled {
+			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+		}
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
+		return nil
+	}
+
+	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+
+	require.NoError(t, err)
+	assert.Equal(t, throttled+1, polls)
+	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
+}
+
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
