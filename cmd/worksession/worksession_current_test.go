@@ -15,7 +15,8 @@ import (
 func TestRunCurrent_NoActive_ReturnsEmpty(t *testing.T) {
 	setupTmpConfig(t)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("server should not be called when no active session")
+		assert.Fail(t, "server should not be called when no active session")
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 	ac := newTestClient(ts)

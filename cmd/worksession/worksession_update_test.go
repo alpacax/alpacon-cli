@@ -93,7 +93,9 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(wsapi.WorkSession{ID: "ses-1", Status: "active"})
 		default:
-			t.Fatalf("unexpected method: %s", r.Method)
+			assert.Failf(t, "unexpected method", "%s", r.Method)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}))
 	defer ts.Close()
@@ -148,7 +150,9 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(wsapi.WorkSession{ID: "ses-1", Status: "pending"})
 		default:
-			t.Fatalf("unexpected method: %s", r.Method)
+			assert.Failf(t, "unexpected method", "%s", r.Method)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 	}))
 	defer ts.Close()

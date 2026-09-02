@@ -61,10 +61,14 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 				assert.Contains(t, r.URL.Path, "events/subscriptions")
 
 				body, err := io.ReadAll(r.Body)
-				require.NoError(t, err)
+				if !assert.NoError(t, err) {
+					return
+				}
 
 				var req EventSubscriptionRequest
-				require.NoError(t, json.Unmarshal(body, &req))
+				if !assert.NoError(t, json.Unmarshal(body, &req)) {
+					return
+				}
 				assert.Equal(t, "channel-456", req.Channel)
 				assert.Equal(t, tt.eventType, req.EventType)
 				assert.Equal(t, tt.targetID, req.TargetID)
@@ -88,12 +92,16 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 
 func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 	t.Parallel()
-	bodies := make(chan map[string]any, 1)
+	type decoded struct {
+		body map[string]any
+		err  error
+	}
+	bodies := make(chan decoded, 1)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		bodies <- body
+		err := json.NewDecoder(r.Body).Decode(&body)
+		bodies <- decoded{body: body, err: err}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -108,7 +116,9 @@ func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 
 	require.NoError(t, SubscribeEvent(ac, "channel-456", "notification", ""))
 
-	body := <-bodies
+	got := <-bodies
+	require.NoError(t, got.err)
+	body := got.body
 	_, present := body["target_id"]
 	// The server validates target_id as a UUID, so an empty string would be a 400.
 	assert.False(t, present, "empty target must be omitted from the request body")

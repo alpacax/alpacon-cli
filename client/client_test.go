@@ -614,13 +614,22 @@ func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testin
 			assert.Equal(t, http.MethodPost, r.Method)
 
 			partReader, err := r.MultipartReader()
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			part, err := partReader.NextPart()
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			defer func() { _ = part.Close() }()
 
 			content, err := io.ReadAll(part)
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			uploadedContent = string(content)
 
 			w.Header().Set("Content-Type", "application/json")

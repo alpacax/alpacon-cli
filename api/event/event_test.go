@@ -1513,7 +1513,9 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 		defer func() { _ = conn.Close() }()
 		select {
 		case <-subscribed:

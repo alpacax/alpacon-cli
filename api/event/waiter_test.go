@@ -167,13 +167,15 @@ func TestWaiter_StopCancelsTheWait(t *testing.T) {
 
 	w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: time.Minute})
 
+	connected := make(chan bool, 1)
 	go func() {
-		require.True(t, w.WaitConnected(testWaitTimeout))
+		connected <- w.WaitConnected(testWaitTimeout)
 		w.Stop()
 	}()
 
 	_, outcome, err := w.Wait()
 
+	require.True(t, <-connected)
 	require.NoError(t, err)
 	assert.Equal(t, OutcomeCanceled, outcome)
 }

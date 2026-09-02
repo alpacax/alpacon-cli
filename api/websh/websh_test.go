@@ -192,7 +192,9 @@ func TestConnectToSession(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 
 		var req ConnectRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
 		assert.Equal(t, "sess-xyz", req.Session)
 		assert.False(t, req.IsMaster)
 		assert.True(t, req.ReadOnly)
@@ -216,7 +218,9 @@ func TestInviteToSession(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "sess-abc/invite")
 
 		var req InviteRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
 		assert.Equal(t, []string{"a@example.com", "b@example.com"}, req.Emails)
 		assert.True(t, req.ReadOnly)
 
@@ -236,7 +240,9 @@ func TestJoinWebshSession(t *testing.T) {
 		assert.Contains(t, r.URL.Path, "chan-id-123/join")
 
 		var req JoinRequest
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
 		assert.Equal(t, "secret", req.Password)
 
 		resp := SessionResponse{ID: "joined-session", WebsocketURL: "ws://localhost/ws"}
