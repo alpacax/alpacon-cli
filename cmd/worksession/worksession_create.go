@@ -309,7 +309,8 @@ so it is recorded and scoped accordingly.`,
 }
 
 // useDecision is what the post-create switch does about --use: nothing, attach
-// now, wait for the session to become attachable, or refuse.
+// now, refuse a session no approval can attach yet unless --wait was passed, or
+// wait out one the server has approved but not activated.
 type useDecision int
 
 // terminalWaitError marks a wait that ended in a status the session can never leave.
