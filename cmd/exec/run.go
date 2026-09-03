@@ -560,6 +560,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 				if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 					delay := utils.NextPollBackoff(approvalWaitPollInterval, throttles, utils.RetryAfter(err))
 					throttles++
+					budget.WarnThrottled(delay)
 					if newDeadline, extended := budget.Extend(deadline, delay); extended {
 						deadline = newDeadline
 						// No drain before Reset: under this module's Go 1.23+ timer

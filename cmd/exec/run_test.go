@@ -633,6 +633,48 @@ func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *te
 	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
 }
 
+// A wait that stays throttled prints nothing but a spinner, so a user watching
+// it has no way to tell a slow approver from a rate-limited CLI. The budget caps
+// the notice at one per throttled stretch, the way the work-session wait and the
+// command poll do (TestPollForApproval_ThrottleWarnsOnce).
+func TestRunExecWithApprovalWait_ThrottleWarnsOnce(t *testing.T) {
+	const waitTimeout = 150 * time.Millisecond
+	const pollInterval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+
+	submits := 0
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		submits++
+		if submits == 1 {
+			return denial
+		}
+		return nil
+	}
+	polls := 0
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		polls++
+		if polls <= throttled {
+			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+		}
+		status := "authorized"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("a denial-code wait polls the command detail; it never resumes a held job")
+		return nil
+	}
+
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
+	assert.NotContains(t, stderr, "gave up after", "a 429 is the server answering, not a failed poll")
+}
+
 // A rejection landing mid-wait must end the loop at once: the poll reads the
 // command's own grant status, so a reviewer's rejection is visible on the very
 // next tick.
