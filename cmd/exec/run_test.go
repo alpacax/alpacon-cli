@@ -555,9 +555,6 @@ func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWaitOnThePendingContract
 	assert.Equal(t, 1, polls, "a fatal 4xx must not be retried until the deadline")
 }
 
-// A rejection landing mid-wait must end the loop at once: the poll reads the
-// command's own grant status, so a reviewer's rejection is visible on the very
-// next tick.
 // A 429 must not starve the wait: the approval may still be pending, only the
 // status GET refused. Without the deadline extension the wait would time out
 // before the third poll (t=80ms) ever fires.
@@ -636,6 +633,9 @@ func TestRunExecWithApprovalWait_SustainedThrottleDoesNotTripTheFailureCap(t *te
 	assert.Equal(t, 2, submits, "one first attempt and one run after approval")
 }
 
+// A rejection landing mid-wait must end the loop at once: the poll reads the
+// command's own grant status, so a reviewer's rejection is visible on the very
+// next tick.
 func TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
