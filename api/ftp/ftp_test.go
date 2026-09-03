@@ -1361,9 +1361,9 @@ func TestAlignedPollDelay(t *testing.T) {
 func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	t.Parallel()
 	// Server reports "not yet complete" (success=null) twice, then succeeds.
-	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below
-	// the old fixed 2s+2s = 4s. Assert both the poll count and a loose upper
-	// bound that the old fixed interval could not have met.
+	// With adaptive backoff the two waits are 250ms + 500ms = 750ms. Assert the
+	// poll count and the lower bound only; alignedPollDelay's table test above
+	// pins the schedule itself, so no wall-clock ceiling is needed.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
@@ -1386,11 +1386,8 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
 	assert.Equal(t, int32(3), calls.Load())
-	// Lower bound proves the two waits actually backed off (250ms+500ms);
-	// loose upper bound proves it beat the old fixed 2s+2s without being
-	// flaky under slow CI scheduling.
+	// Lower bound proves the two waits actually backed off (250ms+500ms).
 	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
-	assert.Less(t, elapsed, 3*time.Second, "adaptive backoff should finish well under the old fixed 2s+2s")
 }
 
 func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {

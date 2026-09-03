@@ -1010,8 +1010,10 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 // A run that ended on the fin must take its poll with it. Left alive, the poll goes
 // on requesting a command that is already over—spending the throttle budget this
 // pacing exists to protect, and outliving the process's other streams.
+//
+// Serial: the ten-tick window at the end is the subject, and parallel load would
+// stretch the ticks it counts.
 func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
-	t.Parallel()
 	tick := 20 * time.Millisecond
 	details := &atomic.Int32{}
 	ac := newStreamingServers(t, streamingServerConfig{
