@@ -173,22 +173,25 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	spinner := utils.NewSpinner("Waiting for MFA verification...")
 	spinner.Start()
 
-	// Mirror the websh sudo listener: a precise deadline plus a timer that widens
-	// as the wait ages (api/event/sudolistener.go).
-	started := time.Now()
+	// Mirror the websh sudo listener: a precise deadline plus a fixed-interval
+	// ticker (api/event/sudolistener.go). This one wait does not widen with age:
+	// it is a person finishing MFA in a browser inside a single 60s window, so a
+	// widened tail turns a half-second detection lag into five and can miss a
+	// completion at t=56s entirely. The quota utils.NextPollTick paces for is a
+	// service token's, and by this function's own contract no script or agent
+	// reaches a step-up.
 	deadline := time.After(timeout)
-	poll := time.NewTimer(pollInterval)
-	defer poll.Stop()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-deadline:
 			spinner.Stop()
 			return fmt.Errorf("MFA step-up timed out after %v", timeout)
-		case <-poll.C:
+		case <-ticker.C:
 			completed, cerr := CheckMFACompletion(ac)
 			if cerr != nil || !completed {
 				// Non-fatal: the endpoint may lag the browser; keep polling.
-				poll.Reset(utils.NextPollTick(pollInterval, time.Since(started)))
 				continue
 			}
 			spinner.Stop()

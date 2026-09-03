@@ -295,10 +295,13 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 }
 
 func (sl *SudoListener) pollMFACompletion() bool {
-	started := time.Now()
+	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
+	// keeps over the server's pending-grant expiry is what this wait is built on,
+	// and a gap that widens to ten ticks at the tail spends that buffer against a
+	// person who is still in the browser.
 	timeout := time.After(sl.pollTimeout)
-	poll := time.NewTimer(sl.pollInterval)
-	defer poll.Stop()
+	ticker := time.NewTicker(sl.pollInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -306,13 +309,11 @@ func (sl *SudoListener) pollMFACompletion() bool {
 			return false
 		case <-timeout:
 			return false
-		case <-poll.C:
-			completed, err := mfa.CheckMFACompletion(sl.ac)
-			if err == nil && completed {
+		case <-ticker.C:
+			// The endpoint may lag the browser; a failure here is not an answer.
+			if completed, err := mfa.CheckMFACompletion(sl.ac); err == nil && completed {
 				return true
 			}
-			// The endpoint may lag the browser; a failure here is not an answer.
-			poll.Reset(utils.NextPollTick(sl.pollInterval, time.Since(started)))
 		}
 	}
 }

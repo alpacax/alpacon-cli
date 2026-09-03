@@ -216,10 +216,11 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	})
 }
 
-func TestSudoListener_PollMFACompletion_WidensTheGap(t *testing.T) {
+func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
 	const tick = 10 * time.Millisecond
-	// Not a whole multiple of the widened gap: a deadline landing on the same
-	// instant as a poll leaves the select to pick between them.
+	// Long enough that a widening schedule would have reached its widest gap
+	// twice over, and not a whole multiple of the tick: a deadline landing on the
+	// same instant as a poll leaves the select to pick between them.
 	const waitFor = 125 * tick
 
 	var polls testutil.PollRecorder
@@ -236,11 +237,10 @@ func TestSudoListener_PollMFACompletion_WidensTheGap(t *testing.T) {
 		assert.False(t, sl.pollMFACompletion())
 	})
 
-	// The widest gap the schedule defines is ten base ticks, reached once the wait
-	// is older than sixty of them. Written out rather than read back from
-	// NextPollTick, which is the thing under test.
-	assert.Equal(t, 10*tick, polls.WidestGap(),
-		"the last stretch must poll at the widest gap the schedule defines")
+	// The buffer this timeout keeps over the server's pending-grant expiry is only
+	// worth having while the gap stays fixed, so a widened tail must fail here.
+	assert.Equal(t, tick, polls.WidestGap(),
+		"no poll may sit out longer than the base tick")
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {

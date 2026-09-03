@@ -236,10 +236,11 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 	assert.False(t, called, "the name lookup must not run when no workspace can be named")
 }
 
-func TestStepUpForSudo_PollWidensTheGap(t *testing.T) {
+func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 	const tick = 10 * time.Millisecond
-	// Not a whole multiple of the widened gap: a deadline landing on the same
-	// instant as a poll leaves the select to pick between them.
+	// Long enough that a widening schedule would have reached its widest gap
+	// twice over, and not a whole multiple of the tick: a deadline landing on the
+	// same instant as a poll leaves the select to pick between them.
 	const waitFor = 125 * tick
 
 	var polls testutil.PollRecorder
@@ -266,9 +267,8 @@ func TestStepUpForSudo_PollWidensTheGap(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	// The widest gap the schedule defines is ten base ticks, reached once the wait
-	// is older than sixty of them. Written out rather than read back from
-	// NextPollTick, which is the thing under test.
-	assert.Equal(t, 10*tick, polls.WidestGap(),
-		"the last stretch must poll at the widest gap the schedule defines")
+	// A person is watching a browser through this window, so the gap stays put:
+	// widening it would push the worst-case detection lag from one tick to ten.
+	assert.Equal(t, tick, polls.WidestGap(),
+		"no poll may sit out longer than the base tick")
 }
