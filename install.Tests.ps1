@@ -24,12 +24,16 @@ Describe 'Get-DefaultInstallDir' {
             Should -BeExactly 'C:\Users\jane\AppData\Local\Alpacon\bin'
     }
 
+    # Expected is spelled out rather than computed: recomputing it with the
+    # TrimEnd the function itself uses would assert the implementation against
+    # a copy of itself, and a strip of one trailing character would pass.
     It 'does not double the separator when the value ends with <Trailing>' -TestCases @(
-        @{ Trailing = 'a backslash'; LocalAppData = 'C:\Users\jane\AppData\Local\' }
-        @{ Trailing = 'a forward slash'; LocalAppData = 'C:/Users/jane/AppData/Local/' }
+        @{ Trailing = 'a backslash'; LocalAppData = 'C:\Users\jane\AppData\Local\'; Expected = 'C:\Users\jane\AppData\Local\Alpacon\bin' }
+        @{ Trailing = 'a forward slash'; LocalAppData = 'C:/Users/jane/AppData/Local/'; Expected = 'C:/Users/jane/AppData/Local\Alpacon\bin' }
+        @{ Trailing = 'two backslashes'; LocalAppData = 'C:\Users\jane\AppData\Local\\'; Expected = 'C:\Users\jane\AppData\Local\Alpacon\bin' }
+        @{ Trailing = 'one of each'; LocalAppData = 'C:\Users\jane\AppData\Local/\'; Expected = 'C:\Users\jane\AppData\Local\Alpacon\bin' }
     ) {
-        Get-DefaultInstallDir -LocalAppData $LocalAppData |
-            Should -BeExactly ($LocalAppData.TrimEnd('\', '/') + '\Alpacon\bin')
+        Get-DefaultInstallDir -LocalAppData $LocalAppData | Should -BeExactly $Expected
     }
 }
 
