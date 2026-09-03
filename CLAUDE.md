@@ -163,7 +163,7 @@ _ = json.NewEncoder(w).Encode(resp)
 ### Assertion conventions (testify)
 
 - Dedicated helper over a predicate wrapped in `True/False`: `Contains`/`NotContains`, `ErrorAs`/`NotErrorAs`, `Len`, `NoError`, `Empty`. The wrapper collapses both operands to one bool and failure output loses them. `testifylint` enforces all of these, `Empty` included (#320 turned its `empty` checker on: `Empty` also accepts `nil`, `0` and an empty slice, and the function signature under test pins the type anyway). Suffix/prefix checks have no helper. Where the whole path is known, `assert.Equal` on it beats `assert.True(t, strings.HasSuffix(...))`—it prints both operands and pins the head of the path too; only a genuinely unknowable head keeps `HasSuffix`, with the operand in the message
-- `require` when later lines depend on the assertion, `assert` when checks are independent. Never `require` inside an httptest handler or goroutine—`FailNow` off the test goroutine is undefined
+- `require` when later lines depend on the assertion, `assert` when checks are independent. Never `require` or `t.Fatalf` inside an httptest handler or goroutine—`FailNow` off the test goroutine is undefined, and `go-require` only sees the testify form, so the `t.Fatalf` shape has no linter behind it. A handler reports with `t.Errorf` or `assert`, answers 500, and returns
 - No message that restates the assertion (helpers print operands and error chains themselves); keep only a reason the code cannot say. `True`/`False` are the exception—they print `Should be true` and nothing else, so their message carries the operand: `"stderr line must end with a newline: %q", line`
 - JSON passthrough tests: one `JSONEq` over the whole body, not per-field asserts—field lists drift and silently drop fields
 

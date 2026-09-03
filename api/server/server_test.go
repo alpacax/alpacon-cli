@@ -206,7 +206,9 @@ func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
 		}
 		var req RegistrationTokenRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
+			t.Errorf("failed to decode request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		if req.ExpiresAt == nil || *req.ExpiresAt != expiresAt {
 			t.Errorf("expected expires_at %q, got %v", expiresAt, req.ExpiresAt)
@@ -463,7 +465,9 @@ func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
 		gotPath = r.URL.Path
 		gotMethod = r.Method
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
+			t.Errorf("failed to decode request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(want)
@@ -557,7 +561,9 @@ func TestRequestServerAction(t *testing.T) {
 					}
 					var req serverActionRequest
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
+						t.Errorf("failed to decode request body: %v", err)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
 					}
 					if req.Action != tt.action {
 						t.Errorf("expected action %q, got %q", tt.action, req.Action)

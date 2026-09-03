@@ -58,7 +58,9 @@ func TestLoginAndSaveCredentialsPasswordPreservesTargetMetadata(t *testing.T) {
 
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("failed to decode login request: %v", err)
+			t.Errorf("failed to decode login request: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		wantKeys := map[string]bool{"workspace_url": true, "username": true, "password": true}
 		if len(body) != len(wantKeys) {
@@ -319,7 +321,9 @@ func TestCreateAPIToken(t *testing.T) {
 				}
 				var body map[string]json.RawMessage
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Fatalf("failed to decode body: %v", err)
+					t.Errorf("failed to decode body: %v", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
 				}
 				if tt.wantScopes == nil {
 					if _, ok := body["scopes"]; ok {
@@ -332,7 +336,9 @@ func TestCreateAPIToken(t *testing.T) {
 					} else {
 						var got []string
 						if err := json.Unmarshal(raw, &got); err != nil {
-							t.Fatalf("failed to unmarshal scopes: %v", err)
+							t.Errorf("failed to unmarshal scopes: %v", err)
+							w.WriteHeader(http.StatusInternalServerError)
+							return
 						}
 						if !reflect.DeepEqual(got, tt.wantScopes) {
 							t.Errorf("expected scopes %v, got %v", tt.wantScopes, got)
