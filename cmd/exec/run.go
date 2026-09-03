@@ -556,9 +556,10 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 					throttles++
 					if newDeadline, extended := budget.Extend(deadline, delay); extended {
 						deadline = newDeadline
-						if !timer.Stop() {
-							<-timer.C
-						}
+						// No drain before Reset: under this module's Go 1.23+ timer
+						// semantics Stop reports true for a timer nobody received from,
+						// and a receive after Stop is guaranteed to block.
+						timer.Stop()
 						timer.Reset(time.Until(deadline))
 					}
 					poll.Reset(delay)
