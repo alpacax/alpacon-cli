@@ -45,6 +45,10 @@ jobs:
     permissions:
       contents: write
       packages: write
+      # Build provenance is signed with a short-lived certificate minted from
+      # this job's OIDC identity, so there is no long-lived key to leak.
+      id-token: write
+      attestations: write
     steps:
       - name: Check out code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -98,6 +102,18 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ steps.release-publisher-token.outputs.token }}
+
+      # The checksums file says an archive is the one this release names; the
+      # attestation says which workflow, at which commit, built it. Stealing a
+      # release token is enough to rewrite the first and not the second.
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
 
       - name: Strip "v" prefix from tag
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV

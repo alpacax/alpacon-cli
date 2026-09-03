@@ -68,9 +68,11 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
-#### What the checksum does and does not prove
+#### What the checksum and the attestation do and do not prove
 
-Releases are checksum-verified but **unsigned**. The SHA-256 comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release and no signature is attached. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and verification would pass. Signing the checksums against a pinned identity is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
+`alpacon update` compares SHA-256 checksums and nothing else. That comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and the update would install it. Teaching the CLI to verify the publisher is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
+
+Every release newer than v1.11.2 does carry a [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds), which the update does not read but you can. The release workflow signs each archive and package with a short-lived certificate minted from its own GitHub identity, and the signature is recorded in a public transparency log—so a release published any other way cannot be made to verify, and one published this way leaves a record nobody can quietly remove.
 
 To check out of band, compare `alpacon version` against the [Releases](https://github.com/alpacax/alpacon-cli/releases) page, and verify the archive yourself before installing it:
 
@@ -79,7 +81,14 @@ To check out of band, compare `alpacon version` against the [Releases](https://g
 curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-<os>-<arch>.tar.gz
 curl -LO https://github.com/alpacax/alpacon-cli/releases/download/v<version>/alpacon-<version>-checksums.sha256
 sha256sum --check --ignore-missing alpacon-<version>-checksums.sha256
+
+# Who built it, from which commit. Needs the GitHub CLI.
+gh attestation verify alpacon-<version>-<os>-<arch>.tar.gz \
+  --repo alpacax/alpacon-cli \
+  --signer-workflow alpacax/alpacon-cli/.github/workflows/release.yaml
 ```
+
+Provenance still answers only who built the artifact, never what went into it: a dependency or an action compromised upstream is built by the real workflow and gets a valid attestation. Pinning every action to a commit SHA is what narrows that, and the workflows do.
 
 #### If a Windows update is killed mid-replace
 
