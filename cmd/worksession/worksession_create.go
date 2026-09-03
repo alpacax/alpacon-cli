@@ -24,8 +24,6 @@ const (
 	waitMsgActivation = "Waiting for activation..."
 )
 
-type useDecision int
-
 const (
 	useDecisionNoop useDecision = iota
 	useDecisionUseNow
@@ -309,6 +307,10 @@ so it is recorded and scoped accordingly.`,
 		printSessionAdvisories(finalSession)
 	},
 }
+
+// useDecision is what the post-create switch does about --use: nothing, attach
+// now, wait for the session to become attachable, or refuse.
+type useDecision int
 
 // terminalWaitError marks a wait that ended in a status the session can never leave.
 // Distinguished from a polling failure so the two do not share an exit code: an agent
