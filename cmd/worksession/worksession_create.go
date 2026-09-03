@@ -511,6 +511,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 	failures := 0
 	throttles := 0
 	budget := utils.NewThrottleBudget(timeout)
+	lastStatus := ""
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
@@ -557,7 +558,15 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		}
 		failures = 0
 		throttles = 0
-		budget.Reset()
+		// Only a status change is progress. Resetting on every successful poll would
+		// re-earn the whole extension allowance from any non-429 response, leaving
+		// the wait no ceiling but the extension count. The first status read is not
+		// a change: nothing was observed before it, and the throttles that preceded
+		// it are exactly what the allowance is meant to bound.
+		if lastStatus != "" && s.Status != lastStatus {
+			budget.Reset()
+		}
+		lastStatus = s.Status
 		switch s.Status {
 		case activeWorkSessionStatus:
 			return s, nil

@@ -83,6 +83,14 @@ func (b *ThrottleBudget) Reset() {
 	b.warned = false
 }
 
+// ThrottleCeiling is the longest a throttled wait may run: its own timeout, one
+// timeout of extensions, and the overshoot of the grant that crosses the budget,
+// which Extend takes whole. Exported for the wait loops' own tests the way
+// PollMaxBackoffTick is—a wait that refills its budget has no ceiling at all.
+func ThrottleCeiling(timeout, tick time.Duration) time.Duration {
+	return 2*timeout + time.Duration(PollMaxBackoffTick)*tick
+}
+
 // NextPollTick widens the gap as the wait ages; elapsed is its age.
 func NextPollTick(tick, elapsed time.Duration) time.Duration {
 	switch {

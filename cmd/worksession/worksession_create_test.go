@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -280,6 +281,38 @@ func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	assert.Equal(t, throttled+1, requests)
+}
+
+// The throttle budget is spent, not re-earned. Reading the same pending status
+// again is no more progress than the 429 before it, so a wait that keeps being
+// throttled must still end within one timeout of extensions.
+func TestPollForApproval_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T) {
+	const timeout = 100 * time.Millisecond
+	const interval = time.Millisecond
+
+	requests := 0
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		requests++
+		// A throttled stretch long enough to spend the whole allowance, then one
+		// clean read of a session sitting exactly where it was.
+		if requests%8 != 0 {
+			return http.StatusTooManyRequests, ""
+		}
+		return http.StatusOK, `{"id":"ws-uuid","status":"pending"}`
+	})}
+
+	var elapsed time.Duration
+	var err error
+	testutil.CaptureOutput(t, func() {
+		synctest.Test(t, func(*testing.T) {
+			start := time.Now()
+			_, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			elapsed = time.Since(start)
+		})
+	})
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, utils.ThrottleCeiling(timeout, interval), "the wait outran one timeout of extensions, so the budget was refilled rather than spent")
 }
 
 // The per-poll "Poll failed" line belongs to failures the cap still counts. A

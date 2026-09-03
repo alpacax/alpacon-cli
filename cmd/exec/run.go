@@ -583,7 +583,10 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			}
 			failures = 0
 			throttles = 0
-			budget.Reset()
+			// The budget is not reset here: reading a grant that is still pending is
+			// not progress, and this loop returns the moment the status becomes one.
+			// So the allowance runs for the life of the wait, like the deadline it
+			// extends—resetting per poll would re-earn it on any non-429 response.
 			if requestID != "" {
 				lastRequestID = requestID
 			}

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -668,6 +669,49 @@ func TestApprovalOutcomeOf(t *testing.T) {
 			assert.Equal(t, tt.want, approvalOutcomeOf(tt.status))
 		})
 	}
+}
+
+// The throttle budget is spent, not re-earned. A successful read of a grant that
+// has not moved is no more progress than the 429 before it, so a wait that keeps
+// being throttled must still end within one timeout of extensions—not gain a
+// fresh allowance from every non-429 response.
+func TestRunExecWithApprovalWait_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T) {
+	const waitTimeout = 100 * time.Millisecond
+	const pollInterval = time.Millisecond
+	denial := stubApprovalWaitSeams(t, pollInterval, "SUDO_APPROVAL_REQUIRED")
+
+	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+		return denial
+	}
+	polls := 0
+	getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+		polls++
+		// A throttled stretch long enough to spend the whole allowance, then one
+		// clean read of a grant sitting exactly where it was.
+		if polls%8 != 0 {
+			return event.EventDetails{}, &statusError{status: http.StatusTooManyRequests}
+		}
+		status := "pending_approval"
+		return event.EventDetails{SudoGrantStatus: &status}, nil
+	}
+	streamApprovedCommand = func(*client.AlpaconClient, string, io.Writer, time.Duration) error {
+		t.Fatal("stream must not run when approval never lands")
+		return nil
+	}
+
+	var elapsed time.Duration
+	var err error
+	_ = captureStderr(t, func() {
+		synctest.Test(t, func(*testing.T) {
+			start := time.Now()
+			err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", waitTimeout, io.Discard)
+			elapsed = time.Since(start)
+		})
+	})
+
+	var remoteErr *event.RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Less(t, elapsed, utils.ThrottleCeiling(waitTimeout, pollInterval), "the wait outran one timeout of extensions, so the budget was refilled rather than spent")
 }
 
 // captureStderr returns everything fn writes to stderr.
