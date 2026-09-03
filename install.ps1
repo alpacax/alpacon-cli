@@ -299,6 +299,15 @@ function Add-PathEntry {
     return ($CurrentPath.TrimEnd(';') + ';' + $Directory)
 }
 
+function Add-ToSessionPath {
+    param([Parameter(Mandatory)][string]$Directory)
+
+    # irm | iex runs inside the caller's shell, so this makes alpacon usable
+    # right away instead of only in the next terminal.
+    $updated = Add-PathEntry -CurrentPath "$env:Path" -Directory $Directory
+    if ($updated) { $env:Path = $updated }
+}
+
 function Add-ToUserPath {
     param(
         [Parameter(Mandatory)][string]$Directory,
@@ -408,6 +417,9 @@ function Invoke-AlpaconInstall {
         $installed = Get-InstalledAlpaconVersion -InstallDir $InstallDir
         $action = Resolve-InstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
         if ($action -eq 'skip') {
+            # This shell can predate the install that put alpacon here, so it
+            # still needs the directory on a run that installs nothing.
+            Add-ToSessionPath -Directory $InstallDir
             Write-Host "alpacon is already at $target. Pass -Force to install it again."
             return
         }
@@ -493,10 +505,7 @@ function Invoke-AlpaconInstall {
             Write-Warning "Add it yourself, or call alpacon by its full path."
         }
 
-        # irm | iex runs inside the caller's shell, so this makes alpacon usable
-        # right away instead of only in the next terminal.
-        $sessionPath = Add-PathEntry -CurrentPath "$env:Path" -Directory $InstallDir
-        if ($sessionPath) { $env:Path = $sessionPath }
+        Add-ToSessionPath -Directory $InstallDir
 
         $shadow = Get-Command alpacon -CommandType Application -ErrorAction SilentlyContinue |
             Select-Object -First 1

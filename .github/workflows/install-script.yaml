@@ -133,11 +133,18 @@ jobs:
           $hits = @($raw -split ';' | Where-Object { $_ -eq $dir }).Count
           if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
 
-      - name: Running it again reports it is already current
+      # The run that installs nothing still has to put the directory on the
+      # PATH of the shell it was started from, because that shell can predate
+      # the install that placed alpacon and gets no other chance to learn of it.
+      - name: Running it again reports it is already current and still fixes this shell
         shell: powershell
         run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Alpacon\bin'
+          $env:Path = (@($env:Path -split ';' | Where-Object { $_ -and $_ -ne $dir }) -join ';')
           $output = ./install.ps1 6>&1 | Out-String
           if ($output -notmatch 'already') { throw "second run did not report an existing install: $output" }
+          $hits = @($env:Path -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($hits -ne 1) { throw "the skipped run left this shell's PATH with $hits copies of $dir, expected 1" }
 
       # This is the first re-run that reaches Add-ToUserPath at all: the step
       # above skips out before it, so counting PATH entries there would measure
