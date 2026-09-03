@@ -41,28 +41,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shell: [powershell, pwsh]
+        # powershell is Windows PowerShell 5.1, pwsh is PowerShell 7.
+        edition: [powershell, pwsh]
     steps:
       - name: Check out code
         uses: actions/checkout@v6
 
-      - name: Install Pester
-        shell: ${{ matrix.shell }}
-        run: Install-Module Pester -RequiredVersion 6.1.0 -Force -SkipPublisherCheck -Scope CurrentUser
-
+      # The matrix is not available in a step's `shell:`, so the edition is the
+      # host this step launches rather than the shell GitHub picks for it.
       - name: Run Pester
-        shell: ${{ matrix.shell }}
-        run: |
-          # The runner image ships its own Pester, and auto-loading takes the
-          # highest version it finds, not the one installed above.
-          Import-Module Pester -RequiredVersion 6.1.0 -Force
-          $result = Invoke-Pester ./install.Tests.ps1 -Output Detailed -PassThru
-          # FailedCount stays 0 when discovery itself throws or when the file
-          # yields no tests at all, and Invoke-Pester raises nothing either way.
-          # Exactly one skip is expected here: the suite has a single
-          # deliberately Unix-only test, and every other -Skip condition is
-          # false on Windows. Any other count means coverage went missing.
-          if ($result.Result -ne 'Passed' -or $result.TotalCount -eq 0 -or $result.SkippedCount -ne 1) { exit 1 }
+        run: ${{ matrix.edition }} -NoProfile -File .github/scripts/run-installer-tests.ps1
 
   analyze:
     runs-on: windows-latest

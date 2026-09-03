@@ -27,17 +27,17 @@ go test -race -v -shuffle=on ./...
 The Windows installer has its own suite. `.github/workflows/install-script.yaml` runs three jobs: Pester on both PowerShell editions, PSScriptAnalyzer on Windows PowerShell alone, and an end-to-end job that installs on a real runner, re-runs, reinstalls after the binary is deleted but the version marker survives, pins a version, and checks that a locked binary is refused. `release.yaml` calls that workflow before GoReleaser publishes anything. To run the same checks by hand on a Windows machine:
 
 ```powershell
-Install-Module Pester -RequiredVersion 6.1.0 -Force -SkipPublisherCheck -Scope CurrentUser
+# The same script CI runs: it installs the pinned Pester, runs the suite and
+# reads the result, since Invoke-Pester throws nothing when discovery fails or
+# finds no tests. powershell is Windows PowerShell 5.1, pwsh is PowerShell 7.
+powershell -NoProfile -File .github/scripts/run-installer-tests.ps1
+pwsh -NoProfile -File .github/scripts/run-installer-tests.ps1
+
 Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -SkipPublisherCheck -Scope CurrentUser
-# Import the pinned versions: auto-loading picks the highest one on the machine.
-Import-Module Pester -RequiredVersion 6.1.0 -Force
+# Import the pinned version: auto-loading picks the highest one on the machine.
 Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force
-
-# Invoke-Pester throws nothing when discovery fails or finds no tests, so read the result.
-$result = Invoke-Pester ./install.Tests.ps1 -Output Detailed -PassThru
-if ($result.Result -ne 'Passed' -or $result.TotalCount -eq 0) { throw 'installer tests did not pass' }
-
-$found = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1)
+$found = @('install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1' |
+  ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Settings ./PSScriptAnalyzerSettings.psd1 })
 if ($found.Count -gt 0) { $found; throw 'PSScriptAnalyzer reported findings' }
 ```
 
