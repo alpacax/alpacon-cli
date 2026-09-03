@@ -19,8 +19,9 @@ go build -o alpacon .
 ### Test
 
 ```bash
-# With race detection (same as CI)
-go test -race -v ./...
+# With race detection and a shuffled order (same as CI); shuffling is what
+# catches a test that only passes after its neighbor
+go test -race -v -shuffle=on ./...
 ```
 
 ### Lint
