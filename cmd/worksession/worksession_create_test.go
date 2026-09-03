@@ -354,25 +354,29 @@ func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testi
 	const throttled = 6
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests <= throttled {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+		// One pending read prints the progress line under test; the next ends the
+		// wait, so the assertion does not sit out the extended deadline.
+		if requests == throttled+1 {
+			return http.StatusOK, `{"id":"ws-uuid","status":"pending"}`
+		}
+		return http.StatusOK, `{"id":"ws-uuid","status":"active"}`
+	})}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		synctest.Test(t, func(*testing.T) {
+			_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		})
 	})
 
-	assert.Contains(t, stderr, "1s elapsed of 2s")
-	assert.NotContains(t, stderr, "0s elapsed of 2s")
+	// Six throttled polls buy ~1.26s, so the window the line reports against is
+	// the extended 3s rather than the 2s the flag asked for.
+	assert.Contains(t, stderr, "1s elapsed of 3s")
+	assert.NotContains(t, stderr, "0s elapsed of")
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned

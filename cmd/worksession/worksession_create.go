@@ -592,9 +592,12 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		}
 		// Measured from the start rather than from what is left before the
 		// deadline, which a 429's extension moves: subtracting a moving deadline
-		// would make the reported elapsed time shrink as the wait grew.
+		// would make the reported elapsed time shrink as the wait grew. The window
+		// it is reported against moves with the deadline for the same reason—held
+		// at the flag's timeout, an extended wait would read as one that outran it.
 		elapsed := time.Since(start)
-		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), timeout)
+		window := elapsed + time.Until(deadline)
+		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
 		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
 			return nil, timedOut
 		}
