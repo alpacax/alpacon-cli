@@ -526,7 +526,7 @@ func TestRunExecWithApprovalWait_GiveUpWarningSanitizesServerText(t *testing.T) 
 	assert.Contains(t, stderr, "bad gateway page: server said 502")
 }
 
-func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWait(t *testing.T) {
+func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWaitOnThePendingContract(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
 		return denial
@@ -541,10 +541,17 @@ func TestRunExecWithApprovalWait_FatalClientErrorEndsTheWait(t *testing.T) {
 		return nil
 	}
 
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	var err error
+	stderr := captureStderr(t, func() {
+		err = RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	})
 
-	var status *statusError
-	require.ErrorAs(t, err, &status)
+	// The status read says nothing about the approval request, which is still open,
+	// so the wait ends on the pending denial the way the timeout does—not on an
+	// exit 1 an agent answers by filing a second request for the same command.
+	var remoteErr *event.RemoteCommandError
+	require.ErrorAs(t, err, &remoteErr)
+	assert.Contains(t, stderr, "server said 401")
 	assert.Equal(t, 1, polls, "a fatal 4xx must not be retried until the deadline")
 }
 

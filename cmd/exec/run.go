@@ -585,7 +585,12 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 				continue
 			case err != nil:
 				spinner.Stop()
-				return err
+				// A fatal 4xx on the status read says nothing about the approval
+				// request, which is still open—so this exits on the pending contract
+				// like the give-up branch above, rather than on an exit 1 an agent
+				// answers by filing a second request for the same command.
+				utils.CliWarning("Approval status read failed (%s); the command is still pending.", err)
+				return pendingWithRequestID(pendingDenial, lastRequestID)
 			}
 			failures = 0
 			throttles = 0
