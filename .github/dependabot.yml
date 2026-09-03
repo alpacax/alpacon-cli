@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # SHA-pinned actions receive no upstream patch on their own—the pin is
+  # exact, so a fix upstream reaches this repo only as a raised pin.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
