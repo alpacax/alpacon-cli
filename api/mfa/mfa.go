@@ -21,8 +21,8 @@ const (
 
 // stepUpPollInterval and stepUpTimeout bound the StepUpForSudo wait. They
 // mirror the websh sudo listener (api/event/sudolistener.go) so the step-up
-// feel is consistent across the two terminals. Vars so a test can shorten them.
-var (
+// feel is consistent across the two terminals.
+const (
 	stepUpPollInterval = 500 * time.Millisecond
 	stepUpTimeout      = 60 * time.Second
 )
@@ -135,6 +135,13 @@ func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string
 // this on an interactive terminal, since scripts, CI, and AI agents never
 // receive a presence denial in the first place.
 func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
+	return stepUpForSudo(ac, serverName, stepUpPollInterval, stepUpTimeout)
+}
+
+// stepUpForSudo takes its pacing as arguments rather than off package vars a test
+// would overwrite: the poll runs alongside the stdin goroutine this function
+// starts, so a shared knob written mid-suite is a race waiting for a slow runner.
+func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, timeout time.Duration) error {
 	// Use the CLI-scoped sudo MFA URL (location=cli) so the mfa-success page
 	// notifies the backend, letting CheckMFACompletion observe completion.
 	stepUpURL, err := GetMFALinkByServerName(ac, serverName)
@@ -169,19 +176,19 @@ func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	// Mirror the websh sudo listener: a precise deadline plus a timer that widens
 	// as the wait ages (api/event/sudolistener.go).
 	started := time.Now()
-	deadline := time.After(stepUpTimeout)
-	poll := time.NewTimer(stepUpPollInterval)
+	deadline := time.After(timeout)
+	poll := time.NewTimer(pollInterval)
 	defer poll.Stop()
 	for {
 		select {
 		case <-deadline:
 			spinner.Stop()
-			return fmt.Errorf("MFA step-up timed out after %v", stepUpTimeout)
+			return fmt.Errorf("MFA step-up timed out after %v", timeout)
 		case <-poll.C:
 			completed, cerr := CheckMFACompletion(ac)
 			if cerr != nil || !completed {
 				// Non-fatal: the endpoint may lag the browser; keep polling.
-				poll.Reset(utils.NextPollTick(stepUpPollInterval, time.Since(started)))
+				poll.Reset(utils.NextPollTick(pollInterval, time.Since(started)))
 				continue
 			}
 			spinner.Stop()

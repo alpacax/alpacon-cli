@@ -4,11 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,38 +237,38 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 }
 
 func TestStepUpForSudo_PollWidensTheGap(t *testing.T) {
-	var polls int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case mfaURL + "/":
-			_, _ = w.Write([]byte(`{"mfa_url": "https://example.com/mfa"}`))
-		case mfaCompletionURL:
-			atomic.AddInt32(&polls, 1)
-			_, _ = w.Write([]byte(`{"completed": false}`))
-		default:
-			// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
-			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "server-id"}]}`))
-		}
-	}))
-	defer ts.Close()
+	const tick = 10 * time.Millisecond
+	// Not a whole multiple of the widened gap: a deadline landing on the same
+	// instant as a poll leaves the select to pick between them.
+	const waitFor = 125 * tick
 
-	restoreInterval := stepUpPollInterval
-	stepUpPollInterval = time.Millisecond
-	defer func() { stepUpPollInterval = restoreInterval }()
-	restoreTimeout := stepUpTimeout
-	stepUpTimeout = 120 * time.Millisecond
-	defer func() { stepUpTimeout = restoreTimeout }()
-
+	var polls testutil.PollRecorder
 	ac := &client.AlpaconClient{
-		HTTPClient:    ts.Client(),
-		BaseURL:       ts.URL,
+		BaseURL:       testutil.StubBaseURL,
 		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch r.URL.Path {
+			case mfaURL + "/":
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			case mfaCompletionURL:
+				polls.Record()
+				return http.StatusOK, `{"completed": false}`
+			default:
+				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
+				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
+			}
+		}),
 	}
 
-	err := StepUpForSudo(ac, "my-server")
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		err = stepUpForSudo(ac, "my-server", tick, waitFor)
+	})
 
 	require.Error(t, err)
-	got := atomic.LoadInt32(&polls)
-	assert.Less(t, got, int32(60), "a fixed 1ms tick would poll about 120 times")
+	// The widest gap the schedule defines is ten base ticks, reached once the wait
+	// is older than sixty of them. Written out rather than read back from
+	// NextPollTick, which is the thing under test.
+	assert.Equal(t, 10*tick, polls.WidestGap(),
+		"the last stretch must poll at the widest gap the schedule defines")
 }

@@ -199,8 +199,8 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// The client is nil, so the stop has to land before the first poll tick.
 		const stopAfter = 100 * time.Millisecond
-		require.Greater(t, mfaPollingInterval, stopAfter, "a poll before the stop would dereference the nil client")
 		sl := NewSudoListener(nil, "", "")
+		require.Greater(t, sl.pollInterval, stopAfter, "a poll before the stop would dereference the nil client")
 
 		start := time.Now()
 		go func() {
@@ -217,26 +217,30 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 }
 
 func TestSudoListener_PollMFACompletion_WidensTheGap(t *testing.T) {
-	var polls int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&polls, 1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"completed":false}`))
-	}))
-	defer ts.Close()
+	const tick = 10 * time.Millisecond
+	// Not a whole multiple of the widened gap: a deadline landing on the same
+	// instant as a poll leaves the select to pick between them.
+	const waitFor = 125 * tick
 
-	restore := mfaPollingInterval
-	mfaPollingInterval = time.Millisecond
-	defer func() { mfaPollingInterval = restore }()
-	restoreTimeout := mfaPollingTimeout
-	mfaPollingTimeout = 120 * time.Millisecond
-	defer func() { mfaPollingTimeout = restoreTimeout }()
+	var polls testutil.PollRecorder
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		polls.Record()
+		return http.StatusOK, `{"completed":false}`
+	})}
 
-	sl := &SudoListener{ac: &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, wsListener: &wsListener{done: make(chan struct{})}}
-	assert.False(t, sl.pollMFACompletion())
+	synctest.Test(t, func(t *testing.T) {
+		sl := NewSudoListener(ac, "", "")
+		sl.pollInterval = tick
+		sl.pollTimeout = waitFor
 
-	got := atomic.LoadInt32(&polls)
-	assert.Less(t, got, int32(60), "a fixed 1ms tick would poll about 120 times")
+		assert.False(t, sl.pollMFACompletion())
+	})
+
+	// The widest gap the schedule defines is ten base ticks, reached once the wait
+	// is older than sixty of them. Written out rather than read back from
+	// NextPollTick, which is the thing under test.
+	assert.Equal(t, 10*tick, polls.WidestGap(),
+		"the last stretch must poll at the widest gap the schedule defines")
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {

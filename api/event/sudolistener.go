@@ -24,18 +24,14 @@ const (
 	// sudoOutageWarning is asserted on by the tests, so it lives here rather than
 	// inline at the one place that prints it.
 	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
-)
 
-var (
-	// mfaPollingInterval is how often we check if MFA is completed. A var so a
-	// test can shorten it.
-	mfaPollingInterval = 500 * time.Millisecond
+	// defaultMFAPollInterval is how often the listener checks whether MFA completed.
+	defaultMFAPollInterval = 500 * time.Millisecond
 
-	// mfaPollingTimeout is the maximum time to wait for MFA completion.
-	// The server expires the pending sudo grant after a short window; we keep
-	// extra buffer over that so a slow browser MFA does not race the expiry.
-	// A var so a test can shorten it.
-	mfaPollingTimeout = 60 * time.Second
+	// defaultMFAPollTimeout is the longest the listener waits for MFA completion.
+	// The server expires the pending sudo grant after a short window; the buffer
+	// over that keeps a slow browser MFA from racing the expiry.
+	defaultMFAPollTimeout = 60 * time.Second
 )
 
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
@@ -67,6 +63,11 @@ type SudoListener struct {
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
 	refreshToken func() error
+	// pollInterval and pollTimeout bound pollMFACompletion. Fields rather than
+	// package vars: the poll runs on a goroutine that can outlive the test which
+	// started it, and a test shortening a shared knob would race the next one.
+	pollInterval time.Duration
+	pollTimeout  time.Duration
 
 	stateMu    sync.Mutex // guards channelID, subscribed, warned, refreshed, err
 	channelID  string
@@ -81,9 +82,11 @@ type SudoListener struct {
 // provisioning a session on the listen goroutine would dereference it.
 func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *SudoListener {
 	sl := &SudoListener{
-		ac:         ac,
-		serverName: serverName,
-		sessionID:  sessionID,
+		ac:           ac,
+		serverName:   serverName,
+		sessionID:    sessionID,
+		pollInterval: defaultMFAPollInterval,
+		pollTimeout:  defaultMFAPollTimeout,
 	}
 	if ac != nil {
 		sl.refreshToken = ac.RefreshToken
@@ -293,8 +296,8 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 
 func (sl *SudoListener) pollMFACompletion() bool {
 	started := time.Now()
-	timeout := time.After(mfaPollingTimeout)
-	poll := time.NewTimer(mfaPollingInterval)
+	timeout := time.After(sl.pollTimeout)
+	poll := time.NewTimer(sl.pollInterval)
 	defer poll.Stop()
 
 	for {
@@ -309,7 +312,7 @@ func (sl *SudoListener) pollMFACompletion() bool {
 				return true
 			}
 			// The endpoint may lag the browser; a failure here is not an answer.
-			poll.Reset(utils.NextPollTick(mfaPollingInterval, time.Since(started)))
+			poll.Reset(utils.NextPollTick(sl.pollInterval, time.Since(started)))
 		}
 	}
 }
