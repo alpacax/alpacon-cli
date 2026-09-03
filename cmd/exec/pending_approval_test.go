@@ -226,7 +226,10 @@ func TestExecWaitTimeoutCarriesTheApprovalRequestID(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	stdout, _, exitCode := runExecWaitHelper(t, ts.URL, "--output", "json", "--wait-approval", "30ms", "prod", "--", "sudo", "reboot")
+	// Wide enough that the wait outlives a slow first poll: the request id only
+	// reaches the envelope once a poll has read it, and every tick here pays a
+	// real HTTP round trip inside a subprocess.
+	stdout, _, exitCode := runExecWaitHelper(t, ts.URL, "--output", "json", "--wait-approval", "300ms", "prod", "--", "sudo", "reboot")
 	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 
 	var got pendingApprovalSignal
