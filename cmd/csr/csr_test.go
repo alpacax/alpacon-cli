@@ -116,7 +116,7 @@ func TestDownloadSubcommandFlags(t *testing.T) {
 	outFlag := cmd.Flags().Lookup("out")
 	assert.NotNil(t, outFlag, "--out flag should exist")
 	assert.Equal(t, "o", outFlag.Shorthand, "short flag should be -o")
-	assert.Empty(t, outFlag.DefValue, "default value should be empty")
+	assert.Empty(t, outFlag.DefValue)
 }
 
 func TestCreateSubcommandFlags(t *testing.T) {
