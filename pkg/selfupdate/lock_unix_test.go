@@ -11,6 +11,7 @@ import (
 )
 
 func TestAcquireLockRefusesToFollowASymlink(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	victim := filepath.Join(dir, "victim")
 	require.NoError(t, os.WriteFile(victim, nil, 0600))
@@ -23,6 +24,7 @@ func TestAcquireLockRefusesToFollowASymlink(t *testing.T) {
 }
 
 func TestAcquireLockOpensALockFileThisUserCannotWrite(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root opens a file whatever its mode says")
 	}

@@ -68,7 +68,7 @@ func TestRunUse_NotFound(t *testing.T) {
 	require.Error(t, err)
 
 	got, _ := config.GetActiveWorkSession()
-	assert.Equal(t, "", got, "config must not be updated on failure")
+	assert.Empty(t, got, "config must not be updated on failure")
 }
 
 func TestRunUse_RejectsNonActiveStatus(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRunUse_RejectsNonActiveStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "pending")
 
 	got, _ := config.GetActiveWorkSession()
-	assert.Equal(t, "", got)
+	assert.Empty(t, got)
 }
 
 func TestRunUse_RejectsAgentSession(t *testing.T) {
@@ -117,7 +117,7 @@ func TestRunUse_RejectsAgentSession(t *testing.T) {
 	assert.Contains(t, err.Error(), "not workspace-attachable")
 
 	got, _ := config.GetActiveWorkSession()
-	assert.Equal(t, "", got, "config must not be updated for an agent session")
+	assert.Empty(t, got, "config must not be updated for an agent session")
 }
 
 func TestRunUnset_Idempotent(t *testing.T) {
@@ -132,7 +132,7 @@ func TestRunUnset_Idempotent(t *testing.T) {
 	err = worksession.RunUnset()
 	require.NoError(t, err)
 	got, _ := config.GetActiveWorkSession()
-	assert.Equal(t, "", got)
+	assert.Empty(t, got)
 }
 
 // TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand covers a --wait --use

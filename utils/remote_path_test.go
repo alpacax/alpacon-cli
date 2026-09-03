@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRemoteFileName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		remotePath string
@@ -26,11 +28,10 @@ func TestRemoteFileName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := RemoteFileName(tt.remotePath)
 			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), "file name")
+				require.ErrorContains(t, err, "file name")
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

@@ -22,6 +22,7 @@ func workspaceBinding(id, roleName string) rbac.UserRoleResponse {
 }
 
 func TestPlannedRevocations(t *testing.T) {
+	t.Parallel()
 	contentType := 42
 	scopedAdmin := rbac.UserRoleResponse{ID: "scoped", Role: rbac.RoleNested{Name: rbac.RoleAdmin}, ContentType: &contentType}
 
@@ -91,6 +92,7 @@ func TestPlannedRevocations(t *testing.T) {
 }
 
 func TestDescribeTargets(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "superuser", describeTargets([]rbac.UserRoleResponse{workspaceBinding("su", rbac.RoleSuperuser)}))
 	assert.Equal(t, "superuser and admin", describeTargets([]rbac.UserRoleResponse{
 		workspaceBinding("su", rbac.RoleSuperuser),
@@ -99,6 +101,7 @@ func TestDescribeTargets(t *testing.T) {
 }
 
 func TestRoleCommandFor(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		privilege iam.PrivilegeEdit
@@ -118,6 +121,7 @@ func TestRoleCommandFor(t *testing.T) {
 }
 
 func TestSplitCanIArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		args           []string
@@ -175,6 +179,7 @@ func TestRoleFlagKeepsOneMeaning(t *testing.T) {
 }
 
 func TestLooksLikePermission(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		arg  string
 		want bool
@@ -196,6 +201,7 @@ func TestLooksLikePermission(t *testing.T) {
 }
 
 func TestReasonFlagTrimsOnce(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		flag string
@@ -224,6 +230,7 @@ func (e statusOnlyError) Error() string       { return "forbidden" }
 func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
 func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
+	t.Parallel()
 	bearer := &client.AlpaconClient{AccessToken: "bearer-token"}
 	apiToken := &client.AlpaconClient{Token: "alpat-token"}
 
@@ -295,6 +302,7 @@ func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 }
 
 func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{Token: "alpat-token"}
 	// ParseErrorResponse reads "code: X" only when the prefix starts its own "; " segment,
 	// which a status-prefixed message never does—hence the JSON envelope.
@@ -308,6 +316,7 @@ func TestDescribeRBACError_CodedRefusalIgnoresTheGate(t *testing.T) {
 }
 
 func TestWouldStrandThePlatformFlags(t *testing.T) {
+	t.Parallel()
 	adminRow := workspaceBinding("adm", rbac.RoleAdmin)
 	superRow := workspaceBinding("su", rbac.RoleSuperuser)
 
@@ -356,6 +365,7 @@ func TestWouldStrandThePlatformFlags(t *testing.T) {
 }
 
 func TestResolveSubject(t *testing.T) {
+	t.Parallel()
 	const (
 		callerID = "11111111-1111-1111-1111-111111111111"
 		otherID  = "33333333-3333-3333-3333-333333333333"
@@ -398,6 +408,7 @@ func TestResolveSubject(t *testing.T) {
 
 // A coded 403 never reaches the codeless branch, so it needs a case of its own.
 func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
 	coded := fmt.Errorf("request failed with status 403: {\"code\": %q}", codePermissionDenied)
 
@@ -407,6 +418,7 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 }
 
 func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
+	t.Parallel()
 	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
 	cause := statusOnlyError{status: http.StatusForbidden}
 
@@ -424,6 +436,7 @@ func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 }
 
 func TestResolveSubjectCanonicalizesAUUID(t *testing.T) {
+	t.Parallel()
 	const canonical = "2222222a-2222-2222-2222-22222222222b"
 
 	for _, typed := range []string{

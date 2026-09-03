@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,7 @@ type refreshServer struct {
 }
 
 func TestAppendDeviceScope(t *testing.T) {
+	t.Parallel()
 	const base = "openid profile email offline_access cli org:myws"
 
 	tests := []struct {
@@ -92,6 +94,7 @@ func TestAppendDeviceScope(t *testing.T) {
 }
 
 func TestDeviceCodeScope(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t,
 		"openid profile email offline_access cli org:myws device:"+testDeviceID,
 		deviceCodeScope("myws", testDeviceID),
@@ -103,6 +106,7 @@ func TestDeviceCodeScope(t *testing.T) {
 }
 
 func TestRefreshScope(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "cli org:myws device:"+testDeviceID, refreshScope("myws", testDeviceID))
 	assert.Equal(t, "cli org:myws", refreshScope("myws", ""))
 }
@@ -118,6 +122,7 @@ func TestCurrentDeviceID_StableAcrossCalls(t *testing.T) {
 }
 
 func TestResolveOrgName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		envInfo  *AuthEnvResponse
@@ -164,6 +169,7 @@ func TestResolveOrgName(t *testing.T) {
 }
 
 func TestFetchAuthEnv(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		responseBody     string
@@ -210,7 +216,7 @@ func TestFetchAuthEnv(t *testing.T) {
 			defer ts.Close()
 
 			envInfo, err := FetchAuthEnv(ts.URL, ts.Client())
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, "auth0", envInfo.Auth0.Method)
 			assert.Equal(t, "client123", envInfo.Auth0.ClientID)
 			assert.Equal(t, tt.expectSchemaName, envInfo.Auth0.SchemaName)
@@ -219,6 +225,7 @@ func TestFetchAuthEnv(t *testing.T) {
 }
 
 func TestExtractSubdomain(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		url       string
@@ -244,7 +251,7 @@ func TestExtractSubdomain(t *testing.T) {
 				assert.Error(t, err)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, subdomain)
 		})
 	}
@@ -330,21 +337,8 @@ func setupRefreshConfig(t *testing.T, server *refreshServer) {
 // captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	reader, writer, err := os.Pipe()
-	require.NoError(t, err)
-	original := os.Stderr
-	os.Stderr = writer
-	defer func() { os.Stderr = original }()
-
-	captured := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(reader)
-		captured <- string(data)
-	}()
-
-	fn()
-	require.NoError(t, writer.Close())
-	return <-captured
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
 }
 
 // TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected is the whole

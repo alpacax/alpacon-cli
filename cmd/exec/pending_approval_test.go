@@ -129,6 +129,7 @@ func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, 
 // command and asserts it converges on the same pending-approval contract as the
 // denial-code path: exit 4 and a {"status":"pending_approval", ...} envelope.
 func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
+	t.Parallel()
 	ts := newAwaitingApprovalServer()
 	defer ts.Close()
 
@@ -145,6 +146,7 @@ func TestExecStatusAwaitingApprovalExits4WithJSONSignal(t *testing.T) {
 }
 
 func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
+	t.Parallel()
 	ts := newApprovalDenialServer(denialLine("SUDO_APPROVAL_REQUIRED"))
 	defer ts.Close()
 
@@ -234,6 +236,7 @@ func TestExecLogsHelperProcess(t *testing.T) {
 
 // Exit 0 would tell a consumer reading the code alone that the command finished.
 func TestExecLogsAwaitingApprovalExits4(t *testing.T) {
+	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -268,6 +271,7 @@ func TestExecLogsAwaitingApprovalExits4(t *testing.T) {
 // The sibling exit-6 paths (exec, work-session create) answer --output json with
 // an error envelope, so prose here would break a consumer polling exec logs.
 func TestExecLogsRejectedExits6(t *testing.T) {
+	t.Parallel()
 	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -303,6 +307,7 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 
 // Exit 1 reads as transient, so an agent re-runs a rejected command forever.
 func TestExecRejectedExits6(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -327,6 +332,7 @@ func TestExecRejectedExits6(t *testing.T) {
 // process exit: TestRunExecWithApprovalWait_RejectionMidWaitEndsTheWait stops at
 // the returned error, and TestExecRejectedExits6 enters through the no-wait path.
 func TestExecRejectedMidWaitExits6(t *testing.T) {
+	t.Parallel()
 	var submissions atomic.Int64
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

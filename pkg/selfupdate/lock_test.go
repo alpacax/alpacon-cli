@@ -11,13 +11,14 @@ import (
 )
 
 func TestAcquireLockRefusesASecondHolder(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "update.lock")
 
 	first, err := AcquireLock(path)
 	require.NoError(t, err)
 
 	_, err = AcquireLock(path)
-	assert.ErrorIs(t, err, ErrUpdateInProgress)
+	require.ErrorIs(t, err, ErrUpdateInProgress)
 
 	require.NoError(t, first.Release())
 
@@ -27,6 +28,7 @@ func TestAcquireLockRefusesASecondHolder(t *testing.T) {
 }
 
 func TestAcquireLockTakesALockFileNoProcessHolds(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "update.lock")
 	require.NoError(t, os.WriteFile(path, []byte("4242"), 0600))
 
@@ -37,6 +39,7 @@ func TestAcquireLockTakesALockFileNoProcessHolds(t *testing.T) {
 }
 
 func TestReleaseLetsTheNextHolderIn(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "update.lock")
 	lock, err := AcquireLock(path)
 	require.NoError(t, err)
@@ -49,6 +52,7 @@ func TestReleaseLetsTheNextHolderIn(t *testing.T) {
 }
 
 func TestAcquireLockGivesAnUnheldLockToExactlyOneClaimant(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "update.lock")
 	require.NoError(t, os.WriteFile(path, []byte("4242"), 0600))
 
@@ -80,10 +84,12 @@ func TestAcquireLockGivesAnUnheldLockToExactlyOneClaimant(t *testing.T) {
 }
 
 func TestLockPathSitsBesideTheBinaryItGuards(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, filepath.Join("/usr/local/bin", ".alpacon-update.lock"), LockPath("/usr/local/bin/alpacon"))
 }
 
 func TestAcquireLockNamesItselfWhicheverWayTheLockCannotBeMade(t *testing.T) {
+	t.Parallel()
 	blocked := filepath.Join(t.TempDir(), "bin")
 	require.NoError(t, os.WriteFile(blocked, []byte("not a directory"), 0600))
 

@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -29,6 +29,7 @@ import (
 // GetEventList is that tail reaches the helper as its limit, so a tail larger than the
 // server's 100-item page cap still yields exactly tail commands.
 func TestGetEventList_PassesTailAsTheLimit(t *testing.T) {
+	t.Parallel()
 	// Twice the pages the tail needs, so a walk that ignored the limit comes back with 500
 	// and fails the length assertion instead of running until the test timeout.
 	const lastPage = 5
@@ -65,6 +66,7 @@ func TestGetEventList_PassesTailAsTheLimit(t *testing.T) {
 // The --server and --user filters are path segments, not query params, so a broken join
 // does not fail the request—it returns every command as if no filter had been given.
 func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
+	t.Parallel()
 	// Mirrors the lookup endpoints of api/server and api/iam, whose consts are unexported.
 	const (
 		serverLookupURL = "/api/servers/servers/"
@@ -128,6 +130,7 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 }
 
 func TestPollCommandExecution(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		statusSequence []string
@@ -268,6 +271,7 @@ func newRunCommandBodyCaptureServer(t *testing.T, capture *runCommandBodyCapture
 }
 
 func TestSubmitCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
+	t.Parallel()
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -283,6 +287,7 @@ func TestSubmitCommand_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 }
 
 func TestSubmitCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
+	t.Parallel()
 	var capture runCommandBodyCapture
 	ts := newRunCommandBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -297,6 +302,7 @@ func TestSubmitCommand_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 }
 
 func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		respSuccess    *bool
@@ -364,6 +370,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 }
 
 func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing.T) {
+	t.Parallel()
 	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "awaiting_approval"})
 	var pending *PendingApprovalError
 	require.ErrorAs(t, err, &pending)
@@ -371,6 +378,7 @@ func TestErrorFromDetails_AwaitingApprovalReturnsPendingApprovalError(t *testing
 }
 
 func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
+	t.Parallel()
 	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
@@ -378,6 +386,7 @@ func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 }
 
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
+	t.Parallel()
 	// awaiting_approval, then the transient "error" the server emits in the
 	// approve→deliver window, then completed: waitApproval must poll through both.
 	seq := []string{"awaiting_approval", "awaiting_approval", "error", "completed"}
@@ -399,6 +408,7 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 }
 
 func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	var mu sync.Mutex
 	var subscriptions [][2]string
@@ -433,6 +443,7 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 // The fin subscription needs the server the command ran on, which only a read of
 // the command names. A failed read costs the run its fin event, not the run.
 func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	var mu sync.Mutex
 	var subscriptions [][2]string
@@ -465,6 +476,7 @@ func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
 
 func TestPollCommandExecution_ClientTimeout(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Always fail GETs so SendGetRequest returns an error, and with a status
 		// that is not 429 so the poll loop never extends its deadline.
@@ -522,6 +534,7 @@ func fakePollClock() (pollSeams, func() []time.Duration) {
 
 // A throttled poll must space its requests out instead of spending one per tick.
 func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
+	t.Parallel()
 	tick := 10 * time.Millisecond
 	tests := []struct {
 		name       string
@@ -558,6 +571,7 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 // A 429 must not starve the deadline: the command may already have finished,
 // with only its result GET throttled.
 func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
+	t.Parallel()
 	ts, reqCount := throttleServer(t, 1, "1")
 	defer ts.Close()
 
@@ -577,6 +591,7 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 // Extending the deadline by exactly the wait keeps it ahead of the clock forever,
 // so the extension is capped: a token stuck over quota has to give up.
 func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T) {
+	t.Parallel()
 	ts, reqCount := throttleServer(t, math.MaxInt, "1")
 	defer ts.Close()
 
@@ -597,6 +612,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T)
 // A duration budget alone is spent at the server's pace, so short mandated waits
 // would trade the whole extension for a request storm.
 func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
+	t.Parallel()
 	ts, _ := throttleServer(t, math.MaxInt, "1")
 	defer ts.Close()
 
@@ -625,6 +641,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 // with it: a throttle late in a long command must not be refused an extension
 // because an unrelated one early on spent the budget.
 func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
+	t.Parallel()
 	reqCount := &atomic.Int32{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -656,6 +673,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 // The count belongs to the deadline it protects: held across a refresh, one early
 // stretch would leave a long command no grants for the next.
 func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
+	t.Parallel()
 	const tick = 100 * time.Microsecond
 	// One timeout is worth exactly one round of capped grants, so a second round is
 	// only reachable through the reset.
@@ -694,6 +712,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 // The loop paces by how long the poll has been running, not by the gap since the
 // last poll—measured the latter way a command never leaves the fast window.
 func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
+	t.Parallel()
 	tick := 10 * time.Millisecond
 	// The 21st request answers terminal, so the reply that earns the slow tick is
 	// still polled for.
@@ -724,6 +743,7 @@ func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
 }
 
 func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: "completed"})
@@ -731,12 +751,83 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, pollSeams{})
+	// A fake clock, or the deadline is real time: the loop sleeps a tick before it
+	// checks, and a scheduling hiccup longer than the timeout times the poll out
+	// before it ever sends a request.
+	seams, _ := fakePollClock()
+	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
 
+// A cancelled poll is the stream's only way to stop one it no longer reads. The
+// check at the top of the loop is what a caller that cancels before the first
+// wait relies on: the command may already be over, and a request for it is one
+// the throttle budget pays for and nobody reads.
+func TestPollCommandExecution_CancelledBeforeTheFirstWaitNeverRequests(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// Terminal, so a poll that ignores the cancel ends on the response instead
+		// of running out the package timeout: a running status refreshes the
+		// deadline on every answer and no wall clock ever stops it.
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	cancel := make(chan struct{})
+	close(cancel)
+
+	// A deadline the loop would reach quickly, so a poll that ignores the cancel
+	// fails here instead of running until the package timeout.
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
+
+	require.ErrorIs(t, err, errPollCancelled)
+	assert.Zero(t, calls.Load(), "a poll cancelled before its first wait must not request at all")
+}
+
+// The other half: a cancel that lands while the loop is parked in its backoff wait.
+// The seam's timer never fires, so only the cancel branch can end this poll—no
+// sleep, and nothing for a loaded machine to stretch.
+func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// Terminal, so a poll that ignores the cancel ends on the response instead
+		// of running out the package timeout: a running status refreshes the
+		// deadline on every answer and no wall clock ever stops it.
+		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"completed"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	cancel := make(chan struct{})
+	var once sync.Once
+	seams := pollSeams{
+		cancel: cancel,
+		after: func(time.Duration) <-chan time.Time {
+			once.Do(func() { close(cancel) })
+			// Cancel is closed before this timer is handed back, so the wait can
+			// only end on cancel. The two seconds are the far side of that race:
+			// long enough that no scheduling delay reaches them, short enough that
+			// a poll ignoring the cancel fails here rather than hanging.
+			return time.After(2 * time.Second)
+		},
+	}
+
+	_, err := pollCommandExecution(ac, "cmd-1", 3*time.Second, time.Millisecond, false, seams)
+
+	require.ErrorIs(t, err, errPollCancelled)
+	assert.Zero(t, calls.Load(), "the wait was cancelled, so no request follows it")
+}
+
 func TestSubmitCommand_ReturnsJobID(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
@@ -761,6 +852,7 @@ func TestSubmitCommand_ReturnsJobID(t *testing.T) {
 }
 
 func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/events/commands/") {
 			w.Header().Set("Content-Type", "application/json")
@@ -784,6 +876,7 @@ func TestGetCommandByID_ReturnsEventDetails(t *testing.T) {
 }
 
 func TestGetCommandByID_PropagatesError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 	}))
@@ -810,6 +903,7 @@ func TestExecTimeout_InvalidEnvFallsBackToDefault(t *testing.T) {
 }
 
 func TestSubmitCommand_401WithDetailSurfacesServerReason(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/api/servers/servers/"):
@@ -838,6 +932,7 @@ func TestSubmitCommand_401WithDetailSurfacesServerReason(t *testing.T) {
 }
 
 func TestRunCommandStreaming_NormalFlow(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:        "cmd-uuid",
@@ -884,6 +979,7 @@ func awaitStream(t *testing.T, done <-chan error) error {
 // a finished command—a tick away at best, ten once it is a minute old. The tick here
 // is longer than the test can run, so nothing but the fin event can end this one.
 func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	var mu sync.Mutex
 	var subscriptions [][2]string
@@ -914,6 +1010,9 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 // A run that ended on the fin must take its poll with it. Left alive, the poll goes
 // on requesting a command that is already over—spending the throttle budget this
 // pacing exists to protect, and outliving the process's other streams.
+//
+// Serial: the ten-tick window at the end is the subject, and parallel load would
+// stretch the ticks it counts.
 func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
 	tick := 20 * time.Millisecond
 	details := &atomic.Int32{}
@@ -928,14 +1027,20 @@ func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, tick, false))
 	require.NoError(t, err)
 
+	// Cancel can land while a request is already out, and pollSeams says the poll
+	// outlives its stream by exactly that one. What must not happen is another
+	// tick's worth: a poll still running would spend one request per tick over
+	// the window below.
 	atEnd := details.Load()
-	time.Sleep(5 * tick)
-	assert.Equal(t, atEnd, details.Load(), "the poll must stop with the run, not keep requesting")
+	time.Sleep(10 * tick)
+	assert.LessOrEqual(t, details.Load()-atEnd, int32(1),
+		"the poll must stop with the run, not keep requesting")
 }
 
 // The fin channel is the command's server, which on this path only the submit
 // response names—the command's own id would subscribe to nothing that fires.
 func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var subscriptions [][2]string
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -964,6 +1069,7 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 // A fin racing a status the server has not written yet must not end the run on a
 // half-finished read: the poll picks it up on its next tick instead.
 func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	details := &atomic.Int32{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -986,6 +1092,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 
 // Same fallback when the read the fin triggers fails outright.
 func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	details := &atomic.Int32{}
 	ac := newStreamingServers(t, streamingServerConfig{
@@ -1008,6 +1115,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 // "error" the approve→deliver window emits. The fin path reads the same command, so
 // it has to wait on the same statuses or it reports a run that has not started.
 func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{"awaiting_approval", "error"} {
 		t.Run(status, func(t *testing.T) {
 			stdoutBuf := &bytes.Buffer{}
@@ -1032,6 +1140,7 @@ func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
 }
 
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
@@ -1060,6 +1169,7 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 // written rather than skipped as a duplicate. seq 3 is then filled by the
 // terminal drain in order.
 func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
@@ -1086,6 +1196,7 @@ func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 }
 
 func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
@@ -1109,6 +1220,7 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 // TestRunCommandStreaming_FailedStatusPropagatesExitCode guards that terminal
 // status "failed" yields a *RemoteCommandError carrying the exit code.
 func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:        "cmd-uuid",
@@ -1130,6 +1242,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 // fetch returns a hole (seq 1,3; 2 not yet persisted), applyChunk stops at the
 // hole so the later WS seq 2 isn't dropped as a duplicate.
 func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
@@ -1160,6 +1273,7 @@ func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 }
 
 func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
 	serverID := "srv-uuid"
@@ -1237,6 +1351,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 // reconstructs output from chunks when the server leaves Result empty (the
 // chunk-streaming contract), instead of silently dropping it.
 func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
 	serverID := "srv-uuid"
@@ -1280,6 +1395,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 }
 
 func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
 	serverID := "srv-uuid"
@@ -1327,6 +1443,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 // TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable: when the chunks
 // endpoint errors, the polling fallback emits the buffered Result, not an error.
 func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	cmdID := "cmd-uuid"
 	serverID := "srv-uuid"
@@ -1398,7 +1515,9 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
-		require.NoError(t, err)
+		if !assert.NoError(t, err) {
+			return
+		}
 		defer func() { _ = conn.Close() }()
 		select {
 		case <-subscribed:
@@ -1505,6 +1624,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 // the chunks were already streamed. The Result is still carried on the error so
 // cmd/exec can inspect it (e.g. for the sudo-denial hint) without reprinting.
 func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:        "cmd-uuid",
@@ -1527,6 +1647,7 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 // TestRunCommandStreaming_TerminalStatusErrors covers errorFromDetails' non-nil
 // branches reached through the streaming select loop.
 func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		terminal EventDetails
@@ -1536,6 +1657,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "success false returns RemoteCommandError with exit code",
 			terminal: EventDetails{Status: "completed", Success: boolPtr(false), ExitCode: intPtr(7)},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				var re *RemoteCommandError
 				require.ErrorAs(t, err, &re)
 				assert.Equal(t, 7, re.ExitCode)
@@ -1545,6 +1667,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "stuck status without phase keeps legacy message",
 			terminal: EventDetails{Status: "stuck"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: stuck")
 			},
@@ -1553,6 +1676,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "error status without phase keeps legacy message",
 			terminal: EventDetails{Status: "error"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: error")
 			},
@@ -1561,6 +1685,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "cancelled status without phase keeps legacy message",
 			terminal: EventDetails{Status: "cancelled"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "command failed with status: cancelled")
 			},
@@ -1569,6 +1694,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "stuck status with phase carries phase identifier",
 			terminal: EventDetails{Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "[agent_timeout]")
 				assert.Contains(t, err.Error(), "status=stuck")
@@ -1578,6 +1704,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 			name:     "unrecognized status returns unexpected-status error",
 			terminal: EventDetails{Status: "denied"},
 			check: func(t *testing.T, err error) {
+				t.Helper()
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "unexpected command status")
 			},
@@ -1601,6 +1728,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 // TestRunCommandStreaming_DrainsTrailingChunksOnTerminal covers the drain path:
 // trailing chunks never seen over the WS are recovered by the final REST drain.
 func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:    "cmd-uuid",
@@ -1626,6 +1754,7 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 // last-resort path: when no chunks arrive over the WS and none are persisted,
 // the buffered Result must still be written so output is never silently dropped.
 func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
+	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:        "cmd-uuid",
@@ -1639,21 +1768,11 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
 
-// captureStderr runs fn with os.Stderr redirected to a pipe and returns what
-// was written, so tests can assert on utils.CliWarning output.
+// captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stderr = w
-	defer func() { os.Stderr = old }()
-	fn()
-	_ = w.Close()
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	_ = r.Close()
-	return buf.String()
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
 }
 
 // parseSeqLte reads the optional seq__lte upper bound. An absent value means
@@ -1855,6 +1974,7 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 }
 
 func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
+	t.Parallel()
 	var fetches atomic.Int32
 	ac := holeServer(t, 10, map[int]bool{}, &fetches)
 
@@ -1971,6 +2091,7 @@ func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 // A sub-maxGapWidth gap can still hold thousands of seqs; warnings must
 // collapse them to a range instead of dumping the full slice.
 func TestFormatSeqs_CollapsesLargeLists(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "[3 5 7]", formatSeqs([]int{3, 5, 7}))
 
 	seqs := make([]int, 1000)
@@ -2015,6 +2136,7 @@ func lteCapturingServer(t *testing.T, results []Chunk) (ac *client.AlpaconClient
 // TestApplyChunk_SendsSeqLteBound verifies the gap-fill re-fetch is bounded by
 // the live chunk that exposed the hole (seq__gte == lastSeq+1, seq__lte == chunk.Seq-1).
 func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
+	t.Parallel()
 	// Return the whole gap so applyChunk can advance contiguously.
 	ac, bounds := lteCapturingServer(t, []Chunk{{Seq: 1, Content: "c1\n"}, {Seq: 2, Content: "c2\n"}})
 
@@ -2048,6 +2170,7 @@ func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
 // server ignores seq__lte and returns the full tail, applyChunk's contiguous
 // consumption still stops at the live chunk (client-side upper-bound filter).
 func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Old server: ignores seq__lte, returns everything from seq__gte on.
 		from, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))

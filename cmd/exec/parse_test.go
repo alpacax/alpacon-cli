@@ -8,6 +8,7 @@ import (
 )
 
 func TestParseRemoteExecArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		args     []string
@@ -517,6 +518,7 @@ func TestParseRemoteExecArgs(t *testing.T) {
 }
 
 func TestWaitTimeout(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, time.Duration(0), RemoteExecArgs{}.WaitTimeout())
 	assert.Equal(t, 5*time.Minute, RemoteExecArgs{Wait: true}.WaitTimeout())
 	assert.Equal(t, 10*time.Minute, RemoteExecArgs{WaitApproval: 10 * time.Minute}.WaitTimeout())
@@ -525,6 +527,7 @@ func TestWaitTimeout(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
+	t.Parallel()
 	for _, flag := range []string{"-h", "--help"} {
 		t.Run(flag, func(t *testing.T) {
 			result := ParseRemoteExecArgs([]string{flag, "server", "ls"})
@@ -535,6 +538,7 @@ func TestParseRemoteExecArgs_HelpFlag(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_WorkSessionFlag(t *testing.T) {
+	t.Parallel()
 	parsed := ParseRemoteExecArgs([]string{"--work-session", "ses-abc", "my-server", "ls"})
 	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
@@ -542,6 +546,7 @@ func TestParseRemoteExecArgs_WorkSessionFlag(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
+	t.Parallel()
 	parsed := ParseRemoteExecArgs([]string{"--work-session=ses-abc", "my-server", "ls"})
 	assert.Equal(t, "ses-abc", parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
@@ -549,8 +554,9 @@ func TestParseRemoteExecArgs_WorkSessionEqualForm(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
+	t.Parallel()
 	parsed := ParseRemoteExecArgs([]string{"my-server", "--", "ls", "--work-session", "fake"})
-	assert.Equal(t, "", parsed.WorkSessionID)
+	assert.Empty(t, parsed.WorkSessionID)
 	assert.Equal(t, "my-server", parsed.Server)
 	assert.Contains(t, parsed.Command, "--work-session")
 }
@@ -560,6 +566,7 @@ func TestParseRemoteExecArgs_DoubleDashIgnoresWorkSession(t *testing.T) {
 // strips the surrounding quotes during tokenization. Without this, strings.Join
 // loses the arg boundary and the server's sh fails with a syntax error (issue #164).
 func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		args             []string
@@ -637,6 +644,7 @@ func TestParseRemoteExecArgs_ShellQuoting(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		args           []string
@@ -670,16 +678,19 @@ func TestParseRemoteExecArgs_OutputFlag(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_OutputFlagMissingValue(t *testing.T) {
+	t.Parallel()
 	result := ParseRemoteExecArgs([]string{"--output"})
 	assert.NotEmpty(t, result.Err)
 }
 
 func TestParseRemoteExecArgs_OutputFlagEmptyValue(t *testing.T) {
+	t.Parallel()
 	result := ParseRemoteExecArgs([]string{"--output="})
 	assert.NotEmpty(t, result.Err)
 }
 
 func TestParseRemoteExecArgs_DetachFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []string
@@ -844,18 +855,21 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 }
 
 func TestParseRemoteExecArgs_EnvErrorHidesSecret(t *testing.T) {
+	t.Parallel()
 	result := ParseRemoteExecArgs([]string{"--env=\"=hunter2\"", "server", "ls"})
 	assert.NotEmpty(t, result.Err)
 	assert.NotContains(t, result.Err, "hunter2", "malformed --env error must not echo the value")
 }
 
 func TestParseRemoteExecArgs_EnvPrefixIsExact(t *testing.T) {
+	t.Parallel()
 	// --env-file must not be swallowed by --env matching; it is an unknown flag.
 	result := ParseRemoteExecArgs([]string{"--env-file=secrets", "server", "ls"})
 	assert.Contains(t, result.Err, "unknown flag")
 }
 
 func TestParseRemoteExecArgs_Errors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []string
@@ -916,6 +930,7 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 // validates with DRF's CharField(max_length=...), which counts characters, so a
 // byte count would refuse a Korean purpose at roughly a third of the limit.
 func TestParseRemoteExecArgsPurpose(t *testing.T) {
+	t.Parallel()
 	koreanAtCeiling := make([]rune, PurposeMaxLength)
 	for i := range koreanAtCeiling {
 		koreanAtCeiling[i] = '한'

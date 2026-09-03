@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func withFastRetry(t *testing.T) {
@@ -24,12 +25,14 @@ func withFastTimeout(t *testing.T) {
 }
 
 func TestHandleCommonErrors_UnknownError(t *testing.T) {
+	t.Parallel()
 	err := errors.New("connection refused")
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
 	assert.Equal(t, err, result)
 }
 
 func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
+	t.Parallel()
 	t.Run("no callback returns original error", func(t *testing.T) {
 		err := errors.New(`{"code": "user_username_required", "source": ""}`)
 		result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
@@ -56,6 +59,7 @@ func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
 }
 
 func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
+	t.Parallel()
 	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
 	assert.Equal(t, err, result)
@@ -75,7 +79,7 @@ func TestHandleCommonErrors_MFA_RefreshTokenError(t *testing.T) {
 		},
 	})
 
-	assert.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
+	require.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
 	assert.ErrorIs(t, result, refreshErr)
 }
 
@@ -97,7 +101,7 @@ func TestHandleCommonErrors_MFA_RefreshThenRetrySucceeds(t *testing.T) {
 		},
 	})
 
-	assert.NoError(t, result)
+	require.NoError(t, result)
 	assert.Equal(t, int32(1), refreshCount.Load(), "RefreshToken should be called once")
 	assert.Equal(t, int32(1), retryCount.Load(), "RetryOperation should be called once")
 }
@@ -127,7 +131,7 @@ func TestHandleCommonErrors_MFA_PollingSuccess(t *testing.T) {
 		},
 	})
 
-	assert.NoError(t, result)
+	require.NoError(t, result)
 	assert.GreaterOrEqual(t, pollCount.Load(), int32(3), "should poll until completed")
 	assert.Equal(t, int32(1), refreshCount.Load(), "RefreshToken should be called once after completion")
 	assert.Equal(t, int32(1), retryCount.Load(), "RetryOperation should be called once after completion")
@@ -151,7 +155,7 @@ func TestHandleCommonErrors_MFA_PollingErrorRecovery(t *testing.T) {
 		RetryOperation: func() error { return nil },
 	})
 
-	assert.NoError(t, result)
+	require.NoError(t, result)
 	assert.GreaterOrEqual(t, pollCount.Load(), int32(3), "should continue polling after errors")
 }
 
@@ -170,7 +174,7 @@ func TestHandleCommonErrors_MFA_PollingThenRefreshFails(t *testing.T) {
 		},
 	})
 
-	assert.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
+	require.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
 	assert.ErrorIs(t, result, refreshErr)
 }
 
@@ -218,6 +222,6 @@ func TestHandleCommonErrors_MFA_NilCheckMFACompleted_LegacyFlow(t *testing.T) {
 		},
 	})
 
-	assert.NoError(t, result)
+	require.NoError(t, result)
 	assert.Equal(t, int32(1), retryCount.Load(), "legacy flow should still work")
 }

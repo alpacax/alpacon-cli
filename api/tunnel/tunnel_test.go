@@ -78,6 +78,7 @@ func newCreateTunnelBodyCaptureServer(t *testing.T, capture *createTunnelBodyCap
 }
 
 func TestCreateTunnelSession_BodyIncludesWorkSession_WhenSet(t *testing.T) {
+	t.Parallel()
 	var capture createTunnelBodyCapture
 	ts := newCreateTunnelBodyCaptureServer(t, &capture)
 	defer ts.Close()
@@ -95,6 +96,7 @@ func TestCreateTunnelSession_BodyIncludesWorkSession_WhenSet(t *testing.T) {
 }
 
 func TestCreateTunnelSession_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
+	t.Parallel()
 	var capture createTunnelBodyCapture
 	ts := newCreateTunnelBodyCaptureServer(t, &capture)
 	defer ts.Close()

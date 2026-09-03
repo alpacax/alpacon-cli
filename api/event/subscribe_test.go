@@ -14,6 +14,7 @@ import (
 )
 
 func TestCreateEventSession(t *testing.T) {
+	t.Parallel()
 	expected := EventSessionResponse{
 		ID:           "session-123",
 		WebsocketURL: "ws://localhost/ws/event/session-123/channel-456/token/",
@@ -35,13 +36,14 @@ func TestCreateEventSession(t *testing.T) {
 	}
 
 	resp, err := CreateEventSession(ac)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, expected.ID, resp.ID)
 	assert.Equal(t, expected.WebsocketURL, resp.WebsocketURL)
 	assert.Equal(t, expected.ChannelID, resp.ChannelID)
 }
 
 func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		eventType EventType
@@ -59,10 +61,14 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 				assert.Contains(t, r.URL.Path, "events/subscriptions")
 
 				body, err := io.ReadAll(r.Body)
-				require.NoError(t, err)
+				if !assert.NoError(t, err) {
+					return
+				}
 
 				var req EventSubscriptionRequest
-				require.NoError(t, json.Unmarshal(body, &req))
+				if !assert.NoError(t, json.Unmarshal(body, &req)) {
+					return
+				}
 				assert.Equal(t, "channel-456", req.Channel)
 				assert.Equal(t, tt.eventType, req.EventType)
 				assert.Equal(t, tt.targetID, req.TargetID)
@@ -85,12 +91,17 @@ func TestSubscribeEvent_SendsExpectedPayload(t *testing.T) {
 }
 
 func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
-	bodies := make(chan map[string]any, 1)
+	t.Parallel()
+	type decoded struct {
+		body map[string]any
+		err  error
+	}
+	bodies := make(chan decoded, 1)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		bodies <- body
+		err := json.NewDecoder(r.Body).Decode(&body)
+		bodies <- decoded{body: body, err: err}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -105,7 +116,9 @@ func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 
 	require.NoError(t, SubscribeEvent(ac, "channel-456", "notification", ""))
 
-	body := <-bodies
+	got := <-bodies
+	require.NoError(t, got.err)
+	body := got.body
 	_, present := body["target_id"]
 	// The server validates target_id as a UUID, so an empty string would be a 400.
 	assert.False(t, present, "empty target must be omitted from the request body")
@@ -114,6 +127,7 @@ func TestSubscribeEvent_OmitsEmptyTarget(t *testing.T) {
 }
 
 func TestCreateEventSession_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -125,11 +139,12 @@ func TestCreateEventSession_ServerError(t *testing.T) {
 	}
 
 	resp, err := CreateEventSession(ac)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, resp)
 }
 
 func TestSubscribeEvent_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -146,6 +161,7 @@ func TestSubscribeEvent_ServerError(t *testing.T) {
 }
 
 func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)

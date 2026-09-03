@@ -8,9 +8,11 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetPaymentAPIBaseURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		workspaceURL string
@@ -26,13 +28,14 @@ func TestGetPaymentAPIBaseURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := GetPaymentAPIBaseURL(tt.workspaceURL)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
 
 func TestGetWorkspaceID(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/workspaces/workspaces/", r.URL.Path)
@@ -50,11 +53,12 @@ func TestGetWorkspaceID(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	id, err := GetWorkspaceID(ac, ts.URL, "ws-beta")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "uuid-2", id)
 }
 
 func TestGetWorkspaceID_NotFound(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -68,11 +72,11 @@ func TestGetWorkspaceID_NotFound(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, err := GetWorkspaceID(ac, ts.URL, "ws-unknown")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	require.ErrorContains(t, err, "not found")
 }
 
 func TestGetUsageEstimate(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/workspaces/workspaces/uuid-123/estimate/", r.URL.Path)
@@ -99,13 +103,14 @@ func TestGetUsageEstimate(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	estimate, err := GetUsageEstimate(ac, ts.URL, "uuid-123")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "KRW", estimate.Currency)
 	assert.Equal(t, 30, estimate.BillingPeriod.TotalDays)
 	assert.Equal(t, "Alpacon Core", estimate.Subscription.ProductName)
 }
 
 func TestGetUsageEstimate_ServerError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte(`{"detail":"permission denied"}`))

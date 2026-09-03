@@ -3,6 +3,7 @@ package worksession
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func mustParseTime(ts string) time.Time {
 }
 
 func TestFormatTimestamp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -33,11 +35,14 @@ func TestFormatTimestamp(t *testing.T) {
 		{"2024-01-15 10:30:00", "2024-01-15 10:30:00"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatTimestamp(tc.input), tc.input)
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatTimestamp(tc.input))
+		})
 	}
 }
 
 func TestFormatType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -53,11 +58,14 @@ func TestFormatType(t *testing.T) {
 		{"unknown_type", "unknown_type"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatType(tc.input), tc.input)
+		t.Run(tc.input, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatType(tc.input))
+		})
 	}
 }
 
 func TestFormatSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		bytes int64
 		want  string
@@ -71,17 +79,21 @@ func TestFormatSize(t *testing.T) {
 		{1073741824, "1.0 GB"},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatSize(tc.bytes), "%d bytes", tc.bytes)
+		t.Run(fmt.Sprintf("%d bytes", tc.bytes), func(t *testing.T) {
+			assert.Equal(t, tc.want, formatSize(tc.bytes))
+		})
 	}
 }
 
 func TestSessionState(t *testing.T) {
+	t.Parallel()
 	closed := "2024-01-15T10:30:00Z"
 	assert.Equal(t, "closed", sessionState(&closed))
 	assert.Equal(t, "opened", sessionState(nil))
 }
 
 func TestFormatDetails_Command(t *testing.T) {
+	t.Parallel()
 	success := true
 	failure := false
 
@@ -106,17 +118,20 @@ func TestFormatDetails_Command(t *testing.T) {
 			"[denied] sudo su",
 		},
 		{
-			"unknown (nil success)",
+			"unknown nil success",
 			wsapi.TimelineItem{Type: "command", Line: "some-cmd"},
 			"[unknown] some-cmd",
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
 func TestFormatDetails_Sessions(t *testing.T) {
+	t.Parallel()
 	closed := "2024-01-15T10:30:00Z"
 	port := 8080
 
@@ -152,11 +167,14 @@ func TestFormatDetails_Sessions(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
 func TestFormatDetails_Files(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		item wsapi.TimelineItem
@@ -174,11 +192,14 @@ func TestFormatDetails_Files(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
 func TestFormatDetails_SudoGrant(t *testing.T) {
+	t.Parallel()
 	cmd := "apt-get install vim"
 	emptyCmd := ""
 
@@ -204,16 +225,20 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		assert.Equal(t, tc.want, formatDetails(&tc.item), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, formatDetails(&tc.item))
+		})
 	}
 }
 
 func TestFormatDetails_WebshRecord(t *testing.T) {
+	t.Parallel()
 	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "ls -la /home/user"}
 	assert.Equal(t, "ls -la /home/user", formatDetails(&item))
 }
 
 func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
+	t.Parallel()
 	// The escape has to go before the 60-char cut, or it eats the budget the command
 	// text needs and the cell shows less than the rows beside it.
 	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "\x1b[2K\u202els -la"}
@@ -221,11 +246,13 @@ func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
 }
 
 func TestFormatDetails_Unknown(t *testing.T) {
+	t.Parallel()
 	item := wsapi.TimelineItem{Type: "unknown_event"}
-	assert.Equal(t, "", formatDetails(&item))
+	assert.Empty(t, formatDetails(&item))
 }
 
 func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	printTimelineTableTo(&buf, []wsapi.TimelineAttributes{{
 		Time:    "2024-01-15 10:30:00",
@@ -244,6 +271,7 @@ func TestPrintTimelineTableTo_StripsControlSequences(t *testing.T) {
 }
 
 func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	serverID := "srv-1"
 	timestamp := "2024-01-15T10:30:00Z"
 	var buf bytes.Buffer

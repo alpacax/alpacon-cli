@@ -53,6 +53,7 @@ func writeDeviceIDFile(t *testing.T, raw string) {
 }
 
 func TestIsValidDeviceID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		id   string
@@ -76,8 +77,9 @@ func TestIsValidDeviceID(t *testing.T) {
 }
 
 func TestNewDeviceID_IsUniqueAndAcceptedByAuth0Pattern(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, err := newDeviceID()
 		require.NoError(t, err)
 		assert.True(t, IsValidDeviceID(id), "generated id must satisfy the Auth0 action pattern: %q", id)
@@ -171,12 +173,15 @@ func TestGetOrCreateDeviceID_SurvivesConfigWrites(t *testing.T) {
 		write func(t *testing.T)
 	}{
 		{"workspace switch", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
 		}},
 		{"access token refresh", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SaveRefreshedAuth0Token("refreshed-access-token", 3600))
 		}},
 		{"active work session", func(t *testing.T) {
+			t.Helper()
 			require.NoError(t, SetActiveWorkSession("6f1c1d0e-0000-0000-0000-000000000000"))
 		}},
 	}
@@ -273,6 +278,7 @@ func TestCreateDeviceIDFile_ReportsErrExistWhenPathIsTaken(t *testing.T) {
 // no-hard-link fallback on the contract createDeviceID branches on. It gives up
 // atomicity; it must not give up the exclusion.
 func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), DeviceIDFileName)
 	const winner = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
 	require.NoError(t, createDeviceIDFileWithoutLink(path, winner))
@@ -290,6 +296,8 @@ func TestCreateDeviceIDFileWithoutLink_ReportsErrExistWhenPathIsTaken(t *testing
 // line passes that one too, while the path exists holding nothing. The catch is
 // probabilistic—the window is one write wide—but one-sided: a publication step
 // with no window cannot fail it, so a failure here is real.
+// Serial: the reader below spins without sleeping, and the window it watches is
+// one write wide. Sharing a core with parallel neighbours only narrows it.
 func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 	const rounds = 200
 	const deviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
@@ -350,7 +358,7 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		go func(i int) {
 			defer done.Done()
 			start.Wait()
@@ -396,7 +404,7 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
-	for i := 0; i < callers; i++ {
+	for i := range callers {
 		go func(i int) {
 			defer done.Done()
 			start.Wait()
@@ -531,7 +539,7 @@ func TestGetOrCreateDeviceID_UnreadableFile(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(path, 0600) })
 
 	deviceID, err := GetOrCreateDeviceID()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, deviceID)
 }
 

@@ -72,6 +72,7 @@ func TestNoteLsParsesFlags(t *testing.T) {
 }
 
 func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
+	t.Parallel()
 	helper := osexec.Command(os.Args[0], "-test.run=^TestNoteLsTailZeroHelperProcess$")
 	helper.Env = append(os.Environ(), "GO_WANT_NOTE_LS_TAIL_HELPER=1")
 
@@ -82,6 +83,8 @@ func TestNoteLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestNoteLsTailZeroHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_NOTE_LS_TAIL_HELPER") != "1" {
 		return

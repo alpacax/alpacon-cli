@@ -22,6 +22,7 @@ type promptCall struct {
 }
 
 func TestFormatHostURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		host     string
@@ -113,6 +114,7 @@ func TestFormatHostURL(t *testing.T) {
 }
 
 func TestValidateHostTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		host    string
@@ -147,6 +149,7 @@ func TestValidateHostTarget(t *testing.T) {
 }
 
 func TestBuildCloudWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		workspace string
@@ -176,6 +179,7 @@ func TestBuildCloudWorkspaceURL(t *testing.T) {
 }
 
 func TestParseCloudWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		workspaceURL  string
@@ -236,6 +240,7 @@ func TestParseCloudWorkspaceURL(t *testing.T) {
 }
 
 func TestCloudLoginDefaults(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		cfg           config.Config
@@ -277,6 +282,7 @@ func TestCloudLoginDefaults(t *testing.T) {
 }
 
 func TestIsCloudWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		workspaceURL string
@@ -333,6 +339,7 @@ func TestIsCloudWorkspaceURL(t *testing.T) {
 }
 
 func TestPromptForLoginTarget(t *testing.T) {
+	t.Parallel()
 	t.Run("saved cloud target prompts with workspace and region defaults", func(t *testing.T) {
 		workspaceURL, workspaceName, baseDomain, calls, err := runPromptForLoginTarget(t, config.Config{
 			WorkspaceURL: "https://demo.ap1.alpacon.io",
@@ -415,7 +422,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://demo.us1.alpacon.io/foo]: ", defaultValue: "https://demo.us1.alpacon.io/foo"},
 		}, calls)
@@ -427,7 +434,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/foo")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -439,7 +446,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=1")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -451,7 +458,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com#frag")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -463,7 +470,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com/%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -475,7 +482,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "alpacon.example.com?x=%zz")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "paths, queries, and fragments are not supported")
+		require.ErrorContains(t, err, "paths, queries, and fragments are not supported")
 		assert.Equal(t, []promptCall{
 			{prompt: "Host [https://tenant.private.example.com]: ", defaultValue: "https://tenant.private.example.com"},
 		}, calls)
@@ -485,7 +492,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		_, _, _, calls, err := runPromptForLoginTarget(t, config.Config{}, "demo/foo", "")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "workspace must contain only letters, numbers, and hyphens")
+		require.ErrorContains(t, err, "workspace must contain only letters, numbers, and hyphens")
 		assert.Equal(t, []promptCall{
 			{prompt: "Workspace name: ", required: true},
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
@@ -498,7 +505,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 		}, "", "us1/foo")
 
 		require.Error(t, err)
-		assert.ErrorContains(t, err, "region must contain only letters, numbers, and hyphens")
+		require.ErrorContains(t, err, "region must contain only letters, numbers, and hyphens")
 		assert.Equal(t, []promptCall{
 			{prompt: "Workspace name [demo]: ", defaultValue: "demo"},
 			{prompt: "Region [us1] (us1, ap1): ", defaultValue: "us1"},
@@ -520,6 +527,7 @@ func TestPromptForLoginTarget(t *testing.T) {
 }
 
 func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		isInteractive bool
@@ -536,7 +544,7 @@ func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
 			err := validateInteractiveLoginTargetPrompt(tt.isInteractive)
 			if tt.wantErr {
 				require.Error(t, err)
-				assert.ErrorContains(t, err, "login target is required in non-interactive mode")
+				require.ErrorContains(t, err, "login target is required in non-interactive mode")
 				assert.ErrorContains(t, err, "--workspace and --region")
 				return
 			}
@@ -546,6 +554,7 @@ func TestValidateInteractiveLoginTargetPrompt(t *testing.T) {
 }
 
 func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -570,6 +579,7 @@ func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
 }
 
 func TestNormalizeCloudFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		workspace     string
@@ -596,6 +606,7 @@ func TestNormalizeCloudFlags(t *testing.T) {
 }
 
 func TestResolveLoginTarget(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		args       []string
@@ -633,11 +644,11 @@ func TestResolveLoginTarget(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			url, name, domain, ok, err := resolveLoginTarget(tt.args, tt.workspace, tt.region)
 			if tt.wantErrSub != "" {
-				assert.ErrorContains(t, err, tt.wantErrSub)
+				require.ErrorContains(t, err, tt.wantErrSub)
 				assert.False(t, ok)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantOK, ok)
 			if tt.wantOK {
 				assert.Equal(t, tt.wantURL, url)
@@ -653,6 +664,7 @@ func TestResolveLoginTarget(t *testing.T) {
 }
 
 func TestValidateCloudFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		workspace string
@@ -724,6 +736,7 @@ func (e stubStatusErr) Error() string       { return "stub" }
 func (e stubStatusErr) HTTPStatusCode() int { return e.code }
 
 func TestClassifyWhoamiVerification(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, whoamiVerified, classifyWhoamiVerification(nil))
 	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{code: http.StatusNotFound}))
 	// 401 must fail, never fall back, so an invalid token cannot slip through.
@@ -732,6 +745,7 @@ func TestClassifyWhoamiVerification(t *testing.T) {
 }
 
 func TestShouldFailOnProfileError(t *testing.T) {
+	t.Parallel()
 	// Browser/password login (no token) → profile failure is fatal.
 	assert.True(t, shouldFailOnProfileError(""))
 	// Any token login → profile failure is non-fatal (credential already validated via
@@ -820,6 +834,7 @@ func writeLoginCommandTestConfig(t *testing.T, home string) {
 }
 
 func TestPrintDeviceCodePrompt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		verificationURI string

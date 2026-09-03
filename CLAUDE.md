@@ -19,8 +19,9 @@ go build -o alpacon .
 ### Test
 
 ```bash
-# With race detection (same as CI)
-go test -race -v ./...
+# With race detection and a shuffled order (same as CI); shuffling is what
+# catches a test that only passes after its neighbor
+go test -race -v -shuffle=on ./...
 ```
 
 ### Lint
@@ -154,14 +155,16 @@ _ = json.NewEncoder(w).Encode(resp)
 
 ### Test patterns
 
-- Table-driven tests with `testify/assert`
+- Table-driven tests with `testify/assert`. Every struct case table runs its cases under `t.Run` so a failure names the case and `-run 'TestX/case'` can select one. A loop that walks a list of inputs inside a single case is not a case table and stays as it is. `-run` matches a regex against the name Go has already rewritten, spaces included—it turns them into underscores—so a case name carries no parentheses or other regex metacharacters, and never an empty string, which Go renames to `#00`
+- Every test calls `t.Parallel()` first unless it touches process-wide state or reads a package-level Cobra command. Process-wide state is `t.Setenv` and `t.Chdir` (Go panics when a test calls either alongside `t.Parallel()`, in whichever order), an `os.Stdout`/`os.Stderr` swap including `testutil.CaptureOutput`, `utils.OutputFormat`, and any package-level seam a test reassigns. There are about eighteen such seams and `runPresenceStepUp`, `tunnelFlags` and `refreshAccessToken` are only three of them, so what decides is whether the assignment outlives the test, not whether the name appears here. Cobra commands are out because `Commands()` sorts the child list in place and `Find()` builds the merged flag set lazily, so even a read-only test races with its neighbor. A helper-process test stays serial as well: the child reaches an `os.Exit`, and the parent's own run of it is a guard that returns at once. Serial tests run to completion before the parallel ones start, so a serial test may reassign a global as long as it restores it—that ordering holds within one package's test binary, and `go test ./...` still runs other packages' binaries beside it
+- A test whose subject is a timing window stays serial too: sharing a core with parallel neighbours widens every wait, which narrows the window the test is watching and costs it the detection it exists for
 - API tests use `httptest.NewServer` with a minimal `*client.AlpaconClient` pointing at `ts.URL`
 - Command logic is extracted to unexported helpers (e.g., `parseExecArgs`) for direct unit testing
 
 ### Assertion conventions (testify)
 
-- Dedicated helper over a predicate wrapped in `True/False`: `Contains`/`NotContains`, `ErrorAs`/`NotErrorAs`, `Len`, `NoError`, `Empty`. The wrapper collapses both operands to one bool and failure output loses them. `testifylint` enforces all of these but `Empty`—its `empty` checker is still disabled in `.golangci.yml` (#320), so apply that one by hand. Suffix/prefix checks have no helper, so `assert.True(t, strings.HasSuffix(...))` stays
-- `require` when later lines depend on the assertion, `assert` when checks are independent. Never `require` inside an httptest handler or goroutine—`FailNow` off the test goroutine is undefined
+- Dedicated helper over a predicate wrapped in `True/False`: `Contains`/`NotContains`, `ErrorAs`/`NotErrorAs`, `Len`, `NoError`, `Empty`. The wrapper collapses both operands to one bool and failure output loses them. `testifylint` enforces all of these, `Empty` included (#320 turned its `empty` checker on: `Empty` also accepts `nil`, `0` and an empty slice, and the function signature under test pins the type anyway). Suffix/prefix checks have no helper. Where the whole path is known, `assert.Equal` on it beats `assert.True(t, strings.HasSuffix(...))`—it prints both operands and pins the head of the path too; only a genuinely unknowable head keeps `HasSuffix`, with the operand in the message
+- `require` when later lines depend on the assertion, `assert` when checks are independent. Never `require` or `t.Fatalf` inside an httptest handler or goroutine—`FailNow` off the test goroutine is undefined, and `go-require` only sees the testify form, so the `t.Fatalf` shape has no linter behind it. A handler reports with `t.Errorf` or `assert`, answers 500, and returns
 - No message that restates the assertion (helpers print operands and error chains themselves); keep only a reason the code cannot say. `True`/`False` are the exception—they print `Should be true` and nothing else, so their message carries the operand: `"stderr line must end with a newline: %q", line`
 - JSON passthrough tests: one `JSONEq` over the whole body, not per-field asserts—field lists drift and silently drop fields
 

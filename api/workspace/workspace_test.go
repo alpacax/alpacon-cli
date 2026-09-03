@@ -7,6 +7,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // buildTestJWT creates a minimal JWT string with the given payload claims.
@@ -14,13 +15,14 @@ func buildTestJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
 	payload, err := json.Marshal(claims)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	payloadEnc := base64.RawURLEncoding.EncodeToString(payload)
 	signature := base64.RawURLEncoding.EncodeToString([]byte("fakesig"))
 	return header + "." + payloadEnc + "." + signature
 }
 
 func TestGetWorkspacesFromToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		claims    map[string]any
@@ -73,7 +75,7 @@ func TestGetWorkspacesFromToken(t *testing.T) {
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Len(t, workspaces, tt.expectLen)
 			}
 		})
@@ -81,6 +83,7 @@ func TestGetWorkspacesFromToken(t *testing.T) {
 }
 
 func TestGetWorkspacesFromToken_FieldValues(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "production", "auth0_id": "org_123", "region": "ap1"},
@@ -88,7 +91,7 @@ func TestGetWorkspacesFromToken_FieldValues(t *testing.T) {
 	})
 
 	workspaces, err := GetWorkspacesFromToken(token)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, workspaces, 1)
 	assert.Equal(t, "production", workspaces[0].SchemaName)
 	assert.Equal(t, "org_123", workspaces[0].Auth0ID)
@@ -96,6 +99,7 @@ func TestGetWorkspacesFromToken_FieldValues(t *testing.T) {
 }
 
 func TestGetWorkspaceList(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -133,14 +137,14 @@ func TestGetWorkspaceList(t *testing.T) {
 			}
 
 			entries, err := GetWorkspaceList(cfg)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Len(t, entries, 2)
 
 			for i, entry := range entries {
 				if i == tt.expectCurrentAt {
 					assert.Equal(t, "*", entry.Current)
 				} else {
-					assert.Equal(t, "", entry.Current)
+					assert.Empty(t, entry.Current)
 				}
 			}
 		})
@@ -148,6 +152,7 @@ func TestGetWorkspaceList(t *testing.T) {
 }
 
 func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "only-ws", "auth0_id": "org_abc", "region": "ap1"},
@@ -160,7 +165,7 @@ func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
 	}
 
 	entries, err := GetWorkspaceList(cfg)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, entries, 1)
 	assert.Equal(t, "only-ws", entries[0].Name)
 	assert.Equal(t, "ap1", entries[0].Region)
@@ -168,6 +173,7 @@ func TestGetWorkspaceList_SingleWorkspace(t *testing.T) {
 }
 
 func TestResolveWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -211,7 +217,7 @@ func TestResolveWorkspaceURL(t *testing.T) {
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectURL, resolvedURL)
 				assert.Equal(t, tt.expectName, name)
 			}
@@ -220,6 +226,7 @@ func TestResolveWorkspaceURL(t *testing.T) {
 }
 
 func TestValidateAndBuildWorkspaceURL(t *testing.T) {
+	t.Parallel()
 	token := buildTestJWT(t, map[string]any{
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
@@ -273,11 +280,11 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 
 			newURL, newName, err := ValidateAndBuildWorkspaceURL(cfg, tt.targetName)
 			if tt.expectErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Empty(t, newURL)
 				assert.Empty(t, newName)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Equal(t, tt.expectURL, newURL)
 				assert.Equal(t, tt.expectName, newName)
 			}
@@ -286,6 +293,7 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 }
 
 func TestValidateAndBuildWorkspaceURL_InvalidToken(t *testing.T) {
+	t.Parallel()
 	cfg := config.Config{
 		AccessToken: "not-a-jwt",
 		BaseDomain:  "alpacon.io",

@@ -18,6 +18,7 @@ func denialLine(code string) string {
 }
 
 func TestSudoDenialHint(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		code            string
@@ -116,12 +117,14 @@ func TestSudoDenialHint(t *testing.T) {
 // `work-session update --sudo`, so identical wording would leave the user unable
 // to tell which of the two they hit.
 func TestSudoDenialHintSeparatesTheTwoPolicyDenials(t *testing.T) {
+	t.Parallel()
 	assert.NotEqual(t,
 		sudoDenialHint(denialLine("SUDO_NO_WORKSESSION_POLICY")),
 		sudoDenialHint(denialLine("SUDO_POLICY_MFA_REQUIRED")))
 }
 
 func TestHasSudoPresenceDenial(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		output string
@@ -163,6 +166,7 @@ func TestHasSudoPresenceDenial(t *testing.T) {
 }
 
 func TestHasSudoApprovalDenial(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		output string
@@ -209,6 +213,7 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 }
 
 func TestPendingSudoDenial(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name             string
 		output           string
@@ -270,6 +275,7 @@ func TestPendingSudoDenial(t *testing.T) {
 }
 
 func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
+	t.Parallel()
 	// The server adds denial codes on its own release train and nothing enforces
 	// this table's sync with it, so an unknown code must still leave the user
 	// something to act on instead of a bare denial line.
@@ -335,6 +341,7 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 }
 
 func TestSudoDenialHintCodelessDenial(t *testing.T) {
+	t.Parallel()
 	// Spelled out, not reused from sudoDenialCodelessLine, so changing that constant
 	// fails these tests instead of moving along with them.
 	const codelessLine = "Alpacon denied this sudo command.\n"
@@ -385,6 +392,7 @@ func TestSudoDenialHintCodelessDenial(t *testing.T) {
 }
 
 func TestIsApprovalDenial(t *testing.T) {
+	t.Parallel()
 	approvalDenial := &event.RemoteCommandError{ExitCode: 1, Output: denialLine("SUDO_APPROVAL_REQUIRED")}
 
 	tests := []struct {
@@ -422,6 +430,7 @@ func TestIsApprovalDenial(t *testing.T) {
 }
 
 func TestReRunHint(t *testing.T) {
+	t.Parallel()
 	t.Run("minimal: server and command only", func(t *testing.T) {
 		got := reRunHint(RemoteExecArgs{Server: "web-01", Command: "sudo reboot"})
 		assert.Equal(t, "alpacon exec web-01 -- sudo reboot", got.Command)

@@ -16,6 +16,7 @@ import (
 )
 
 func TestParseChecksums(t *testing.T) {
+	t.Parallel()
 	data := []byte("" +
 		"9f2d1c0e6b3a4d5f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7  alpacon-1.4.0-linux-amd64.tar.gz\n" +
 		"1122334455667788990011223344556677889900112233445566778899001122  alpacon-1.4.0-windows-amd64.zip\n" +
@@ -29,6 +30,7 @@ func TestParseChecksums(t *testing.T) {
 }
 
 func TestVerifyChecksumAcceptsAMatch(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "archive.tar.gz")
 	content := []byte("archive content")
 	require.NoError(t, os.WriteFile(path, content, 0600))
@@ -38,6 +40,7 @@ func TestVerifyChecksumAcceptsAMatch(t *testing.T) {
 }
 
 func TestVerifyChecksumRejectsAMismatch(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "archive.tar.gz")
 	require.NoError(t, os.WriteFile(path, []byte("archive content"), 0600))
 
@@ -47,6 +50,7 @@ func TestVerifyChecksumRejectsAMismatch(t *testing.T) {
 }
 
 func TestVerifyChecksumRejectsAnEmptyExpectation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "archive.tar.gz")
 	require.NoError(t, os.WriteFile(path, []byte("archive content"), 0600))
 
@@ -78,8 +82,9 @@ func TestFetchVerifiedBinaryRejectsAnArchiveTheChecksumsNeverName(t *testing.T) 
 }
 
 func TestVerifyChecksumStopsBeforeItEvenOpensTheFile(t *testing.T) {
+	t.Parallel()
 	err := VerifyChecksum(filepath.Join(t.TempDir(), "never-downloaded.tar.gz"), "")
 
-	assert.ErrorIs(t, err, ErrChecksumMismatch)
+	require.ErrorIs(t, err, ErrChecksumMismatch)
 	assert.NotErrorIs(t, err, fs.ErrNotExist)
 }

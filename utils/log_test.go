@@ -47,6 +47,10 @@ func TestDebugEnabled(t *testing.T) {
 			if tt.set {
 				t.Setenv(DebugEnvVar, tt.value)
 			} else {
+				// t.Setenv only restores the variable afterwards; the absent case
+				// is a different branch of os.LookupEnv than an empty value, so it
+				// has to be unset for real.
+				t.Setenv(DebugEnvVar, "")
 				require.NoError(t, os.Unsetenv(DebugEnvVar))
 			}
 			assert.Equal(t, tt.want, DebugEnabled())
@@ -186,10 +190,7 @@ func TestWarnTerminalTextAltered(t *testing.T) {
 	WarnTerminalTextAltered(&buf, "  ")
 
 	got := buf.String()
-	assert.True(t, strings.HasPrefix(got, "  Warning"), "the indent must come before the label: %q", got)
-	assert.True(t, strings.HasSuffix(got, "\n"), "the warning must end with a newline: %q", got)
-	assert.Equal(t, 1, strings.Count(got, "\n"))
-	assert.Contains(t, got, "control characters")
+	assert.Equal(t, "  Warning: control characters from the server were removed from the text below.\n", got)
 }
 
 func TestWarnTerminalTextAltered_ColorsTheLabel(t *testing.T) {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(ts *httptest.Server) *client.AlpaconClient {
@@ -22,6 +22,7 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 }
 
 func TestListApprovalRequests(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	requests := []ApprovalRequest{
 		{
@@ -42,7 +43,7 @@ func TestListApprovalRequests(t *testing.T) {
 	defer ts.Close()
 
 	list, err := ListApprovalRequests(newTestClient(ts), "pending", "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, list, 1)
 	assert.Equal(t, "apr-1", list[0].ID)
 	assert.Equal(t, "work_session", list[0].Type)
@@ -50,6 +51,7 @@ func TestListApprovalRequests(t *testing.T) {
 }
 
 func TestListApprovalRequests_TypeFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "sudo", r.URL.Query().Get("request_type"))
 		w.Header().Set("Content-Type", "application/json")
@@ -62,6 +64,7 @@ func TestListApprovalRequests_TypeFilter(t *testing.T) {
 }
 
 func TestListMyApprovalRequests(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/api/approvals/approvals/-/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -74,9 +77,10 @@ func TestListMyApprovalRequests(t *testing.T) {
 }
 
 func TestGetApprovalRequest(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/"))
+		assert.Equal(t, "/api/approvals/approvals/apr-abc/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(ApprovalRequest{
 			ID: "apr-abc", RequestType: "sudo", Status: "pending", AddedAt: now,
@@ -85,15 +89,16 @@ func TestGetApprovalRequest(t *testing.T) {
 	defer ts.Close()
 
 	req, err := GetApprovalRequest(newTestClient(ts), "apr-abc")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "apr-abc", req.ID)
 	assert.Equal(t, "sudo", req.RequestType)
 }
 
 func TestCancelRequest(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "apr-abc/cancel/"))
+		assert.Equal(t, "/api/approvals/approvals/apr-abc/cancel/", r.URL.Path)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer ts.Close()
@@ -103,6 +108,7 @@ func TestCancelRequest(t *testing.T) {
 }
 
 func TestCancelRequest_403PropagatesError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -111,6 +117,5 @@ func TestCancelRequest_403PropagatesError(t *testing.T) {
 	defer ts.Close()
 
 	err := CancelRequest(newTestClient(ts), "apr-abc")
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "permission")
+	require.ErrorContains(t, err, "permission")
 }

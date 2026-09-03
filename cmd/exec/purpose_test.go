@@ -69,6 +69,7 @@ func longPurpose() string {
 // command exits 1, `exec logs` included. Exiting 2 here would tell a script this
 // is a usage-error-only surface, which it is not.
 func TestExecPurposeRejectsBadArgsWithExit1(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
@@ -96,6 +97,7 @@ func TestExecPurposeRejectsBadArgsWithExit1(t *testing.T) {
 // byte count refuses a Korean purpose at roughly 666 of them, while claiming the
 // server would refuse it.
 func TestExecPurposeAcceptsAMultibytePurposeAtTheCeiling(t *testing.T) {
+	t.Parallel()
 	korean := make([]rune, PurposeMaxLength)
 	for i := range korean {
 		korean[i] = '한'
@@ -126,6 +128,7 @@ func TestExecPurposeAcceptsAMultibytePurposeAtTheCeiling(t *testing.T) {
 // TestExecPurposeAnswersTheDemand covers the happy path: a 202 and a pointer at
 // where to read the outcome, never at a resubmit.
 func TestExecPurposeAnswersTheDemand(t *testing.T) {
+	t.Parallel()
 	var body atomic.Value
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/"+purposeJobID+"/purpose/" {
@@ -155,6 +158,7 @@ func TestExecPurposeAnswersTheDemand(t *testing.T) {
 // sent: `--purpose '  x  '` must not be stored, judged, and written to the
 // approver's card with the padding intact.
 func TestExecPurposeTrimsBeforeSending(t *testing.T) {
+	t.Parallel()
 	var body atomic.Value
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/"+purposeJobID+"/purpose/" {
@@ -180,6 +184,7 @@ func TestExecPurposeTrimsBeforeSending(t *testing.T) {
 // TestExecLogsShowsTheStatedPurpose gives EventDetails.Purpose its reader. A
 // field parsed into nothing is a promise no surface keeps.
 func TestExecLogsShowsTheStatedPurpose(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+purposeJobID+"/" {

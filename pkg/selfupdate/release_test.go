@@ -11,6 +11,7 @@ import (
 )
 
 func TestLatestReleaseStripsTagPrefixAndReadsAssets(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "application/vnd.github.v3+json", r.Header.Get("Accept"))
 		_, _ = w.Write([]byte(`{
@@ -35,6 +36,7 @@ func TestLatestReleaseStripsTagPrefixAndReadsAssets(t *testing.T) {
 }
 
 func TestLatestReleaseRejectsABodyThatIsNotJSON(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("<html>blocked by a proxy</html>"))
 	}))
@@ -46,6 +48,7 @@ func TestLatestReleaseRejectsABodyThatIsNotJSON(t *testing.T) {
 }
 
 func TestLatestReleaseRejectsNonOKStatus(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -58,6 +61,7 @@ func TestLatestReleaseRejectsNonOKStatus(t *testing.T) {
 }
 
 func TestLatestReleaseRejectsATagItCannotTurnIntoFileNames(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		tag  string

@@ -59,6 +59,7 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 }
 
 func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
+	t.Parallel()
 	helper := osexec.Command(os.Args[0], "-test.run=^TestWebshLsTailZeroHelperProcess$")
 	helper.Env = append(os.Environ(), "GO_WANT_WEBSH_LS_TAIL_HELPER=1")
 
@@ -69,6 +70,8 @@ func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 }
 
+// Serial: the child process reaches an os.Exit, and the parent's own run of this
+// function is a two-line guard that parallelism buys nothing for.
 func TestWebshLsTailZeroHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_WEBSH_LS_TAIL_HELPER") != "1" {
 		return

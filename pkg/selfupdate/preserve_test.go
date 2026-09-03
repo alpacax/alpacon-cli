@@ -12,6 +12,7 @@ import (
 )
 
 func TestPreservedNameCarriesATimestamp(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(0, 1735689600000000000)
 
 	name := PreservedName("/usr/local/bin/alpacon", now)
@@ -20,6 +21,7 @@ func TestPreservedNameCarriesATimestamp(t *testing.T) {
 }
 
 func TestStagedNameCarriesATimestamp(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(0, 1735689600000000000)
 
 	name := StagedName("/usr/local/bin/alpacon", now)
@@ -28,6 +30,7 @@ func TestStagedNameCarriesATimestamp(t *testing.T) {
 }
 
 func TestRestorePreservedPutsTheBinaryBack(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon")
 	preserved := filepath.Join(dir, "alpacon.old.1735689600000000000")
@@ -43,6 +46,7 @@ func TestRestorePreservedPutsTheBinaryBack(t *testing.T) {
 }
 
 func TestSweepPreservedRemovesOnlyTimestampedCopies(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	keep := []string{"alpacon", "alpacon.old", "alpacon.old.notanumber", "other.old.123", "alpacon.staged", ".alpacon-.tmp", ".alpacon-1-2-3.tmp.bak", ".alpacon-4242-1735689600000000000-0.tmp"}
 	remove := []string{"alpacon.old.1", "alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000", ".alpacon-99-1735689600000000000-0.tmp"}
@@ -58,7 +62,7 @@ func TestSweepPreservedRemovesOnlyTimestampedCopies(t *testing.T) {
 	assert.Equal(t, 4, removed)
 	for _, name := range keep {
 		_, err := os.Stat(filepath.Join(dir, name))
-		assert.NoError(t, err, "sweep must not remove %s", name)
+		require.NoError(t, err, "sweep must not remove %s", name)
 	}
 	for _, name := range remove {
 		_, err := os.Stat(filepath.Join(dir, name))
@@ -87,6 +91,7 @@ func TestRestorePreservedCopiesWhenTheRenameFails(t *testing.T) {
 }
 
 func TestCopyFileRefusesToWriteOverAnExistingFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "alpacon")
 	require.NoError(t, os.WriteFile(source, []byte("new binary"), 0755))
@@ -103,6 +108,7 @@ func TestCopyFileRefusesToWriteOverAnExistingFile(t *testing.T) {
 
 // A directory opens fine and fails on the first Read—the shape of ENOSPC.
 func TestCopyFileLeavesNothingBehindWhenTheCopyFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "not-a-file")
 	require.NoError(t, os.Mkdir(source, 0755))

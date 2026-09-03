@@ -29,6 +29,7 @@ func newTestClient(baseURL string) *AlpaconClient {
 }
 
 func TestSendRequest_401SurfacesServerDetail(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -38,11 +39,12 @@ func TestSendRequest_401SurfacesServerDetail(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "invalid token")
+	require.ErrorContains(t, err, "invalid token")
 	assert.ErrorContains(t, err, "alpacon login")
 }
 
 func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -54,6 +56,7 @@ func TestSendRequest_401WithoutBodyFallsBackToLoginHint(t *testing.T) {
 }
 
 func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -63,11 +66,12 @@ func TestSendRequest_401EmptyJSONFallsBackToLoginHint(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "authentication failed")
+	require.ErrorContains(t, err, "authentication failed")
 	assert.NotContains(t, err.Error(), "{}")
 }
 
 func TestSendRequest_404ExposesStatusCode(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
@@ -82,6 +86,7 @@ func TestSendRequest_404ExposesStatusCode(t *testing.T) {
 }
 
 func TestSendRequest_404EmptyBodyExposesStatusCode(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -94,6 +99,7 @@ func TestSendRequest_404EmptyBodyExposesStatusCode(t *testing.T) {
 }
 
 func TestSendRequest_404HTMLBodyExposesStatusCode(t *testing.T) {
+	t.Parallel()
 	// An old server/proxy without the endpoint may answer 404 with an HTML page;
 	// the status must still reach callers so the whoami legacy fallback triggers.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +116,7 @@ func TestSendRequest_404HTMLBodyExposesStatusCode(t *testing.T) {
 }
 
 func TestSendRequest_TruncatedBodyKeepsStatusCode(t *testing.T) {
+	t.Parallel()
 	// A connection cut mid-body through a proxy: the headers already named the
 	// status, so a caller can still tell an unreadable answer from a request that
 	// never went out.
@@ -129,6 +136,7 @@ func TestSendRequest_TruncatedBodyKeepsStatusCode(t *testing.T) {
 }
 
 func TestSendRequest_401ExposesStatusCode(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -143,11 +151,13 @@ func TestSendRequest_401ExposesStatusCode(t *testing.T) {
 }
 
 func TestHTTPStatusCode_NonAPIErrorIsZero(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, 0, utils.HTTPStatusCode(errors.New("boom")))
 	assert.Equal(t, 0, utils.HTTPStatusCode(nil))
 }
 
 func TestSendRequest_429ExposesRetryAfter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		retryAfter string
@@ -187,6 +197,7 @@ func TestSendRequest_429ExposesRetryAfter(t *testing.T) {
 // A proxy-level throttle answers with its own HTML, which readJSONResponse rejects
 // before the status check ever runs. The hint has to survive that path too.
 func TestSendRequest_429WithNonJSONBodyExposesRetryAfter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Retry-After", "29")
@@ -204,6 +215,7 @@ func TestSendRequest_429WithNonJSONBodyExposesRetryAfter(t *testing.T) {
 
 // Upload shares the throttle, so it must tag the hint the same way sendRequest does.
 func TestSendMultipartStreamRequest_429ExposesRetryAfter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Retry-After", "29")
@@ -219,11 +231,13 @@ func TestSendMultipartStreamRequest_429ExposesRetryAfter(t *testing.T) {
 }
 
 func TestRetryAfter_ErrorWithoutHintIsZero(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, time.Duration(0), utils.RetryAfter(errors.New("boom")))
 	assert.Equal(t, time.Duration(0), utils.RetryAfter(nil))
 }
 
 func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -237,6 +251,7 @@ func TestSendRequest_403SurfacesServerDetail(t *testing.T) {
 }
 
 func TestSendRequest_403PreservesWorkSessionCodeAndSource(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -250,7 +265,7 @@ func TestSendRequest_403PreservesWorkSessionCodeAndSource(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "WorkSession required")
+	require.ErrorContains(t, err, "WorkSession required")
 
 	code, source := utils.ParseErrorResponse(err)
 	assert.Equal(t, utils.WorkSessionRequired, code)
@@ -258,6 +273,7 @@ func TestSendRequest_403PreservesWorkSessionCodeAndSource(t *testing.T) {
 }
 
 func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -269,6 +285,7 @@ func TestSendRequest_403WithoutBodyFallsBackToGenericMessage(t *testing.T) {
 }
 
 func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -278,11 +295,12 @@ func TestSendRequest_403EmptyDetailFallsBackToGenericMessage(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "permission denied")
+	require.ErrorContains(t, err, "permission denied")
 	assert.NotContains(t, err.Error(), "detail:")
 }
 
 func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -293,7 +311,7 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	// Detail-less denial: generic message, but code/source must survive for exit-3 routing.
-	assert.ErrorContains(t, err, "permission denied")
+	require.ErrorContains(t, err, "permission denied")
 	assert.NotContains(t, err.Error(), "work_session_required")
 	code, source := utils.ParseErrorResponse(err)
 	assert.Equal(t, utils.WorkSessionRequired, code)
@@ -301,6 +319,7 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 }
 
 func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
+	t.Parallel()
 	// An ACL refusal (exec, websh, cp) arrives as a bare {"code": ...} 403—the
 	// server's error handler emits nothing else. Without a mapping the user reads
 	// the generic privileges message and never learns a token rule caused it.
@@ -313,8 +332,8 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "token access control")
-	assert.ErrorContains(t, err, "alpacon token acl")
+	require.ErrorContains(t, err, "token access control")
+	require.ErrorContains(t, err, "alpacon token acl")
 	// The no-raw-code contract: callers read the code via ErrorCode(), not the message.
 	assert.NotContains(t, err.Error(), "api_token_acl_not_allowed")
 	// A token missing a rule is not a stale session—never suggest re-login.
@@ -325,6 +344,7 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 }
 
 func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
+	t.Parallel()
 	// The server still returns 400 for an ACL denial until alpacax/alpacon-server#2804
 	// lands. checkAuthStatus only handles 401/403, so this body never reaches
 	// authStatusCodeMessage—the code must still survive for callers that route on it.
@@ -345,6 +365,7 @@ func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T)
 }
 
 func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
+	t.Parallel()
 	// Accessing root / a system account requires MFA: the server returns 401
 	// with {"code": "auth_mfa_required"} and no detail string. This must not be
 	// mislabeled as an authentication failure or suggest re-login—the user is
@@ -358,7 +379,7 @@ func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "multi-factor authentication")
+	require.ErrorContains(t, err, "multi-factor authentication")
 	assert.NotContains(t, err.Error(), "authentication failed")
 	assert.NotContains(t, err.Error(), "alpacon login")
 
@@ -368,6 +389,7 @@ func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 }
 
 func TestSendRequest_401MFARequiredPrefersServerDetail(t *testing.T) {
+	t.Parallel()
 	// When the server also provides a human detail, surface it—still without a
 	// re-login hint, since a coded 401 is not a stale token.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -379,7 +401,7 @@ func TestSendRequest_401MFARequiredPrefersServerDetail(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
-	assert.ErrorContains(t, err, "MFA required to access root")
+	require.ErrorContains(t, err, "MFA required to access root")
 	assert.NotContains(t, err.Error(), "alpacon login")
 
 	code, _ := utils.ParseErrorResponse(err)
@@ -387,6 +409,7 @@ func TestSendRequest_401MFARequiredPrefersServerDetail(t *testing.T) {
 }
 
 func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
+	t.Parallel()
 	// Any coded 401 without a detail must not become "authentication failed" /
 	// re-login; the code is preserved for downstream handling.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +430,7 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 }
 
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	var requestedPath string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -424,7 +448,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	ac := newTestClient(ts.URL)
 
 	err := ac.LoadCurrentUser()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "alice", ac.Username)
 	assert.Equal(t, "staff", ac.Privileges)
 
@@ -436,6 +460,7 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 }
 
 func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
@@ -447,11 +472,12 @@ func TestLoadCurrentUser_SuperuserPrivileges(t *testing.T) {
 	defer ts.Close()
 
 	ac := newTestClient(ts.URL)
-	assert.NoError(t, ac.LoadCurrentUser())
+	require.NoError(t, ac.LoadCurrentUser())
 	assert.Equal(t, "superuser", ac.Privileges)
 }
 
 func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(CurrentUserResponse{
@@ -463,11 +489,12 @@ func TestLoadCurrentUser_GeneralPrivileges(t *testing.T) {
 	defer ts.Close()
 
 	ac := newTestClient(ts.URL)
-	assert.NoError(t, ac.LoadCurrentUser())
+	require.NoError(t, ac.LoadCurrentUser())
 	assert.Equal(t, "general", ac.Privileges)
 }
 
 func TestLoadCurrentUser_401SurfacesServerDetail(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -477,13 +504,14 @@ func TestLoadCurrentUser_401SurfacesServerDetail(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	err := ac.LoadCurrentUser()
-	assert.ErrorContains(t, err, "invalid token")
-	assert.ErrorContains(t, err, "alpacon login")
+	require.ErrorContains(t, err, "invalid token")
+	require.ErrorContains(t, err, "alpacon login")
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
 }
 
 func TestLoadCurrentUser_403ReturnsForbiddenError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -491,12 +519,13 @@ func TestLoadCurrentUser_403ReturnsForbiddenError(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	err := ac.LoadCurrentUser()
-	assert.ErrorContains(t, err, "permission denied")
+	require.ErrorContains(t, err, "permission denied")
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
 }
 
 func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`not valid json`))
@@ -505,12 +534,13 @@ func TestLoadCurrentUser_InvalidJSONReturnsError(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	err := ac.LoadCurrentUser()
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Empty(t, ac.Username)
 	assert.Empty(t, ac.Privileges)
 }
 
 func TestSendGetRequestForDownload_401ReturnsAuthError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -522,6 +552,7 @@ func TestSendGetRequestForDownload_401ReturnsAuthError(t *testing.T) {
 }
 
 func TestSendGetRequestForDownload_403ReturnsForbiddenError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
@@ -533,6 +564,7 @@ func TestSendGetRequestForDownload_403ReturnsForbiddenError(t *testing.T) {
 }
 
 func TestSendMultipartStreamRequest_401ReturnsAuthError(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
@@ -548,6 +580,7 @@ func TestSendMultipartStreamRequest_401ReturnsAuthError(t *testing.T) {
 }
 
 func TestSendMultipartStreamRequest_200IsSuccess(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -561,11 +594,12 @@ func TestSendMultipartStreamRequest_200IsSuccess(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	body, err := ac.SendMultipartStreamRequest("/api/test/", mw.FormDataContentType(), &buf, int64(buf.Len()))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte(`{}`), body)
 }
 
 func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testing.T) {
+	t.Parallel()
 	var finalHit bool
 	var uploadedContent string
 	var finalContentLength int64
@@ -580,13 +614,22 @@ func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testin
 			assert.Equal(t, http.MethodPost, r.Method)
 
 			partReader, err := r.MultipartReader()
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			part, err := partReader.NextPart()
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			defer func() { _ = part.Close() }()
 
 			content, err := io.ReadAll(part)
-			require.NoError(t, err)
+			if !assert.NoError(t, err) {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			uploadedContent = string(content)
 
 			w.Header().Set("Content-Type", "application/json")
@@ -628,6 +671,7 @@ func TestSendMultipartStreamRequest_ReplaysFileBodyOnTemporaryRedirect(t *testin
 }
 
 func TestSendPostRequest_204IsSuccess(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		w.WriteHeader(http.StatusNoContent)
@@ -636,11 +680,12 @@ func TestSendPostRequest_204IsSuccess(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	body, err := ac.SendPostRequest("/api/test/", struct{}{})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, body)
 }
 
 func TestSendDeleteRequest_200IsSuccess(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodDelete, r.Method)
 		w.Header().Set("Content-Type", "application/json")
@@ -651,11 +696,12 @@ func TestSendDeleteRequest_200IsSuccess(t *testing.T) {
 
 	ac := newTestClient(ts.URL)
 	body, err := ac.SendDeleteRequest("/api/test/")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, []byte(`{}`), body)
 }
 
 func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
@@ -669,8 +715,8 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 	err1 := ac.LoadCurrentUser()
 	err2 := ac.LoadCurrentUser() // second call must return cached error without hitting server
 
-	assert.ErrorContains(t, err1, "invalid token")
-	assert.ErrorContains(t, err2, "invalid token")
+	require.ErrorContains(t, err1, "invalid token")
+	require.ErrorContains(t, err2, "invalid token")
 	assert.Equal(t, 1, callCount, "LoadCurrentUser must hit the server exactly once even on failure")
 }
 
@@ -873,7 +919,7 @@ func TestSendRequest_RenewalFailureSurfacesTheOriginal401(t *testing.T) {
 
 	require.Error(t, err)
 	// The caller must read what the server said, not how the renewal failed.
-	assert.ErrorContains(t, err, "Authentication credentials were not provided.")
+	require.ErrorContains(t, err, "Authentication credentials were not provided.")
 	assert.Equal(t, 1, requests, "a failed renewal must not replay the request")
 }
 

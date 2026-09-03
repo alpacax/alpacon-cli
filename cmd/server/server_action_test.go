@@ -7,6 +7,7 @@ import (
 )
 
 func TestBusyGuardMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		force       bool

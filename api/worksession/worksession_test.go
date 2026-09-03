@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestClient(ts *httptest.Server) *client.AlpaconClient {
@@ -22,6 +22,7 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 }
 
 func TestGetWorkSessionList(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	sessions := []WorkSession{
 		{
@@ -43,7 +44,7 @@ func TestGetWorkSessionList(t *testing.T) {
 	defer ts.Close()
 
 	list, err := GetWorkSessionList(newTestClient(ts), "", "", "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, list, 1)
 	assert.Equal(t, "ses-1", list[0].ID)
 	assert.Equal(t, "active", list[0].Status)
@@ -52,6 +53,7 @@ func TestGetWorkSessionList(t *testing.T) {
 }
 
 func TestGetWorkSessionList_StatusFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "pending", r.URL.Query().Get("status"))
 		w.Header().Set("Content-Type", "application/json")
@@ -64,6 +66,7 @@ func TestGetWorkSessionList_StatusFilter(t *testing.T) {
 }
 
 func TestGetWorkSessionList_AssignedUserFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "6eaa827d-616a-4fa9-ad42-4fbb67bb007b", r.URL.Query().Get("assigned_user"))
 		w.Header().Set("Content-Type", "application/json")
@@ -76,6 +79,7 @@ func TestGetWorkSessionList_AssignedUserFilter(t *testing.T) {
 }
 
 func TestCreateWorkSession(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -100,30 +104,32 @@ func TestCreateWorkSession(t *testing.T) {
 		ExpiresAt:     now.Format(time.RFC3339),
 	}
 	session, err := CreateWorkSession(newTestClient(ts), req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "ses-new", session.ID)
 	assert.Equal(t, "pending", session.Status)
 }
 
 func TestGetWorkSession(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "approved", ExpiresAt: now})
 	}))
 	defer ts.Close()
 
 	session, err := GetWorkSession(newTestClient(ts), "ses-abc")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", session.ID)
 	assert.Equal(t, "approved", session.Status)
 }
 
 func TestActivateWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/activate/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/activate/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "active"})
 	}))
@@ -134,9 +140,10 @@ func TestActivateWorkSession(t *testing.T) {
 }
 
 func TestCompleteWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/complete/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/complete/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "completed"})
 	}))
@@ -147,10 +154,11 @@ func TestCompleteWorkSession(t *testing.T) {
 }
 
 func TestExtendWorkSession(t *testing.T) {
+	t.Parallel()
 	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/extend/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/extend/", r.URL.Path)
 
 		var req WorkSessionExtendRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -166,6 +174,7 @@ func TestExtendWorkSession(t *testing.T) {
 }
 
 func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "agent", r.URL.Query().Get("requester_type"))
 		w.Header().Set("Content-Type", "application/json")
@@ -178,6 +187,7 @@ func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
 }
 
 func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Add(time.Hour)
 	sessions := []WorkSession{
 		{ID: "s1", Scopes: []string{"command", "websh", "webftp"}, ExpiresAt: now},
@@ -189,14 +199,15 @@ func TestGetWorkSessionList_ScopesJoined(t *testing.T) {
 	defer ts.Close()
 
 	list, err := GetWorkSessionList(newTestClient(ts), "", "", "")
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "command, websh, webftp", list[0].Scopes)
 }
 
 func TestRevokeWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/revoke/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/revoke/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "revoked"})
 	}))
@@ -207,9 +218,10 @@ func TestRevokeWorkSession(t *testing.T) {
 }
 
 func TestCancelWorkSession(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/cancel/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/cancel/", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "cancelled"})
 	}))
@@ -220,6 +232,7 @@ func TestCancelWorkSession(t *testing.T) {
 }
 
 func TestGetWorkSessionTimeline(t *testing.T) {
+	t.Parallel()
 	ts := newString("2024-01-15T10:30:00Z")
 	items := []TimelineItem{
 		{Type: "command", Timestamp: ts, Line: "ls -la"},
@@ -227,7 +240,7 @@ func TestGetWorkSessionTimeline(t *testing.T) {
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-abc/timeline/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/timeline/", r.URL.Path)
 		assert.Equal(t, "true", r.URL.Query().Get("include_records"))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 2, Results: items})
@@ -235,15 +248,16 @@ func TestGetWorkSessionTimeline(t *testing.T) {
 	defer srv.Close()
 
 	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-abc", true)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Len(t, result, 2)
 	assert.Equal(t, "command", result[0].Type)
 	assert.Equal(t, "ls -la", result[0].Line)
 }
 
 func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.True(t, strings.HasSuffix(r.URL.Path, "ses-xyz/timeline/"))
+		assert.Equal(t, "/api/work-sessions/sessions/ses-xyz/timeline/", r.URL.Path)
 		assert.Equal(t, "false", r.URL.Query().Get("include_records"))
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 0, Results: nil})
@@ -251,11 +265,12 @@ func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
 	defer srv.Close()
 
 	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-xyz", false)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Empty(t, result)
 }
 
 func TestUpdateWorkSession(t *testing.T) {
+	t.Parallel()
 	var gotBody WorkSessionUpdateRequest
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPatch, r.Method)
@@ -271,7 +286,7 @@ func TestUpdateWorkSession(t *testing.T) {
 		{Commands: []string{"tail -f /var/log/nginx/*.log"}, AllowBypassMFA: true},
 	}}
 	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", session.ID)
 	// Full desired set is sent: existing policy echoed back with its ID
 	// plus the new addition without one.
@@ -283,6 +298,7 @@ func TestUpdateWorkSession(t *testing.T) {
 func newString(s string) *string { return &s }
 
 func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{
 		"id": "ses-1",
 		"status": "approved",
@@ -300,7 +316,7 @@ func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
 	}`)
 
 	var ws WorkSession
-	assert.NoError(t, json.Unmarshal(body, &ws))
+	require.NoError(t, json.Unmarshal(body, &ws))
 
 	assert.NotNil(t, ws.Adjustments)
 	assert.Equal(t, []string{"command", "websh"}, ws.Adjustments.Scopes.Old)
@@ -315,8 +331,9 @@ func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
 }
 
 func TestWorkSessionUnmarshalNoAdjustments(t *testing.T) {
+	t.Parallel()
 	var ws WorkSession
-	assert.NoError(t, json.Unmarshal([]byte(`{"id":"ses-1","adjustments":null,"recommendations":[]}`), &ws))
+	require.NoError(t, json.Unmarshal([]byte(`{"id":"ses-1","adjustments":null,"recommendations":[]}`), &ws))
 	assert.Nil(t, ws.Adjustments)
 	assert.Empty(t, ws.Recommendations)
 }

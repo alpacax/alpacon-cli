@@ -16,6 +16,7 @@ func makeRecording(id, sessionID string) wsapi.TimelineItem {
 // findRecording
 
 func TestFindRecording_DefaultFirst(t *testing.T) {
+	t.Parallel()
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1"), makeRecording("r2", "s1")}
 	target, idx := findRecording(recs, 1)
 	assert.Equal(t, "r1", target.ID)
@@ -23,6 +24,7 @@ func TestFindRecording_DefaultFirst(t *testing.T) {
 }
 
 func TestFindRecording_ByIndex(t *testing.T) {
+	t.Parallel()
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1"), makeRecording("r2", "s1"), makeRecording("r3", "s1")}
 	target, idx := findRecording(recs, 3)
 	assert.Equal(t, "r3", target.ID)
@@ -30,6 +32,7 @@ func TestFindRecording_ByIndex(t *testing.T) {
 }
 
 func TestFindRecording_IndexOutOfRange(t *testing.T) {
+	t.Parallel()
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
 	target, idx := findRecording(recs, 2)
 	assert.Nil(t, target)
@@ -37,6 +40,7 @@ func TestFindRecording_IndexOutOfRange(t *testing.T) {
 }
 
 func TestFindRecording_IndexZero(t *testing.T) {
+	t.Parallel()
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
 	target, idx := findRecording(recs, 0)
 	assert.Nil(t, target)
@@ -44,6 +48,7 @@ func TestFindRecording_IndexZero(t *testing.T) {
 }
 
 func TestFindRecording_NegativeIndex(t *testing.T) {
+	t.Parallel()
 	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
 	target, idx := findRecording(recs, -1)
 	assert.Nil(t, target)
@@ -53,6 +58,7 @@ func TestFindRecording_NegativeIndex(t *testing.T) {
 // buildRecordingIndex
 
 func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
+	t.Parallel()
 	items := []wsapi.TimelineItem{
 		{Type: "websh_session", ID: "s1"},
 		{Type: "websh_record", ID: "r1", SessionID: "s1"},
@@ -69,6 +75,7 @@ func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
 }
 
 func TestBuildRecordingIndex_NoRecordings(t *testing.T) {
+	t.Parallel()
 	items := []wsapi.TimelineItem{
 		{Type: "websh_session", ID: "s1"},
 		{Type: "ftp_session", ID: "f1"},
@@ -79,6 +86,7 @@ func TestBuildRecordingIndex_NoRecordings(t *testing.T) {
 }
 
 func TestBuildRecordingIndex_Empty(t *testing.T) {
+	t.Parallel()
 	bySession, flat := buildRecordingIndex(nil)
 	assert.Empty(t, bySession)
 	assert.Empty(t, flat)
@@ -87,43 +95,52 @@ func TestBuildRecordingIndex_Empty(t *testing.T) {
 // recordingBadge
 
 func TestRecordingBadge_Single(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "• 1 recording", recordingBadge(1))
 }
 
 func TestRecordingBadge_Multiple(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "• 3 recordings", recordingBadge(3))
 }
 
 // recordingPreview
 
 func TestRecordingPreview_StripsANSI(t *testing.T) {
+	t.Parallel()
 	raw := "\x1b]0;user@host:~\x07\x1b[?2004h[user@host:~]$ ls -la"
 	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
 }
 
 func TestRecordingPreview_StripsCarriageReturns(t *testing.T) {
+	t.Parallel()
 	raw := "[user@host:~]$ \r\r[user@host:~]$ ls -la"
 	assert.Equal(t, "[user@host:~]$ ls -la", recordingPreview(raw))
 }
 
 func TestRecordingPreview_SkipsEmptyLines(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "actual content here", recordingPreview("\n\n  \nactual content here"))
 }
 
 func TestRecordingPreview_Truncates(t *testing.T) {
+	t.Parallel()
 	raw := strings.Repeat("a", 80)
 	assert.LessOrEqual(t, len(recordingPreview(raw)), 63) // 60 chars + possible "..."
 }
 
 func TestRecordingPreview_EmptyRaw(t *testing.T) {
-	assert.Equal(t, "", recordingPreview(""))
+	t.Parallel()
+	assert.Empty(t, recordingPreview(""))
 }
 
 func TestRecordingPreview_OnlyANSI(t *testing.T) {
-	assert.Equal(t, "", recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
+	t.Parallel()
+	assert.Empty(t, recordingPreview("\x1b[?2004h\x1b[2J\x1b[H"))
 }
 
 func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
+	t.Parallel()
 	// A bidi override carries no control byte, so the control pass alone leaves
 	// it free to reorder the preview a reviewer reads back.
 	raw := "[user@host:~]$ echo \u202esafe"
@@ -131,6 +148,7 @@ func TestRecordingPreview_StripsBidiOverride(t *testing.T) {
 }
 
 func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
+	t.Parallel()
 	// Format chars go before the escape strip, or the match breaks and the
 	// sequence's tail lands on screen as text.
 	assert.Equal(t, "ls", recordingPreview("\x1b[2\u200dKls"))
@@ -139,6 +157,7 @@ func TestRecordingPreview_StripsFormatCharBuriedInSequence(t *testing.T) {
 // printRecordingHeader
 
 func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
+	t.Parallel()
 	// formatTimestamp returns the server's string as-is when it does not parse, so
 	// the header is a sink for an escape sequence that clears the reviewer's screen.
 	ts := "\x1b[2J\x1b[H\u202eSPOOFED"
@@ -150,12 +169,14 @@ func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 // printRecordingContent
 
 func TestPrintRecordingContent_StripsFormatChars(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	printRecordingContent(&buf, "echo \u202esafe\n")
 	assert.Equal(t, "echo safe\n", buf.String())
 }
 
 func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
+	t.Parallel()
 	// U+009B is an 8-bit CSI: left in, it erases the recorded line and the reviewer
 	// reads what follows instead.
 	var buf bytes.Buffer
@@ -164,6 +185,7 @@ func TestPrintRecordingContent_StripsC1Controls(t *testing.T) {
 }
 
 func TestPrintRecordingContent_StripsRawC1Byte(t *testing.T) {
+	t.Parallel()
 	// A recording of an 8-bit program carries CSI as the raw byte 0x9b, which is
 	// invalid UTF-8, so IsC1OrDEL never sees it. What keeps it off the terminal is
 	// strings.Map substituting U+FFFD, so a rewrite into a byte loop reopens this.
@@ -173,6 +195,7 @@ func TestPrintRecordingContent_StripsRawC1Byte(t *testing.T) {
 }
 
 func TestPrintRecordingContent_StripsShiftFunctions(t *testing.T) {
+	t.Parallel()
 	// SO invokes G1 into GL and holds until SI or a reset: the same charset switch
 	// as "ESC ( 0", reached without an ESC.
 	var buf bytes.Buffer
@@ -181,6 +204,7 @@ func TestPrintRecordingContent_StripsShiftFunctions(t *testing.T) {
 }
 
 func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
+	t.Parallel()
 	// ansiEscapeRE ends an ESC-led form at \x40-\x7e, so these three get past it.
 	// "ESC 7"/"ESC 8" restore the cursor onto an earlier line, which lets the
 	// recording overwrite what the reviewer already read.
@@ -192,6 +216,7 @@ func TestPrintRecordingContent_StripsUnmatchedEscapeIntroducers(t *testing.T) {
 }
 
 func TestPrintRecordingContent_KeepsControlBytes(t *testing.T) {
+	t.Parallel()
 	// The C0 pass is deliberately absent here: a recording shown as it was keeps
 	// \r and its line endings.
 	var buf bytes.Buffer

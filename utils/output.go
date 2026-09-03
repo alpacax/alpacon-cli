@@ -161,7 +161,7 @@ func PrintTable(slice any) {
 	}
 	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
 
-	for i := 0; i < s.Len(); i++ {
+	for i := range s.Len() {
 		row := make([]string, numFields)
 		for j := range numFields {
 			// API values are untrusted: a control sequence here rewrites the reader's terminal.

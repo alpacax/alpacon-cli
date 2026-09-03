@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsRemotePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		path     string
@@ -63,6 +65,7 @@ func TestIsRemotePath(t *testing.T) {
 }
 
 func TestIsLocalPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		path     string
@@ -104,6 +107,7 @@ func TestIsLocalPath(t *testing.T) {
 }
 
 func TestIsLocalPaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		paths    []string
@@ -145,6 +149,7 @@ func TestIsLocalPaths(t *testing.T) {
 }
 
 func TestValidatePaths(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		sources    []string
@@ -202,6 +207,7 @@ func TestValidatePaths(t *testing.T) {
 
 // Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		args         []string
@@ -274,7 +280,7 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 			username, err := normalizeArgs(args, "")
 
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.expectedArgs, args)
 			assert.Equal(t, tt.expectedUser, username)
 		})
@@ -283,6 +289,7 @@ func TestCpCommandSSHParsing(t *testing.T) {
 
 // Test scenarios covering the required patterns from the issue
 func TestRequiredCpPatterns(t *testing.T) {
+	t.Parallel()
 	patterns := []struct {
 		description    string
 		command        string
@@ -343,6 +350,7 @@ func TestRequiredCpPatterns(t *testing.T) {
 }
 
 func TestStripUserPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		arg           string
@@ -371,6 +379,7 @@ func TestStripUserPrefix(t *testing.T) {
 }
 
 func TestNormalizeArgsUsername(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		args         []string
@@ -411,12 +420,12 @@ func TestNormalizeArgsUsername(t *testing.T) {
 			user, err := normalizeArgs(tt.args, tt.flagUser)
 			if len(tt.wantErrUsers) > 0 {
 				for _, u := range tt.wantErrUsers {
-					assert.ErrorContains(t, err, u)
+					require.ErrorContains(t, err, u)
 				}
 				assert.Equal(t, tt.wantArgs, tt.args)
 				return
 			}
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.wantUser, user)
 			assert.Equal(t, tt.wantArgs, tt.args)
 		})

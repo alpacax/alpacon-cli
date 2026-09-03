@@ -30,6 +30,7 @@ func (e statusErr) Error() string       { return fmt.Sprintf("server said %d", e
 func (e statusErr) HTTPStatusCode() int { return e.status }
 
 func TestCommandParsing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		testName          string
 		args              []string
@@ -280,6 +281,7 @@ func TestCommandParsing(t *testing.T) {
 }
 
 func TestSudoListenerWarning(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		cause error
@@ -334,6 +336,7 @@ func executeTestCommand(t *testing.T, args []string) (string, string, string, []
 }
 
 func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
+	t.Parallel()
 	got, err := ParseWebshArgs([]string{"--work-session", "ses-abc", "my-server"})
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", got.WorkSessionID)
@@ -341,6 +344,7 @@ func TestParseWebshArgs_WorkSessionFlag(t *testing.T) {
 }
 
 func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
+	t.Parallel()
 	got, err := ParseWebshArgs([]string{"--work-session=ses-abc", "my-server"})
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", got.WorkSessionID)
@@ -348,12 +352,14 @@ func TestParseWebshArgs_WorkSessionEqualForm(t *testing.T) {
 }
 
 func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
+	t.Parallel()
 	_, err := ParseWebshArgs([]string{"--env=\"=hunter2\"", "my-server", "ls"})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
 
 func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
+	t.Parallel()
 	// --env-file must not be swallowed by --env matching; websh has no
 	// unknown-flag rejection, so it falls through to the server-name slot.
 	got, err := ParseWebshArgs([]string{"--env-file=secrets", "ls"})
@@ -362,14 +368,16 @@ func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
 }
 
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
+	t.Parallel()
 	got, err := ParseWebshArgs([]string{"my-server", "ls", "--work-session", "fake"})
 	require.NoError(t, err)
 	assert.Equal(t, "my-server", got.ServerName)
-	assert.Equal(t, "", got.WorkSessionID)
+	assert.Empty(t, got.WorkSessionID)
 	assert.Equal(t, []string{"ls", "--work-session", "fake"}, got.CommandArgs)
 }
 
 func TestSanitizeRecord(t *testing.T) {
+	t.Parallel()
 	// ANSI color codes stripped, newlines collapsed to single spaces.
 	in := "\x1b[31mdocker\x1b[0m ps\n  -a\tfoo"
 	assert.Equal(t, "docker ps -a foo", sanitizeRecord(in, 100))
@@ -397,6 +405,7 @@ func TestSanitizeRecord(t *testing.T) {
 }
 
 func TestPrintWatchHeader_StripsControlSequences(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	printWatchHeader(&buf, websh.SessionDetailResponse{
 		ID:       "abc123",
@@ -483,6 +492,7 @@ func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
 }
 
 func TestSudoListenerWarning_SanitizesTheServersText(t *testing.T) {
+	t.Parallel()
 	warning := sudoListenerWarning(errors.New("boom \x1b[31mred\x1b[0m"))
 
 	assert.NotContains(t, warning, "\x1b")

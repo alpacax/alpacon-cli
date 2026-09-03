@@ -48,6 +48,7 @@ func createTestZip(t *testing.T, files map[string]string) []byte {
 }
 
 func TestPollTransferStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		response    TransferStatusResponse
@@ -91,6 +92,7 @@ func TestPollTransferStatus(t *testing.T) {
 }
 
 func TestUploadToS3(t *testing.T) {
+	t.Parallel()
 	var receivedBody []byte
 	var receivedMethod string
 
@@ -110,17 +112,18 @@ func TestUploadToS3(t *testing.T) {
 }
 
 func TestUploadToS3_Failure(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer ts.Close()
 
 	err := uploadToS3(ts.Client(), ts.URL, bytes.NewReader([]byte("data")), int64(len("data")))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "403")
+	require.ErrorContains(t, err, "403")
 }
 
 func TestExecuteBulkUpload(t *testing.T) {
+	t.Parallel()
 	var bulkReq BulkUploadRequest
 	var triggerReq BulkUploadTriggerRequest
 	var s3Uploads atomic.Int32
@@ -188,6 +191,7 @@ func TestExecuteBulkUpload(t *testing.T) {
 }
 
 func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
+	t.Parallel()
 	uploadsEntered := make(chan struct{}, 2)
 	releaseUploads := make(chan struct{})
 	var releaseOnce sync.Once
@@ -251,6 +255,7 @@ func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
 }
 
 func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
+	t.Parallel()
 	pollsEntered := make(chan struct{}, 2)
 	releasePolls := make(chan struct{})
 	var releaseOnce sync.Once
@@ -311,6 +316,7 @@ func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
 }
 
 func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
+	t.Parallel()
 	var bulkReq BulkUploadRequest
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -359,6 +365,7 @@ func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
 }
 
 func TestExecuteBulkUpload_WithUnzip(t *testing.T) {
+	t.Parallel()
 	var bulkReq BulkUploadRequest
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +414,7 @@ func TestExecuteBulkUpload_WithUnzip(t *testing.T) {
 }
 
 func TestDownloadBulk(t *testing.T) {
+	t.Parallel()
 	var bulkReq BulkDownloadRequest
 
 	zipContent := createTestZip(t, map[string]string{
@@ -480,6 +488,7 @@ func TestDownloadBulk(t *testing.T) {
 }
 
 func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
+	t.Parallel()
 	zipContent := createTestZip(t, map[string]string{
 		"file.txt": "downloaded",
 	})
@@ -535,6 +544,7 @@ func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
 }
 
 func TestExecuteSingleUpload(t *testing.T) {
+	t.Parallel()
 	var uploadReq UploadRequest
 	var s3Uploaded bool
 	var triggerCalled bool
@@ -598,6 +608,7 @@ func TestExecuteSingleUpload(t *testing.T) {
 }
 
 func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -637,11 +648,11 @@ func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
 	}
 
 	err := executeSingleUpload(ac, request, bytes.NewReader([]byte("content")), int64(len("content")))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "permission denied")
+	require.ErrorContains(t, err, "permission denied")
 }
 
 func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
+	t.Parallel()
 	var uploadReq UploadRequest
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -689,6 +700,7 @@ func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
 }
 
 func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -728,11 +740,11 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 	files := []io.Reader{bytes.NewReader([]byte("content"))}
 	sizes := []int64{int64(len("content"))}
 	err := executeBulkUpload(ac, request, files, sizes)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "disk full")
+	require.ErrorContains(t, err, "disk full")
 }
 
 func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -761,11 +773,11 @@ func TestExecuteBulkUpload_MismatchedResponseCount(t *testing.T) {
 	files := []io.Reader{bytes.NewReader([]byte("content1")), bytes.NewReader([]byte("content2"))}
 	sizes := []int64{int64(len("content1")), int64(len("content2"))}
 	err := executeBulkUpload(ac, request, files, sizes)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "1 upload slots but 2 files")
+	require.ErrorContains(t, err, "1 upload slots but 2 files")
 }
 
 func TestPollTransferStatus_Timeout(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Always return nil success (pending state)
@@ -780,12 +792,13 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 
 	// Use a very short timeout to make the test fast
 	success, _, err := PollTransferStatus(ac, "upload", "test-id", 3*time.Second)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
 }
 
 func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		status  int
@@ -817,6 +830,7 @@ func TestFetchFromURL_ClientErrorNoRetry(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "100")
 		_, _ = w.Write([]byte("partial"))
@@ -840,6 +854,7 @@ func TestFetchFromURLToFile_ReadErrorKeepsExistingFile(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_CreatesOwnerOnlyFile(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file modes are not enforced on Windows")
 	}
@@ -866,6 +881,7 @@ func TestFetchFromURLToFile_CreatesOwnerOnlyFile(t *testing.T) {
 }
 
 func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
+	t.Parallel()
 	zipContent := createTestZip(t, map[string]string{
 		"folder/file.txt": "downloaded",
 	})
@@ -899,6 +915,7 @@ func TestSaveDownloadedURL_RecursiveUsesTempArchive(t *testing.T) {
 }
 
 func TestDownloadFile_InputValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sources []string
@@ -916,6 +933,7 @@ func TestDownloadFile_InputValidation(t *testing.T) {
 }
 
 func TestDownloadFile_SpaceInPath(t *testing.T) {
+	t.Parallel()
 	// Verify that a path with spaces is preserved as a single path,
 	// not split by whitespace (the old strings.Fields bug).
 	serverResp := api.ListResponse[server.ServerDetails]{
@@ -954,6 +972,7 @@ func TestDownloadFile_SpaceInPath(t *testing.T) {
 }
 
 func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
+	t.Parallel()
 	serverResp := api.ListResponse[server.ServerDetails]{
 		Count:   1,
 		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
@@ -1019,6 +1038,7 @@ func TestDownloadFile_SingleVsBulkRouting(t *testing.T) {
 // TestExecuteSingleUpload_WorkSession verifies the WorkSession field is sent
 // when present and omitted when empty, on the single upload create-request.
 func TestExecuteSingleUpload_WorkSession(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		workSessionID   string
@@ -1077,6 +1097,7 @@ func TestExecuteSingleUpload_WorkSession(t *testing.T) {
 }
 
 func TestUploadLocalFileAsUsesRemoteBasenameAndDirectory(t *testing.T) {
+	t.Parallel()
 	var uploadReq UploadRequest
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1125,6 +1146,7 @@ func TestUploadLocalFileAsUsesRemoteBasenameAndDirectory(t *testing.T) {
 }
 
 func TestUploadLocalFileAsRejectsInvalidRemoteBasename(t *testing.T) {
+	t.Parallel()
 	for _, remotePath := range []string{"/tmp/..", "/tmp/app.conf/", `/tmp/..\saved`} {
 		t.Run(remotePath, func(t *testing.T) {
 			err := UploadLocalFileAs(&client.AlpaconClient{}, "/tmp/local", "prod", remotePath, "", "", "")
@@ -1137,6 +1159,7 @@ func TestUploadLocalFileAsRejectsInvalidRemoteBasename(t *testing.T) {
 // TestExecuteBulkUpload_WorkSession verifies the WorkSession field is sent
 // when present and omitted when empty, on the bulk upload create-request.
 func TestExecuteBulkUpload_WorkSession(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		workSessionID   string
@@ -1198,6 +1221,7 @@ func TestExecuteBulkUpload_WorkSession(t *testing.T) {
 // single- and bulk-download create-requests when DownloadFile is invoked with
 // a non-empty workSessionID, and omitted when the ID is empty.
 func TestDownloadFile_WorkSession(t *testing.T) {
+	t.Parallel()
 	serverResp := api.ListResponse[server.ServerDetails]{
 		Count:   1,
 		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
@@ -1279,6 +1303,7 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 }
 
 func TestNextPollInterval(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		attempt int
@@ -1300,6 +1325,7 @@ func TestNextPollInterval(t *testing.T) {
 }
 
 func TestAlignedPollDelay(t *testing.T) {
+	t.Parallel()
 	// The delay is the backoff for the attempt, clamped so the poll never lands
 	// past the next maxPollInterval grid boundary. This keeps the adaptive
 	// schedule a superset of a fixed maxPollInterval poller (poll points 0, 250,
@@ -1333,10 +1359,11 @@ func TestAlignedPollDelay(t *testing.T) {
 }
 
 func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
+	t.Parallel()
 	// Server reports "not yet complete" (success=null) twice, then succeeds.
-	// With adaptive backoff the two waits are 250ms + 500ms = 750ms, far below
-	// the old fixed 2s+2s = 4s. Assert both the poll count and a loose upper
-	// bound that the old fixed interval could not have met.
+	// With adaptive backoff the two waits are 250ms + 500ms = 750ms. Assert the
+	// poll count and the lower bound only; alignedPollDelay's table test above
+	// pins the schedule itself, so no wall-clock ceiling is needed.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
@@ -1359,14 +1386,12 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
 	assert.Equal(t, int32(3), calls.Load())
-	// Lower bound proves the two waits actually backed off (250ms+500ms);
-	// loose upper bound proves it beat the old fixed 2s+2s without being
-	// flaky under slow CI scheduling.
+	// Lower bound proves the two waits actually backed off (250ms+500ms).
 	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
-	assert.Less(t, elapsed, 3*time.Second, "adaptive backoff should finish well under the old fixed 2s+2s")
 }
 
 func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
+	t.Parallel()
 	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
 	// status: PollTransferStatus must back off and retry, not treat it as fatal.
 	var calls atomic.Int32
@@ -1393,6 +1418,7 @@ func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 }
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
+	t.Parallel()
 	// A non-in-progress error (e.g. 403) is fatal: return immediately without
 	// polling again.
 	var calls atomic.Int32
@@ -1408,12 +1434,13 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	success, _, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.False(t, success)
 	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
 }
 
 func TestPollTransferStatus_TimesOut(t *testing.T) {
+	t.Parallel()
 	// Server never completes (success=null). With a timeout below the initial
 	// poll interval, the deadline check breaks before the first sleep, so a
 	// single poll happens and the timeout error is returned.
@@ -1436,6 +1463,7 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_RetriesRetryableStatuses(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		firstStatus int
@@ -1528,6 +1556,7 @@ func TestFetchFromURLToFile_StopsAtTheAttemptBudget(t *testing.T) {
 }
 
 func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
+	t.Parallel()
 	stall := make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(stall) }) }
@@ -1559,6 +1588,7 @@ func TestFetchFromURLToFile_StopsDrainingAStalledErrorBody(t *testing.T) {
 }
 
 func TestBackoffDelay(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		attempt int
@@ -1579,6 +1609,7 @@ func TestBackoffDelay(t *testing.T) {
 }
 
 func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
 	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
 }

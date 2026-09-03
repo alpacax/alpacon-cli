@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // buildTestJWT creates a minimal JWT string with the given payload claims.
@@ -13,13 +14,14 @@ func buildTestJWT(t *testing.T, claims map[string]any) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
 	payload, err := json.Marshal(claims)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	payloadEnc := base64.RawURLEncoding.EncodeToString(payload)
 	signature := base64.RawURLEncoding.EncodeToString([]byte("fakesig"))
 	return header + "." + payloadEnc + "." + signature
 }
 
 func TestDecodeJWTPayload(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		token       string
@@ -78,10 +80,10 @@ func TestDecodeJWTPayload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			claims, err := DecodeJWTPayload(tt.token)
 			if tt.expectErr {
-				assert.Error(t, err)
+				require.Error(t, err)
 				assert.Nil(t, claims)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.NotNil(t, claims)
 				if tt.expectClaim != "" && tt.expectValue != nil {
 					assert.Equal(t, tt.expectValue, claims[tt.expectClaim])
@@ -95,11 +97,12 @@ func TestDecodeJWTPayload(t *testing.T) {
 }
 
 func TestDecodeJWTPayload_StandardPadding(t *testing.T) {
+	t.Parallel()
 	// Ensure payloads that need base64 padding (=, ==) still decode correctly
 	claims := map[string]any{"a": "b"}
 	token := buildTestJWT(t, claims)
 
 	result, err := DecodeJWTPayload(token)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, "b", result["a"])
 }

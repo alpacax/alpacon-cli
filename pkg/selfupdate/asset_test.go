@@ -11,6 +11,7 @@ import (
 )
 
 func TestArchiveName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		goos   string
@@ -29,10 +30,12 @@ func TestArchiveName(t *testing.T) {
 }
 
 func TestChecksumsName(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "alpacon-1.4.0-checksums.sha256", ChecksumsName("1.4.0"))
 }
 
 func TestSelectAsset(t *testing.T) {
+	t.Parallel()
 	release := &Release{
 		Version: "1.4.0",
 		Assets: []Asset{
@@ -50,12 +53,14 @@ func TestSelectAsset(t *testing.T) {
 }
 
 func TestBinaryNameIgnoresWhatTheUserRenamedTheBinaryTo(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "alpacon", BinaryName("linux"))
 	assert.Equal(t, "alpacon", BinaryName("darwin"))
 	assert.Equal(t, "alpacon.exe", BinaryName("windows"))
 }
 
 func TestAssetNamesStillMatchTheGoreleaserTemplates(t *testing.T) {
+	t.Parallel()
 	config, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yaml"))
 	require.NoError(t, err)
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestUsernameErrorMessage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code      string
 		wantOK    bool
@@ -35,6 +36,7 @@ func TestUsernameErrorMessage(t *testing.T) {
 }
 
 func TestIsRetryableUsernameError(t *testing.T) {
+	t.Parallel()
 	assert.True(t, isRetryableUsernameError("user_username_invalid"))
 	assert.True(t, isRetryableUsernameError("user_username_disallowed"))
 	assert.True(t, isRetryableUsernameError("user_username_in_use"))

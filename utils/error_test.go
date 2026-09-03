@@ -10,12 +10,14 @@ import (
 )
 
 func TestParseErrorResponse_NilError(t *testing.T) {
+	t.Parallel()
 	code, source := ParseErrorResponse(nil)
-	assert.Equal(t, "", code)
-	assert.Equal(t, "", source)
+	assert.Empty(t, code)
+	assert.Empty(t, source)
 }
 
 func TestParseErrorResponse_JSONFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		errMsg         string
@@ -58,6 +60,7 @@ func TestParseErrorResponse_JSONFormat(t *testing.T) {
 }
 
 func TestParseErrorResponse_TextFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		errMsg         string
@@ -94,12 +97,14 @@ func TestParseErrorResponse_TextFormat(t *testing.T) {
 }
 
 func TestParseErrorResponse_NoMatch(t *testing.T) {
+	t.Parallel()
 	code, source := ParseErrorResponse(errors.New("connection refused"))
-	assert.Equal(t, "", code)
-	assert.Equal(t, "", source)
+	assert.Empty(t, code)
+	assert.Empty(t, source)
 }
 
 func TestParseErrorResponse_WrappedJSONFormat(t *testing.T) {
+	t.Parallel()
 	inner := errors.New(`{"code": "work_session_required", "source": "command"}`)
 	wrapped := fmt.Errorf("failed to execute command on 'srv' server: %w", inner)
 	code, source := ParseErrorResponse(wrapped)
@@ -108,6 +113,7 @@ func TestParseErrorResponse_WrappedJSONFormat(t *testing.T) {
 }
 
 func TestParseErrorResponse_WrappedTextFormat(t *testing.T) {
+	t.Parallel()
 	inner := errors.New("code: work_session_expired; source: server")
 	wrapped := fmt.Errorf("request failed: %w", inner)
 	code, source := ParseErrorResponse(wrapped)
@@ -116,6 +122,7 @@ func TestParseErrorResponse_WrappedTextFormat(t *testing.T) {
 }
 
 func TestWorkSessionConstants(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, "work_session_required", WorkSessionRequired)
 	assert.Equal(t, "work_session_not_usable", WorkSessionNotUsable)
 	assert.Equal(t, "work_session_not_active", WorkSessionNotActive)
@@ -127,6 +134,7 @@ func TestWorkSessionConstants(t *testing.T) {
 }
 
 func TestClientErrorBand(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name           string
 		status         int
@@ -151,12 +159,14 @@ func TestClientErrorBand(t *testing.T) {
 }
 
 func TestServerBusyExitCode(t *testing.T) {
+	t.Parallel()
 	// Stable, script-facing contract—see README "Exit codes".
 	assert.Equal(t, "server_busy_with_user_work", ServerBusyWithUserWork)
 	assert.Equal(t, 5, ExitCodeServerBusy)
 }
 
 func TestExitCodeNotApproved_IsSixAndDistinct(t *testing.T) {
+	t.Parallel()
 	// 6 is a public contract documented in README; scripts and agents branch on it.
 	assert.Equal(t, 6, ExitCodeNotApproved)
 	assert.NotEqual(t, ExitCodeWorkSessionDenied, ExitCodeNotApproved)
@@ -165,6 +175,7 @@ func TestExitCodeNotApproved_IsSixAndDistinct(t *testing.T) {
 }
 
 func TestExitCodeUsageError_IsTwoAndDistinct(t *testing.T) {
+	t.Parallel()
 	// 2 is a public contract documented in README; scripts and agents branch on it.
 	assert.Equal(t, 2, ExitCodeUsageError)
 	assert.NotEqual(t, ExitCodeGeneralError, ExitCodeUsageError)

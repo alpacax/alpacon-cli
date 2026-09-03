@@ -16,10 +16,12 @@ import (
 )
 
 func TestExitCodeUpdateAvailableIsEight(t *testing.T) {
+	t.Parallel()
 	assert.Equal(t, 8, utils.ExitCodeUpdateAvailable, "scripts branch on this value; it is a public contract")
 }
 
 func TestCheckOutcome(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		current      string
@@ -64,6 +66,7 @@ func TestUpdateCommandIsRegistered(t *testing.T) {
 }
 
 func TestPermissionHint(t *testing.T) {
+	t.Parallel()
 	hint := permissionHint(os.ErrPermission)
 
 	assert.Contains(t, hint, "not writable")
@@ -76,6 +79,7 @@ func TestPermissionHint(t *testing.T) {
 }
 
 func TestPermissionHintStillNamesSudoWhenTheLockIsWhatWasRefused(t *testing.T) {
+	t.Parallel()
 	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrLockUnavailable, os.ErrPermission)) // The lock sits in the install directory, so this is that directory refusing a write—the first one the command attempts.
 
 	assert.Contains(t, hint, "install location")
@@ -87,6 +91,7 @@ func TestPermissionHintStillNamesSudoWhenTheLockIsWhatWasRefused(t *testing.T) {
 }
 
 func TestPermissionHintSendsATempDirectoryFailureSomewhereElse(t *testing.T) {
+	t.Parallel()
 	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrWorkDirUnavailable, os.ErrPermission))
 
 	if runtime.GOOS == "windows" {
@@ -98,6 +103,7 @@ func TestPermissionHintSendsATempDirectoryFailureSomewhereElse(t *testing.T) {
 }
 
 func TestUpdateFailureMessageKeepsTheCauseBesideTheHint(t *testing.T) {
+	t.Parallel()
 	refused := fmt.Errorf("%w: open /usr/local/bin/.alpacon-update.lock: %w", selfupdate.ErrLockUnavailable, os.ErrPermission)
 
 	message := updateFailureMessage(refused)
@@ -108,6 +114,7 @@ func TestUpdateFailureMessageKeepsTheCauseBesideTheHint(t *testing.T) {
 }
 
 func TestReportResultNeverReportsSuccessForAnInstallItLeftAlone(t *testing.T) {
+	t.Parallel()
 	message, code := reportResult(selfupdate.Result{Kind: selfupdate.InstallVersionManager}, "1.3.0")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, code)
@@ -115,6 +122,7 @@ func TestReportResultNeverReportsSuccessForAnInstallItLeftAlone(t *testing.T) {
 }
 
 func TestReportResult(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		result       selfupdate.Result
@@ -151,6 +159,7 @@ func TestReportResult(t *testing.T) {
 }
 
 func TestCheckActionNeverSendsAPackageManagerInstallToTheUpdateCommand(t *testing.T) {
+	t.Parallel()
 	assert.Contains(t, checkAction(selfupdate.InstallManual), "alpacon update")
 
 	for _, kind := range []selfupdate.InstallKind{
@@ -168,7 +177,7 @@ func TestCheckActionNeverSendsAPackageManagerInstallToTheUpdateCommand(t *testin
 func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
 	require.NotNil(t, updateCmd.Args, "an unvalidated argument makes 'alpacon update check' replace the binary")
 
-	assert.Error(t, updateCmd.Args(updateCmd, []string{"check"}))
+	require.Error(t, updateCmd.Args(updateCmd, []string{"check"}))
 	assert.NoError(t, updateCmd.Args(updateCmd, nil))
 }
 
@@ -176,6 +185,7 @@ func TestUpdateCommandRefusesAPositionalArgument(t *testing.T) {
 // decides after its first branch is an os.Exit, so deleting the dev-build guard
 // or the os.Exit(8) leaves every in-process test green.
 func TestUpdateCommandRefusesADevBuild(t *testing.T) {
+	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update"})
 
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
@@ -184,6 +194,7 @@ func TestUpdateCommandRefusesADevBuild(t *testing.T) {
 }
 
 func TestUpdateCommandCheckExitsEightWhenANewerReleaseExists(t *testing.T) {
+	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update", "--check"},
 		"ALPACON_TEST_CURRENT_VERSION=1.0.0",
 		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
@@ -194,6 +205,7 @@ func TestUpdateCommandCheckExitsEightWhenANewerReleaseExists(t *testing.T) {
 }
 
 func TestUpdateCommandCheckExitsZeroWhenAlreadyCurrent(t *testing.T) {
+	t.Parallel()
 	stderr, exitCode := runUpdateCommandHelper(t, []string{"update", "--check"},
 		"ALPACON_TEST_CURRENT_VERSION=9.9.9",
 		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
@@ -236,6 +248,7 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 }
 
 func TestUpdateFailureMessageSaysWhyTheBinaryWasLeftAlone(t *testing.T) {
+	t.Parallel()
 	message := updateFailureMessage(fmt.Errorf("%w: rpm: context deadline exceeded", selfupdate.ErrOwnerUnknown))
 
 	assert.Contains(t, message, "left alone")

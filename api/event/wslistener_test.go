@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +19,7 @@ import (
 const testReconnectBaseDelay = 10 * time.Millisecond
 
 func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	assert.PanicsWithValue(t, "event: wsListener.handleFrame must be assigned before Start", func() {
@@ -26,6 +28,7 @@ func TestWSListener_StartPanicsWithoutHandleFrame(t *testing.T) {
 }
 
 func TestWSListener_StopIsIdempotent(t *testing.T) {
+	t.Parallel()
 	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
 	w.Stop()
@@ -34,31 +37,37 @@ func TestWSListener_StopIsIdempotent(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Success(t *testing.T) {
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	// Simulate connection after short delay
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(w.connected)
-	}()
+		// Simulate connection after short delay
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(w.connected)
+		}()
 
-	result := w.WaitConnected(2 * time.Second)
-	assert.True(t, result, "should return true when connected")
+		result := w.WaitConnected(2 * time.Second)
+		assert.True(t, result, "should return true when connected")
+	})
 }
 
 func TestWSListener_WaitConnected_Timeout(t *testing.T) {
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	start := time.Now()
-	result := w.WaitConnected(100 * time.Millisecond)
-	elapsed := time.Since(start)
+		start := time.Now()
+		result := w.WaitConnected(100 * time.Millisecond)
+		elapsed := time.Since(start)
 
-	assert.False(t, result, "should return false on timeout")
-	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
-	assert.Less(t, elapsed, 1*time.Second)
+		assert.False(t, result, "should return false on timeout")
+		assert.Equal(t, 100*time.Millisecond, elapsed, "the timeout must fire on the deadline, not later")
+	})
 }
 
 func TestWSListener_NextReconnectDelay(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		delay time.Duration
@@ -78,6 +87,7 @@ func TestWSListener_NextReconnectDelay(t *testing.T) {
 }
 
 func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T) {
+	t.Parallel()
 	// Responds 200 instead of upgrading, so Dial fails with ErrBadHandshake.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer server.Close()
@@ -90,6 +100,7 @@ func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T)
 }
 
 func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
+	t.Parallel()
 	var dialed atomic.Int32
 
 	// Counted at handler entry so the increment happens-before Dial returns.
@@ -118,22 +129,26 @@ func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 }
 
 func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(w.done)
-	}()
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(w.done)
+		}()
 
-	start := time.Now()
-	result := w.WaitConnected(5 * time.Second)
-	elapsed := time.Since(start)
+		start := time.Now()
+		result := w.WaitConnected(5 * time.Second)
+		elapsed := time.Since(start)
 
-	assert.False(t, result, "should return false when done is closed")
-	assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+		assert.False(t, result, "should return false when done is closed")
+		assert.Equal(t, 50*time.Millisecond, elapsed, "the stop must land on the close, not a tick later")
+	})
 }
 
 func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 	var conns atomic.Int32
 
@@ -183,6 +198,7 @@ func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
 }
 
 func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
+	t.Parallel()
 	var provisions atomic.Int32
 
 	w := newProvisionedWSListener(nil, func() (string, error) {
@@ -197,6 +213,7 @@ func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
 }
 
 func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +250,7 @@ func TestWSListener_OnConnectedRunsBeforeConnectedCloses(t *testing.T) {
 }
 
 func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
+	t.Parallel()
 	upgrader := websocket.Upgrader{}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

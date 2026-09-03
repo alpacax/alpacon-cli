@@ -66,6 +66,7 @@ func newAwaitingPurposeServer(submitted *atomic.Value) *httptest.Server {
 // this as a pending approval waits for a human who was never asked, and the
 // demand expires while it waits.
 func TestExecAwaitingPurposeExits7WithJSONSignal(t *testing.T) {
+	t.Parallel()
 	ts := newAwaitingPurposeServer(nil)
 	defer ts.Close()
 
@@ -92,6 +93,7 @@ func TestExecAwaitingPurposeExits7WithJSONSignal(t *testing.T) {
 // it the server feature is unreachable from the CLI, however complete the rest
 // of this file is.
 func TestExecDeclaresPurposeDemandSupport(t *testing.T) {
+	t.Parallel()
 	var submitted atomic.Value
 	ts := newAwaitingPurposeServer(&submitted)
 	defer ts.Close()
@@ -111,6 +113,7 @@ func TestExecDeclaresPurposeDemandSupport(t *testing.T) {
 // TestExecSendsTheStatedPurpose covers the path the ADR actually intends: with a
 // purpose in hand the assessor judges on the first pass and no demand is issued.
 func TestExecSendsTheStatedPurpose(t *testing.T) {
+	t.Parallel()
 	var submitted atomic.Value
 	ts := newAwaitingPurposeServer(&submitted)
 	defer ts.Close()
@@ -131,6 +134,7 @@ func TestExecSendsTheStatedPurpose(t *testing.T) {
 // demand: SubmitCommand returns before the verdict, so the status is first
 // visible when the result is retrieved.
 func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/"+purposeJobID+"/" {
@@ -183,6 +187,7 @@ func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 // TestAwaitingPurposeStatusIsNotAnApproval keeps the two holds apart at the
 // status predicates, which is where a rename would collapse them.
 func TestAwaitingPurposeStatusIsNotAnApproval(t *testing.T) {
+	t.Parallel()
 	assert.True(t, event.IsAwaitingPurposeStatus("awaiting_purpose"))
 	assert.False(t, event.IsAwaitingApprovalStatus("awaiting_purpose"))
 	assert.False(t, event.IsAwaitingPurposeStatus("awaiting_approval"))

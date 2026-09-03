@@ -14,6 +14,7 @@ import (
 )
 
 func TestGetWebFTPLogList(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name            string
 		serverName      string
@@ -105,7 +106,7 @@ func TestGetWebFTPLogList(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.wantErrContains != "" {
-					assert.ErrorContains(t, err, tt.wantErrContains)
+					require.ErrorContains(t, err, tt.wantErrContains)
 				}
 				return
 			}
@@ -123,6 +124,7 @@ func TestGetWebFTPLogList(t *testing.T) {
 
 // Regression for #274: a cursor-token next crashed the old int-typed unmarshal.
 func TestGetWebFTPLogList_FollowsCursor(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {

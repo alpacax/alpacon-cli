@@ -8,6 +8,7 @@ import (
 )
 
 func TestIsWorkSessionCode(t *testing.T) {
+	t.Parallel()
 	trueCodes := []string{
 		WorkSessionRequired,
 		WorkSessionNotUsable,
@@ -28,6 +29,7 @@ func TestIsWorkSessionCode(t *testing.T) {
 }
 
 func TestBuildWorkSessionDiagnostic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code          string
 		wantReason    string
@@ -68,12 +70,14 @@ func TestBuildWorkSessionDiagnostic(t *testing.T) {
 }
 
 func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
+	t.Parallel()
 	got := buildWorkSessionDiagnostic(WorkSessionRequired, "command", "srv-1", "API token", "")
 	assert.Contains(t, got, "API token")
 	assert.NotContains(t, got, "(interactive)")
 }
 
 func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		WorkSessionRequired,
 		WorkSessionNotActive,
@@ -102,6 +106,7 @@ func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 }
 
 func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
+	t.Parallel()
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "abc-123-uuid")
 
 	assert.NotNil(t, envelope.Context.CurrentWorksession)
@@ -122,6 +127,7 @@ func nextActionCommands(actions []NextAction) []string {
 }
 
 func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
+	t.Parallel()
 	// When activeWS is unknown, the placeholder must remain.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "")
 
@@ -129,6 +135,7 @@ func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 }
 
 func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
+	t.Parallel()
 	// For work_session_required, activeWS is unrelated to the suggested `use <ID>`,
 	// so the placeholder must NOT be substituted even when activeWS is known.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionRequired, "command", "srv-1", "Browser login", "abc-123-uuid")
@@ -137,6 +144,7 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 }
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
+	t.Parallel()
 	// Non-WorkSession errors must not trigger any exit — just return.
 	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
 	err := errors.New("some unrelated error")
@@ -145,5 +153,6 @@ func TestHandleWorkSessionError_NoOp(t *testing.T) {
 }
 
 func TestHandleWorkSessionError_NilError(t *testing.T) {
+	t.Parallel()
 	HandleWorkSessionError(nil, "websh", "srv", "Browser login", "")
 }

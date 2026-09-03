@@ -17,6 +17,7 @@ func parseTunnelCommandArgs(t *testing.T, rawArgs []string) (*cobra.Command, []s
 }
 
 func TestValidateTunnelArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		rawArgs     []string

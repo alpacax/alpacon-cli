@@ -10,6 +10,7 @@ import (
 )
 
 func TestWorkSessionStatusSubType(t *testing.T) {
+	t.Parallel()
 	// The event channel and the REST projection agree everywhere except active.
 	// Reusing the REST status verbatim would silently never match an approval.
 	tests := []struct {
@@ -34,6 +35,7 @@ func TestWorkSessionStatusSubType(t *testing.T) {
 }
 
 func TestResolveWaitOptions_RegisteredTypeGetsItsDefaults(t *testing.T) {
+	t.Parallel()
 	opts, err := resolveWaitOptions(nil, "work_session", "ws-uuid", nil, time.Minute)
 
 	require.NoError(t, err)
@@ -44,6 +46,7 @@ func TestResolveWaitOptions_RegisteredTypeGetsItsDefaults(t *testing.T) {
 }
 
 func TestResolveWaitOptions_NoTargetMeansNoCatchUp(t *testing.T) {
+	t.Parallel()
 	// Catch-up reads one resource by id; without a target there is nothing to read.
 	opts, err := resolveWaitOptions(nil, "work_session", "", nil, time.Minute)
 
@@ -52,6 +55,7 @@ func TestResolveWaitOptions_NoTargetMeansNoCatchUp(t *testing.T) {
 }
 
 func TestResolveWaitOptions_UntilOverridesButKeepsCatchUp(t *testing.T) {
+	t.Parallel()
 	opts, err := resolveWaitOptions(nil, "work_session", "ws-uuid", []string{"activated"}, time.Minute)
 
 	require.NoError(t, err)
@@ -61,6 +65,7 @@ func TestResolveWaitOptions_UntilOverridesButKeepsCatchUp(t *testing.T) {
 }
 
 func TestResolveWaitOptions_UnregisteredTypeNeedsUntil(t *testing.T) {
+	t.Parallel()
 	opts, err := resolveWaitOptions(nil, "notification", "", []string{"created"}, time.Minute)
 
 	require.NoError(t, err)
@@ -74,6 +79,7 @@ func TestResolveWaitOptions_UnregisteredTypeNeedsUntil(t *testing.T) {
 }
 
 func TestResolveWaitOptions_OptionsAreEventAPITyped(t *testing.T) {
+	t.Parallel()
 	// Guards the seam: cmd owns the domain knowledge, api/event stays type-ignorant.
 	var opts eventapi.WaitOptions
 	opts, err := resolveWaitOptions(nil, "work_session", "ws-uuid", nil, time.Minute)

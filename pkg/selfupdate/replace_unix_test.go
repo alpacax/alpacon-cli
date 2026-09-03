@@ -14,6 +14,7 @@ import (
 )
 
 func TestReplaceBinaryKeepsTheDestinationMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0700)) // 0700, not the 0755 the implementation passes: a fixture at 0755 cannot tell keeping the destination's mode from forcing that literal.
@@ -65,6 +66,7 @@ func TestReplaceBinaryStaysQuietOnAnOrdinaryInstallMode(t *testing.T) {
 }
 
 func TestReplaceBinaryLeavesNoPreservedCopyOnSuccess(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))
@@ -77,6 +79,7 @@ func TestReplaceBinaryLeavesNoPreservedCopyOnSuccess(t *testing.T) {
 }
 
 func TestReplaceBinaryRestoresTheOldBinaryWhenTheSourceIsMissing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon")
 	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0755))

@@ -17,6 +17,7 @@ import (
 )
 
 func TestGetServerList_PaginationBug(t *testing.T) {
+	t.Parallel()
 	var requestCount atomic.Int32
 
 	// mock server: 150 servers total (page1=100, page2=50)
@@ -94,6 +95,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 }
 
 func TestGetServerIDByName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		serverName string
@@ -138,6 +140,7 @@ func TestGetServerIDByName(t *testing.T) {
 }
 
 func TestCreateRegistrationToken(t *testing.T) {
+	t.Parallel()
 	want := RegistrationTokenCreatedResponse{
 		ID:   "token-uuid-abc",
 		Name: "new-server",
@@ -164,6 +167,7 @@ func TestCreateRegistrationToken(t *testing.T) {
 }
 
 func TestListRegistrationTokens(t *testing.T) {
+	t.Parallel()
 	tokens := []RegistrationTokenDetails{
 		{ID: "uuid-1", Name: "prod-token", Enabled: true},
 		{ID: "uuid-2", Name: "dev-token", Enabled: true},
@@ -193,6 +197,7 @@ func TestListRegistrationTokens(t *testing.T) {
 }
 
 func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
+	t.Parallel()
 	expiresAt := "2026-12-31T00:00:00Z"
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +206,9 @@ func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
 		}
 		var req RegistrationTokenRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
+			t.Errorf("failed to decode request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		if req.ExpiresAt == nil || *req.ExpiresAt != expiresAt {
 			t.Errorf("expected expires_at %q, got %v", expiresAt, req.ExpiresAt)
@@ -224,6 +231,7 @@ func TestCreateRegistrationToken_WithExpiresAt(t *testing.T) {
 }
 
 func TestCreateRegistrationToken_WithoutExpiresAt(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(body), "expires_at") {
@@ -242,6 +250,7 @@ func TestCreateRegistrationToken_WithoutExpiresAt(t *testing.T) {
 }
 
 func TestDeleteRegistrationToken_ByName_Success(t *testing.T) {
+	t.Parallel()
 	const tokenID = "tok-uuid-abc"
 	var deleteCalled bool
 
@@ -274,6 +283,7 @@ func TestDeleteRegistrationToken_ByName_Success(t *testing.T) {
 }
 
 func TestDeleteRegistrationToken_ByName_NotFound(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := api.ListResponse[RegistrationTokenDetails]{Count: 0, Results: []RegistrationTokenDetails{}}
 		w.Header().Set("Content-Type", "application/json")
@@ -292,6 +302,7 @@ func TestDeleteRegistrationToken_ByName_NotFound(t *testing.T) {
 }
 
 func TestGetRegistrationTokenAttributes_MapsGroupNames(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
@@ -334,6 +345,7 @@ func TestGetRegistrationTokenAttributes_MapsGroupNames(t *testing.T) {
 }
 
 func TestGetRegistrationTokenAttributes_FallsBackToUUID(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
@@ -364,6 +376,7 @@ func TestGetRegistrationTokenAttributes_FallsBackToUUID(t *testing.T) {
 }
 
 func TestGetRegistrationTokenAttributes_ExpiresNever(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
@@ -398,6 +411,7 @@ func TestGetRegistrationTokenAttributes_ExpiresNever(t *testing.T) {
 }
 
 func TestGetRegistrationTokenAttributes_EmptyList(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasPrefix(r.URL.Path, "/api/iam/groups/") {
@@ -424,6 +438,7 @@ func TestGetRegistrationTokenAttributes_EmptyList(t *testing.T) {
 }
 
 func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
+	t.Parallel()
 	want := AnsibleGuideJsonResponse{
 		RegistrationGuideMeta: RegistrationGuideMeta{
 			MethodID:         "ansible",
@@ -450,7 +465,9 @@ func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
 		gotPath = r.URL.Path
 		gotMethod = r.Method
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("failed to decode request body: %v", err)
+			t.Errorf("failed to decode request body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(want)
@@ -478,6 +495,7 @@ func TestGetAnsibleRegistrationGuideJSON(t *testing.T) {
 }
 
 func TestDeleteServer(t *testing.T) {
+	t.Parallel()
 	const serverID = "delete-server-id"
 	var deleteCalled bool
 
@@ -511,6 +529,7 @@ func TestDeleteServer(t *testing.T) {
 }
 
 func TestRequestServerAction(t *testing.T) {
+	t.Parallel()
 	const serverID = "action-server-id"
 
 	tests := []struct {
@@ -542,7 +561,9 @@ func TestRequestServerAction(t *testing.T) {
 					}
 					var req serverActionRequest
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-						t.Fatalf("failed to decode request body: %v", err)
+						t.Errorf("failed to decode request body: %v", err)
+						w.WriteHeader(http.StatusInternalServerError)
+						return
 					}
 					if req.Action != tt.action {
 						t.Errorf("expected action %q, got %q", tt.action, req.Action)

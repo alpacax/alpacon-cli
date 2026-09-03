@@ -15,6 +15,7 @@ import (
 )
 
 func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
+	t.Parallel()
 	var logRequestCount atomic.Int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

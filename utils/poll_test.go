@@ -8,6 +8,7 @@ import (
 )
 
 func TestNextPollTick(t *testing.T) {
+	t.Parallel()
 	base := time.Second
 	tests := []struct {
 		name    string
@@ -30,6 +31,7 @@ func TestNextPollTick(t *testing.T) {
 }
 
 func TestNextPollBackoff(t *testing.T) {
+	t.Parallel()
 	base := time.Second
 	tests := []struct {
 		name       string

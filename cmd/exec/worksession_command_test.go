@@ -19,6 +19,7 @@ import (
 )
 
 func TestExecCommandWorkSessionGateExits3WithJSONDiagnostic(t *testing.T) {
+	t.Parallel()
 	var sawCommandPost atomic.Bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -118,7 +119,7 @@ func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
 
 // helperArgsAfter returns the args after marker—the helper's, not go test's.
 func helperArgsAfter(args []string, marker string) ([]string, bool) {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if args[i] == marker {
 			return args[i+1:], true
 		}

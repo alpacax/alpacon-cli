@@ -11,6 +11,7 @@ import (
 )
 
 func TestPackageOwner(t *testing.T) {
+	t.Parallel()
 	notFound := errors.New("exit status 1")
 
 	tests := []struct {
@@ -67,7 +68,7 @@ func TestPackageOwner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			owner, err := PackageOwner(tt.run, "/usr/local/bin/alpacon")
 
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, tt.want, owner)
 		})
 	}
@@ -76,6 +77,7 @@ func TestPackageOwner(t *testing.T) {
 // No querier is the strongest form of "the query could not answer", and
 // answering "" would have ClassifyPath call it a manual install.
 func TestPackageOwnerRefusesAnAnswerWithNoWayToAsk(t *testing.T) {
+	t.Parallel()
 	owner, err := PackageOwner(nil, "/usr/local/bin/alpacon")
 
 	require.ErrorIs(t, err, ErrOwnerUnknown)
@@ -85,6 +87,7 @@ func TestPackageOwnerRefusesAnAnswerWithNoWayToAsk(t *testing.T) {
 // A query that could not answer must not read as "nobody owns it": ClassifyPath
 // turns that into a manual install, which is permission to overwrite the file.
 func TestPackageOwnerRefusesToGuessWhenTheQueryCannotAnswer(t *testing.T) {
+	t.Parallel()
 	for _, stalled := range []string{"dpkg", "rpm"} {
 		t.Run(stalled, func(t *testing.T) {
 			run := func(name string, args ...string) ([]byte, error) {
@@ -108,6 +111,7 @@ func TestPackageOwnerRefusesToGuessWhenTheQueryCannotAnswer(t *testing.T) {
 // $PATH must never name the manager: 'sudo alpacon update' carries the
 // operator's PATH wherever sudoers has no secure_path.
 func TestResolvePackageManagerNeverLeavesTheNameToThePath(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"dpkg", "rpm"} {
 		path, installed := resolvePackageManager(name)
 		if installed {

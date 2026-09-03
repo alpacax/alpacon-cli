@@ -32,6 +32,7 @@ type errorEnvelope struct {
 }
 
 func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/ses-1/extend/" {
@@ -59,6 +60,7 @@ func TestExtendJSONErrorEnvelope_ServerCode(t *testing.T) {
 }
 
 func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
+	t.Parallel()
 	// Flag validation fails before any HTTP call; no live server needed.
 	// The subprocess has no TTY, so IsInteractiveShell() is false.
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, "http://127.0.0.1:1",
@@ -76,6 +78,7 @@ func TestExtendJSONErrorEnvelope_UsageError(t *testing.T) {
 }
 
 func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
+	t.Parallel()
 	// Table is the default output mode, so this is the branch of
 	// CliUsageErrorEnvelopeWithExit most callers reach.
 	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, "http://127.0.0.1:1",
@@ -88,6 +91,7 @@ func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
 }
 
 func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
+	t.Parallel()
 	// GET succeeds but the session is expired — local validation error with err,
 	// no server code: error_code must be omitted.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +176,7 @@ func TestWorkSessionErrorHelperProcess(t *testing.T) {
 }
 
 func workSessionHelperArgs(args []string) ([]string, bool) {
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if args[i] == "worksession-error-helper" {
 			return args[i+1:], true
 		}

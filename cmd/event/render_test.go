@@ -12,6 +12,7 @@ import (
 )
 
 func TestRenderEvent_JSONIsOneLinePerFrameAndPreservesUnknownFields(t *testing.T) {
+	t.Parallel()
 	raw := []byte("{\n  \"event_type\": \"work_session\",\n  \"payload\": {\n    \"sub_type\": \"approved\",\n    \"brand_new_field\": 7\n  }\n}")
 
 	var buf bytes.Buffer
@@ -30,6 +31,7 @@ func TestRenderEvent_JSONIsOneLinePerFrameAndPreservesUnknownFields(t *testing.T
 }
 
 func TestRenderEvent_TableHasFourFixedFields(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 29, 13, 4, 5, 0, time.UTC)
 
 	tests := []struct {
@@ -87,6 +89,7 @@ func TestRenderEvent_TableHasFourFixedFields(t *testing.T) {
 }
 
 func TestRenderEvent_InvalidJSONWritesNothing(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
 		t.Run(format, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -102,6 +105,7 @@ func TestRenderEvent_InvalidJSONWritesNothing(t *testing.T) {
 // A bare JSON null unmarshals into the zero struct without error, so without the check
 // the table path would print it as a legitimate-looking row of dashes.
 func TestRenderEvent_TableRejectsAFrameWithNoEventType(t *testing.T) {
+	t.Parallel()
 	// The escape-only case pins that the check runs after stripping, not before.
 	for _, raw := range []string{
 		`null`,

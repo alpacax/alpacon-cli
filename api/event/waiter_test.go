@@ -39,6 +39,7 @@ func newTestWaiter(t *testing.T, ts *httptest.Server, opts WaitOptions) *Waiter 
 }
 
 func TestWaiter_CatchUpRunsOnlyAfterTheSubscriptionStands(t *testing.T) {
+	t.Parallel()
 	var subscribes atomic.Int32
 	var catchUpSawSubscribes atomic.Int32
 
@@ -66,6 +67,7 @@ func TestWaiter_CatchUpRunsOnlyAfterTheSubscriptionStands(t *testing.T) {
 }
 
 func TestWaiter_CatchUpDecidesWithoutAnEvent(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
 	w := newTestWaiter(t, ts, WaitOptions{
@@ -91,6 +93,7 @@ func TestWaiter_CatchUpDecidesWithoutAnEvent(t *testing.T) {
 }
 
 func TestWaiter_ClassifiesFrameSubTypes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		subType string
@@ -125,6 +128,7 @@ func TestWaiter_ClassifiesFrameSubTypes(t *testing.T) {
 }
 
 func TestWaiter_IgnoresAnUnrelatedSubType(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"event_type":"work_session","payload":{"sub_type":"extended"}}`))
 		holdOpen(conn, 0)
@@ -143,6 +147,7 @@ func TestWaiter_IgnoresAnUnrelatedSubType(t *testing.T) {
 }
 
 func TestWaiter_UnparseableFrameDoesNotEndTheWait(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("not json at all"))
 		holdOpen(conn, 0)
@@ -157,22 +162,26 @@ func TestWaiter_UnparseableFrameDoesNotEndTheWait(t *testing.T) {
 }
 
 func TestWaiter_StopCancelsTheWait(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
 	w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: time.Minute})
 
+	connected := make(chan bool, 1)
 	go func() {
-		require.True(t, w.WaitConnected(testWaitTimeout))
+		connected <- w.WaitConnected(testWaitTimeout)
 		w.Stop()
 	}()
 
 	_, outcome, err := w.Wait()
 
+	require.True(t, <-connected)
 	require.NoError(t, err)
 	assert.Equal(t, OutcomeCanceled, outcome)
 }
 
 func TestWaiter_CatchUpErrorIsReportedButDoesNotEndTheWait(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, holdOpen)
 
 	w := newTestWaiter(t, ts, WaitOptions{
@@ -196,6 +205,7 @@ func TestWaiter_CatchUpErrorIsReportedButDoesNotEndTheWait(t *testing.T) {
 }
 
 func TestWaiter_RejectedSubscriptionSurfacesTheServerMessage(t *testing.T) {
+	t.Parallel()
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysRejected, holdOpen)
 
 	w := newTestWaiter(t, ts, WaitOptions{OK: []string{"approved"}, Timeout: testWaitTimeout})
@@ -208,6 +218,7 @@ func TestWaiter_RejectedSubscriptionSurfacesTheServerMessage(t *testing.T) {
 }
 
 func TestWaiter_ReconnectRerunsCatchUp(t *testing.T) {
+	t.Parallel()
 	var catchUps atomic.Int32
 
 	ts, _, _ := newWatcherTestServer(t, alwaysCreated, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, n int32) {
