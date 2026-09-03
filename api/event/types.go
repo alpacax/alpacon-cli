@@ -45,8 +45,12 @@ type PendingApprovalError struct {
 
 // CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
 // agent reading a generic failure code retries, filing a fresh approval request.
+// Expired separates the two settled-without-a-grant outcomes: both exit
+// ExitCodeNotApproved, but only a reviewer's refusal is answered by going back to
+// the reviewer—a window that simply lapsed is answered by requesting again.
 type CommandRejectedError struct {
 	CommandID string
+	Expired   bool
 }
 
 // AwaitingPurposeError is returned when the server parked a command at the
@@ -172,10 +176,14 @@ func (*AwaitingPurposeError) Error() string {
 }
 
 func (e *CommandRejectedError) Error() string {
-	if e.CommandID == "" {
-		return "command was rejected by a reviewer"
+	reason := "was rejected by a reviewer"
+	if e.Expired {
+		reason = "was not approved before the request expired"
 	}
-	return fmt.Sprintf("command %s was rejected by a reviewer", e.CommandID)
+	if e.CommandID == "" {
+		return "command " + reason
+	}
+	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
 
 // DescribePhase returns the human-readable description for an error_phase,

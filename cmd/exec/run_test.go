@@ -225,11 +225,12 @@ func TestRunExecWithApprovalWait_PollsTheCommandDetailInsteadOfResubmitting(t *t
 
 func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T) {
 	tests := []struct {
-		name   string
-		status string
+		name    string
+		status  string
+		message string
 	}{
-		{"rejected", "rejected"},
-		{"expired", "expired"},
+		{"rejected", "rejected", "was rejected by a reviewer"},
+		{"expired", "expired", "was not approved before the request expired"},
 	}
 
 	for _, tt := range tests {
@@ -247,7 +248,10 @@ func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T)
 			err := RunExecWithApprovalWait(nil, "srv", "cmd", "", "", nil, "", "", time.Minute, io.Discard)
 
 			var rejected *event.CommandRejectedError
-			assert.ErrorAs(t, err, &rejected)
+			require.ErrorAs(t, err, &rejected)
+			// A lapsed window told as a reviewer's refusal points the user at the
+			// wrong next move, so the sentence is asserted, not only the type.
+			assert.Contains(t, rejected.Error(), tt.message)
 		})
 	}
 }
@@ -655,8 +659,8 @@ func TestApprovalOutcomeOf(t *testing.T) {
 		want   approvalOutcome
 	}{
 		{"authorized approves", str("authorized"), outcomeApproved},
-		{"rejected settles without a grant", str("rejected"), outcomeNotGranted},
-		{"expired settles without a grant", str("expired"), outcomeNotGranted},
+		{"rejected settles as a refusal", str("rejected"), outcomeRejected},
+		{"expired settles as a lapsed window", str("expired"), outcomeExpired},
 		{"pending_approval keeps waiting", str("pending_approval"), outcomePending},
 		{"pending_mfa keeps waiting", str("pending_mfa"), outcomePending},
 		{"used keeps waiting", str("used"), outcomePending},

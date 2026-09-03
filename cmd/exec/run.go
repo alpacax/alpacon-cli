@@ -59,7 +59,11 @@ const (
 	// field included: a value nobody can read as an answer must not end a wait.
 	outcomePending approvalOutcome = iota
 	outcomeApproved
-	outcomeNotGranted
+	// outcomeRejected and outcomeExpired both settle without a grant and both exit
+	// ExitCodeNotApproved. They stay apart because the sentence the user reads
+	// differs: one sends them back to the reviewer, the other to a fresh request.
+	outcomeRejected
+	outcomeExpired
 )
 
 // approvalWaitPollInterval is the base gap of the --wait poll loop—slower than
@@ -210,8 +214,10 @@ func approvalOutcomeOf(status *string) approvalOutcome {
 	switch *status {
 	case "authorized":
 		return outcomeApproved
-	case "rejected", "expired":
-		return outcomeNotGranted
+	case "rejected":
+		return outcomeRejected
+	case "expired":
+		return outcomeExpired
 	default:
 		return outcomePending
 	}
@@ -594,11 +600,12 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			case outcomeApproved:
 				spinner.Stop()
 				return runAfterApproval(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
-			case outcomeNotGranted:
+			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant. CommandRejectedError is what already carries
-				// this to ExitCodeNotApproved, so the two denial shapes exit alike.
-				return &event.CommandRejectedError{CommandID: cmdID}
+				// this to ExitCodeNotApproved, so the two denial shapes exit alike; only
+				// the sentence they print differs.
+				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired}
 			}
 			// A fixed gap over a 30m wait outspends the default 1000/hour
 			// service-token quota, so the gap widens as the wait ages.
