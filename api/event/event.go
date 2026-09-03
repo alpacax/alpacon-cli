@@ -334,11 +334,9 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
-				if budget.ShouldWarn() {
-					// The wait can reach two timeouts, and nothing else on this path
-					// prints while it lasts.
-					utils.CliWarning("rate limited by the server, retrying in %s", delay)
-				}
+				// The wait can reach two timeouts, and nothing else on this path
+				// prints while it lasts.
+				budget.WarnThrottled(delay)
 				// The server is alive: the command may be done, only its result GET refused.
 				// Budgeted so a token stuck over quota gives up—extending by exactly the
 				// wait would keep the deadline ahead forever.

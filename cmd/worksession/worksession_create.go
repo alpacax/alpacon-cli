@@ -526,9 +526,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 				delay := utils.NextPollBackoff(interval, throttles, utils.RetryAfter(err))
 				throttles++
-				if budget.ShouldWarn() {
-					utils.CliWarning("rate limited by the server, retrying in %s", delay)
-				}
+				budget.WarnThrottled(delay)
 				if newDeadline, extended := budget.Extend(deadline, delay); extended {
 					deadline = newDeadline
 				}

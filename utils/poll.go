@@ -74,6 +74,17 @@ func (b *ThrottleBudget) ShouldWarn() bool {
 	return true
 }
 
+// WarnThrottled prints the rate-limit notice the first time a throttled stretch
+// calls it, and stays quiet for the rest of that stretch. Every wait loop that
+// spends a budget shows the same line, so the wording lives here rather than at
+// each call site. CliWarning steps off a running spinner's line itself, so a
+// caller animating one need not stop it first.
+func (b *ThrottleBudget) WarnThrottled(delay time.Duration) {
+	if b.ShouldWarn() {
+		CliWarning("rate limited by the server, retrying in %s", delay)
+	}
+}
+
 // Reset clears the spent budget, extension count, and warning flag—called when
 // the poll sees progress, so a throttle late in a long wait is not charged
 // against an earlier, unrelated one.
