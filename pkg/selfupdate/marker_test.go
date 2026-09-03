@@ -72,7 +72,9 @@ func TestTheMarkerNameMatchesTheWindowsInstaller(t *testing.T) {
 	require.NoError(t, err)
 
 	// The assignment alone, not the whole script: Contains over 500 lines of
-	// PowerShell prints every one of them when it fails.
-	assignment := regexp.MustCompile(`(?m)^\$script:VersionMarkerName = .*$`).FindString(string(script))
+	// PowerShell prints every one of them when it fails. [^\r\n]* rather than
+	// .*$, since git checks the file out with CRLF on Windows and $ leaves the
+	// carriage return inside the match.
+	assignment := regexp.MustCompile(`(?m)^\$script:VersionMarkerName = [^\r\n]*`).FindString(string(script))
 	assert.Equal(t, "$script:VersionMarkerName = '"+installedVersionMarker+"'", assignment)
 }
