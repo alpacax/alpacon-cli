@@ -3,12 +3,16 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// Serial, like the rest of the Run tests: updateFixture reaches releaseServer,
+// which reassigns the package-level allowedAssetOrigins, and t.Parallel() here
+// races the parallel tests that read it.
 func TestRunPutsTheInstallersVersionMarkerBackInStep(t *testing.T) {
 	opts, executable := updateFixture(t, noOwnerRunner)
 	marker := filepath.Join(filepath.Dir(executable), installedVersionMarker)
@@ -62,8 +66,13 @@ func TestRunRecordsTheRunningBuildWhenItIsAheadOfTheRelease(t *testing.T) {
 
 // The name is spelled out on both sides of a language boundary, so pin them.
 func TestTheMarkerNameMatchesTheWindowsInstaller(t *testing.T) {
+	t.Parallel()
+
 	script, err := os.ReadFile(filepath.Join("..", "..", "install.ps1"))
 	require.NoError(t, err)
 
-	assert.Contains(t, string(script), "$script:VersionMarkerName = '"+installedVersionMarker+"'")
+	// The assignment alone, not the whole script: Contains over 500 lines of
+	// PowerShell prints every one of them when it fails.
+	assignment := regexp.MustCompile(`(?m)^\$script:VersionMarkerName = .*$`).FindString(string(script))
+	assert.Equal(t, "$script:VersionMarkerName = '"+installedVersionMarker+"'", assignment)
 }
