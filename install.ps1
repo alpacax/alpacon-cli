@@ -92,25 +92,24 @@ function Assert-FullLanguageMode {
     }
 }
 
-function Get-LocationHeader {
-    param($Headers)
+function Get-ResponseUri {
+    param($Response)
 
-    if ($null -eq $Headers) { return $null }
+    if ($null -eq $Response) { return $null }
 
-    # The property branch is for HttpResponseHeaders, which is what PowerShell 7
-    # hands back on the exception path and which exposes a typed Uri Location.
-    # The indexer branch covers everything else: Windows PowerShell 5.1's header
-    # collection, and the plain dictionary both editions return on success.
-    $typed = $Headers.PSObject.Properties['Location']
-    if ($typed -and $typed.Value) {
-        return [string]$typed.Value
-    }
+    $base = $Response.PSObject.Properties['BaseResponse']
+    if (-not $base -or -not $base.Value) { return $null }
 
-    try {
-        return [string]($Headers['Location'] | Select-Object -First 1)
-    } catch {
-        return $null
-    }
+    # Windows PowerShell 5.1 answers with an HttpWebResponse, which names the
+    # URL the request ended on ResponseUri. PowerShell 7 answers with an
+    # HttpResponseMessage, which keeps it on the request it replied to.
+    $ended = $base.Value.PSObject.Properties['ResponseUri']
+    if ($ended -and $ended.Value) { return [string]$ended.Value }
+
+    $request = $base.Value.PSObject.Properties['RequestMessage']
+    if ($request -and $request.Value) { return [string]$request.Value.RequestUri }
+
+    return $null
 }
 
 function ConvertFrom-VersionArgument {
@@ -135,29 +134,23 @@ function Get-LatestAlpaconVersion {
 
     # The GitHub API is rate limited to 60 calls an hour per IP, which a shared
     # office network or a CI runner can exhaust. The releases/latest redirect
-    # carries the same tag and is not rate limited.
+    # carries the same tag and is not rate limited. The redirect is followed
+    # rather than refused because Windows PowerShell 5.1 turns
+    # -MaximumRedirection 0 into an exception carrying no response at all,
+    # which leaves the tag unreadable. HEAD follows it without downloading the
+    # release page.
     try {
-        $response = Invoke-WebRequest -Uri $LatestUrl -MaximumRedirection 0 -UseBasicParsing
-        $location = Get-LocationHeader -Headers $response.Headers
+        $response = Invoke-WebRequest -Uri $LatestUrl -Method Head -UseBasicParsing
     } catch {
-        # Refusing to follow the redirect is an error in both PowerShell
-        # editions, but they throw unrelated types: WebException on 5.1 and
-        # HttpResponseException on 7. And 5.1 cannot even resolve the name of
-        # the other one in a typed catch. So catch everything, and rethrow
-        # whatever carries no redirect for us.
-        $failure = $_.Exception.PSObject.Properties['Response']
-        if (-not $failure -or -not $failure.Value) {
-            throw "Could not reach $LatestUrl to find the latest alpacon release. Check this machine can reach github.com, or pass -Version to skip the lookup. ($($_.Exception.Message))"
-        }
-        $location = Get-LocationHeader -Headers $failure.Value.Headers
-        if ([string]::IsNullOrWhiteSpace($location)) { throw }
+        throw "Could not reach $LatestUrl to find the latest alpacon release. Check this machine can reach github.com, or pass -Version to skip the lookup. ($($_.Exception.Message))"
     }
 
-    if ([string]::IsNullOrWhiteSpace($location)) {
-        throw "The latest release URL '$LatestUrl' did not redirect to a tag."
+    $landed = Get-ResponseUri -Response $response
+    if ([string]::IsNullOrWhiteSpace($landed)) {
+        throw "The response from '$LatestUrl' did not say which release it landed on."
     }
 
-    return ConvertFrom-ReleaseLocation -Location $location
+    return ConvertFrom-ReleaseLocation -Location $landed
 }
 
 function ConvertTo-ResponseText {

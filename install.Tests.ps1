@@ -1,13 +1,3 @@
-# Neither edition's redirect exception can be constructed with a response
-# attached, so the redirect tests throw this instead.
-class FakeRedirectFailure : System.Exception {
-    [object]$Response
-
-    FakeRedirectFailure([object]$response) : base('refused to follow the redirect') {
-        $this.Response = $response
-    }
-}
-
 BeforeAll {
     # install.ps1 keeps StrictMode inside its entry point so that irm | iex
     # cannot leave a user's shell strict. The helpers are still written for it,
@@ -140,36 +130,40 @@ Describe 'Assert-FullLanguageMode' {
     }
 }
 
-Describe 'Get-LocationHeader' {
-    It 'reads the typed Uri property PowerShell 7 exposes' {
-        $headers = [pscustomobject]@{
-            Location = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
+Describe 'Get-ResponseUri' {
+    It 'reads the ResponseUri Windows PowerShell 5.1 exposes' {
+        $response = [pscustomobject]@{
+            BaseResponse = [pscustomobject]@{
+                ResponseUri = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
+            }
         }
-        Get-LocationHeader -Headers $headers |
+        Get-ResponseUri -Response $response |
             Should -Be 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
     }
 
-    It 'reads the string indexer Windows PowerShell 5.1 exposes' {
-        $headers = @{ 'Location' = 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3' }
-        Get-LocationHeader -Headers $headers |
+    It 'reads the request PowerShell 7 hangs the final URL off' {
+        $response = [pscustomobject]@{
+            BaseResponse = [pscustomobject]@{
+                RequestMessage = [pscustomobject]@{
+                    RequestUri = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
+                }
+            }
+        }
+        Get-ResponseUri -Response $response |
             Should -Be 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
     }
 
-    It 'takes the first value when the header comes back as a collection' {
-        $headers = @{ 'Location' = @(
-            'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
-            'https://github.com/alpacax/alpacon-cli/releases/tag/v9.9.9'
-        ) }
-        Get-LocationHeader -Headers $headers |
-            Should -Be 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
+    It 'returns nothing when the response names no URL' {
+        Get-ResponseUri -Response ([pscustomobject]@{ BaseResponse = [pscustomobject]@{} }) |
+            Should -BeNullOrEmpty
     }
 
-    It 'returns nothing when there is no Location header' {
-        Get-LocationHeader -Headers @{} | Should -BeNullOrEmpty
+    It 'returns nothing when there is no underlying response' {
+        Get-ResponseUri -Response ([pscustomobject]@{ BaseResponse = $null }) | Should -BeNullOrEmpty
     }
 
-    It 'returns nothing for a null header set' {
-        Get-LocationHeader -Headers $null | Should -BeNullOrEmpty
+    It 'returns nothing for a null response' {
+        Get-ResponseUri -Response $null | Should -BeNullOrEmpty
     }
 }
 
@@ -179,58 +173,47 @@ Describe 'Get-LatestAlpaconVersion' {
         $source | Should -Not -Match 'api\.github\.com'
     }
 
-    It 'reads the tag from a redirect that throws' {
-        # Both PowerShell editions refuse the redirect by throwing, but the
-        # exception types are unrelated, so the code catches everything and
-        # looks for a Response. This stands in for either one.
-        Mock -CommandName Invoke-WebRequest -MockWith {
-            throw [FakeRedirectFailure]::new([pscustomobject]@{
-                Headers = [pscustomobject]@{
-                    Location = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v2.4.6'
-                }
-            })
-        }
-
-        Get-LatestAlpaconVersion -LatestUrl 'https://example.invalid/latest' | Should -Be '2.4.6'
-
-        # -MaximumRedirection 0 is how the 302 becomes observable at all, so
-        # pin it: a mock that ignores its arguments would not notice its loss.
-        Should -Invoke -CommandName Invoke-WebRequest -Times 1 -Exactly -ParameterFilter {
-            $Uri -eq 'https://example.invalid/latest' -and
-            $MaximumRedirection -eq 0 -and
-            $UseBasicParsing
-        }
-    }
-
-    It 'reads the tag from a redirect that does not throw' {
+    It 'reads the tag out of the URL the redirect landed on' {
         Mock -CommandName Invoke-WebRequest -MockWith {
             [pscustomobject]@{
-                Headers = @{ 'Location' = @('https://github.com/alpacax/alpacon-cli/releases/tag/v2.4.6') }
+                BaseResponse = [pscustomobject]@{
+                    ResponseUri = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v2.4.6'
+                }
             }
         }
 
         Get-LatestAlpaconVersion -LatestUrl 'https://example.invalid/latest' | Should -Be '2.4.6'
+
+        # HEAD is what keeps the release page off the wire, so pin it: a mock
+        # that ignores its arguments would not notice its loss.
+        Should -Invoke -CommandName Invoke-WebRequest -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'https://example.invalid/latest' -and
+            $Method -eq 'Head' -and
+            $UseBasicParsing
+        }
     }
 
-    It 'explains a response that arrived without a redirect' {
+    It 'explains a response that never left the latest URL' {
         Mock -CommandName Invoke-WebRequest -MockWith {
-            [pscustomobject]@{ Headers = @{} }
+            [pscustomobject]@{
+                BaseResponse = [pscustomobject]@{
+                    ResponseUri = [uri]'https://example.invalid/latest'
+                }
+            }
         }
 
         { Get-LatestAlpaconVersion -LatestUrl 'https://example.invalid/latest' } |
-            Should -Throw -ExpectedMessage '*did not redirect to a tag*'
+            Should -Throw -ExpectedMessage '*Could not read a version*'
     }
 
-    It 'rethrows a response whose headers carry no Location' {
-        Mock -CommandName Invoke-WebRequest -MockWith {
-            throw [FakeRedirectFailure]::new([pscustomobject]@{ Headers = @{} })
-        }
+    It 'explains a response that names no URL at all' {
+        Mock -CommandName Invoke-WebRequest -MockWith { [pscustomobject]@{ BaseResponse = $null } }
 
         { Get-LatestAlpaconVersion -LatestUrl 'https://example.invalid/latest' } |
-            Should -Throw -ExpectedMessage '*refused to follow the redirect*'
+            Should -Throw -ExpectedMessage '*did not say which release it landed on*'
     }
 
-    It 'rethrows a failure that carries no redirect' {
+    It 'names the URL and the transport error when the request fails' {
         Mock -CommandName Invoke-WebRequest -MockWith {
             throw [System.Net.WebException]::new('the host is unreachable')
         }
