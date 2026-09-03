@@ -34,9 +34,12 @@ Describe 'Get-DefaultInstallDir' {
             Should -BeExactly 'C:\Users\jane\AppData\Local\Alpacon\bin'
     }
 
-    It 'does not double the separator when the value ends with one' {
-        Get-DefaultInstallDir -LocalAppData 'C:\Users\jane\AppData\Local\' |
-            Should -BeExactly 'C:\Users\jane\AppData\Local\Alpacon\bin'
+    It 'does not double the separator when the value ends with <Trailing>' -TestCases @(
+        @{ Trailing = 'a backslash'; LocalAppData = 'C:\Users\jane\AppData\Local\' }
+        @{ Trailing = 'a forward slash'; LocalAppData = 'C:/Users/jane/AppData/Local/' }
+    ) {
+        Get-DefaultInstallDir -LocalAppData $LocalAppData |
+            Should -BeExactly ($LocalAppData.TrimEnd('\', '/') + '\Alpacon\bin')
     }
 }
 

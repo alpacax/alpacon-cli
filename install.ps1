@@ -52,7 +52,7 @@ function Get-DefaultInstallDir {
 
     # Joined as a string, not with Join-Path: a drive-qualified path is a
     # PowerShell drive reference off Windows, and Join-Path fails on it.
-    return $LocalAppData.TrimEnd('\') + '\Alpacon\bin'
+    return $LocalAppData.TrimEnd('\', '/') + '\Alpacon\bin'
 }
 
 function Get-AlpaconArch {
