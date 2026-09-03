@@ -183,6 +183,25 @@ jobs:
           $ErrorActionPreference = $prior
           if ($reported -notmatch '1\.10\.0') { throw "alpacon reports '$reported', expected 1.10.0" }
 
+      # The shape a pipeline actually hits: -Version reads a variable nobody
+      # set, so it arrives as an empty string. That has to be refused, because
+      # installing the latest release is the one thing a pin rules out.
+      - name: An empty -Version is refused instead of falling back to latest
+        shell: powershell
+        run: |
+          $marker = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\installed-version.txt'
+          $before = (Get-Content $marker -Raw).Trim()
+          $refused = $false
+          try {
+            ./install.ps1 -Version "$env:PINNED_VERSION_NOBODY_SET"
+          } catch {
+            if ("$_" -notlike '*is not a version number*') { throw }
+            $refused = $true
+          }
+          if (-not $refused) { throw "install.ps1 accepted an empty -Version" }
+          $after = (Get-Content $marker -Raw).Trim()
+          if ($after -ne $before) { throw "the install went ahead anyway: the marker moved from '$before' to '$after'" }
+
       - name: A running binary is refused instead of overwritten
         shell: powershell
         run: |

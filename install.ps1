@@ -412,7 +412,11 @@ function Invoke-AlpaconInstall {
 
     try {
         $arch = Get-AlpaconArch
-        $target = if ($Version) { ConvertFrom-VersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
+        # Whether -Version was passed, not whether it holds anything: '' is what
+        # -Version "$env:PINNED_VERSION" carries when the variable is unset, and
+        # a pipeline that meant to pin a version must hear about it rather than
+        # get the latest release.
+        $target = if ($PSBoundParameters.ContainsKey('Version')) { ConvertFrom-VersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
 
         $installed = Get-InstalledAlpaconVersion -InstallDir $InstallDir
         $action = Resolve-InstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
