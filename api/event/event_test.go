@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -1768,21 +1768,11 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
 
-// captureStderr runs fn with os.Stderr redirected to a pipe and returns what
-// was written, so tests can assert on utils.CliWarning output.
+// captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
-	old := os.Stderr
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stderr = w
-	defer func() { os.Stderr = old }()
-	fn()
-	_ = w.Close()
-	var buf bytes.Buffer
-	_, _ = io.Copy(&buf, r)
-	_ = r.Close()
-	return buf.String()
+	_, stderr := testutil.CaptureOutput(t, fn)
+	return stderr
 }
 
 // parseSeqLte reads the optional seq__lte upper bound. An absent value means
