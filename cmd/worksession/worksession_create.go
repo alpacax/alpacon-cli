@@ -505,7 +505,8 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // failures ends it at MaxConsecutivePollFailures, but a run of 429s does not:
 // the throttle budget and the deadline bound that instead.
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
-	deadline := time.Now().Add(timeout)
+	start := time.Now()
+	deadline := start.Add(timeout)
 	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
 	failures := 0
 	throttles := 0
@@ -529,16 +530,15 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				if newDeadline, extended := budget.Extend(deadline, delay); extended {
 					deadline = newDeadline
 				}
-				remaining := time.Until(deadline)
-				if remaining <= 0 {
+				if !pollSleep(deadline, delay) {
 					return nil, timedOut
 				}
-				pollSleep(remaining, delay)
 				continue
 			}
 			failures++
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
+			// The deadline outranks the cap: once the window is over, "timed out"
+			// is the honest answer even when this poll also filled the cap.
+			if !time.Now().Before(deadline) {
 				return nil, timedOut
 			}
 			if failures >= utils.MaxConsecutivePollFailures {
@@ -550,7 +550,9 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
-			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
+			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
+				return nil, timedOut
+			}
 			continue
 		}
 		failures = 0
@@ -575,28 +577,36 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
 		}
 
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return nil, timedOut
-		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
-		elapsed := timeout - remaining
+		// Measured from the start rather than from what is left before the
+		// deadline, which a 429's extension moves: subtracting a moving deadline
+		// would make the reported elapsed time shrink as the wait grew.
+		elapsed := time.Since(start)
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), timeout)
-		pollSleep(remaining, utils.NextPollTick(interval, elapsed))
+		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
+			return nil, timedOut
+		}
 	}
 }
 
-// pollSleep waits want, capped at remaining (must be positive); a non-positive
-// want falls back to remaining rather than spinning.
-func pollSleep(remaining, want time.Duration) {
+// pollSleep waits want, capped at the time left before deadline, and reports
+// whether the wait may go on; false means the window closed. The deadline test
+// lives here so the wait states it once rather than at every sleep. A
+// non-positive want falls back to the whole remainder rather than spinning.
+func pollSleep(deadline time.Time, want time.Duration) bool {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
 	step := min(remaining, want)
 	if step <= 0 {
 		step = remaining
 	}
 	time.Sleep(step)
+	return true
 }
 
 func init() {

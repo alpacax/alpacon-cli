@@ -311,6 +311,37 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	assert.NotContains(t, stderr, "Poll failed")
 }
 
+// The progress line reports how long the caller has been waiting, so a 429 that
+// pushes the deadline out must not make it shrink. Deriving it from what is left
+// before a moving deadline did exactly that: six throttled polls buy ~1.26s of
+// extension, and the wait then reported 0s elapsed after 1.26s of waiting.
+func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testing.T) {
+	const timeout = 2 * time.Second
+	const interval = 20 * time.Millisecond
+	const throttled = 6
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= throttled {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	})
+
+	assert.Contains(t, stderr, "1s elapsed of 2s")
+	assert.NotContains(t, stderr, "0s elapsed of 2s")
+}
+
 // Guards the attempt-count regression: at interval=10ms the old logic returned
 // after ~20ms (no sleep after the final attempt) instead of the full 30ms.
 func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
