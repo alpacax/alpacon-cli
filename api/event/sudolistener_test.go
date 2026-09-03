@@ -219,9 +219,9 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
 	const tick = 10 * time.Millisecond
 	// Long enough that a widening schedule would have reached its widest gap
-	// twice over, and not a whole multiple of the tick: a deadline landing on the
-	// same instant as a poll leaves the select to pick between them.
-	const waitFor = 125 * tick
+	// twice over, and off the tick grid: a deadline landing on the same instant as
+	// a poll leaves the select to pick between them.
+	const waitFor = 125*tick + tick/2
 
 	var polls testutil.PollRecorder
 	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
@@ -234,7 +234,7 @@ func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
 		sl.pollInterval = tick
 		sl.pollTimeout = waitFor
 
-		assert.False(t, sl.pollMFACompletion())
+		assert.False(t, sl.pollMFACompletion(), "the wait must end unverified once pollTimeout elapses with no completion")
 	})
 
 	// The buffer this timeout keeps over the server's pending-grant expiry is only

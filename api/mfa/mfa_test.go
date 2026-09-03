@@ -239,9 +239,9 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 	const tick = 10 * time.Millisecond
 	// Long enough that a widening schedule would have reached its widest gap
-	// twice over, and not a whole multiple of the tick: a deadline landing on the
-	// same instant as a poll leaves the select to pick between them.
-	const waitFor = 125 * tick
+	// twice over, and off the tick grid: a deadline landing on the same instant as
+	// a poll leaves the select to pick between them.
+	const waitFor = 125*tick + tick/2
 
 	var polls testutil.PollRecorder
 	ac := &client.AlpaconClient{
@@ -280,7 +280,7 @@ func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 // cannot be renewed.
 func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 	const tick = 10 * time.Millisecond
-	const waitFor = 125 * tick
+	const waitFor = 125*tick + tick/2
 
 	t.Setenv("HOME", t.TempDir())
 
