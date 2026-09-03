@@ -212,6 +212,8 @@ function Get-InstalledAlpaconVersion {
     # A marker without the binary beside it means nothing is installed. An
     # antivirus quarantine or a manual delete leaves exactly that behind, and
     # trusting the marker alone would make the next run skip the repair.
+    # 'alpacon update' rewrites the marker on both of its endings, so a
+    # self-update between two runs does not strand it.
     if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'alpacon.exe'))) { return $null }
 
     $marker = Join-Path $InstallDir $script:VersionMarkerName

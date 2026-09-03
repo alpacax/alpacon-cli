@@ -58,6 +58,9 @@ func Run(opts Options) (Result, error) {
 	}
 	if !IsOutdated(opts.CurrentVersion, release.Version) {
 		sweepIfPossible(opts.ExecutablePath)
+		// Also the repair path for a marker an earlier update left stale. It names
+		// the running build, never the release: a release candidate lands here too.
+		syncVersionMarker(filepath.Dir(opts.ExecutablePath), opts.CurrentVersion)
 		return Result{AlreadyCurrent: true}, nil
 	}
 
@@ -100,5 +103,6 @@ func Run(opts Options) (Result, error) {
 	if err := ReplaceBinary(opts.ExecutablePath, newBinary); err != nil {
 		return Result{Kind: kind}, err
 	}
+	syncVersionMarker(installDir, release.Version)
 	return Result{Kind: kind, UpdatedTo: release.Version}, nil
 }

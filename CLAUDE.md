@@ -90,6 +90,8 @@ PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
 
 `install.ps1` is delivered through `releases/latest/download/install.ps1` and is run by `irm | iex`, which executes it in the user's own shell. Its functions and `$script:` variables land in that shell and there is no way around it, but no preference may: `Set-StrictMode`, `$ErrorActionPreference`, and `$ProgressPreference` all live inside `Invoke-AlpaconInstall`, and a test walks the syntax tree to keep them there. The file stays pure ASCII because Windows PowerShell 5.1 reads a BOM-less file as ANSI while a BOM would reach `iex` as a stray U+FEFF. The archive and checksum file names are spelled out by hand in the script, so they are pinned to `.goreleaser.yaml`'s templates by a test as well. What the script installed is recorded in `installed-version.txt` beside the binary, because reading the version out of `alpacon version` would reach the network on every install.
 
+`selfupdate.syncVersionMarker` keeps that record honest from the Go side: a marker an update left behind would send the next install against a version that is no longer on disk, skipping a pinned reinstall or reporting an upgrade it never made. It rewrites the file whichever way `alpacon update` ends—after a replace, and on a run that finds nothing to install, which is what repairs a marker stranded by an update killed before it got there—and creates one nowhere, since a marker beside a binary the script never placed would claim an install it does not own.
+
 ### Key patterns
 
 - **Command registration**: All commands are registered in `cmd/root.go` via `RootCmd.AddCommand()`
