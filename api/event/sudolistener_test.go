@@ -197,11 +197,14 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
+		// The client is nil, so the stop has to land before the first poll tick.
+		const stopAfter = 100 * time.Millisecond
+		require.Greater(t, mfaPollingInterval, stopAfter, "a poll before the stop would dereference the nil client")
 		sl := NewSudoListener(nil, "", "")
 
 		start := time.Now()
 		go func() {
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(stopAfter)
 			sl.Stop()
 		}()
 
@@ -209,7 +212,7 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 		elapsed := time.Since(start)
 
 		assert.False(t, result, "should return false when stopped")
-		assert.Less(t, elapsed, 2*time.Second, "should exit quickly when stopped")
+		assert.Equal(t, stopAfter, elapsed, "the stop must land on Stop(), not a poll tick later")
 	})
 }
 

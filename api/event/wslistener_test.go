@@ -54,15 +54,16 @@ func TestWSListener_WaitConnected_Success(t *testing.T) {
 
 func TestWSListener_WaitConnected_Timeout(t *testing.T) {
 	t.Parallel()
-	w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
+	synctest.Test(t, func(t *testing.T) {
+		w := newProvisionedWSListener(nil, func() (string, error) { return "", nil }, 0)
 
-	start := time.Now()
-	result := w.WaitConnected(100 * time.Millisecond)
-	elapsed := time.Since(start)
+		start := time.Now()
+		result := w.WaitConnected(100 * time.Millisecond)
+		elapsed := time.Since(start)
 
-	assert.False(t, result, "should return false on timeout")
-	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
-	assert.Less(t, elapsed, 1*time.Second)
+		assert.False(t, result, "should return false on timeout")
+		assert.Equal(t, 100*time.Millisecond, elapsed, "the timeout must fire on the deadline, not later")
+	})
 }
 
 func TestWSListener_NextReconnectDelay(t *testing.T) {
@@ -142,7 +143,7 @@ func TestWSListener_WaitConnected_Shutdown(t *testing.T) {
 		elapsed := time.Since(start)
 
 		assert.False(t, result, "should return false when done is closed")
-		assert.Less(t, elapsed, 1*time.Second, "should exit quickly on shutdown")
+		assert.Equal(t, 50*time.Millisecond, elapsed, "the stop must land on the close, not a tick later")
 	})
 }
 
