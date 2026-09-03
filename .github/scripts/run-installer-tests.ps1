@@ -9,7 +9,10 @@ Install-Module Pester -RequiredVersion 6.1.0 -Force -SkipPublisherCheck -Scope C
 # version it finds, not the one installed above.
 Import-Module Pester -RequiredVersion 6.1.0 -Force
 
-$result = Invoke-Pester ./install.Tests.ps1 -Output Detailed -PassThru
+# Located from this script rather than from the working directory, so an
+# absolute call from anywhere runs the suite instead of discovering nothing.
+$suite = Join-Path $PSScriptRoot '..\..\install.Tests.ps1'
+$result = Invoke-Pester $suite -Output Detailed -PassThru
 # FailedCount stays 0 when discovery itself throws or when the file yields no
 # tests at all, and Invoke-Pester raises nothing either way. Exactly one skip is
 # expected here: the suite has a single deliberately Unix-only test, and every
