@@ -625,11 +625,17 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // asked for.
 func runAfterApproval(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
 	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
-	// Either shape means the grant did not carry this run: the plugin denied it
-	// again, or the server parked the job for a fresh approval.
+	// Either shape means the grant did not carry this run, and each gets the
+	// sentence its own way out needs. A repeated denial is answered by filing a
+	// fresh request; a job the server parked runs on its own once approved, so
+	// telling that caller to re-run would contradict the pending text
+	// HandlePendingApproval prints moments later on the same stream.
 	var pendingErr *event.PendingApprovalError
-	if isApprovalDenial(err) || errors.As(err, &pendingErr) {
+	switch {
+	case isApprovalDenial(err):
 		utils.CliWarning("The approval was granted but the command was denied again; the grant appears already used or expired. Re-run the command to request approval again.")
+	case errors.As(err, &pendingErr):
+		utils.CliWarning("The approval was granted but the grant did not carry this run; the server is holding the command for a fresh approval.")
 	}
 	return err
 }

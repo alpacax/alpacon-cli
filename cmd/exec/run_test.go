@@ -761,7 +761,9 @@ func TestPrintPresenceStepUpLink(t *testing.T) {
 }
 
 // A status hold after approval is the other shape of "the grant did not carry
-// this run", and it must reach the same warning as a repeated denial.
+// this run". It warns too, but with the sentence that shape needs: the held job
+// runs on its own once approved, so the re-run advice a repeated denial gets
+// would contradict the pending text printed right after it.
 func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t *testing.T) {
 	denial := stubApprovalWaitSeams(t, time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	held := &event.PendingApprovalError{CommandID: "cmd-2"}
@@ -788,5 +790,7 @@ func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t
 
 	assert.Equal(t, 2, submits, "the wait must not re-enter after the post-approval run")
 	assert.Equal(t, 1, polls)
-	assert.Contains(t, stderr, "already used")
+	assert.Contains(t, stderr, "holding the command for a fresh approval")
+	assert.NotContains(t, stderr, "Re-run the command",
+		"a held job needs no re-run, and the pending text that follows says so")
 }
