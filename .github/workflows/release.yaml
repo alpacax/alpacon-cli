@@ -39,8 +39,18 @@ jobs:
       contents: read
     uses: ./.github/workflows/build-and-test.yaml
 
+  # The end-to-end job inside this workflow installs from the release that is
+  # already public: create-release leaves this tag as a draft, and a draft is
+  # not releases/latest. So it proves the script still works, not that this
+  # tag's assets install.
+  install-script:
+    needs: [create-release]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/install-script.yaml
+
   goreleaser:
-    needs: [build-and-test]
+    needs: [build-and-test, install-script]
     runs-on: ubuntu-latest
     permissions:
       contents: write

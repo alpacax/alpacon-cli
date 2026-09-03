@@ -48,7 +48,22 @@ sudo yum update alpacon   # update
 ```
 
 ### Windows
-Download the latest `.zip` from [Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your `PATH`. Update it in place with `alpacon update`.
+```powershell
+irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\Alpacon\bin` and puts that directory on your user `PATH`—no administrator rights needed. After an install or an update, the shell you ran it in can use `alpacon` right away; terminals that were already open need a restart. Run the same command again to update. `alpacon update` updates this install as well, since no package manager owns a binary the script placed.
+
+The script is piped straight into `iex`, so you run it without reading it first. To look before you run, open a release on [Releases](https://github.com/alpacax/alpacon-cli/releases), download `install.ps1` and `alpacon-<version>-checksums.sha256` from it, compare the file's SHA256 against the `install.ps1` line in that checksums file, and then run the file. Both come from the same release, so this proves the download arrived intact—not that the release itself is what we meant to publish.
+
+`irm | iex` cannot pass arguments, so pass `-Version` to pin a release, or `-Force` to reinstall the version you already have, through a script block:
+
+```powershell
+&([scriptblock]::Create((irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1))) -Version 1.10.0
+&([scriptblock]::Create((irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1))) -Force
+```
+
+Pre-built `.zip` archives for 64-bit x86 and for ARM stay on [Releases](https://github.com/alpacax/alpacon-cli/releases). There is no 32-bit x86 build, and the installer says so rather than guessing.
 
 ### Docker
 ```bash
@@ -110,6 +125,8 @@ Remove-Item alpacon.exe.old.<timestamp>
 ```
 
 To go back to the version you had instead, rename `alpacon.exe.old.<timestamp>` and delete the staged copy. Either way the next update sweeps whichever one you leave.
+
+On an install the Windows script placed, running the one-liner again is the easier way out: it finds no `alpacon.exe`, treats the directory as empty and installs the latest release. The two leftover files stay where they are, and the next `alpacon update` sweeps them.
 
 ## Quick start
 
