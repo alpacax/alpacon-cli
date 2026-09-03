@@ -2221,6 +2221,7 @@ func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing
 }
 
 func TestErrorFromDetails_RemoteCommandErrorCarriesCommandID(t *testing.T) {
+	t.Parallel()
 	exitCode := 1
 	success := false
 	details := EventDetails{
@@ -2239,6 +2240,7 @@ func TestErrorFromDetails_RemoteCommandErrorCarriesCommandID(t *testing.T) {
 }
 
 func TestGetCommandByID_ReadsSudoGrantFields(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"failed","sudo_approval_request_id":"req-9","sudo_grant_status":"pending_approval"}`))
@@ -2256,6 +2258,7 @@ func TestGetCommandByID_ReadsSudoGrantFields(t *testing.T) {
 }
 
 func TestGetCommandByID_MissingSudoFieldsStayNil(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"cmd-1","status":"failed"}`))
