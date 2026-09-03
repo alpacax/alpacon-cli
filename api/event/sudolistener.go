@@ -19,19 +19,19 @@ const (
 	// substituted into the path. Replaces the removed self-approve route.
 	sudoVerifyURLFmt = "/api/sudo/grants/%s/verify/"
 
-	// mfaPollingInterval is how often we check if MFA is completed.
-	mfaPollingInterval = 500 * time.Millisecond
-
-	// mfaPollingTimeout is the maximum time to wait for MFA completion.
-	// The server expires the pending sudo grant after a short window; we keep
-	// extra buffer over that so a slow browser MFA does not race the expiry.
-	mfaPollingTimeout = 60 * time.Second
-
 	sudoHandshakeTimeout = 10 * time.Second
 
 	// sudoOutageWarning is asserted on by the tests, so it lives here rather than
 	// inline at the one place that prints it.
 	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
+
+	// defaultMFAPollInterval is how often the listener checks whether MFA completed.
+	defaultMFAPollInterval = 500 * time.Millisecond
+
+	// defaultMFAPollTimeout is the longest the listener waits for MFA completion.
+	// The server expires the pending sudo grant after a short window; the buffer
+	// over that keeps a slow browser MFA from racing the expiry.
+	defaultMFAPollTimeout = 60 * time.Second
 )
 
 // sudoMFAEvent represents the MFA request payload from the event WebSocket.
@@ -63,6 +63,11 @@ type SudoListener struct {
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
 	refreshToken func() error
+	// pollInterval and pollTimeout bound pollMFACompletion. Fields rather than
+	// package vars: the poll runs on a goroutine that can outlive the test which
+	// started it, and a test shortening a shared knob would race the next one.
+	pollInterval time.Duration
+	pollTimeout  time.Duration
 
 	stateMu    sync.Mutex // guards channelID, subscribed, warned, refreshed, err
 	channelID  string
@@ -77,9 +82,11 @@ type SudoListener struct {
 // provisioning a session on the listen goroutine would dereference it.
 func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *SudoListener {
 	sl := &SudoListener{
-		ac:         ac,
-		serverName: serverName,
-		sessionID:  sessionID,
+		ac:           ac,
+		serverName:   serverName,
+		sessionID:    sessionID,
+		pollInterval: defaultMFAPollInterval,
+		pollTimeout:  defaultMFAPollTimeout,
 	}
 	if ac != nil {
 		sl.refreshToken = ac.RefreshToken
@@ -288,8 +295,12 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 }
 
 func (sl *SudoListener) pollMFACompletion() bool {
-	timeout := time.After(mfaPollingTimeout)
-	ticker := time.NewTicker(mfaPollingInterval)
+	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
+	// keeps over the server's pending-grant expiry is what this wait is built on,
+	// and a gap that widens to ten ticks at the tail spends that buffer against a
+	// person who is still in the browser.
+	timeout := time.After(sl.pollTimeout)
+	ticker := time.NewTicker(sl.pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -299,11 +310,8 @@ func (sl *SudoListener) pollMFACompletion() bool {
 		case <-timeout:
 			return false
 		case <-ticker.C:
-			completed, err := mfa.CheckMFACompletion(sl.ac)
-			if err != nil {
-				continue
-			}
-			if completed {
+			// The endpoint may lag the browser; a failure here is not an answer.
+			if completed, err := mfa.CheckMFACompletion(sl.ac); err == nil && completed {
 				return true
 			}
 		}

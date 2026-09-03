@@ -20,15 +20,6 @@ import (
 const (
 	getEventURL = "/api/events/commands/"
 
-	// Grants of extra deadline for time lost to 429s, capped by count as well as
-	// duration: a duration budget is spent at whatever pace the server asks for, so a
-	// flat Retry-After: 1 buys a second window of one-second polls. 60 grants at the
-	// capped 60-tick wait is 3,600 ticks—a whole quota window at the default
-	// one-second tick—so at the default timeout the duration budget binds first at the
-	// cap and this bound only catches a throttle asking for less. Past an hour's
-	// timeout the count binds at the cap too.
-	pollMaxThrottleExtensions = 60
-
 	// Base gap the pacing above multiplies, for the poll running behind a live
 	// stream.
 	streamPollTick = time.Second
@@ -306,8 +297,8 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 
 // waitApproval polls through the awaiting_approval hold—bounded by timeout, which
 // the hold never resets and throttled waits extend by at most one timeout or
-// pollMaxThrottleExtensions grants, whichever binds first, plus one backoff wait—so
-// an approved job resumes streaming. Without it the hold is terminal
+// utils.PollMaxThrottleExtensions grants, whichever binds first, plus one backoff
+// wait—so an approved job resumes streaming. Without it the hold is terminal
 // (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
@@ -316,9 +307,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 	deadline := started.Add(timeout)
 	delay := tick
 	failures := 0
-	throttledWait := time.Duration(0)
-	throttleExtensions := 0
-	throttleWarned := false
+	budget := utils.NewThrottleBudget(timeout)
 
 	for {
 		select {
@@ -345,20 +334,14 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
-				if !throttleWarned {
-					// The wait can reach two timeouts, and nothing else on this path
-					// prints while it lasts.
-					throttleWarned = true
-					utils.CliWarning("rate limited by the server, retrying in %s", delay)
-				}
+				// The wait can reach two timeouts, and nothing else on this path
+				// prints while it lasts.
+				budget.WarnThrottled(delay)
 				// The server is alive: the command may be done, only its result GET refused.
 				// Budgeted so a token stuck over quota gives up—extending by exactly the
-				// wait would keep the deadline ahead forever. The last extension is granted
-				// whole rather than trimmed, so every mandated wait still buys its poll.
-				if throttledWait < timeout && throttleExtensions < pollMaxThrottleExtensions {
-					deadline = deadline.Add(delay)
-					throttledWait += delay
-					throttleExtensions++
+				// wait would keep the deadline ahead forever.
+				if newDeadline, extended := budget.Extend(deadline, delay); extended {
+					deadline = newDeadline
 				}
 			}
 			continue
@@ -370,12 +353,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 
 		if IsRunningStatus(response.Status) {
 			deadline = seams.Now().Add(timeout)
-			// The refreshed deadline gets its throttle allowance back with it, so a
-			// throttle late in a long command is not paid for by an earlier one—and
-			// the warning with it, so a later stretch is not silent.
-			throttledWait = 0
-			throttleExtensions = 0
-			throttleWarned = false
+			budget.Reset()
 			delay = utils.NextPollTick(tick, seams.Now().Sub(started))
 			continue
 		}
@@ -665,7 +643,7 @@ func errorFromDetails(d EventDetails) error {
 			if d.ErrorPhase != nil {
 				phase = *d.ErrorPhase
 			}
-			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase}
+			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: d.ID}
 		}
 		return nil
 	case "stuck", "error", "cancelled":

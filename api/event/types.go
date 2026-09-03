@@ -23,6 +23,11 @@ type RemoteCommandError struct {
 	Output     string
 	ExitCode   int
 	ErrorPhase string
+	// CommandID identifies the job this failure came from, so an approval wait
+	// has something to poll. ApprovalRequestID is filled in by that wait, not
+	// by the server response this error is built from.
+	CommandID         string
+	ApprovalRequestID string
 }
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
@@ -40,8 +45,12 @@ type PendingApprovalError struct {
 
 // CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
 // agent reading a generic failure code retries, filing a fresh approval request.
+// Expired separates the two settled-without-a-grant outcomes: both exit
+// ExitCodeNotApproved, but only a reviewer's refusal is answered by going back to
+// the reviewer—a window that simply lapsed is answered by requesting again.
 type CommandRejectedError struct {
 	CommandID string
+	Expired   bool
 }
 
 // AwaitingPurposeError is returned when the server parked a command at the
@@ -98,6 +107,11 @@ type EventDetails struct {
 	// field read by nothing is a promise no surface keeps.
 	Purpose          string     `json:"purpose"`
 	PurposeExpiresAt *time.Time `json:"purpose_expires_at"`
+	// The server fills these only on the command detail; the list response omits
+	// them, and this struct decodes both. Pointers so an absent field stays
+	// distinguishable from a status the server deliberately left empty.
+	SudoApprovalRequestID *string `json:"sudo_approval_request_id"`
+	SudoGrantStatus       *string `json:"sudo_grant_status"`
 }
 
 type CommandRequest struct {
@@ -162,10 +176,14 @@ func (*AwaitingPurposeError) Error() string {
 }
 
 func (e *CommandRejectedError) Error() string {
-	if e.CommandID == "" {
-		return "command was rejected by a reviewer"
+	reason := "was rejected by a reviewer"
+	if e.Expired {
+		reason = "was not approved before the request expired"
 	}
-	return fmt.Sprintf("command %s was rejected by a reviewer", e.CommandID)
+	if e.CommandID == "" {
+		return "command " + reason
+	}
+	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
 
 // DescribePhase returns the human-readable description for an error_phase,

@@ -71,6 +71,7 @@ type pendingApprovalSignal struct {
 	OK          bool               `json:"ok"`
 	Status      string             `json:"status"`
 	ExitCode    int                `json:"exit_code"`
+	RequestID   string             `json:"request_id"`
 	NextActions []utils.NextAction `json:"next_actions"`
 }
 
@@ -195,6 +196,45 @@ func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) 
 
 	assert.Contains(t, stderr, "Approval wait timed out")
 	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
+}
+
+// TestExecWaitTimeoutCarriesTheApprovalRequestID drives a real --wait-approval
+// timeout through the subprocess and checks that the request id the wait loop
+// picked up while polling reaches the JSON envelope, not just the in-process
+// RunExecWithApprovalWait return value (TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID).
+func TestExecWaitTimeoutCarriesTheApprovalRequestID(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":                       "cmd-1",
+				"status":                   "completed",
+				"success":                  false,
+				"exit_code":                1,
+				"result":                   denialLine("SUDO_APPROVAL_REQUIRED"),
+				"sudo_approval_request_id": "req-9",
+				"sudo_grant_status":        "pending_approval",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	// Wide enough that the wait outlives a slow first poll: the request id only
+	// reaches the envelope once a poll has read it, and every tick here pays a
+	// real HTTP round trip inside a subprocess.
+	stdout, _, exitCode := runExecWaitHelper(t, ts.URL, "--output", "json", "--wait-approval", "300ms", "prod", "--", "sudo", "reboot")
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+
+	var got pendingApprovalSignal
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Equal(t, "req-9", got.RequestID)
 }
 
 // runIntentDeviationHelper drives the real exec command against a server that
@@ -333,26 +373,29 @@ func TestExecRejectedExits6(t *testing.T) {
 // the returned error, and TestExecRejectedExits6 enters through the no-wait path.
 func TestExecRejectedMidWaitExits6(t *testing.T) {
 	t.Parallel()
-	var submissions atomic.Int64
+	var detailReads atomic.Int64
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
-			_, _ = fmt.Fprintf(w, `[{"id":"cmd-%d"}]`, submissions.Add(1))
-		// The first submission is denied with an approval request in flight, so --wait blocks.
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			// The first read is the submission's own completion poll: denied with
+			// an approval request in flight, so --wait enters the loop. A reviewer
+			// rejects it while the loop is waiting, seen on the next detail read.
+			resp := map[string]any{
 				"id":        "cmd-1",
 				"status":    "completed",
 				"success":   false,
 				"exit_code": 1,
 				"result":    denialLine("SUDO_APPROVAL_REQUIRED"),
-			})
-		// A reviewer rejects it while the loop is waiting.
-		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-2/":
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-2", "status": "rejected"})
+			}
+			if detailReads.Add(1) > 1 {
+				resp["sudo_grant_status"] = "rejected"
+			}
+			_ = json.NewEncoder(w).Encode(resp)
 		default:
 			http.NotFound(w, r)
 		}

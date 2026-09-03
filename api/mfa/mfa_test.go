@@ -5,8 +5,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -231,4 +234,82 @@ func TestGetMFALinkByServerName_EmptyWorkspaceCostsNoRoundTrip(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, link)
 	assert.False(t, called, "the name lookup must not run when no workspace can be named")
+}
+
+func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
+	const tick = 10 * time.Millisecond
+	// Long enough that a widening schedule would have reached its widest gap
+	// twice over, and off the tick grid: a deadline landing on the same instant as
+	// a poll leaves the select to pick between them.
+	const waitFor = 125*tick + tick/2
+
+	var polls testutil.PollRecorder
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch r.URL.Path {
+			case mfaURL + "/":
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			case mfaCompletionURL:
+				polls.Record()
+				return http.StatusOK, `{"completed": false}`
+			default:
+				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
+				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
+			}
+		}),
+	}
+
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		err = stepUpForSudo(ac, "my-server", tick, waitFor)
+	})
+
+	require.Error(t, err)
+	// A person is watching a browser through this window, so the gap stays put:
+	// widening it would push the worst-case detection lag from one tick to ten.
+	assert.Equal(t, tick, polls.WidestGap(),
+		"no poll may sit out longer than the base tick")
+}
+
+// Completion has to end the wait on the poll that sees it, and the token refresh
+// that follows is what makes the step-up visible to the retry. HOME points at an
+// empty dir so the refresh has no stored token to spend—which is exactly the
+// failure whose wording a user reads when a step-up completes but the session
+// cannot be renewed.
+func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
+	const tick = 10 * time.Millisecond
+	const waitFor = 125*tick + tick/2
+
+	t.Setenv("HOME", t.TempDir())
+
+	var polls testutil.PollRecorder
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch r.URL.Path {
+			case mfaURL + "/":
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			case mfaCompletionURL:
+				polls.Record()
+				return http.StatusOK, `{"completed": true}`
+			default:
+				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
+				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
+			}
+		}),
+	}
+
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		err = stepUpForSudo(ac, "my-server", tick, waitFor)
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to refresh token after MFA")
+	assert.NotContains(t, err.Error(), "timed out", "completion must end the wait, not run it to the deadline")
+	assert.Equal(t, time.Duration(0), polls.WidestGap(),
+		"the first completed read must end the wait rather than schedule another poll")
 }

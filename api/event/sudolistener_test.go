@@ -199,8 +199,8 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// The client is nil, so the stop has to land before the first poll tick.
 		const stopAfter = 100 * time.Millisecond
-		require.Greater(t, mfaPollingInterval, stopAfter, "a poll before the stop would dereference the nil client")
 		sl := NewSudoListener(nil, "", "")
+		require.Greater(t, sl.pollInterval, stopAfter, "a poll before the stop would dereference the nil client")
 
 		start := time.Now()
 		go func() {
@@ -214,6 +214,33 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 		assert.False(t, result, "should return false when stopped")
 		assert.Equal(t, stopAfter, elapsed, "the stop must land on Stop(), not a poll tick later")
 	})
+}
+
+func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
+	const tick = 10 * time.Millisecond
+	// Long enough that a widening schedule would have reached its widest gap
+	// twice over, and off the tick grid: a deadline landing on the same instant as
+	// a poll leaves the select to pick between them.
+	const waitFor = 125*tick + tick/2
+
+	var polls testutil.PollRecorder
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		polls.Record()
+		return http.StatusOK, `{"completed":false}`
+	})}
+
+	synctest.Test(t, func(t *testing.T) {
+		sl := NewSudoListener(ac, "", "")
+		sl.pollInterval = tick
+		sl.pollTimeout = waitFor
+
+		assert.False(t, sl.pollMFACompletion(), "the wait must end unverified once pollTimeout elapses with no completion")
+	})
+
+	// The buffer this timeout keeps over the server's pending-grant expiry is only
+	// worth having while the gap stays fixed, so a widened tail must fail here.
+	assert.Equal(t, tick, polls.WidestGap(),
+		"no poll may sit out longer than the base tick")
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {

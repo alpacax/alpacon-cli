@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
@@ -49,6 +52,40 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 			assert.ErrorAs(t, err, &terminal, "a settled status must be typed so the caller can exit 6")
 		})
 	}
+}
+
+func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
+	var polls int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&polls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-1","status":"pending"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	// 1ms base tick: the fast window is the first 10ms, then the gap is 5ms.
+	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
+
+	require.Error(t, err)
+	got := atomic.LoadInt32(&polls)
+	assert.Less(t, got, int32(40), "a fixed 1ms tick would poll about 60 times")
+}
+
+func TestPollForApproval_RejectionNamesTheSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-1","status":"rejected"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
+
+	var terminal *terminalWaitError
+	require.ErrorAs(t, err, &terminal)
+	assert.Equal(t, "ws-1", terminal.sessionID)
+	assert.Contains(t, err.Error(), "ws-1")
 }
 
 func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
@@ -182,6 +219,164 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 	assert.NotErrorAs(t, err, &terminal)
 	var pending *pendingWaitError
 	assert.ErrorAs(t, err, &pending)
+}
+
+// A 429 must not starve the wait: the session may still be pending, only the
+// status GET refused. Without the deadline extension, the third 429 (arriving
+// right at the original deadline) would end the wait with "timed out" before
+// the fourth request—the one that finally reports "approved"—ever fires.
+func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
+	const timeout = 30 * time.Millisecond
+	const interval = 10 * time.Millisecond
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests < 4 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	start := time.Now()
+	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, "approved", session.Status)
+	assert.Equal(t, 4, requests)
+	assert.GreaterOrEqual(t, elapsed, timeout, "the throttle extension must carry the wait past the original deadline")
+}
+
+// A run of 429s must not end the wait through the failed-poll cap. That cap is
+// for a server the CLI cannot reach; a 429 is the server answering, and the
+// throttle budget plus the deadline are what bound it.
+func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	const interval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= throttled {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, throttled+1, requests)
+}
+
+// The throttle budget is spent, not re-earned. Reading the same pending status
+// again is no more progress than the 429 before it, so a wait that keeps being
+// throttled must still end within one timeout of extensions.
+func TestPollForApproval_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T) {
+	const timeout = 100 * time.Millisecond
+	const interval = time.Millisecond
+
+	requests := 0
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		requests++
+		// A throttled stretch long enough to spend the whole allowance, then one
+		// clean read of a session sitting exactly where it was.
+		if requests%8 != 0 {
+			return http.StatusTooManyRequests, ""
+		}
+		return http.StatusOK, `{"id":"ws-uuid","status":"pending"}`
+	})}
+
+	var elapsed time.Duration
+	var err error
+	testutil.CaptureOutput(t, func() {
+		synctest.Test(t, func(*testing.T) {
+			start := time.Now()
+			_, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			elapsed = time.Since(start)
+		})
+	})
+
+	require.Error(t, err)
+	assert.Less(t, elapsed, utils.ThrottleCeiling(timeout, interval), "the wait outran one timeout of extensions, so the budget was refilled rather than spent")
+}
+
+// The per-poll "Poll failed" line belongs to failures the cap still counts. A
+// throttled run is uncapped, so it warns once and then holds its peace.
+func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	const interval = 2 * time.Millisecond
+	throttled := utils.MaxConsecutivePollFailures + 1
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= throttled {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
+	assert.NotContains(t, stderr, "Poll failed")
+}
+
+// The progress line reports how long the caller has been waiting, so a 429 that
+// pushes the deadline out must not make it shrink. Deriving it from what is left
+// before a moving deadline did exactly that: six throttled polls buy ~1.26s of
+// extension, and the wait then reported 0s elapsed after 1.26s of waiting.
+func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testing.T) {
+	const timeout = 2 * time.Second
+	const interval = 20 * time.Millisecond
+	const throttled = 6
+
+	requests := 0
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		requests++
+		if requests <= throttled {
+			return http.StatusTooManyRequests, ""
+		}
+		// One pending read prints the progress line under test; the next ends the
+		// wait, so the assertion does not sit out the extended deadline.
+		if requests == throttled+1 {
+			return http.StatusOK, `{"id":"ws-uuid","status":"pending"}`
+		}
+		return http.StatusOK, `{"id":"ws-uuid","status":"active"}`
+	})}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		synctest.Test(t, func(*testing.T) {
+			_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		})
+	})
+
+	// Six throttled polls buy ~1.26s, so the window the line reports against is
+	// the extended 3s rather than the 2s the flag asked for.
+	assert.Contains(t, stderr, "1s elapsed of 3s")
+	assert.NotContains(t, stderr, "0s elapsed of")
 }
 
 // Guards the attempt-count regression: at interval=10ms the old logic returned
@@ -519,4 +714,94 @@ func TestWorkSessionCreateWaitJSONOutputIncludesAdjustments(t *testing.T) {
 	assert.Equal(t, []string{"command"}, got.WorkSession.Adjustments.Scopes.New)
 	require.Len(t, got.WorkSession.Recommendations, 1)
 	assert.Equal(t, "high", got.WorkSession.Recommendations[0].Severity)
+}
+
+// rejectedWaitServer answers a create whose first poll comes back rejected, so a
+// --wait run settles without a grant on its first tick.
+func rejectedWaitServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+			_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected","expires_at":"2026-06-01T12:00:00Z"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+func rejectedWaitArgs() []string {
+	return []string{
+		"create", "--purpose", "incident", "--scope", "command", "--server", "prod",
+		"--expires-at", "2026-06-01T12:00:00Z", "--wait",
+	}
+}
+
+func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
+	ts := rejectedWaitServer()
+	defer ts.Close()
+
+	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, rejectedWaitArgs()...)
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refused wait is settled, not pending; stderr: %s", stderr)
+	assert.Contains(t, stderr, "ses-x")
+	assert.Contains(t, stderr, "alpacon work-session describe ses-x")
+	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+	assert.NotContains(t, stderr, "work-session use", "see TestRunUseSessionRefusesASettledSession")
+	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
+}
+
+func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
+	ts := rejectedWaitServer()
+	defer ts.Close()
+
+	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 6,
+		"message": "work session was rejected (work session ses-x)",
+		"context": {"operation": "create", "work_session_id": "ses-x"},
+		"next_actions": [
+			{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
+			{"command": "alpacon work-session complete ses-x"}
+		]
+	}`, stderr)
+}
+
+// The refusal's follow-ups are read by an agent that runs them, so every one of
+// them has to be a command the session can still take. RunUseSession is the seam
+// that decides: it refuses anything but an active session, and none of the five
+// statuses behind a terminalWaitError can become active again.
+func TestRunUseSessionRefusesASettledSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := RunUseSession(ac, "ses-x")
+
+	require.Error(t, err, "a rejected session must not be attachable")
+	for _, action := range terminalWaitNextActions("ses-x") {
+		assert.NotContains(t, action.Command, "work-session use",
+			"a refusal must not hand back a command RunUseSession will reject")
+	}
+}
+
+func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
+	terminal := &terminalWaitError{message: "work session was rejected", sessionID: "ses-\x1b[2Kx"}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		printTerminalWaitError(terminal, terminal)
+	})
+
+	assert.NotContains(t, stderr, "\x1b[2K")
+	assert.Contains(t, stderr, "work session was rejected")
 }

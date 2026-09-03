@@ -3,6 +3,7 @@ package worksession
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
@@ -22,8 +23,6 @@ const (
 	waitMsgApproval   = "Waiting for approval..."
 	waitMsgActivation = "Waiting for activation..."
 )
-
-type useDecision int
 
 const (
 	useDecisionNoop useDecision = iota
@@ -262,7 +261,12 @@ so it is recorded and scoped accordingly.`,
 			// failure falls through to the general-error code.
 			var terminal *terminalWaitError
 			if errors.As(err, &terminal) {
-				utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, opCreate, err, "%s", err)
+				if utils.OutputFormat == utils.OutputFormatJSON {
+					printTerminalWaitErrorJSON(opCreate, terminal, err)
+					os.Exit(utils.ExitCodeNotApproved)
+				}
+				printTerminalWaitError(terminal, err)
+				os.Exit(utils.ExitCodeNotApproved)
 			}
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
@@ -304,14 +308,27 @@ so it is recorded and scoped accordingly.`,
 	},
 }
 
+// useDecision is what the post-create switch does about --use: nothing, attach
+// now, refuse a session no approval can attach yet unless --wait was passed, or
+// wait out one the server has approved but not activated.
+type useDecision int
+
 // terminalWaitError marks a wait that ended in a status the session can never leave.
 // Distinguished from a polling failure so the two do not share an exit code: an agent
 // that reads only the exit code would otherwise retry a rejected request forever.
 type terminalWaitError struct {
 	message string
+	// sessionID names the session the wait left behind. The session outlives a
+	// refusal, so a caller told only "rejected" has no way back to it.
+	sessionID string
 }
 
-func (e *terminalWaitError) Error() string { return e.message }
+func (e *terminalWaitError) Error() string {
+	if e.sessionID == "" {
+		return e.message
+	}
+	return fmt.Sprintf("%s (work session %s)", e.message, e.sessionID)
+}
 
 // pendingWaitError marks a wait that ended with the outcome still open—the window
 // elapsed, or the CLI could not reach the server for a bounded run of polls. Either
@@ -323,6 +340,58 @@ type pendingWaitError struct {
 }
 
 func (e *pendingWaitError) Error() string { return e.message }
+
+// terminalWaitErrorCtx is the JSON error envelope context for a wait that
+// settled without a grant. WorkSessionID is a structured field here—not only
+// folded into the message text—so a machine consumer can act on it without
+// parsing prose.
+type terminalWaitErrorCtx struct {
+	Operation     string `json:"operation"`
+	WorkSessionID string `json:"work_session_id,omitempty"`
+}
+
+// printTerminalWaitErrorJSON writes the settled-without-a-grant refusal as a
+// structured envelope, with the follow-ups as NextActions rather than folded
+// into the message text.
+func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, err error) {
+	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
+		OK:          false,
+		ExitCode:    utils.ExitCodeNotApproved,
+		Message:     err.Error(),
+		Context:     terminalWaitErrorCtx{Operation: operation, WorkSessionID: terminal.sessionID},
+		NextActions: terminalWaitNextActions(terminal.sessionID),
+	})
+}
+
+// terminalWaitNextActions is what a caller can still do with the session the
+// refusal left behind: read why it settled, or give it up. Not `work-session
+// use`—that is the pending path's follow-up, and RunUseSession refuses anything
+// but an active session, which none of these statuses can become again.
+func terminalWaitNextActions(sessionID string) []utils.NextAction {
+	return []utils.NextAction{
+		{Command: fmt.Sprintf("alpacon work-session describe %s", sessionID), Description: "why it settled"},
+		{Command: fmt.Sprintf("alpacon work-session complete %s", sessionID)},
+	}
+}
+
+// printTerminalWaitError writes the refusal and its follow-ups to stderr in the
+// shape every other next-action surface uses. Assembled and written once rather
+// than through CliError, which appends the report-a-bug pointer: a reviewer
+// saying no is the feature working, so the gate refusal (exit 3) leaves that
+// pointer off too.
+func printTerminalWaitError(terminal *terminalWaitError, err error) {
+	var sb strings.Builder
+	// The message carries a server-issued session id, so it takes the sanitizer
+	// CliError would otherwise have applied on the way out.
+	message, _ := utils.SanitizeTerminalBlock(err.Error())
+	fmt.Fprintf(&sb, "%s: %s\n", utils.Red("Error"), message)
+	fmt.Fprintln(&sb)
+	fmt.Fprintln(&sb, "Next:")
+	for _, action := range terminalWaitNextActions(terminal.sessionID) {
+		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
+	}
+	fmt.Fprint(os.Stderr, sb.String())
+}
 
 // parseExpiryFlag validates the --expires-in / --expires-at mutual exclusion
 // and returns an RFC3339 expires_at string.
@@ -435,20 +504,43 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 // auto-activates). Deadline-based rather than attempt-count-based so a timeout
 // under one interval (e.g. --wait-approval 15s) still waits the full duration.
 // A failed poll does not end the wait—one 429 would otherwise discard a
-// half-hour wait—unless it will repeat (a fatal 4xx) or already has.
+// half-hour wait. A fatal 4xx ends it at once and a run of other transient
+// failures ends it at MaxConsecutivePollFailures, but a run of 429s does not:
+// the throttle budget and the deadline bound that instead.
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
-	deadline := time.Now().Add(timeout)
+	start := time.Now()
+	deadline := start.Add(timeout)
 	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
 	failures := 0
+	throttles := 0
+	budget := utils.NewThrottleBudget(timeout)
+	lastStatus := ""
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
 		if err != nil {
-			failures++
 			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
 			}
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
+			// A 429 says the server is answering, so it is not counted toward the
+			// cap below—the throttle budget and the deadline bound it instead, and
+			// counting it would end the wait before the budget it just spent could
+			// carry it anywhere. Uncapped, it also warns once rather than per poll.
+			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
+				delay := utils.NextPollBackoff(interval, throttles, utils.RetryAfter(err))
+				throttles++
+				budget.WarnThrottled(delay)
+				if newDeadline, extended := budget.Extend(deadline, delay); extended {
+					deadline = newDeadline
+				}
+				if !pollSleep(deadline, delay) {
+					return nil, timedOut
+				}
+				continue
+			}
+			failures++
+			// The deadline outranks the cap: once the window is over, "timed out"
+			// is the honest answer even when this poll also filled the cap.
+			if !time.Now().Before(deadline) {
 				return nil, timedOut
 			}
 			if failures >= utils.MaxConsecutivePollFailures {
@@ -460,10 +552,22 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return nil, &pendingWaitError{message: fmt.Sprintf("gave up after %d failed polls", failures)}
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
-			pollSleep(remaining, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err)))
+			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
+				return nil, timedOut
+			}
 			continue
 		}
 		failures = 0
+		throttles = 0
+		// Only a status change is progress. Resetting on every successful poll would
+		// re-earn the whole extension allowance from any non-429 response, leaving
+		// the wait no ceiling but the extension count. The first status read is not
+		// a change: nothing was observed before it, and the throttles that preceded
+		// it are exactly what the allowance is meant to bound.
+		if lastStatus != "" && s.Status != lastStatus {
+			budget.Reset()
+		}
+		lastStatus = s.Status
 		switch s.Status {
 		case activeWorkSessionStatus:
 			return s, nil
@@ -472,38 +576,50 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 				return s, nil
 			}
 		case rejectedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was rejected"}
+			return nil, &terminalWaitError{message: "work session was rejected", sessionID: id}
 		case expiredWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session expired while waiting for approval"}
+			return nil, &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
 		case revokedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was revoked"}
+			return nil, &terminalWaitError{message: "work session was revoked", sessionID: id}
 		case cancelledWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was cancelled"}
+			return nil, &terminalWaitError{message: "work session was cancelled", sessionID: id}
 		case completedWorkSessionStatus:
-			return nil, &terminalWaitError{message: "work session was completed unexpectedly"}
+			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
 		}
 
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return nil, timedOut
-		}
 		waitMsg := waitMsgApproval
 		if s.Status == approvedWorkSessionStatus {
 			waitMsg = waitMsgActivation
 		}
-		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, (timeout - remaining).Round(time.Second), timeout)
-		pollSleep(remaining, interval)
+		// Measured from the start rather than from what is left before the
+		// deadline, which a 429's extension moves: subtracting a moving deadline
+		// would make the reported elapsed time shrink as the wait grew. The window
+		// it is reported against moves with the deadline for the same reason—held
+		// at the flag's timeout, an extended wait would read as one that outran it.
+		elapsed := time.Since(start)
+		window := elapsed + time.Until(deadline)
+		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
+		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
+			return nil, timedOut
+		}
 	}
 }
 
-// pollSleep waits want, capped at remaining (must be positive); a non-positive
-// want falls back to remaining rather than spinning.
-func pollSleep(remaining, want time.Duration) {
+// pollSleep waits want, capped at the time left before deadline, and reports
+// whether the wait may go on; false means the window closed. The deadline test
+// lives here so the wait states it once rather than at every sleep. A
+// non-positive want falls back to the whole remainder rather than spinning.
+func pollSleep(deadline time.Time, want time.Duration) bool {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
 	step := min(remaining, want)
 	if step <= 0 {
 		step = remaining
 	}
 	time.Sleep(step)
+	return true
 }
 
 func init() {
