@@ -53,7 +53,7 @@ Keep these stable—scripts, CI, and AI agents branch on them. See README "Exit 
 
 ## Release workflow conventions
 
-- Every `uses:` in `.github/workflows/` is pinned to a 40-character commit SHA, with the version in a trailing comment: `uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0`
+- Every `uses:` in `.github/workflows/` that names another repository is pinned to a 40-character commit SHA, with the version in a trailing comment. The one local reference, `uses: ./.github/workflows/build-and-test.yaml`, runs at the calling commit and has nothing to pin: `uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0`
 - Never replace a pinned SHA with a tag. A tag is a ref its own repository can move—`v6.1.0` no less than `v6`—so a moved tag runs new code inside our release build with nothing in our diff to show it. A SHA is the hash of the commit it names and cannot come to mean different content
 - Keep the trailing version comment. It is the only thing that says which version a SHA is, and it is what Dependabot rewrites when raising a pin. `.github/dependabot.yml` has it check the actions weekly
 - Raising a pin means changing both the SHA and its comment together. Resolve the SHA rather than guessing it: `gh api repos/OWNER/REPO/commits/vX.Y.Z --jq .sha`
