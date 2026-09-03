@@ -364,10 +364,12 @@ func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, e
 }
 
 // terminalWaitNextActions is what a caller can still do with the session the
-// refusal left behind: attach it if approval lands out of band, or give it up.
+// refusal left behind: read why it settled, or give it up. Not `work-session
+// use`—that is the pending path's follow-up, and RunUseSession refuses anything
+// but an active session, which none of these statuses can become again.
 func terminalWaitNextActions(sessionID string) []utils.NextAction {
 	return []utils.NextAction{
-		{Command: fmt.Sprintf("alpacon work-session use %s", sessionID)},
+		{Command: fmt.Sprintf("alpacon work-session describe %s", sessionID), Description: "why it settled"},
 		{Command: fmt.Sprintf("alpacon work-session complete %s", sessionID)},
 	}
 }

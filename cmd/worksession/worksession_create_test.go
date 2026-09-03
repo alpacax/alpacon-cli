@@ -749,8 +749,9 @@ func TestWorkSessionCreateWaitRejectedNamesTheSessionOnStderr(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a refused wait is settled, not pending; stderr: %s", stderr)
 	assert.Contains(t, stderr, "ses-x")
-	assert.Contains(t, stderr, "alpacon work-session use ses-x")
+	assert.Contains(t, stderr, "alpacon work-session describe ses-x")
 	assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+	assert.NotContains(t, stderr, "work-session use", "see TestRunUseSessionRefusesASettledSession")
 	assert.NotContains(t, stderr, "report on https://github.com", "a reviewer saying no is not a bug to file")
 }
 
@@ -761,24 +762,37 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 	_, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, rejectedWaitArgs()...)
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 6,
+		"message": "work session was rejected (work session ses-x)",
+		"context": {"operation": "create", "work_session_id": "ses-x"},
+		"next_actions": [
+			{"command": "alpacon work-session describe ses-x", "description": "why it settled"},
+			{"command": "alpacon work-session complete ses-x"}
+		]
+	}`, stderr)
+}
 
-	var env struct {
-		OK       bool   `json:"ok"`
-		ExitCode int    `json:"exit_code"`
-		Message  string `json:"message"`
-		Context  struct {
-			Operation     string `json:"operation"`
-			WorkSessionID string `json:"work_session_id"`
-		} `json:"context"`
-		NextActions []utils.NextAction `json:"next_actions"`
+// The refusal's follow-ups are read by an agent that runs them, so every one of
+// them has to be a command the session can still take. RunUseSession is the seam
+// that decides: it refuses anything but an active session, and none of the five
+// statuses behind a terminalWaitError can become active again.
+func TestRunUseSessionRefusesASettledSession(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-x","status":"rejected"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := RunUseSession(ac, "ses-x")
+
+	require.Error(t, err, "a rejected session must not be attachable")
+	for _, action := range terminalWaitNextActions("ses-x") {
+		assert.NotContains(t, action.Command, "work-session use",
+			"a refusal must not hand back a command RunUseSession will reject")
 	}
-	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
-	assert.False(t, env.OK)
-	assert.Equal(t, utils.ExitCodeNotApproved, env.ExitCode)
-	assert.Equal(t, "ses-x", env.Context.WorkSessionID)
-	require.Len(t, env.NextActions, 2)
-	assert.Equal(t, "alpacon work-session use ses-x", env.NextActions[0].Command)
-	assert.Equal(t, "alpacon work-session complete ses-x", env.NextActions[1].Command)
 }
 
 func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
