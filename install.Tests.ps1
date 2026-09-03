@@ -593,7 +593,9 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
 
     It 'refuses a Path stored as a kind a string write would destroy' {
         $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($script:SubKey)
-        $key.SetValue('Path', @('C:\one', 'C:\two'), [Microsoft.Win32.RegistryValueKind]::MultiString)
+        # Cast: SetValue wants a string[] for MultiString, and PowerShell's
+        # array literal is an object[], which it refuses.
+        $key.SetValue('Path', [string[]]@('C:\one', 'C:\two'), [Microsoft.Win32.RegistryValueKind]::MultiString)
         $key.Close()
 
         { Add-ToUserPath -Directory 'C:\Alpacon\bin' -SubKey $script:SubKey } |
