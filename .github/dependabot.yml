@@ -22,3 +22,10 @@ updates:
       dependencies:
         patterns:
           - "*"
+    # smux tagged v2 in 2019 without a /v2 module path, so Go ranks
+    # v2.0.1+incompatible above v1.5.57 on the number alone. That tree predates
+    # MaxStreamBuffer, which config.GetSmuxConfig sets, so the bump does not
+    # compile. Drop this once a real /v2 module exists.
+    ignore:
+      - dependency-name: "github.com/xtaci/smux"
+        update-types: ["version-update:semver-major"]
