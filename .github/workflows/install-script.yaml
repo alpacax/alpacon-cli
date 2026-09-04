@@ -1,0 +1,221 @@
+name: Install script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "install.ps1"
+      - "install.Tests.ps1"
+      - ".github/workflows/install-script.yaml"
+      - "PSScriptAnalyzerSettings.psd1"
+      # The suite cross-checks these two against the documented download URL.
+      - "README.md"
+      - ".goreleaser.yaml"
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+    paths:
+      - "install.ps1"
+      - "install.Tests.ps1"
+      - ".github/workflows/install-script.yaml"
+      - "PSScriptAnalyzerSettings.psd1"
+      # The suite cross-checks these two against the documented download URL.
+      - "README.md"
+      - ".goreleaser.yaml"
+
+  # install.ps1 is a release asset, so a tag must not publish a script this
+  # suite has never seen. release.yaml calls this before goreleaser runs.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # No `name:` on any job here, following build-and-test.yaml: the job id is
+  # then the check context, and a matrix leg reads as `unit (powershell)`.
+  #
+  # The script parses, and reads a redirect, differently on each edition, so run
+  # the suite on both. The redirect tests themselves are mocked; only the
+  # end-to-end job below talks to GitHub, and it runs on 5.1 alone.
+  unit:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell is Windows PowerShell 5.1, pwsh is PowerShell 7.
+        edition: [powershell, pwsh]
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The matrix is not available in a step's `shell:`, so the edition is the
+      # host this step launches rather than the shell GitHub picks for it.
+      - name: Run Pester
+        run: ${{ matrix.edition }} -NoProfile -File .github/scripts/run-installer-tests.ps1
+
+  analyze:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PSScriptAnalyzer
+        shell: powershell
+        run: Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer
+        shell: powershell
+        run: |
+          # The runner image ships PSScriptAnalyzer too, so pin it on import.
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force
+          $found = @(
+            'install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1' |
+              ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Settings ./PSScriptAnalyzerSettings.psd1 }
+          )
+          $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host
+          if ($found.Count -gt 0) { exit 1 }
+
+  end-to-end:
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The script preserves whatever value kind the user PATH already has, so
+      # record it before installing rather than asserting one afterwards.
+      - name: Remember the user PATH value kind
+        shell: powershell
+        run: |
+          $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $kind = 'None'
+          if ($key) {
+            if ($null -ne $key.GetValue('Path', $null)) { $kind = $key.GetValueKind('Path') }
+            $key.Close()
+          }
+          Write-Host "user PATH value kind before install: $kind"
+          # ascii, not utf8: Windows PowerShell writes a BOM for utf8, and this
+          # is the first line in the file. A RegistryValueKind name and the
+          # literal None are both ASCII.
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PATH_KIND_BEFORE=$kind" -Encoding ascii
+
+      # Windows PowerShell 5.1 is what a user actually has, so exercise the
+      # script there rather than in the PowerShell 7 that runners also ship.
+      - name: Install from scratch
+        shell: powershell
+        run: ./install.ps1
+
+      - name: The binary answers
+        shell: powershell
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\alpacon.exe'
+          if (-not (Test-Path $exe)) { throw "alpacon.exe was not installed" }
+          # alpacon prints on stderr, and capturing a native command's stderr
+          # while $ErrorActionPreference is 'Stop' makes it terminating.
+          $prior = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          $reported = (& $exe version 2>&1) | Out-String
+          $ErrorActionPreference = $prior
+          Write-Host $reported
+          if ($reported -notmatch 'Current version') { throw "alpacon version said nothing: $reported" }
+
+      - name: The user PATH kept its value kind and gained one entry
+        shell: powershell
+        run: |
+          $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          if (-not $key) { throw "HKCU\Environment is gone" }
+          $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $kind = $key.GetValueKind('Path')
+          $key.Close()
+          $dir = Join-Path $env:LOCALAPPDATA 'Alpacon\bin'
+          # ExpandString only when the script had to create the value; otherwise
+          # whatever kind was there must have survived.
+          $expected = if ($env:PATH_KIND_BEFORE -eq 'None') { 'ExpandString' } else { $env:PATH_KIND_BEFORE }
+          if ("$kind" -ne $expected) { throw "user PATH is $kind, expected $expected" }
+          $hits = @($raw -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
+
+      # The run that installs nothing still has to put the directory on the
+      # PATH of the shell it was started from, because that shell can predate
+      # the install that placed alpacon and gets no other chance to learn of it.
+      - name: Running it again reports it is already current and still fixes this shell
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Alpacon\bin'
+          $env:Path = (@($env:Path -split ';' | Where-Object { $_ -and $_ -ne $dir }) -join ';')
+          $output = ./install.ps1 6>&1 | Out-String
+          if ($output -notmatch 'already') { throw "second run did not report an existing install: $output" }
+          $hits = @($env:Path -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($hits -ne 1) { throw "the skipped run left this shell's PATH with $hits copies of $dir, expected 1" }
+
+      # This is the first re-run that reaches Add-ToUserPath at all: the step
+      # above skips out before it, so counting PATH entries there would measure
+      # a branch that cannot add one.
+      - name: A missing binary is reinstalled without a second PATH entry
+        shell: powershell
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Alpacon\bin'
+          $exe = Join-Path $dir 'alpacon.exe'
+          Remove-Item -LiteralPath $exe
+          ./install.ps1
+          if (-not (Test-Path $exe)) { throw "a quarantined binary was not reinstalled" }
+          $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment')
+          $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+          $key.Close()
+          $hits = @($raw -split ';' | Where-Object { $_ -eq $dir }).Count
+          if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
+
+      # 1.10.0 is simply an older release that still ships Windows archives.
+      # Any published version older than the latest one does the job.
+      - name: Pinning an older version installs that version
+        shell: powershell
+        run: |
+          ./install.ps1 -Version 1.10.0
+          $marker = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\installed-version.txt'
+          $got = (Get-Content $marker -Raw).Trim()
+          if ($got -ne '1.10.0') { throw "version marker says '$got', expected '1.10.0'" }
+          # The marker is what the script wrote about itself, so ask the binary
+          # too. alpacon prints it on stderr, and capturing a native command's
+          # stderr while $ErrorActionPreference is 'Stop' makes it terminating,
+          # so relax that for this one call.
+          $exe = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\alpacon.exe'
+          $prior = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          $reported = (& $exe version 2>&1) | Out-String
+          $ErrorActionPreference = $prior
+          if ($reported -notmatch '1\.10\.0') { throw "alpacon reports '$reported', expected 1.10.0" }
+
+      # The shape a pipeline actually hits: -Version reads a variable nobody
+      # set, so it arrives as an empty string. That has to be refused, because
+      # installing the latest release is the one thing a pin rules out.
+      - name: An empty -Version is refused instead of falling back to latest
+        shell: powershell
+        run: |
+          $marker = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\installed-version.txt'
+          $before = (Get-Content $marker -Raw).Trim()
+          $refused = $false
+          try {
+            ./install.ps1 -Version "$env:PINNED_VERSION_NOBODY_SET"
+          } catch {
+            if ("$_" -notlike '*is not a version number*') { throw }
+            $refused = $true
+          }
+          if (-not $refused) { throw "install.ps1 accepted an empty -Version" }
+          $after = (Get-Content $marker -Raw).Trim()
+          if ($after -ne $before) { throw "the install went ahead anyway: the marker moved from '$before' to '$after'" }
+
+      - name: A running binary is refused instead of overwritten
+        shell: powershell
+        run: |
+          $exe = Join-Path $env:LOCALAPPDATA 'Alpacon\bin\alpacon.exe'
+          $before = (Get-FileHash $exe).Hash
+          $stream = [System.IO.File]::Open($exe, 'Open', 'ReadWrite', 'None')
+          try {
+            $refused = $false
+            try {
+              ./install.ps1 -Force
+            } catch {
+              if ("$_" -notlike '*cannot be replaced*') { throw }
+              $refused = $true
+            }
+            if (-not $refused) { throw "install.ps1 did not refuse to overwrite a locked binary" }
+          } finally { $stream.Close() }
+          if ((Get-FileHash $exe).Hash -ne $before) { throw "the locked binary was replaced" }

@@ -48,7 +48,22 @@ sudo yum update alpacon   # update
 ```
 
 ### Windows
-Download the latest `.zip` from [Releases](https://github.com/alpacax/alpacon-cli/releases) and add the binary to your `PATH`. Update it in place with `alpacon update`.
+```powershell
+irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\Alpacon\bin` and puts that directory on your user `PATH`—no administrator rights needed. Windows 10 and 11 carry everything it needs; on anything older, PowerShell 5.0 is the floor, since that is where `Expand-Archive` arrives. The execution policy does not have to be relaxed, because `iex` runs a string rather than a script file. A device policy that forces constrained language mode does block it, and it says so instead of failing halfway. After an install or an update, the shell you ran it in can use `alpacon` right away; terminals that were already open need a restart. Run the same command again to update. `alpacon update` updates this install as well, since no package manager owns a binary the script placed.
+
+The script is piped straight into `iex`, so you run it without reading it first. To look before you run, open a release on [Releases](https://github.com/alpacax/alpacon-cli/releases), download `install.ps1` and `alpacon-<version>-checksums.sha256` from it, compare the file's SHA256 against the `install.ps1` line in that checksums file, and then run the file. Both come from the same release, so this proves the download arrived intact—not that the release itself is what we meant to publish.
+
+`irm | iex` cannot pass arguments, so pass `-Version` to pin a release, or `-Force` to reinstall the version you already have, through a script block:
+
+```powershell
+&([scriptblock]::Create((irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1))) -Version 1.10.0
+&([scriptblock]::Create((irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1))) -Force
+```
+
+Pre-built `.zip` archives for 64-bit x86 and for ARM stay on [Releases](https://github.com/alpacax/alpacon-cli/releases). There is no 32-bit x86 build, and the installer says so rather than guessing.
 
 ### Docker
 ```bash
@@ -64,7 +79,7 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 ### Updating
 
-`alpacon update` brings the CLI to the latest release. A binary built from source carries the version `dev`, which matches no release, so the command refuses it and says so—build with GoReleaser or install a released build to use it. A binary you placed yourself is downloaded, verified against the release's SHA-256 checksums, and replaced in place; the old binary is kept beside it until the replacement succeeds—on Windows, where a running executable stays locked, it is kept as `alpacon.exe.old.<timestamp>` and removed by the next update. A binary a package manager or a version manager owns is never overwritten—the command prints how to update through that tool and exits `1`, leaving the upgrade to you. If the ownership question cannot be answered at all—`rpm -qf` takes a read lock on the rpm database, so it is killed when another package transaction holds it—the binary is left alone rather than assumed unowned, and the command says to retry once that transaction has finished. Homebrew, deb and rpm get the exact command; mise and asdf are named without one, since the command depends on how the tool was set up. While it runs it holds `.alpacon-update.lock` beside the binary, so two updates cannot replace the same file at once; the file stays there afterwards and is safe to leave alone. The command only moves forward: a build ahead of the latest release, such as a release candidate, is left alone rather than downgraded. `alpacon update --check` reports whether a newer release exists and installs nothing, exiting `8` when there is one.
+`alpacon update` brings the CLI to the latest release. A binary built from source carries the version `dev`, which matches no release, so the command refuses it and says so—build with GoReleaser or install a released build to use it. A binary you placed yourself is downloaded, verified against the release's SHA-256 checksums, and replaced in place; the old binary is kept beside it until the replacement succeeds—on Windows, where a running executable stays locked, it is kept as `alpacon.exe.old.<timestamp>` and removed by the next update. A binary a package manager or a version manager owns is never overwritten—the command prints how to update through that tool and exits `1`, leaving the upgrade to you. If the ownership question cannot be answered at all—`rpm -qf` takes a read lock on the rpm database, so it is killed when another package transaction holds it—the binary is left alone rather than assumed unowned, and the command says to retry once that transaction has finished. Homebrew, deb and rpm get the exact command; mise and asdf are named without one, since the command depends on how the tool was set up. While it runs it holds `.alpacon-update.lock` beside the binary, so two updates cannot replace the same file at once; the file stays there afterwards and is safe to leave alone. The command only moves forward: a build ahead of the latest release, such as a release candidate, is left alone rather than downgraded. `alpacon update --check` reports whether a newer release exists and installs nothing, exiting `8` when there is one. On Windows it also puts the install script's record of the installed version back in step, so the script and the command can be mixed without one of them acting on a version that is no longer there.
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
@@ -110,6 +125,8 @@ Remove-Item alpacon.exe.old.<timestamp>
 ```
 
 To go back to the version you had instead, rename `alpacon.exe.old.<timestamp>` and delete the staged copy. Either way the next update sweeps whichever one you leave.
+
+On an install the Windows script placed, running the one-liner again is the easier way out: it finds no `alpacon.exe`, treats the directory as empty and installs the latest release. The two leftover files stay where they are, and the next `alpacon update` sweeps them.
 
 ## Quick start
 
