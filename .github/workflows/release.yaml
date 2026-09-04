@@ -15,7 +15,7 @@ jobs:
       contents: write
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Create draft GitHub Release with auto notes
         env:
@@ -45,9 +45,13 @@ jobs:
     permissions:
       contents: write
       packages: write
+      # Build provenance is signed with a short-lived certificate minted from
+      # this job's OIDC identity, so there is no long-lived key to leak.
+      id-token: write
+      attestations: write
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -55,7 +59,7 @@ jobs:
         run: git fetch --force --tags
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -63,7 +67,7 @@ jobs:
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -76,7 +80,7 @@ jobs:
       # GitHub App instead.
       - name: Generate App token
         id: release-publisher-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ secrets.RELEASE_PUBLISHER_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
@@ -91,7 +95,7 @@ jobs:
           permission-contents: write
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v1"
@@ -99,31 +103,61 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.release-publisher-token.outputs.token }}
 
+      # The checksums file says an archive is the one this release names; the
+      # attestation says which workflow, at which commit, built it. Stealing a
+      # release token is enough to rewrite the first and not the second.
+      # The pushed Docker image has no dist/ file, so it's attested below by digest.
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+
+      # Both tags share one manifest, so one digest covers them. A bare
+      # field template silently no-ops here, so JSON plus jq reads the digest.
+      - name: Read the pushed image digest
+        id: image-digest
+        run: |
+          digest="$(docker buildx imagetools inspect --format '{{json .Manifest}}' "alpacax/alpacon-cli:${GITHUB_REF_NAME#v}" | jq -r .digest)"
+          test -n "${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Attest release image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: index.docker.io/alpacax/alpacon-cli
+          subject-digest: ${{ steps.image-digest.outputs.digest }}
+
       - name: Strip "v" prefix from tag
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
         env:
-          GITHUB_REF_NAME: ${{ github.ref_name }} 
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Upload AMD64 DEB artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Upload AMD64 RPM artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
       - name: Upload ARM64 DEB artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
 
       - name: Upload ARM64 RPM artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
           path: dist/alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
@@ -137,30 +171,32 @@ jobs:
       - name: Strip "v" prefix from tag
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
         env:
-          GITHUB_REF_NAME: ${{ github.ref_name }} 
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
       - name: Download AMD64 DEB Artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
 
       - name: Download AMD64 RPM Artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
 
       - name: Download ARM64 DEB Artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
 
       - name: Download ARM64 RPM Artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
 
+      # No newer tag exists to raise this pin to (v1 since 2021-08);
+      # replace with a direct PackageCloud API call instead.
       - name: Upload AMD64 DEB to PackageCloud
-        uses: danielmundi/upload-packagecloud@v1
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.deb
           PACKAGECLOUD-USERNAME: alpacax
@@ -169,7 +205,7 @@ jobs:
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
       - name: Upload AMD64 RPM to PackageCloud
-        uses: danielmundi/upload-packagecloud@v1
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_amd64.rpm
           PACKAGECLOUD-USERNAME: alpacax
@@ -178,7 +214,7 @@ jobs:
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
       - name: Upload ARM64 DEB to PackageCloud
-        uses: danielmundi/upload-packagecloud@v1
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.deb
           PACKAGECLOUD-USERNAME: alpacax
@@ -187,7 +223,7 @@ jobs:
           PACKAGECLOUD-TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
 
       - name: Upload ARM64 RPM to PackageCloud
-        uses: danielmundi/upload-packagecloud@v1
+        uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
           PACKAGE-NAME: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
           PACKAGECLOUD-USERNAME: alpacax
