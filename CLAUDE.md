@@ -30,8 +30,10 @@ The Windows installer has its own suite. `.github/workflows/install-script.yaml`
 # The same script CI runs: it installs the pinned Pester, runs the suite and
 # reads the result, since Invoke-Pester throws nothing when discovery fails or
 # finds no tests. powershell is Windows PowerShell 5.1, pwsh is PowerShell 7.
-powershell -NoProfile -File .github/scripts/run-installer-tests.ps1
-pwsh -NoProfile -File .github/scripts/run-installer-tests.ps1
+# Bypass is for the runner file, not for install.ps1: a Windows client defaults
+# to an execution policy that refuses to load a script file at all.
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/scripts/run-installer-tests.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .github/scripts/run-installer-tests.ps1
 
 Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -SkipPublisherCheck -Scope CurrentUser
 # Import the pinned version: auto-loading picks the highest one on the machine.

@@ -52,7 +52,7 @@ sudo yum update alpacon   # update
 irm https://github.com/alpacax/alpacon-cli/releases/latest/download/install.ps1 | iex
 ```
 
-Installs to `%LOCALAPPDATA%\Alpacon\bin` and puts that directory on your user `PATH`—no administrator rights needed. After an install or an update, the shell you ran it in can use `alpacon` right away; terminals that were already open need a restart. Run the same command again to update. `alpacon update` updates this install as well, since no package manager owns a binary the script placed.
+Installs to `%LOCALAPPDATA%\Alpacon\bin` and puts that directory on your user `PATH`—no administrator rights needed. Windows 10 and 11 carry everything it needs; on anything older, PowerShell 5.0 is the floor, since that is where `Expand-Archive` arrives. The execution policy does not have to be relaxed, because `iex` runs a string rather than a script file. A device policy that forces constrained language mode does block it, and it says so instead of failing halfway. After an install or an update, the shell you ran it in can use `alpacon` right away; terminals that were already open need a restart. Run the same command again to update. `alpacon update` updates this install as well, since no package manager owns a binary the script placed.
 
 The script is piped straight into `iex`, so you run it without reading it first. To look before you run, open a release on [Releases](https://github.com/alpacax/alpacon-cli/releases), download `install.ps1` and `alpacon-<version>-checksums.sha256` from it, compare the file's SHA256 against the `install.ps1` line in that checksums file, and then run the file. Both come from the same release, so this proves the download arrived intact—not that the release itself is what we meant to publish.
 
