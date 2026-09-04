@@ -45,7 +45,7 @@ jobs:
         edition: [powershell, pwsh]
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The matrix is not available in a step's `shell:`, so the edition is the
       # host this step launches rather than the shell GitHub picks for it.
@@ -56,7 +56,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install PSScriptAnalyzer
         shell: powershell
@@ -78,7 +78,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The script preserves whatever value kind the user PATH already has, so
       # record it before installing rather than asserting one afterwards.
