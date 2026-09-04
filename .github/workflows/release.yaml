@@ -175,6 +175,8 @@ jobs:
         with:
           name: alpacon_${{ env.TAG_NAME }}_linux_arm64.rpm
 
+      # No newer tag exists to raise this pin to (v1 since 2021-08);
+      # replace with a direct PackageCloud API call instead.
       - name: Upload AMD64 DEB to PackageCloud
         uses: danielmundi/upload-packagecloud@46cd0e61152bf952dbc0d1759e609d3d22649030 # v1
         with:
