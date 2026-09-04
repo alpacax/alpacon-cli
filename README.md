@@ -72,7 +72,7 @@ If the binary or its directory is group- or world-writable, the update says so o
 
 `alpacon update` compares SHA-256 checksums and nothing else. That comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and the update would install it. Teaching the CLI to verify the publisher is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
 
-Every release published since provenance was added to the release workflow does carry a [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds), which the update does not read but you can. The release workflow signs each archive and package with a short-lived certificate minted from its own GitHub identity, and the signature is recorded in a public transparency log—so a release published any other way cannot be made to verify, and one published this way leaves a record nobody can quietly remove. A release older than that carries no record rather than a bad one, and `gh attestation verify` reports it as a `404`.
+Every release published since provenance was added to the release workflow does carry a [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds), which the update does not read but you can. The Docker image joined the attested set later than the archives and packages, so an older image carries no record where an archive from the same release does. The release workflow signs each archive and package with a short-lived certificate minted from its own GitHub identity, and the signature is recorded in a public transparency log—so a release published any other way cannot be made to verify, and one published this way leaves a record nobody can quietly remove. A release older than that carries no record rather than a bad one, and `gh attestation verify` reports it as a `404`.
 
 To check out of band, compare `alpacon version` against the [Releases](https://github.com/alpacax/alpacon-cli/releases) page, and verify the archive yourself before installing it:
 
@@ -84,6 +84,14 @@ sha256sum --check --ignore-missing alpacon-<version>-checksums.sha256
 
 # Who built it, from which commit. Needs the GitHub CLI.
 gh attestation verify alpacon-<version>-<os>-<arch>.tar.gz \
+  --repo alpacax/alpacon-cli \
+  --signer-workflow alpacax/alpacon-cli/.github/workflows/release.yaml
+```
+
+The Docker image carries the same attestation, keyed to the digest of the manifest GoReleaser pushed rather than to a file:
+
+```bash
+gh attestation verify oci://index.docker.io/alpacax/alpacon-cli:<version> \
   --repo alpacax/alpacon-cli \
   --signer-workflow alpacax/alpacon-cli/.github/workflows/release.yaml
 ```

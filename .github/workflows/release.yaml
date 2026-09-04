@@ -106,6 +106,7 @@ jobs:
       # The checksums file says an archive is the one this release names; the
       # attestation says which workflow, at which commit, built it. Stealing a
       # release token is enough to rewrite the first and not the second.
+      # The pushed Docker image has no dist/ file, so it's attested below by digest.
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -114,6 +115,23 @@ jobs:
             dist/*.zip
             dist/*.deb
             dist/*.rpm
+
+      # Both tags share one manifest, so one digest covers them. A bare
+      # field template silently no-ops here, so JSON plus jq reads the digest.
+      - name: Read the pushed image digest
+        id: image-digest
+        run: |
+          digest="$(docker buildx imagetools inspect --format '{{json .Manifest}}' "alpacax/alpacon-cli:${GITHUB_REF_NAME#v}" | jq -r .digest)"
+          test -n "${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+
+      - name: Attest release image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: index.docker.io/alpacax/alpacon-cli
+          subject-digest: ${{ steps.image-digest.outputs.digest }}
 
       - name: Strip "v" prefix from tag
         run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
