@@ -171,13 +171,13 @@ func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 	_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
 	demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
 	calls := 0
-	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+	runPresenceStepUp = func(*client.AlpaconClient, ExecOptions, io.Writer) error {
 		calls++
 		return demand
 	}
 
 	start := time.Now()
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+	err := RunExecWithApprovalWait(nil, ExecOptions{ServerName: "srv", Command: "whoami"}, time.Minute, io.Discard)
 
 	assert.Same(t, demand, err, "the demand must reach the caller unchanged")
 	assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")

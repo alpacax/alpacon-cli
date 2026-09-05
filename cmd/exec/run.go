@@ -81,34 +81,13 @@ var (
 	getCommandByID = event.GetCommandByID
 )
 
-// sudoDenialHints maps a non-interactive sudo denial code to actionable
-// guidance. Codes mirror alpacon-server utils/error_codes.py by hand—nothing
-// enforces the sync, which is why sudoDenialHint falls back to naming a code
-// this table does not carry.
-//
-// The codes are UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
-// codes through its sanitizer into the user-facing denial line (lowercase
-// values are dropped). Each hint stays at the denial *category* level (what to
-// do)—the server never sends the risk score or reasoning to a client.
-//
-// pendingApproval marks the codes the server emits after creating an approval
-// grant: the sudo call still fails now (an interactive sudo cannot wait on an
-// out-of-band approval, ADR 0016 §3), but a reviewer can still approve it.
-// Flagging them here rather than in a second list is what keeps the hints and
-// that code set from drifting apart.
-//
-// selfService narrows the pendingApproval codes to those whose guidance names a
-// way out that is not "wait for a reviewer". HandlePendingApproval prints only
-// those: its own message already covers re-running after approval, so printing
-// an entry without one would say the same thing twice. pendingSudoDenial
-// prefers a selfService entry over the rest, so the table order does not decide
-// which pending code answers.
-//
-// The gates the server checks before it judges the command at all lead the
-// table, in that order, so output carrying denial lines from several sudo calls
-// answers with the gate the server checks earliest—not with whichever call ran
-// first. The codes after them are alternative verdicts on one call, so their
-// order among themselves carries no meaning.
+// sudoDenialHints maps sanitized sudo denial codes to actionable guidance.
+// pendingApproval marks codes that create an approval request.
+// selfService marks pending codes with a caller action besides waiting.
+// pendingSudoDenial prefers selfService guidance when several codes are present.
+// Keep server gate codes first because that is their evaluation order; later
+// codes are alternative verdicts for one command.
+// See docs/exec-approval.md for approval flow background.
 var sudoDenialHints = []struct {
 	code, guidance  string
 	pendingApproval bool
@@ -190,6 +169,17 @@ var sudoDenialHints = []struct {
 		code:     "SUDO_RISK_DENIED",
 		guidance: "sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
 	},
+}
+
+// ExecOptions carries the remote command fields shared by execution and retry paths.
+type ExecOptions struct {
+	ServerName    string
+	Command       string
+	Username      string
+	Groupname     string
+	Env           map[string]string
+	WorkSessionID string
+	Purpose       string
 }
 
 // Invocation names the command the user ran, so a hint can show an example
@@ -401,8 +391,8 @@ func credentialInlineHint(invokedAs Invocation) string {
 // the static denial hint; non-interactive humans additionally get the
 // verification link they can complete out of band. Reached via RunRemoteExec by
 // exec and websh command mode; interactive websh keeps its own sudo MFA flow.
-func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+func RunExecWithPresenceStepUp(ac *client.AlpaconClient, opts ExecOptions, out io.Writer) error {
+	err := RunCommandWithRetry(ac, opts, out)
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
 	// RemoteCommandError carrying the denial line. Require that error as well as
 	// the line match: a command that merely prints the line and SUCCEEDS
@@ -414,18 +404,18 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 	}
 
 	if !utils.IsInteractiveShell() {
-		printPresenceStepUpLink(ac, serverName)
+		printPresenceStepUpLink(ac, opts.ServerName)
 		return err
 	}
 
-	if stepErr := mfa.StepUpForSudo(ac, serverName); stepErr != nil {
+	if stepErr := mfa.StepUpForSudo(ac, opts.ServerName); stepErr != nil {
 		utils.CliWarning("MFA step-up did not complete: %s", stepErr)
 		return err
 	}
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
-	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return RunCommandWithRetry(ac, opts, out)
 }
 
 // printPresenceStepUpLink surfaces the verification link for a non-interactive
@@ -476,26 +466,13 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 	return approvalOutcomeOf(details.SudoGrantStatus), requestID, nil
 }
 
-// RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when
-// it is denied with an approval request in flight (a pendingApproval code) and
-// waitTimeout is positive, blocks and polls the command's detail until a
-// reviewer grants or refuses the request out of band, or the bounded timeout
-// elapses. When waitTimeout is zero or negative, or the denial carries a
-// terminal code, it returns the first err unchanged so the caller's
-// pending/denial handling runs.
-//
-// A tick that never reached the server is not an answer: the loop backs off, and
-// a timeout—or a run of failed polls long enough to give up on—reports the denial
-// that opened the wait, so the caller still exits on the pending contract rather
-// than as a generic failure.
-//
-// The poll reads the command's own detail (sudo_grant_status) rather than
-// re-submitting it: the denial carries the command id, and re-attempting a
-// command still pending approval would file a fresh approval request on every
-// tick. The poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner,
-// a timer, and a precise deadline.
-func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
-	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+// RunExecWithApprovalWait runs a command and optionally waits for approval.
+// Status-hold jobs are resubscribed and streamed after approval; sudo denials
+// poll their grant status and run the command again after authorization. A
+// non-positive waitTimeout returns the first error unchanged.
+// See docs/exec-approval.md for the approval flow background.
+func RunExecWithApprovalWait(ac *client.AlpaconClient, opts ExecOptions, waitTimeout time.Duration, out io.Writer) error {
+	err := runPresenceStepUp(ac, opts, out)
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
@@ -605,7 +582,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			switch outcome {
 			case outcomeApproved:
 				spinner.Stop()
-				return runAfterApproval(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+				return runAfterApproval(ac, opts, out)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant. CommandRejectedError is what already carries
@@ -624,8 +601,8 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // means the grant went somewhere else—it expired, or another attempt spent
 // it—so this reports that instead of opening a second wait the user never
 // asked for.
-func runAfterApproval(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+func runAfterApproval(ac *client.AlpaconClient, opts ExecOptions, out io.Writer) error {
+	err := runPresenceStepUp(ac, opts, out)
 	// Either shape means the grant did not carry this run, and each gets the
 	// sentence its own way out needs. A repeated denial is answered by filing a
 	// fresh request; a job the server parked runs on its own once approved, so
@@ -757,22 +734,22 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 
 // RunCommandWithRetry executes a remote command with MFA/username-required error
 // handling and retry logic, streaming output to out.
-// workSessionID is forwarded as the work_session field; pass "" to omit it.
-func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+// opts.WorkSessionID is forwarded as the work_session field; pass "" to omit it.
+func RunCommandWithRetry(ac *client.AlpaconClient, opts ExecOptions, out io.Writer) error {
+	err := event.RunCommandStreaming(ac, opts.ServerName, opts.Command, opts.Username, opts.Groupname, opts.Env, opts.WorkSessionID, opts.Purpose, out)
 	if propagated, ok := propagateCommandError(err); ok {
 		return propagated
 	}
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, func() error {
-			return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		err = utils.HandleCommonErrors(err, opts.ServerName, mfa.ErrorCallbacks(ac, func() error {
+			return event.RunCommandStreaming(ac, opts.ServerName, opts.Command, opts.Username, opts.Groupname, opts.Env, opts.WorkSessionID, opts.Purpose, out)
 		}))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
 			return propagated
 		}
 		if err != nil {
-			return fmt.Errorf("failed to execute command on '%s' server: %w", serverName, err)
+			return fmt.Errorf("failed to execute command on '%s' server: %w", opts.ServerName, err)
 		}
 	}
 	return nil
