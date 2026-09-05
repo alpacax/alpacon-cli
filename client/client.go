@@ -39,11 +39,8 @@ type apiError struct {
 	code       string
 	source     string
 	statusCode int
-	// apiPayload records that the body was a JSON object—the shape every
-	// alpacon-server error response has. It is a filter, not a provenance flag:
-	// only the negative holds, since anything standing in front of the server
-	// can emit a JSON object too. The stale-token retry reads it to drop
-	// gateway refusals, and nothing may read it as proof of who wrote the body.
+	// apiPayload records that the error body is a JSON object. It filters retry
+	// candidates; it does not prove the origin of the response.
 	apiPayload bool
 }
 
@@ -154,10 +151,8 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	}
 }
 
-// isJSONObject reports whether body is a JSON object. alpacon-server renders
-// every error as one, so anything else on a 401—an HTML page, a bare string,
-// nothing at all—came from a proxy, a WAF or an mTLS gate ahead of it. Only
-// that direction holds: a JSON object clears the test whoever wrote it.
+// isJSONObject reports whether body is a JSON object. A JSON object is not
+// evidence that the API server produced it.
 func isJSONObject(body []byte) bool {
 	var parsed map[string]any
 	return json.Unmarshal(body, &parsed) == nil && parsed != nil
@@ -276,16 +271,9 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
-// sendRequest sends req and, when the server reports the access token stale,
-// renews it and sends the request once more.
-//
-// The renewal belongs here rather than in each polling loop because only the
-// process-wide credential is stale, not the request: alpacon-server rejects a
-// stale token in its permission layer (utils/api/permissions.py), before the
-// view runs, so the first attempt changed nothing and the replay is the same
-// request rather than a second one. A client built at startup and held for a
-// half-hour approval wait would otherwise never re-enter the refresh that
-// NewAlpaconAPIClient runs once.
+// sendRequest sends req and retries it at most once after a qualifying bearer
+// authentication failure. The retry uses a refreshed token and a replayable
+// request body.
 func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	body, err := ac.roundTrip(req)
 	retry, ok := ac.renewedRequest(req, err)
@@ -317,15 +305,10 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 	return ac.setHTTPHeader(retry), true
 }
 
-// renewAccessToken installs a fresh access token, reporting whether one is now
-// in hand. sent is the token the rejected request carried: a different one means
-// another request in flight already renewed it, and retrying with that one beats
-// spending a second refresh-token grant on the same expiry. A failed grant
-// leaves the token as it was, so the sent check collapses nothing—every other
-// in-flight request that took the same 401 runs its own grant. The in-flight
-// count bounds that and each request still retries at most once; a caller that
-// ever fans requests out widely enough for the bound to hurt should remember
-// the failure for the life of the client instead.
+// renewAccessToken serializes refresh grants with refreshMu. If another request
+// already changed the rejected token, it reports success so the caller can
+// retry with that token. Failed grants leave the token unchanged and may be
+// attempted again by overlapping requests.
 func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
@@ -343,19 +326,10 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	return true
 }
 
-// isStaleCredential reports whether err is a 401 a fresh access token could
-// plausibly move. alpacon-server's Auth0 authenticator returns no user on every
-// bearer rejection, whether it absorbs an exception or declines outright
-// (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
-// raises DRF's NotAuthenticated—which no branch of the server's
-// error_code_handler rewrites, leaving a 401 with a detail and no code. An
-// expired token lands there, and so does every other Auth0-bearer rejection: a
-// workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
-// Those cost one grant and one replay before surfacing the same error, and the
-// MFA case a refresh may genuinely fix. So the empty code slot is not proof of
-// expiry—it is the only 401 worth spending one retry on, because a coded refusal
-// (MFA required, IP not allowed, token ACL) names what it wants and a new token
-// is not it.
+// isStaleCredential identifies a JSON-object 401 with no structured error code.
+// This is only a retry heuristic: a code-less 401 is not proof that the token
+// expired, while coded refusals are excluded. See docs/auth-retry.md for the
+// protocol rationale and replay invariants.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false
