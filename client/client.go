@@ -28,6 +28,15 @@ const (
 	// stale-token retry reads it back off the request to learn which token the
 	// server rejected.
 	bearerPrefix = "Bearer "
+
+	// ClientCapabilitiesHeader carries the optional behaviors a WebSocket
+	// connection supports, as a comma-separated list.
+	ClientCapabilitiesHeader = "X-Alpacon-Client-Capabilities"
+
+	// CapabilityWebsocketReconnect says the client re-dials a new channel and
+	// resumes the session when the connection drops, so closing the connection
+	// for a transient reason does not take the session with it.
+	CapabilityWebsocketReconnect = "websocket-reconnect"
 )
 
 // refreshAccessToken is a test seam so a unit test can drive the stale-token
@@ -221,10 +230,33 @@ func parseAuthStatusErrorPayload(body []byte) (message string, code string, sour
 	return message, code, source, true
 }
 
+// SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
+// User-Agent of its own, so a client assembled without one—every client outside
+// NewAlpaconAPIClient—would dial anonymously; fall back to the same string the
+// HTTP requests carry.
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
+	userAgent := ac.UserAgent
+	if userAgent == "" {
+		userAgent = utils.GetUserAgent()
+	}
+
 	headers := http.Header{}
 	headers.Set("Origin", ac.BaseURL)
-	headers.Set("User-Agent", ac.UserAgent)
+	headers.Set("User-Agent", userAgent)
+
+	return headers
+}
+
+// SetWebsocketHeaderWithCapabilities is SetWebsocketHeader plus the capabilities
+// this connection supports, so the server can tell a client that re-dials a
+// dropped connection from one that ends the session on it. Only a caller that
+// actually implements a capability may advertise it; a server that does not read
+// the header is unaffected either way.
+func (ac *AlpaconClient) SetWebsocketHeaderWithCapabilities(capabilities ...string) http.Header {
+	headers := ac.SetWebsocketHeader()
+	if len(capabilities) > 0 {
+		headers.Set(ClientCapabilitiesHeader, strings.Join(capabilities, ", "))
+	}
 
 	return headers
 }

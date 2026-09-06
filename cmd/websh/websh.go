@@ -312,7 +312,17 @@ Note: All flags must be placed before the server name.
 		}()
 
 		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
-			utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
+			// A session the client could not get back to says so on its own terms:
+			// wrapping it in "ended with error" would read as the shell having
+			// failed, when what failed is the connection to it.
+			switch {
+			case errors.Is(err, websh.ErrReconnectFailed):
+				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Could not reconnect to the session.")
+			case errors.Is(err, websh.ErrSessionGone):
+				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "The session is no longer open.")
+			default:
+				utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
+			}
 		}
 	},
 }

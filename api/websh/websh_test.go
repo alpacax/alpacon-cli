@@ -3,6 +3,7 @@ package websh
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -375,11 +377,16 @@ func TestSessionGoroutines_ReturnAfterTheOutcomeIsTaken(t *testing.T) {
 			},
 		},
 		{
+			// The writer reports to its connection rather than to the session, since
+			// a connection ending is what a reconnect recovers from.
 			name: "writeToServer waiting to flush",
-			start: func(t *testing.T, wsClient *WebsocketClient) func() {
+			start: func(t *testing.T, _ *WebsocketClient) func() {
 				t.Helper()
-				// Empty, so only the done branch can end the loop: nothing is ever flushed.
-				return func() { wsClient.writeToServer(make(chan string)) }
+				conn := newConnection(nil)
+				conn.finish(errors.New("the connection dropped"))
+
+				// Empty, so only the ended branch can end the loop: nothing is ever flushed.
+				return func() { conn.writeToServer(make(chan string)) }
 			},
 		},
 		{
@@ -443,54 +450,49 @@ func TestReadCtrlC_EndsTheSessionOnCtrlC(t *testing.T) {
 
 func TestWriteToServer_ReportsWriteFailure(t *testing.T) {
 	t.Parallel()
-	conn, _ := dialTestServer(t)
-	require.NoError(t, conn.Close()) // every later WriteMessage fails
-
-	wsClient := newWebsocketClient(nil)
-	wsClient.conn = conn
+	ws, _ := dialTestServer(t)
+	require.NoError(t, ws.Close()) // every later WriteMessage fails
+	conn := newConnection(ws)
 
 	inputChan := make(chan string, 1)
 	inputChan <- "x" // buffered input forces the failing write
 
 	awaitReturn(t, "writeToServer parked on the failing write", func() {
-		wsClient.writeToServer(inputChan)
+		conn.writeToServer(inputChan)
 	})
 
-	assertReported(t, wsClient)
-	assert.Error(t, wsClient.err)
+	assertEnded(t, conn)
+	assert.Error(t, conn.err)
 }
 
 func TestReadFromServer_ReportsReadFailure(t *testing.T) {
 	t.Parallel()
-	conn, _ := dialTestServer(t)
-	require.NoError(t, conn.Close()) // every later ReadMessage fails
+	ws, _ := dialTestServer(t)
+	require.NoError(t, ws.Close()) // every later ReadMessage fails
 
-	wsClient := newWebsocketClient(nil)
-	wsClient.conn = conn
+	conn := newConnection(ws)
 
 	awaitReturn(t, "readFromServer parked on the failing read", func() {
-		wsClient.readFromServer()
+		conn.readFromServer()
 	})
 
-	assertReported(t, wsClient)
-	assert.Error(t, wsClient.err)
+	assertEnded(t, conn)
+	assert.Error(t, conn.err)
 }
 
 func TestReadFromServer_PrintsEveryMessage(t *testing.T) {
-	conn, _ := dialTestServer(t, "hi ", "there")
-
-	wsClient := newWebsocketClient(nil)
-	wsClient.conn = conn
+	ws, _ := dialTestServer(t, "hi ", "there")
+	conn := newConnection(ws)
 
 	stdout := testutil.CaptureStdout(t, func() {
 		awaitReturn(t, "readFromServer parked after the server went away", func() {
-			wsClient.readFromServer()
+			conn.readFromServer()
 		})
 	})
 
 	assert.Equal(t, "hi there", stdout) // the loop must survive a successful read
-	assertReported(t, wsClient)
-	assert.Error(t, wsClient.err)
+	assertEnded(t, conn)
+	assert.Error(t, conn.err)
 }
 
 func TestReadUserInput_ForwardsToTheWriter(t *testing.T) {
@@ -514,16 +516,14 @@ func TestReadUserInput_ForwardsToTheWriter(t *testing.T) {
 
 func TestWriteToServer_FlushesBufferedInput(t *testing.T) {
 	t.Parallel()
-	conn, received := dialTestServer(t)
-
-	wsClient := newWebsocketClient(nil)
-	wsClient.conn = conn
-	t.Cleanup(func() { wsClient.finish(nil) })
+	ws, received := dialTestServer(t)
+	conn := newConnection(ws)
+	t.Cleanup(func() { conn.finish(nil) })
 
 	inputChan := make(chan string, 2)
 	inputChan <- "l"
 	inputChan <- "s"
-	go wsClient.writeToServer(inputChan)
+	go conn.writeToServer(inputChan)
 
 	// The two runes may land in one flush or two, but every byte has to arrive.
 	var got string
@@ -743,6 +743,16 @@ func pipeStdin(t *testing.T) *os.File {
 	return pipeWrite
 }
 
+func assertEnded(t *testing.T, conn *connection) {
+	t.Helper()
+
+	select {
+	case <-conn.ended:
+	default:
+		require.Fail(t, "ended must be closed so the connection's other pump can leave")
+	}
+}
+
 func assertReported(t *testing.T, wsClient *WebsocketClient) {
 	t.Helper()
 
@@ -766,5 +776,385 @@ func awaitReturn(t *testing.T, msg string, fn func()) {
 	case <-returned:
 	case <-time.After(teardownWait):
 		require.Fail(t, msg)
+	}
+}
+
+func TestReconnectToSession_AsksForAnInteractiveChannel(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+
+		var req ConnectRequest
+		if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			return
+		}
+		assert.Equal(t, "sess-xyz", req.Session)
+		// What separates reconnecting to your own session from watching someone
+		// else's: a read-only channel would come back to a shell that ignores
+		// every keystroke.
+		assert.True(t, req.IsMaster)
+		assert.False(t, req.ReadOnly)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SessionResponse{ID: "channel-2", WebsocketURL: "ws://localhost/ws"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	resp, err := ReconnectToSession(ac, "sess-xyz")
+	require.NoError(t, err)
+	assert.Equal(t, "ws://localhost/ws", resp.WebsocketURL)
+}
+
+// Which endings close the shell and which are a link to re-dial. Everything the
+// server does deliberately is in the first group; everything else leaves a session
+// still running on the far side.
+func TestEndsSession_SeparatesAnEndFromADrop(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			// What the proxy actually sends at the end of a session.
+			name: "session end",
+			err:  &websocket.CloseError{Code: sessionEndCloseCode},
+			want: true,
+		},
+		{
+			name: "normal closure",
+			err:  &websocket.CloseError{Code: websocket.CloseNormalClosure, Text: "session ended"},
+			want: true,
+		},
+		{
+			name: "going away",
+			err:  &websocket.CloseError{Code: websocket.CloseGoingAway},
+			want: true,
+		},
+		{
+			name: "no error at all",
+			want: true,
+		},
+		{
+			name: "service restart",
+			err:  &websocket.CloseError{Code: websocket.CloseServiceRestart},
+		},
+		{
+			name: "abnormal closure",
+			err:  &websocket.CloseError{Code: websocket.CloseAbnormalClosure},
+		},
+		{
+			name: "internal server error",
+			err:  &websocket.CloseError{Code: websocket.CloseInternalServerErr},
+		},
+		{
+			// A link that went away without a close frame of any kind.
+			name: "transport failure",
+			err:  errors.New("connection reset by peer"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, endsSession(tt.err))
+		})
+	}
+}
+
+func TestReconnectDelay_DoublesUpToTheCap(t *testing.T) {
+	t.Parallel()
+	// The whole production schedule, which is what bounds how long a dropped
+	// session waits before it is given up.
+	var schedule []time.Duration
+	for failures := range maxReconnectAttempts {
+		schedule = append(schedule, reconnectDelay(failures, reconnectBaseDelay))
+	}
+
+	assert.Equal(t, []time.Duration{
+		1 * time.Second,
+		2 * time.Second,
+		4 * time.Second,
+		8 * time.Second,
+		15 * time.Second, // 16s doubled past the cap
+	}, schedule)
+}
+
+func TestReconnectDelay_CapsABaseAlreadyOverTheLimit(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, reconnectMaxDelay, reconnectDelay(0, time.Minute))
+	assert.Equal(t, reconnectMaxDelay, reconnectDelay(3, time.Minute))
+}
+
+// The whole recovery, end to end: the server closes the first connection with a
+// service restart, the client provisions a new channel, dials it, and re-sends the
+// terminal size on it.
+func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
+	pinTerminalSize(t, 40, 120)
+
+	var upgrades atomic.Int32
+	dialHeaders := make(chan http.Header, receivedBufferSize)
+	channels := make(chan ConnectRequest, receivedBufferSize)
+	resizes := make(chan SessionSizeRequest, receivedBufferSize)
+
+	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
+	// as cross-origin against the httptest host.
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case dialHeaders <- r.Header.Clone():
+		default:
+		}
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if !assert.NoError(t, err) {
+			return
+		}
+		defer func() { _ = ws.Close() }()
+
+		if upgrades.Add(1) == 1 {
+			// A service going down for a restart is not the session ending.
+			_ = ws.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseServiceRestart, ""),
+				time.Now().Add(teardownWait),
+			)
+		}
+		// Held open until the client goes away: the first connection has a close
+		// frame to deliver, and the second is the one the reconnect landed on.
+		for {
+			if _, _, err := ws.ReadMessage(); err != nil {
+				return
+			}
+		}
+	})
+	mux.HandleFunc(userChannelsBaseURL, func(w http.ResponseWriter, r *http.Request) {
+		var req ConnectRequest
+		if assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
+			select {
+			case channels <- req:
+			default:
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SessionResponse{
+			ID:           "channel-2",
+			WebsocketURL: "ws://" + r.Host + "/ws/",
+		})
+	})
+	mux.HandleFunc(sessionsBaseURL+"sess-1/", func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		var size SessionSizeRequest
+		if assert.NoError(t, json.NewDecoder(r.Body).Decode(&size)) {
+			select {
+			case resizes <- size:
+			default:
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, UserAgent: "alpacon-cli/test"}
+	wsClient := newWebsocketClient(ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect))
+	wsClient.reconnect = newReconnector(ac, "sess-1")
+	wsClient.reconnect.baseDelay = time.Millisecond
+	wsClient.reconnect.notice = io.Discard
+
+	require.NoError(t, wsClient.dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/"))
+
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		wsClient.serveConnections(make(chan string))
+	}()
+	t.Cleanup(func() {
+		wsClient.finish(nil)
+		<-served
+		wsClient.closeConn()
+	})
+
+	// The size lands only on a connection that is already up, so waiting for it
+	// waits for the whole recovery.
+	select {
+	case size := <-resizes:
+		assert.Equal(t, SessionSizeRequest{Rows: 40, Cols: 120}, size)
+	case <-time.After(teardownWait):
+		require.Fail(t, "the reconnected session never re-sent the terminal size",
+			"upgrades=%d", upgrades.Load())
+	}
+
+	select {
+	case req := <-channels:
+		assert.Equal(t, ConnectRequest{Session: "sess-1", IsMaster: true}, req)
+	default:
+		require.Fail(t, "the reconnect dialed without provisioning a new channel")
+	}
+
+	assert.Equal(t, int32(2), upgrades.Load(), "the client must dial again rather than reuse the closed connection")
+	for dial := 1; dial <= 2; dial++ {
+		select {
+		case header := <-dialHeaders:
+			assert.Equal(t, client.CapabilityWebsocketReconnect,
+				header.Get(client.ClientCapabilitiesHeader), "dial %d", dial)
+			assert.Equal(t, "alpacon-cli/test", header.Get("User-Agent"), "dial %d", dial)
+		default:
+			require.Fail(t, "the server saw fewer dials than the client made", "dial %d", dial)
+		}
+	}
+
+	select {
+	case <-wsClient.done:
+		require.Fail(t, "a service restart must not end the session", "err=%v", wsClient.err)
+	default:
+	}
+}
+
+func TestRedial_StopsWhenTheServerRefusesANewChannel(t *testing.T) {
+	t.Parallel()
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail": "session is closed"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsClient := newTestReconnectClient(ts.URL)
+
+	assert.False(t, wsClient.redial())
+	assertReported(t, wsClient)
+	require.ErrorIs(t, wsClient.err, ErrSessionGone)
+	// The session was closed while the link was down; asking again only asks again.
+	assert.Equal(t, int32(1), attempts.Load())
+}
+
+func TestRedial_SpendsTheBudgetOnAServerThatKeepsFailing(t *testing.T) {
+	t.Parallel()
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail": "service unavailable"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsClient := newTestReconnectClient(ts.URL)
+
+	assert.False(t, wsClient.redial())
+	assertReported(t, wsClient)
+	require.ErrorIs(t, wsClient.err, ErrReconnectFailed)
+	assert.Equal(t, int32(maxReconnectAttempts), attempts.Load(), "a 5xx is worth the whole budget")
+}
+
+func TestRedial_StopsWhenTheSessionEndsMidWait(t *testing.T) {
+	t.Parallel()
+	var attempts atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail": "service unavailable"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	wsClient := newTestReconnectClient(ts.URL)
+	// Ctrl+C during the backoff: the wait has to end with the session, not carry
+	// on dialing for a shell nobody is watching.
+	wsClient.reconnect.baseDelay = teardownWait
+	wsClient.finish(nil)
+
+	awaitReturn(t, "redial parked on the backoff after the session ended", func() {
+		assert.False(t, wsClient.redial())
+	})
+	assert.Zero(t, attempts.Load())
+}
+
+// newTestReconnectClient is a client whose reconnect talks to ts and waits in
+// milliseconds rather than seconds.
+func newTestReconnectClient(baseURL string) *WebsocketClient {
+	ac := &client.AlpaconClient{HTTPClient: &http.Client{}, BaseURL: baseURL}
+
+	wsClient := newWebsocketClient(nil)
+	wsClient.reconnect = newReconnector(ac, "sess-1")
+	wsClient.reconnect.baseDelay = time.Millisecond
+	wsClient.reconnect.notice = io.Discard
+
+	return wsClient
+}
+
+// pinTerminalSize replaces the terminal size lookup, which a test process has no
+// terminal to answer.
+func pinTerminalSize(t *testing.T, rows, cols int) {
+	t.Helper()
+
+	original := terminalSize
+	terminalSize = func() (int, int, error) { return rows, cols, nil }
+	t.Cleanup(func() { terminalSize = original })
+}
+
+// What reaches the server on the real entry points' first dial. Raw mode fails on
+// a pipe, so each call returns right after the handshake the assertions read.
+func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(*client.AlpaconClient, SessionResponse) error
+		want string
+	}{
+		{
+			name: "an interactive session reconnects",
+			open: OpenNewTerminal,
+			want: client.CapabilityWebsocketReconnect,
+		},
+		{
+			// The joiner may not open a channel on someone else's session, so
+			// claiming the capability would promise a recovery it cannot make.
+			name: "a joined session does not",
+			open: OpenSharedTerminal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialHeaders := make(chan http.Header, receivedBufferSize)
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case dialHeaders <- r.Header.Clone():
+				default:
+				}
+				ws, err := upgrader.Upgrade(w, r, nil)
+				if !assert.NoError(t, err) {
+					return
+				}
+				_ = ws.Close() // the handler must not outlive the assertions below
+			}))
+			t.Cleanup(ts.Close)
+
+			pipeStdin(t) // a pipe is not a tty, so raw mode fails after the dial succeeds
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, UserAgent: "alpacon-cli/test"}
+			err := tt.open(ac, SessionResponse{
+				ID:           "sess-1",
+				WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http"),
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "stdin is not a terminal")
+
+			select {
+			case header := <-dialHeaders:
+				assert.Equal(t, tt.want, header.Get(client.ClientCapabilitiesHeader))
+				assert.Equal(t, "alpacon-cli/test", header.Get("User-Agent"))
+			default:
+				require.Fail(t, "the server saw no dial")
+			}
+		})
 	}
 }

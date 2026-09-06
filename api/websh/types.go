@@ -1,6 +1,7 @@
 package websh
 
 import (
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -10,11 +11,44 @@ import (
 )
 
 type WebsocketClient struct {
-	header     http.Header
-	conn       *websocket.Conn
+	header http.Header
+	// conn is the connection currently serving the session, replaced by each
+	// reconnect. Only the goroutine running the session touches it.
+	conn       *connection
 	done       chan struct{} // closed once the first outcome is recorded
 	err        error
 	finishOnce sync.Once
+	// reconnect carries a dropped session to a new connection. nil on a client
+	// that ends the session on the first drop, which is every non-interactive one.
+	reconnect *reconnector
+}
+
+// connection is one WebSocket connection of a session. A session outlives its
+// connections—a dropped link is re-dialed onto a new user channel—so each one
+// records its own ending and the session decides what that ending means.
+type connection struct {
+	ws      *websocket.Conn
+	ended   chan struct{} // closed once the first ending is recorded
+	err     error
+	endOnce sync.Once
+	pumps   sync.WaitGroup
+}
+
+// reconnector is what an interactive session needs to survive a dropped
+// connection: a new user channel to dial, and the terminal size to re-send on it.
+type reconnector struct {
+	// provision issues a new user channel on the same session and returns its
+	// WebSocket URL.
+	provision func() (string, error)
+	// resendSize re-sends the terminal size, which is what makes the remote shell
+	// redraw at the right width once the new connection is up.
+	resendSize func() error
+	// notice is where the reconnect line is printed, os.Stderr in production.
+	notice io.Writer
+	// baseDelay is the first backoff step, lowered by tests so a reconnect
+	// assertion does not have to sit through the production delay.
+	baseDelay   time.Duration
+	maxAttempts int
 }
 
 type SessionRequest struct {
@@ -24,6 +58,14 @@ type SessionRequest struct {
 	Username    string `json:"username"`
 	Groupname   string `json:"groupname"`
 	WorkSession string `json:"work_session,omitempty"`
+}
+
+// SessionSizeRequest updates a session's terminal size. The server resizes the
+// remote PTY on every update, so re-sending an unchanged size is what makes the
+// shell redraw after a reconnect.
+type SessionSizeRequest struct {
+	Rows int `json:"rows"`
+	Cols int `json:"cols"`
 }
 
 type SessionResponse struct {
