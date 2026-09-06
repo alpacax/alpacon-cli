@@ -28,7 +28,7 @@ var webshJoinCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to join the session: %s.", err)
 		}
 
-		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
+		if err = websh.OpenSharedTerminal(alpaconClient, session); err != nil {
 			utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "Websh session ended with error: %s.", err)
 		}
 	},

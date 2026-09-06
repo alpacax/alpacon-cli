@@ -1099,3 +1099,78 @@ func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
 	assert.Equal(t, "https://my-workspace.alpacon.io", ac.BaseURL)
 	assert.Equal(t, "my-workspace", ac.WorkspaceName)
 }
+
+// gorilla sends no User-Agent of its own and copies the header it is handed
+// verbatim, so whatever these two build is exactly what reaches the server.
+func TestSetWebsocketHeader_CarriesTheUserAgent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{
+			name:      "the client's own",
+			userAgent: "alpacon-cli/9.9.9",
+			want:      "alpacon-cli/9.9.9",
+		},
+		{
+			// Every client assembled outside NewAlpaconAPIClient, which is the only
+			// place that fills the field in.
+			name: "the default when the client carries none",
+			want: utils.GetUserAgent(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac := &AlpaconClient{BaseURL: "https://my-workspace.alpacon.io", UserAgent: tt.userAgent}
+
+			header := ac.SetWebsocketHeader()
+
+			assert.Equal(t, tt.want, header.Get("User-Agent"))
+			assert.Equal(t, "https://my-workspace.alpacon.io", header.Get("Origin"))
+			assert.Empty(t, header.Get(ClientCapabilitiesHeader), "a plain dial claims no capability")
+		})
+	}
+}
+
+func TestSetWebsocketHeaderWithCapabilities(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		capabilities []string
+		want         string
+	}{
+		{
+			name:         "one capability",
+			capabilities: []string{CapabilityWebsocketReconnect},
+			want:         CapabilityWebsocketReconnect,
+		},
+		{
+			name:         "several are comma-separated",
+			capabilities: []string{CapabilityWebsocketReconnect, "some-later-capability"},
+			want:         CapabilityWebsocketReconnect + ", some-later-capability",
+		},
+		{
+			// A caller with nothing to advertise must not send an empty header,
+			// which a server could read as a claim of no capabilities at all.
+			name: "none sends no header",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac := &AlpaconClient{BaseURL: "https://my-workspace.alpacon.io", UserAgent: "alpacon-cli/9.9.9"}
+
+			header := ac.SetWebsocketHeaderWithCapabilities(tt.capabilities...)
+
+			assert.Equal(t, tt.want, header.Get(ClientCapabilitiesHeader))
+			// The capabilities ride alongside what a plain dial already sends.
+			assert.Equal(t, "alpacon-cli/9.9.9", header.Get("User-Agent"))
+			assert.Equal(t, "https://my-workspace.alpacon.io", header.Get("Origin"))
+		})
+	}
+}

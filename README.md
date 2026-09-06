@@ -206,6 +206,8 @@ $ alpacon websh --share <server>                 # share via temporary link
 $ alpacon websh join --url <SHARED_URL> --password <PASSWORD>
 ```
 
+For a terminal you opened yourself, if the connection drops for any reason other than the session ending—a restarted service, a network interruption—the terminal reconnects to the same session instead of closing, retrying up to five times with a growing delay; input typed while it is down is not delivered. A terminal joined through a shared link does not reconnect: rejoin with the link if it drops.
+
 ### Remote command execution
 ```bash
 $ alpacon exec <server> "<cmd>"

@@ -34,6 +34,33 @@ const (
 	// the same 4000 for the same meaning. A websh session never ends with 1000, so
 	// without this every normal end would be reported as a failure.
 	sessionEndCloseCode = 4000
+
+	// A close that does not mean the session ended is a dropped link—a restarted
+	// service, a network interruption—and the session it was carrying is still
+	// running on the server, so the client dials a new channel onto it instead of
+	// ending the shell. The budget bounds a server that keeps accepting a channel
+	// and dropping it: roughly 30s of waiting before the session is given up.
+	maxReconnectAttempts   = 5
+	reconnectBaseDelay     = 1 * time.Second
+	reconnectMaxDelay      = 15 * time.Second
+	reconnectBackoffFactor = 2
+)
+
+var (
+	// terminalSize reports the local terminal's size, in rows and columns. A var so
+	// a test can pin a size where there is no terminal to read one from.
+	terminalSize = func() (rows, cols int, err error) {
+		cols, rows, err = term.GetSize(int(os.Stdin.Fd()))
+		return rows, cols, err
+	}
+
+	// ErrReconnectFailed ends a session whose connection dropped and could not be
+	// re-established within the attempt budget.
+	ErrReconnectFailed = errors.New("could not reconnect to the session")
+
+	// ErrSessionGone ends a session the server refused a new channel on: it was
+	// closed while the connection was down, so retrying only asks again.
+	ErrSessionGone = errors.New("the session is no longer open")
 )
 
 // GetSessionList returns the newest tail connectable sessions. The endpoint sorts
@@ -94,12 +121,45 @@ func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
 	return err
 }
 
+// ConnectToSession opens a read-only channel on someone else's session, which is
+// what watching one is.
 func ConnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResponse, error) {
-	req := &ConnectRequest{
+	return createUserChannel(ac, &ConnectRequest{
 		Session:  sessionID,
 		IsMaster: false,
 		ReadOnly: true,
+	})
+}
+
+// ReconnectToSession opens a new interactive channel on a session the caller is
+// already running, so a client whose connection dropped can reattach. The
+// session's PTY channel is untouched by a user channel closing, so the shell and
+// everything running in it survive the gap.
+func ReconnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResponse, error) {
+	return createUserChannel(ac, &ConnectRequest{
+		Session:  sessionID,
+		IsMaster: true,
+		ReadOnly: false,
+	})
+}
+
+// SendTerminalSize tells the server the terminal's current size. The server
+// resizes the remote PTY on every update, so this also redraws a shell that spent
+// a reconnect talking to nobody, even when the size itself has not changed.
+func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
+	rows, cols, err := terminalSize()
+	if err != nil {
+		return err
 	}
+
+	_, err = ac.SendPatchRequest(
+		utils.BuildURL(sessionsBaseURL, sessionID, nil),
+		&SessionSizeRequest{Rows: rows, Cols: cols},
+	)
+	return err
+}
+
+func createUserChannel(ac *client.AlpaconClient, req *ConnectRequest) (SessionResponse, error) {
 	responseBody, err := ac.SendPostRequest(userChannelsBaseURL, req)
 	if err != nil {
 		return SessionResponse{}, err
@@ -168,12 +228,12 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 		return SessionResponse{}, err
 	}
 
-	width, height, err := term.GetSize(int(os.Stdin.Fd()))
+	rows, cols, err := terminalSize()
 	if err != nil {
 		return SessionResponse{}, err
 	}
 
-	sessionRequest := BuildSessionRequest(serverID, username, groupname, height, width, workSessionID)
+	sessionRequest := BuildSessionRequest(serverID, username, groupname, rows, cols, workSessionID)
 
 	responseBody, err := ac.SendPostRequest(sessionsBaseURL, sessionRequest)
 	if err != nil {
@@ -222,22 +282,94 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 		}
 		return fmt.Errorf("websocket connection failed: %w (status %s)", err, utils.SanitizeTerminalText(resp.Status))
 	}
-	wsClient.conn = conn
+	wsClient.conn = newConnection(conn)
 
 	return nil
+}
+
+func newConnection(ws *websocket.Conn) *connection {
+	return &connection{ws: ws, ended: make(chan struct{})}
+}
+
+// finish keeps the first ending. err is written before ended closes, so anyone
+// who saw ended can read it.
+func (c *connection) finish(err error) {
+	c.endOnce.Do(func() {
+		c.err = err
+		close(c.ended)
+	})
+}
+
+// close ends the connection and waits for its pumps, so a reconnect never starts
+// with a goroutine still reading or writing the socket it replaced.
+func (c *connection) close() {
+	_ = c.ws.Close()
+	c.pumps.Wait()
+}
+
+// startReader reads server output for as long as the connection lasts.
+func (c *connection) startReader() {
+	c.pumps.Add(1)
+	go func() {
+		defer c.pumps.Done()
+		c.readFromServer()
+	}()
+}
+
+// startWriter forwards user input for as long as the connection lasts. The input
+// channel outlives the connection: one stdin reader feeds every connection of the
+// session, since a goroutine parked in a terminal read cannot be released.
+func (c *connection) startWriter(inputChan <-chan string) {
+	c.pumps.Add(1)
+	go func() {
+		defer c.pumps.Done()
+		c.writeToServer(inputChan)
+	}()
+}
+
+// closeConn releases the current connection, if the session ever had one.
+func (wsClient *WebsocketClient) closeConn() {
+	if wsClient.conn != nil {
+		wsClient.conn.close()
+	}
 }
 
 // finish keeps the first outcome. err is written before done closes, so anyone who
 // saw done can read it. A deliberate close ends the session rather than failing it;
 // every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
-	if websocket.IsCloseError(err, sessionEndCloseCode, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+	if endsSession(err) {
 		err = nil
 	}
 	wsClient.finishOnce.Do(func() {
 		wsClient.err = err
 		close(wsClient.done)
 	})
+}
+
+// endsSession reports whether a connection error means the session itself ended:
+// the proxy's session-end code, or one of the two normal WebSocket closes. Every
+// other ending—1012 on a restarted service, 1006 on a link that went away, a
+// transport error with no close frame at all—leaves the session running on the
+// server, so it is a connection to re-dial rather than a shell to close.
+func endsSession(err error) bool {
+	if err == nil {
+		return true
+	}
+	return websocket.IsCloseError(err, sessionEndCloseCode, websocket.CloseNormalClosure, websocket.CloseGoingAway)
+}
+
+// reconnectDelay returns the wait before the attempt after the given number of
+// failed ones: the base doubled once per failure, capped.
+func reconnectDelay(failures int, base time.Duration) time.Duration {
+	delay := min(base, reconnectMaxDelay)
+	for range failures {
+		delay *= reconnectBackoffFactor
+		if delay >= reconnectMaxDelay {
+			return reconnectMaxDelay
+		}
+	}
+	return delay
 }
 
 // OpenReadOnlyTerminal opens a read-only terminal view for watching another user's session.
@@ -248,7 +380,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
 		return err
 	}
-	defer func() { _ = wsClient.conn.Close() }()
+	defer wsClient.closeConn()
 
 	sigChan, stopSignals := notifySignals()
 	defer stopSignals()
@@ -259,11 +391,18 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	}
 	defer restore()
 
+	conn := wsClient.conn
 	go wsClient.watchInterrupt(sigChan)
 	go wsClient.readCtrlC()
-	go wsClient.readFromServer()
+	conn.startReader()
 
-	<-wsClient.done
+	// A watcher does not reconnect: it holds no session of its own, and the one
+	// it is watching may well have been what ended.
+	select {
+	case <-wsClient.done:
+	case <-conn.ended:
+		wsClient.finish(conn.err)
+	}
 	return wsClient.err
 }
 
@@ -297,17 +436,59 @@ func (wsClient *WebsocketClient) readCtrlC() {
 
 // OpenNewTerminal opens an interactive terminal on the session.
 // Input is forwarded to the server. Terminal echo is suppressed via raw mode.
-// Ends cleanly on the remote close, on Ctrl+D, or on a signal.
+// Ends cleanly on the remote close, on Ctrl+D, or on a signal. A connection that
+// drops for any other reason is re-dialed onto a new channel of the same session.
 func OpenNewTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
-	wsClient := newWebsocketClient(ac.SetWebsocketHeader())
+	return openInteractiveTerminal(ac, sessionResponse, newReconnector(ac, sessionResponse.ID))
+}
+
+// OpenSharedTerminal opens the interactive terminal of a session joined through a
+// shared link. It does not reconnect: only the session's owner may open a new
+// channel on it, the invite channel is single-use, and the join response names no
+// session to ask about. A drop ends the terminal, and the link can be joined again.
+func OpenSharedTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse) error {
+	return openInteractiveTerminal(ac, sessionResponse, nil)
+}
+
+func openInteractiveTerminal(ac *client.AlpaconClient, sessionResponse SessionResponse, reconnect *reconnector) error {
+	var header http.Header
+	if reconnect != nil {
+		header = ac.SetWebsocketHeaderWithCapabilities(client.CapabilityWebsocketReconnect)
+	} else {
+		header = ac.SetWebsocketHeader()
+	}
+
+	wsClient := newWebsocketClient(header)
+	wsClient.reconnect = reconnect
+
 	if err := wsClient.dial(sessionResponse.WebsocketURL); err != nil {
 		return err
 	}
-	defer func() { _ = wsClient.conn.Close() }()
+	defer wsClient.closeConn()
 
 	return wsClient.runWsClient()
 }
 
+func newReconnector(ac *client.AlpaconClient, sessionID string) *reconnector {
+	return &reconnector{
+		provision: func() (string, error) {
+			session, err := ReconnectToSession(ac, sessionID)
+			if err != nil {
+				return "", err
+			}
+			return session.WebsocketURL, nil
+		},
+		resendSize:  func() error { return SendTerminalSize(ac, sessionID) },
+		notice:      os.Stderr,
+		baseDelay:   reconnectBaseDelay,
+		maxAttempts: maxReconnectAttempts,
+	}
+}
+
+// runWsClient runs the session. Raw mode and the stdin reader are entered once and
+// span every connection the session goes through: leaving raw mode between
+// attempts would echo back whatever was typed into the gap, and re-entering it
+// would repaint over the shell the reconnect is trying to restore.
 func (wsClient *WebsocketClient) runWsClient() error {
 	sigChan, stopSignals := notifySignals()
 	defer stopSignals()
@@ -321,12 +502,100 @@ func (wsClient *WebsocketClient) runWsClient() error {
 	inputChan := make(chan string, 1)
 
 	go wsClient.watchInterrupt(sigChan)
-	go wsClient.readFromServer()
 	go wsClient.readUserInput(inputChan)
-	go wsClient.writeToServer(inputChan)
 
-	<-wsClient.done
+	wsClient.serveConnections(inputChan)
+
 	return wsClient.err
+}
+
+// serveConnections runs the current connection until it ends, then either records
+// the session's outcome or replaces the connection. It returns once the session
+// has an outcome, which is always recorded by the time it does.
+func (wsClient *WebsocketClient) serveConnections(inputChan <-chan string) {
+	for {
+		conn := wsClient.conn
+		conn.startReader()
+		conn.startWriter(inputChan)
+
+		select {
+		case <-wsClient.done:
+			return
+		case <-conn.ended:
+		}
+
+		// A connection ending and the session ending can land together—the remote
+		// closing while the user types Ctrl+D. The session's own outcome wins.
+		select {
+		case <-wsClient.done:
+			return
+		default:
+		}
+
+		conn.close()
+
+		if wsClient.reconnect == nil || endsSession(conn.err) {
+			wsClient.finish(conn.err)
+			return
+		}
+		if !wsClient.redial() {
+			return
+		}
+	}
+}
+
+// redial replaces a dropped connection with a new channel on the same session,
+// within a bounded number of attempts. It reports whether the session has a live
+// connection again; on false the session's outcome is already recorded.
+func (wsClient *WebsocketClient) redial() bool {
+	r := wsClient.reconnect
+	// The terminal is still in raw mode, where a bare newline leaves the cursor
+	// where it stood, so the notice carries its own carriage returns.
+	_, _ = fmt.Fprint(r.notice, "\r\nConnection lost, reconnecting...\r\n")
+
+	for failures := range r.maxAttempts {
+		if !wsClient.wait(reconnectDelay(failures, r.baseDelay)) {
+			return false // the session ended while waiting
+		}
+
+		websocketURL, err := r.provision()
+		if err != nil {
+			// A 4xx is the server refusing rather than failing: the session was
+			// closed while the link was down, and asking again only asks again.
+			if utils.IsFatalClientError(utils.HTTPStatusCode(err)) {
+				wsClient.finish(ErrSessionGone)
+				return false
+			}
+			continue
+		}
+		if err := wsClient.dial(websocketURL); err != nil {
+			continue
+		}
+		// Before the pumps, so the redraw the resize provokes lands on a socket
+		// that is already being read. A size the server would not take is not
+		// worth ending a working session over—the shell is usable, if possibly
+		// drawn at the width it had before.
+		if r.resendSize != nil {
+			_ = r.resendSize()
+		}
+		return true
+	}
+
+	wsClient.finish(ErrReconnectFailed)
+	return false
+}
+
+// wait blocks for delay, and reports whether the session outlasted it.
+func (wsClient *WebsocketClient) wait(delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-wsClient.done:
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // notifySignals returns the signal channel and the stop for the caller to defer.
@@ -353,11 +622,11 @@ func enterRawMode() (func(), error) {
 	return func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }, nil
 }
 
-func (wsClient *WebsocketClient) readFromServer() {
+func (c *connection) readFromServer() {
 	for {
-		_, message, err := wsClient.conn.ReadMessage()
+		_, message, err := c.ws.ReadMessage()
 		if err != nil {
-			wsClient.finish(err)
+			c.finish(err)
 			return
 		}
 		_, _ = os.Stdout.Write(message)
@@ -365,7 +634,13 @@ func (wsClient *WebsocketClient) readFromServer() {
 }
 
 // readUserInput cannot be released mid-read: a goroutine parked in ReadRune stays
-// there until the next keystroke, and only closing stdin would change that.
+// there until the next keystroke, and only closing stdin would change that. That
+// is why one reader serves the whole session rather than one per connection—a
+// reader left over from a dropped connection would race the next one for the
+// user's keystrokes.
+//
+// Between connections nothing is draining inputChan, so this parks on the send
+// until the session either reconnects or ends. Nothing is buffered on its behalf.
 func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -386,7 +661,7 @@ func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	}
 }
 
-func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
+func (c *connection) writeToServer(inputChan <-chan string) {
 	// A ticker rather than time.After, which restarts on every arriving rune and
 	// so defers the flush for as long as input keeps coming.
 	ticker := time.NewTicker(writeFlushInterval)
@@ -395,15 +670,18 @@ func (wsClient *WebsocketClient) writeToServer(inputChan <-chan string) {
 	var inputBuffer []rune
 	for {
 		select {
-		case <-wsClient.done:
+		case <-c.ended:
+			// Whatever is still buffered goes with the connection: nothing here
+			// re-sends it, so input typed as the link dropped is lost. Replaying it
+			// would submit lines to a shell the user could no longer see.
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
 		case <-ticker.C:
 			if len(inputBuffer) > 0 {
-				err := wsClient.conn.WriteMessage(websocket.BinaryMessage, []byte(string(inputBuffer)))
+				err := c.ws.WriteMessage(websocket.BinaryMessage, []byte(string(inputBuffer)))
 				if err != nil {
-					wsClient.finish(err)
+					c.finish(err)
 					return
 				}
 				inputBuffer = []rune{}
