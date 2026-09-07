@@ -723,11 +723,12 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 // newBearerTestClient builds a client authenticated the way an Auth0 login
 // leaves it: an access token, no legacy API key.
 func newBearerTestClient(baseURL, accessToken string) *AlpaconClient {
-	return &AlpaconClient{
-		HTTPClient:  &http.Client{},
-		BaseURL:     baseURL,
-		AccessToken: accessToken,
+	ac := &AlpaconClient{
+		HTTPClient: &http.Client{},
+		BaseURL:    baseURL,
 	}
+	ac.SetAccessToken(accessToken)
+	return ac
 }
 
 // swapTokenRenewal points the refresh seam at renew for the rest of the test.
@@ -747,7 +748,7 @@ func stubTokenRenewal(t *testing.T, newToken string) *int {
 	calls := 0
 	swapTokenRenewal(t, func(ac *AlpaconClient) error {
 		calls++
-		ac.setAccessToken(newToken)
+		ac.SetAccessToken(newToken)
 		return nil
 	})
 	return &calls
@@ -1062,7 +1063,7 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	swapTokenRenewal(t, func(ac *AlpaconClient) error {
 		close(entered)
 		<-release
-		ac.setAccessToken("fresh")
+		ac.SetAccessToken("fresh")
 		return nil
 	})
 
@@ -1072,7 +1073,7 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	<-entered
 
 	read := make(chan string, 1)
-	go func() { read <- ac.accessToken() }()
+	go func() { read <- ac.AccessToken() }()
 	select {
 	case token := <-read:
 		assert.Equal(t, "stale", token, "a read during the grant sees the token still in force")

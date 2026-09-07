@@ -98,9 +98,9 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		BaseURL:       validConfig.WorkspaceURL,
 		WorkspaceName: validConfig.WorkspaceName,
 		Token:         validConfig.Token,
-		AccessToken:   validConfig.AccessToken,
 		UserAgent:     utils.GetUserAgent(),
 	}
+	client.SetAccessToken(validConfig.AccessToken)
 
 	if isAccessTokenExpired(validConfig) {
 		spinner := utils.NewSpinner("Refreshing access token...")
@@ -111,7 +111,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 			return nil, fmt.Errorf("failed to refresh access token: %v. Your session may have expired completely. Please run 'alpacon login' to authenticate again", err)
 		}
 
-		client.AccessToken = tokenRes.AccessToken
+		client.SetAccessToken(tokenRes.AccessToken)
 	}
 
 	return client, nil
@@ -263,7 +263,7 @@ func (ac *AlpaconClient) SetWebsocketHeaderWithCapabilities(capabilities ...stri
 
 func (ac *AlpaconClient) setHTTPHeader(req *http.Request) *http.Request {
 	req.Header.Set("User-Agent", ac.UserAgent)
-	if accessToken := ac.accessToken(); accessToken != "" {
+	if accessToken := ac.AccessToken(); accessToken != "" {
 		req.Header.Set("Authorization", bearerPrefix+accessToken)
 	} else if ac.Token != "" {
 		req.Header.Set("Authorization", fmt.Sprintf("token=\"%s\"", ac.Token))
@@ -361,7 +361,7 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 	ac.refreshMu.Lock()
 	defer ac.refreshMu.Unlock()
-	if ac.accessToken() != sent {
+	if ac.AccessToken() != sent {
 		return true
 	}
 	if err := refreshAccessToken(ac); err != nil {
@@ -596,26 +596,25 @@ func (ac *AlpaconClient) RefreshToken() error {
 	return ac.refreshLocked()
 }
 
-// accessToken reads the token a request should carry. Every read goes through
-// here because sendRequest can replace it between two requests.
-func (ac *AlpaconClient) accessToken() string {
+// AccessToken locks because sendRequest can swap the token mid-flight.
+func (ac *AlpaconClient) AccessToken() string {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
-	return ac.AccessToken
+	return ac.accessToken
 }
 
 // IsBearerAuth reports whether requests carry an Auth0 bearer token rather than a
 // legacy API key. Some endpoints refuse the API key outright, and their refusal arrives
 // with no error code, so a caller rewriting it has to know which credential it sent.
 func (ac *AlpaconClient) IsBearerAuth() bool {
-	return ac.accessToken() != ""
+	return ac.AccessToken() != ""
 }
 
-// setAccessToken installs the token every later request carries.
-func (ac *AlpaconClient) setAccessToken(token string) {
+// SetAccessToken is exported so callers outside this package cannot skip tokenMu.
+func (ac *AlpaconClient) SetAccessToken(token string) {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
-	ac.AccessToken = token
+	ac.accessToken = token
 }
 
 // refreshLocked runs the refresh-token grant and installs the new access token.
@@ -633,7 +632,7 @@ func (ac *AlpaconClient) refreshLocked() error {
 	if err != nil {
 		return err
 	}
-	ac.setAccessToken(tokenRes.AccessToken)
+	ac.SetAccessToken(tokenRes.AccessToken)
 	return nil
 }
 

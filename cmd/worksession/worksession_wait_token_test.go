@@ -61,7 +61,8 @@ func TestPollForApproval_SurvivesATokenExpiryMidWait(t *testing.T) {
 		BaseDomain:   "alpacon.io",
 	})
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, AccessToken: "stale"}
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ac.SetAccessToken("stale")
 
 	session, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 5*time.Second)
 
