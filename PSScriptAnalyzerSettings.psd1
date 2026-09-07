@@ -9,8 +9,8 @@
         # output would have to filter them back out.
         'PSAvoidUsingWriteHost'
 
-        # Set-InstalledAlpaconVersion is internal to this one script and is
-        # never exported as a cmdlet, so -WhatIf plumbing buys nothing.
+        # The Set- functions here are internal to this one script and are
+        # never exported as cmdlets, so -WhatIf plumbing buys nothing.
         'PSUseShouldProcessForStateChangingFunctions'
     )
 }

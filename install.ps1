@@ -25,6 +25,7 @@ param(
     [switch]$Force
 )
 
+$script:ExeName = 'alpacon.exe'
 $script:VersionMarkerName = 'installed-version.txt'
 # The check behind both refusals answers "held by something", not "held by alpacon".
 $script:LockedMessage = 'alpacon.exe cannot be replaced. Close alpacon if it is running. A virus scanner reading the file, or an account not allowed to open it for writing, looks the same from here.'
@@ -207,7 +208,7 @@ function Get-InstalledAlpaconVersion {
     # trusting the marker alone would make the next run skip the repair.
     # 'alpacon update' rewrites the marker on both of its endings, so a
     # self-update between two runs does not strand it.
-    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'alpacon.exe'))) { return $null }
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir $script:ExeName))) { return $null }
 
     $marker = Join-Path $InstallDir $script:VersionMarkerName
     if (-not (Test-Path -LiteralPath $marker)) { return $null }
@@ -371,6 +372,56 @@ public static extern IntPtr SendMessageTimeout(
         $SMTO_ABORTIFHUNG, 1000, [ref]$result)
 }
 
+function Get-ShadowingAlpacon {
+    param(
+        [Parameter(Mandatory)][string]$ExePath,
+        # Injected by the suite: the real lookup answers with whatever is on the
+        # test machine's own PATH.
+        $Resolved = $(Get-Command alpacon -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1)
+    )
+
+    if (-not $Resolved) { return $null }
+    if ((ConvertTo-ComparablePath -Path $Resolved.Source) -eq (ConvertTo-ComparablePath -Path $ExePath)) {
+        return $null
+    }
+
+    return $Resolved.Source
+}
+
+function Set-AlpaconPath {
+    param(
+        [Parameter(Mandatory)][string]$InstallDir,
+        [Parameter(Mandatory)][string]$ExePath
+    )
+
+    try {
+        if (Add-ToUserPath -Directory $InstallDir) {
+            # The broadcast only refreshes open windows; the registry write is
+            # what sets the PATH, so a failed broadcast is not a failed write.
+            try {
+                Send-SettingChange
+            } catch {
+                $null = $_  # silent: irm | iex takes no -Verbose, and the line below states the cost
+            }
+            Write-Host "Added $InstallDir to your PATH. Terminals that are already open need a restart."
+        }
+    } catch {
+        # alpacon.exe is in place on both paths that reach here, so a PATH this
+        # process may not write is a warning, not a failed run. Group policy lands here.
+        Write-Warning "Could not put $InstallDir on your PATH: $($_.Exception.Message)"
+        Write-Warning "Add it yourself, or call alpacon by its full path."
+    }
+
+    Add-ToSessionPath -Directory $InstallDir
+
+    $shadow = Get-ShadowingAlpacon -ExePath $ExePath  # after Add-ToSessionPath: it asks what this shell runs now
+    if ($shadow) {
+        Write-Warning "'alpacon' still resolves to $shadow, which comes earlier on your PATH."
+        Write-Warning "Remove that copy, or put $InstallDir ahead of it."
+    }
+}
+
 function Invoke-AlpaconInstall {
     param(
         [string]$Version,
@@ -418,17 +469,17 @@ function Invoke-AlpaconInstall {
         # get the latest release.
         $target = if ($PSBoundParameters.ContainsKey('Version')) { ConvertFrom-VersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
 
+        $exePath = Join-Path $InstallDir $script:ExeName
         $installed = Get-InstalledAlpaconVersion -InstallDir $InstallDir
         $action = Resolve-InstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
         if ($action -eq 'skip') {
-            # This shell can predate the install that put alpacon here, so it
-            # still needs the directory on a run that installs nothing.
-            Add-ToSessionPath -Directory $InstallDir
+            # Both PATHs need repair even here: this shell can predate the
+            # install, and the entry can have been wiped by another installer.
+            Set-AlpaconPath -InstallDir $InstallDir -ExePath $exePath
             Write-Host "alpacon is already at $target. Pass -Force to install it again."
             return
         }
 
-        $exePath = Join-Path $InstallDir 'alpacon.exe'
         if (Test-AlpaconFileLocked -Path $exePath) {
             throw $script:LockedMessage
         }
@@ -463,7 +514,7 @@ function Invoke-AlpaconInstall {
                 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
             }
             try {
-                Move-Item -LiteralPath (Join-Path $work 'alpacon.exe') -Destination $exePath -Force
+                Move-Item -LiteralPath (Join-Path $work $script:ExeName) -Destination $exePath -Force
             } catch {
                 # The lock check above ran before the download, so alpacon can
                 # have been started in the seconds since. Only say so when the
@@ -486,37 +537,7 @@ function Invoke-AlpaconInstall {
             Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
         }
 
-        try {
-            if (Add-ToUserPath -Directory $InstallDir) {
-                # Only the registry write decides whether the PATH is set. The
-                # broadcast just refreshes windows that are already open, so its
-                # failure must not be reported as a PATH that was never written.
-                try {
-                    Send-SettingChange
-                } catch {
-                    # Deliberately silent: there is no way to pass -Verbose to a
-                    # script run through irm | iex, and the line below already
-                    # tells the reader what a missed broadcast costs them.
-                    $null = $_
-                }
-                Write-Host "Added $InstallDir to your PATH. Terminals that are already open need a restart."
-            }
-        } catch {
-            # alpacon.exe is already in place, so a PATH this process was not
-            # allowed to write is a warning rather than a failed install. A
-            # group policy that locks HKCU\Environment lands here.
-            Write-Warning "Could not put $InstallDir on your PATH: $($_.Exception.Message)"
-            Write-Warning "Add it yourself, or call alpacon by its full path."
-        }
-
-        Add-ToSessionPath -Directory $InstallDir
-
-        $shadow = Get-Command alpacon -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($shadow -and (ConvertTo-ComparablePath -Path $shadow.Source) -ne (ConvertTo-ComparablePath -Path $exePath)) {
-            Write-Warning "'alpacon' still resolves to $($shadow.Source), which comes earlier on your PATH."
-            Write-Warning "Remove that copy, or put $InstallDir ahead of it."
-        }
+        Set-AlpaconPath -InstallDir $InstallDir -ExePath $exePath
 
         if ($action -eq 'upgrade') {
             # Not "updated": Resolve-InstallAction only knows the versions

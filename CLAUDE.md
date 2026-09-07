@@ -24,7 +24,7 @@ go build -o alpacon .
 go test -race -v -shuffle=on ./...
 ```
 
-The Windows installer has its own suite. `.github/workflows/install-script.yaml` runs three jobs: Pester on both PowerShell editions, PSScriptAnalyzer on Windows PowerShell alone, and an end-to-end job that installs on a real runner, re-runs, reinstalls after the binary is deleted but the version marker survives, pins a version, and checks that a locked binary is refused. `release.yaml` calls that workflow before GoReleaser publishes anything. To run the same checks by hand on a Windows machine:
+The Windows installer has its own suite. `.github/workflows/install-script-tests.yaml` runs three jobs: Pester on both PowerShell editions, PSScriptAnalyzer on Windows PowerShell alone, and an end-to-end job that installs on a real runner, re-runs it after emptying both the session and the user PATH, reinstalls after the binary is deleted but the version marker survives, pins a version, and checks that a locked binary is refused. `release.yaml` calls that workflow before GoReleaser publishes anything. To run the same checks by hand on a Windows machine:
 
 ```powershell
 # The same script CI runs: it installs the pinned Pester, runs the suite and
@@ -38,7 +38,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .github/scripts/run-installer-test
 Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -SkipPublisherCheck -Scope CurrentUser
 # Import the pinned version: auto-loading picks the highest one on the machine.
 Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force
-$found = @('install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1' |
+$found = @('install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1',
+  '.github/scripts/run-installer-tests.ps1' |
   ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Settings ./PSScriptAnalyzerSettings.psd1 })
 if ($found.Count -gt 0) { $found; throw 'PSScriptAnalyzer reported findings' }
 ```
@@ -90,7 +91,7 @@ install.Tests.ps1    # Pester suite for the installer
 PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
 ```
 
-`install.ps1` is delivered through `releases/latest/download/install.ps1` and is run by `irm | iex`, which executes it in the user's own shell. Its functions and `$script:` variables land in that shell and there is no way around it, but no preference may: `Set-StrictMode`, `$ErrorActionPreference`, and `$ProgressPreference` all live inside `Invoke-AlpaconInstall`, and a test walks the syntax tree to keep them there. The file stays pure ASCII because Windows PowerShell 5.1 reads a BOM-less file as ANSI while a BOM would reach `iex` as a stray U+FEFF. The archive and checksum file names are spelled out by hand in the script, so they are pinned to `.goreleaser.yaml`'s templates by a test as well. What the script installed is recorded in `installed-version.txt` beside the binary, because reading the version out of `alpacon version` would reach the network on every install.
+`install.ps1` is delivered through `releases/latest/download/install.ps1` and is run by `irm | iex`, which executes it in the user's own shell. Its functions and `$script:` variables land in that shell and there is no way around it, but no preference may: `Set-StrictMode`, `$ErrorActionPreference`, and `$ProgressPreference` all live inside `Invoke-AlpaconInstall`, and a test walks the syntax tree to keep them there. The file stays pure ASCII because Windows PowerShell 5.1 reads a BOM-less file as ANSI while a BOM would reach `iex` as a stray U+FEFF. The archive and checksum file names are spelled out by hand in the script, so they are pinned to `.goreleaser.yaml`'s templates by a test as well. What the script installed is recorded in `installed-version.txt` beside the binary, because reading the version out of `alpacon version` would reach the network on every install. Both exits from `Invoke-AlpaconInstall`—the one that installs and the one that finds the binary already current—hand every PATH decision to `Set-AlpaconPath`, so a re-run repairs a user PATH entry that something else wiped out: another installer, the 2047-character truncation of the old environment variable editor, a hand edit. Dropping that call from the skip branch reads like removing dead work, and it is what left the README's promise of a PATH entry unkept for the one user who re-runs the one-liner to get that entry back (#426).
 
 `selfupdate.syncVersionMarker` keeps that record honest from the Go side: a marker an update left behind would send the next install against a version that is no longer on disk, skipping a pinned reinstall or reporting an upgrade it never made. It rewrites the file whichever way `alpacon update` ends—after a replace, and on a run that finds nothing to install, which is what repairs a marker stranded by an update killed before it got there—and creates one nowhere, since a marker beside a binary the script never placed would claim an install it does not own.
 
