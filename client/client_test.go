@@ -1175,3 +1175,63 @@ func TestSetWebsocketHeaderWithCapabilities(t *testing.T) {
 		})
 	}
 }
+
+// Issue #397: the token is written on one goroutine while others read it for the
+// Authorization header. Nothing is stubbed, so the real grant runs. Serial because
+// t.Setenv panics alongside t.Parallel().
+func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	defer ts.Close()
+
+	mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth0":{"method":"auth0","client_id":"cli","domain":"` + strings.TrimPrefix(ts.URL, "https://") + `"}}`))
+	})
+	mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"fresh","expires_in":3600,"token_type":"Bearer"}`))
+	})
+	mux.HandleFunc("/api/test/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "ws", "", "", "stale", "r1", "alpacon.io", 0, false,
+	))
+
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ac.SetAccessToken("stale")
+
+	const readers, reads, refreshes = 8, 50, 20
+	errs := make(chan error, readers*reads+refreshes)
+
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range reads {
+				_, err := ac.SendGetRequest("/api/test/")
+				errs <- err
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range refreshes {
+			errs <- ac.RefreshToken()
+		}
+	}()
+	wg.Wait()
+	close(errs)
+
+	// A deadlock surfaces as an unanswered request, not as a race report.
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
