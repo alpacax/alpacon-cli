@@ -469,17 +469,17 @@ function Invoke-AlpaconInstall {
         # get the latest release.
         $target = if ($PSBoundParameters.ContainsKey('Version')) { ConvertFrom-VersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
 
+        $exePath = Join-Path $InstallDir $script:ExeName
         $installed = Get-InstalledAlpaconVersion -InstallDir $InstallDir
         $action = Resolve-InstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
         if ($action -eq 'skip') {
-            # This shell can predate the install that put alpacon here, so it
-            # still needs the directory on a run that installs nothing.
-            Add-ToSessionPath -Directory $InstallDir
+            # Both PATHs need repair even here: this shell can predate the
+            # install, and the entry can have been wiped by another installer.
+            Set-AlpaconPath -InstallDir $InstallDir -ExePath $exePath
             Write-Host "alpacon is already at $target. Pass -Force to install it again."
             return
         }
 
-        $exePath = Join-Path $InstallDir $script:ExeName
         if (Test-AlpaconFileLocked -Path $exePath) {
             throw $script:LockedMessage
         }

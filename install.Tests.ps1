@@ -636,6 +636,91 @@ Describe 'Get-ShadowingAlpacon' {
     }
 }
 
+Describe 'A run that installs nothing' {
+    BeforeAll {
+        # Pinned because Invoke-AlpaconInstall reads it: the real value differs
+        # on every machine and is absent off Windows.
+        $script:PriorLocalAppData = $env:LOCALAPPDATA
+        $env:LOCALAPPDATA = 'C:\Users\jane\AppData\Local'
+    }
+
+    AfterAll {
+        $env:LOCALAPPDATA = $script:PriorLocalAppData
+    }
+
+    BeforeEach {
+        Mock -CommandName Get-AlpaconArch -MockWith { 'amd64' }
+        Mock -CommandName Get-LatestAlpaconVersion -MockWith { '1.11.2' }
+        Mock -CommandName Get-InstalledAlpaconVersion -MockWith { '1.11.2' }  # equal to latest: the skip branch
+        Mock -CommandName Add-ToUserPath -MockWith { $false }  # the entry is already there; cases that need more re-mock it
+        Mock -CommandName Add-ToSessionPath -MockWith { }  # would rewrite the suite shell's own PATH
+        Mock -CommandName Send-SettingChange -MockWith { }
+        Mock -CommandName Get-ShadowingAlpacon -MockWith { $null }
+        Mock -CommandName Write-Host -MockWith { }
+        Mock -CommandName Write-Warning -MockWith { }
+    }
+
+    It 'puts the install directory back on the user PATH' {
+        Mock -CommandName Add-ToUserPath -MockWith { $true }
+
+        Invoke-AlpaconInstall
+
+        Should -Invoke -CommandName Add-ToUserPath -Times 1 -Exactly -ParameterFilter {
+            $Directory -eq 'C:\Users\jane\AppData\Local\Alpacon\bin'
+        }
+        Should -Invoke -CommandName Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -like 'Added *to your PATH*'
+        }
+        Should -Invoke -CommandName Send-SettingChange -Times 1 -Exactly  # without it only new terminals see the repair
+        Should -Invoke -CommandName Add-ToSessionPath -Times 1 -Exactly -ParameterFilter {
+            $Directory -eq 'C:\Users\jane\AppData\Local\Alpacon\bin'
+        }
+    }
+
+    It 'says nothing about the PATH when the entry is already there' {
+        Invoke-AlpaconInstall
+
+        Should -Invoke -CommandName Add-ToUserPath -Times 1 -Exactly
+        Should -Invoke -CommandName Write-Host -Times 0 -Exactly -ParameterFilter {
+            $Object -like 'Added *to your PATH*'
+        }
+        Should -Invoke -CommandName Send-SettingChange -Times 0 -Exactly
+    }
+
+    It 'still reports the version it found' {
+        Invoke-AlpaconInstall
+
+        Should -Invoke -CommandName Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -like 'alpacon is already at 1.11.2.*'
+        }
+    }
+
+    It 'warns instead of failing when the user PATH cannot be written' {
+        Mock -CommandName Add-ToUserPath -MockWith { throw 'Requested registry access is not allowed.' }
+
+        { Invoke-AlpaconInstall } | Should -Not -Throw
+
+        Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter {
+            $Message -like '*Could not put*on your PATH*registry access*'
+        }
+        Should -Invoke -CommandName Write-Host -Times 1 -Exactly -ParameterFilter {
+            $Object -like 'alpacon is already at 1.11.2.*'
+        }
+        # The catch sits above it, so a throw here must not cost this shell its entry.
+        Should -Invoke -CommandName Add-ToSessionPath -Times 1 -Exactly
+    }
+
+    It 'warns about a copy of alpacon that comes earlier on the PATH' {
+        Mock -CommandName Get-ShadowingAlpacon -MockWith { 'C:\tools\alpacon.exe' }
+
+        Invoke-AlpaconInstall
+
+        Should -Invoke -CommandName Write-Warning -Times 1 -Exactly -ParameterFilter {
+            $Message -like "*still resolves to C:\tools\alpacon.exe*"
+        }
+    }
+}
+
 Describe 'What the installer promises about itself and about the release' {
     BeforeAll {
         $script:Readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw
