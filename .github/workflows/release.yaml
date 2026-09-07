@@ -47,7 +47,7 @@ jobs:
     needs: [create-release]
     permissions:
       contents: read
-    uses: ./.github/workflows/install-script.yaml
+    uses: ./.github/workflows/install-script-tests.yaml
 
   goreleaser:
     needs: [build-and-test, install-script]
