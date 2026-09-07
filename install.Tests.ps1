@@ -607,6 +607,35 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
     }
 }
 
+Describe 'Get-ShadowingAlpacon' {
+    BeforeAll {
+        $script:Exe = 'C:\Users\jane\AppData\Local\Alpacon\bin\alpacon.exe'
+    }
+
+    It 'names the copy that would run instead of the one just installed' {
+        Get-ShadowingAlpacon -ExePath $script:Exe `
+            -Resolved ([pscustomobject]@{ Source = 'C:\tools\alpacon.exe' }) |
+            Should -BeExactly 'C:\tools\alpacon.exe'
+    }
+
+    It 'stays quiet when the resolved copy is the installed one' {
+        Get-ShadowingAlpacon -ExePath $script:Exe `
+            -Resolved ([pscustomobject]@{ Source = $script:Exe }) |
+            Should -BeNullOrEmpty
+    }
+
+    It 'compares the paths rather than their spelling' {
+        Get-ShadowingAlpacon -ExePath $script:Exe `
+            -Resolved ([pscustomobject]@{ Source = 'C:\Users\jane\AppData\Local\Alpacon\bin\..\bin\alpacon.exe' }) |
+            Should -BeNullOrEmpty
+    }
+
+    It 'stays quiet when nothing resolves at all' {
+        Get-ShadowingAlpacon -ExePath $script:Exe -Resolved $null |
+            Should -BeNullOrEmpty
+    }
+}
+
 Describe 'What the installer promises about itself and about the release' {
     BeforeAll {
         $script:Readme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Raw
