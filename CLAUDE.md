@@ -38,7 +38,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .github/scripts/run-installer-test
 Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -SkipPublisherCheck -Scope CurrentUser
 # Import the pinned version: auto-loading picks the highest one on the machine.
 Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force
-$found = @('install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1' |
+$found = @('install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1',
+  '.github/scripts/run-installer-tests.ps1' |
   ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Settings ./PSScriptAnalyzerSettings.psd1 })
 if ($found.Count -gt 0) { $found; throw 'PSScriptAnalyzer reported findings' }
 ```

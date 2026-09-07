@@ -73,7 +73,8 @@ jobs:
           # The runner image ships PSScriptAnalyzer too, so pin it on import.
           Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force
           $found = @(
-            'install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1' |
+            'install.ps1', 'install.Tests.ps1', 'PSScriptAnalyzerSettings.psd1',
+            '.github/scripts/run-installer-tests.ps1' |
               ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Settings ./PSScriptAnalyzerSettings.psd1 }
           )
           $found | Format-Table RuleName,Severity,ScriptName,Line,Message -AutoSize | Out-String -Width 200 | Write-Host
