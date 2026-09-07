@@ -19,8 +19,8 @@ const accessTokenField = "accessToken"
 // than try to prove from the AST that a lock is held (issue #397).
 var accessTokenAccessors = map[string]bool{"AccessToken": true, "SetAccessToken": true}
 
-// Unexporting stops other packages; setHTTPHeader, the read that started #397,
-// lives here. The AST match ignores comments and any receiver name.
+// Unexporting stops other packages; setHTTPHeader and the package's own tests
+// live here. The AST match ignores comments and any receiver name.
 func TestAccessTokenFieldStaysBehindTheAccessors(t *testing.T) {
 	t.Parallel()
 
@@ -31,7 +31,7 @@ func TestAccessTokenFieldStaysBehindTheAccessors(t *testing.T) {
 	var offenders []string
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
 

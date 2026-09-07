@@ -1203,7 +1203,11 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 		ts.URL, "ws", "", "", "stale", "r1", "alpacon.io", 0, false,
 	))
 
-	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	// A stalled round trip must fail the test, not hang it until the go test deadline.
+	httpClient := ts.Client()
+	httpClient.Timeout = 10 * time.Second
+
+	ac := &AlpaconClient{HTTPClient: httpClient, BaseURL: ts.URL}
 	ac.SetAccessToken("stale")
 
 	const readers, reads, refreshes = 8, 50, 20
