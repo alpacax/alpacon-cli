@@ -74,9 +74,9 @@ Run the command again later to check for completion.`,
 			return
 		}
 
-		// Only the statuses whose outcome prints the output are worth a fetch. A
-		// running command and a status-only failure both answer with a line of
-		// their own, which an unreachable chunk store would only bury.
+		// Only the statuses whose outcome prints the output are worth a fetch: the
+		// rest answer with a line of their own and an empty stdoutLine, so the
+		// round trip buys nothing and a chunk store that hangs costs the wait.
 		var readErr error
 		if !event.IsRunningStatus(details.Status) && !isStatusOnlyFailure(details.Status) {
 			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
