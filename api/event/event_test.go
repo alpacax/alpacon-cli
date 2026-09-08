@@ -2272,3 +2272,73 @@ func TestGetCommandByID_MissingSudoFieldsStayNil(t *testing.T) {
 	assert.Nil(t, details.SudoGrantStatus)
 	assert.Nil(t, details.SudoApprovalRequestID)
 }
+
+// TestRunCommandFallbackFromID_ChunkFetchFailure pins what the polling fallback
+// owes the caller when the chunk store is the thing that failed. The warning
+// this path prints first says the stream was lost; a successful command that
+// then prints nothing and returns nil says the command produced no output.
+func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
+	t.Parallel()
+	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	tests := []struct {
+		name       string
+		result     string
+		success    bool
+		wantOut    string
+		wantErrMsg string
+		wantRemote bool
+	}{
+		{
+			name:       "a successful command with nothing to print",
+			success:    true,
+			wantErrMsg: "failed to read command output",
+		},
+		{
+			name:    "a legacy result stands in for the chunks",
+			result:  "legacy output\n",
+			success: true,
+			wantOut: "legacy output\n",
+		},
+		{
+			name:       "the command's own failure outranks the read failure",
+			wantRemote: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/chunks/"):
+					w.WriteHeader(http.StatusInternalServerError)
+				case r.URL.Path == "/api/events/commands/"+cmdID+"/":
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"id": cmdID, "status": "completed", "success": tt.success,
+						"exit_code": 0, "result": tt.result,
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			var out bytes.Buffer
+			err := runCommandFallbackFromID(ac, cmdID, &out, false, fmt.Errorf("websocket dial failed"))
+
+			assert.Equal(t, tt.wantOut, out.String())
+			switch {
+			case tt.wantRemote:
+				var remoteErr *RemoteCommandError
+				require.ErrorAs(t, err, &remoteErr)
+			case tt.wantErrMsg != "":
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrMsg)
+			default:
+				require.NoError(t, err)
+			}
+		})
+	}
+}

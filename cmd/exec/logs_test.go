@@ -2,7 +2,6 @@ package exec
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func boolPtr(b bool) *bool    { return &b }
@@ -254,38 +252,6 @@ func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
 
 	stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 	assert.Equal(t, 1, exitCode, "unreadable output is a failure, not a command that printed nothing")
-	assert.Contains(t, stderr, "failed to fetch command output")
+	assert.Contains(t, stderr, "failed to read command output")
 	assert.Empty(t, stdout)
-}
-
-func TestResolveCommandOutput(t *testing.T) {
-	t.Parallel()
-	fetchErr := errors.New("unexpected response from server (HTTP 500)")
-	tests := []struct {
-		name    string
-		result  string
-		chunked string
-		err     error
-		want    string
-		wantErr error
-	}{
-		{name: "chunks win over the legacy field", result: "legacy", chunked: "chunked", want: "chunked"},
-		{name: "no chunks falls back to the legacy field", result: "legacy", want: "legacy"},
-		{name: "a command that printed nothing stays empty", want: ""},
-		{name: "fetch failure falls back to a legacy result", result: "legacy", err: fetchErr, want: "legacy"},
-		{name: "fetch failure with nothing to fall back on", err: fetchErr, wantErr: fetchErr},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := resolveCommandOutput(tt.result, tt.chunked, tt.err)
-			if tt.wantErr != nil {
-				require.ErrorIs(t, err, tt.wantErr)
-				assert.Empty(t, got)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
 }

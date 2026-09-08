@@ -680,15 +680,18 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if err != nil {
 		return err
 	}
-	// Command has finished: reconstruct output from chunks best-effort, falling
-	// back to Result when chunks are empty or unavailable. No warning on failure—
-	// the polling-fallback warning above already covers it.
-	output := details.Result
-	if reconstructed, oerr := GetCommandOutput(ac, cmdID); oerr == nil && reconstructed != "" {
-		output = reconstructed
-	}
+	output, oerr := ResolveCommandOutput(ac, cmdID, details.Result)
 	if output != "" {
 		_, _ = fmt.Fprint(out, output)
 	}
-	return errorFromDetails(details)
+	// The command's own failure carries the remote exit code the caller
+	// propagates, so it outranks an unreadable output. The warning above names a
+	// lost stream, not a lost output, so it cannot stand in for this error.
+	if err := errorFromDetails(details); err != nil {
+		return err
+	}
+	if oerr != nil {
+		return fmt.Errorf("failed to read command output: %w", oerr)
+	}
+	return nil
 }

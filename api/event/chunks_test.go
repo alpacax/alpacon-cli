@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -140,6 +141,75 @@ func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 			for _, want := range tt.wantQ {
 				assert.Contains(t, capturedQuery, want)
 			}
+		})
+	}
+}
+
+func TestPickCommandOutput(t *testing.T) {
+	t.Parallel()
+	fetchErr := errors.New("unexpected response from server (HTTP 500)")
+	tests := []struct {
+		name    string
+		result  string
+		chunked string
+		err     error
+		want    string
+		wantErr error
+	}{
+		{name: "chunks win over the legacy field", result: "legacy", chunked: "chunked", want: "chunked"},
+		{name: "no chunks falls back to the legacy field", result: "legacy", want: "legacy"},
+		{name: "a command that printed nothing stays empty", want: ""},
+		{name: "fetch failure falls back to a legacy result", result: "legacy", err: fetchErr, want: "legacy"},
+		{name: "fetch failure with nothing to fall back on", err: fetchErr, wantErr: fetchErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := pickCommandOutput(tt.result, tt.chunked, tt.err)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestResolveCommandOutputSurfacesFetchFailure pins the wiring pickCommandOutput
+// cannot: that the fetch error reaches the decision, and that result and the
+// chunks are not passed the wrong way round.
+func TestResolveCommandOutputSurfacesFetchFailure(t *testing.T) {
+	t.Parallel()
+	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	tests := []struct {
+		name    string
+		result  string
+		want    string
+		wantErr bool
+	}{
+		{name: "nothing to fall back on is an error", wantErr: true},
+		{name: "a legacy result stands in for the chunks", result: "legacy", want: "legacy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			got, err := ResolveCommandOutput(ac, cmdID, tt.result)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

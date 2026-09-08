@@ -74,18 +74,15 @@ Run the command again later to check for completion.`,
 			return
 		}
 
-		// Output is stored as chunks (Result is empty under the streaming
-		// contract); reconstruct it, falling back to Result for legacy commands.
 		// A running command's output is not printed here, so skip the fetch and
 		// keep an unreachable chunk store from burying the "still running" line.
 		if !event.IsRunningStatus(details.Status) {
-			output, oerr := event.GetCommandOutput(alpaconClient, jobID)
-			result, rerr := resolveCommandOutput(details.Result, output, oerr)
-			if rerr != nil {
-				utils.CliErrorWithExit("failed to fetch command output: %s", rerr)
+			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
+			if oerr != nil {
+				utils.CliErrorWithExit("failed to read command output: %s", oerr)
 				return
 			}
-			details.Result = result
+			details.Result = output
 		}
 
 		// What the requester said the command was for, ahead of the outcome and
@@ -112,24 +109,6 @@ Run the command again later to check for completion.`,
 
 func init() {
 	ExecCmd.AddCommand(logsCmd)
-}
-
-// resolveCommandOutput picks what `exec logs` prints as the command's output.
-// A chunk fetch failure is fatal only when Result carries nothing: a server
-// predating the chunk endpoint still answers the legacy field, while an empty
-// Result leaves nothing to print, and exiting 0 there would report a command
-// that finished having produced no output.
-func resolveCommandOutput(result, chunked string, chunkErr error) (string, error) {
-	if chunkErr != nil {
-		if result != "" {
-			return result, nil
-		}
-		return "", chunkErr
-	}
-	if chunked != "" {
-		return chunked, nil
-	}
-	return result, nil
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
