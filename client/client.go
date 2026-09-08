@@ -611,7 +611,9 @@ func (ac *AlpaconClient) IsBearerAuth() bool {
 	return ac.AccessToken() != ""
 }
 
-// SetAccessToken is exported so callers outside this package cannot skip tokenMu.
+// SetAccessToken installs the token every later request carries. It is exported
+// so tests in other packages can build an authenticated client without writing
+// the field directly and skipping tokenMu.
 func (ac *AlpaconClient) SetAccessToken(token string) {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
