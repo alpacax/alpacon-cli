@@ -253,5 +253,7 @@ func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
 	stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
 	assert.Equal(t, 1, exitCode, "unreadable output is a failure, not a command that printed nothing")
 	assert.Contains(t, stderr, "failed to read command output")
+	// A bad verb would leave the marker in place of the reason the read failed.
+	assert.NotContains(t, stderr, "%!", "the fetch error must render, not print a bad-verb marker")
 	assert.Empty(t, stdout)
 }
