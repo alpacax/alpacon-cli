@@ -15,6 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// statusErr carries an HTTP status the way the API client's own errors do,
+// which is what utils.HTTPStatusCode reads out of the chain.
+type statusErr struct{ code int }
+
+func (e *statusErr) Error() string       { return fmt.Sprintf("HTTP %d", e.code) }
+func (e *statusErr) HTTPStatusCode() int { return e.code }
+
 func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	t.Parallel()
 	cmdID := "a1b2c3d4-1234-5678-abcd-000000000000"
@@ -161,6 +168,9 @@ func TestPickCommandOutput(t *testing.T) {
 		{name: "a command that printed nothing stays empty", want: ""},
 		{name: "fetch failure falls back to a legacy result", result: "legacy", err: fetchErr, want: "legacy"},
 		{name: "fetch failure with nothing to fall back on", err: fetchErr, wantErr: fetchErr},
+		// A server without the endpoint carries the whole output in result, so an
+		// empty one there is a command that printed nothing, not an unread result.
+		{name: "a 404 leaves an empty legacy result standing", err: &statusErr{code: http.StatusNotFound}, want: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,18 +195,22 @@ func TestResolveCommandOutputSurfacesFetchFailure(t *testing.T) {
 	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
 	tests := []struct {
 		name    string
+		status  int
 		result  string
 		want    string
 		wantErr bool
 	}{
-		{name: "nothing to fall back on is an error", wantErr: true},
-		{name: "a legacy result stands in for the chunks", result: "legacy", want: "legacy"},
+		{name: "nothing to fall back on is an error", status: http.StatusInternalServerError, wantErr: true},
+		{name: "a legacy result stands in for the chunks", status: http.StatusInternalServerError, result: "legacy", want: "legacy"},
+		// The 404 tag has to survive the wrapping FetchAllPages puts around it,
+		// which is the half a pure table cannot see.
+		{name: "a server without the chunk endpoint is not a failure", status: http.StatusNotFound},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
+				w.WriteHeader(tt.status)
 			}))
 			defer ts.Close()
 
