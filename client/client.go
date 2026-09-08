@@ -596,7 +596,8 @@ func (ac *AlpaconClient) RefreshToken() error {
 	return ac.refreshLocked()
 }
 
-// AccessToken locks because sendRequest can swap the token mid-flight.
+// AccessToken returns the token a request should carry. It locks because
+// sendRequest can swap the token mid-flight.
 func (ac *AlpaconClient) AccessToken() string {
 	ac.tokenMu.Lock()
 	defer ac.tokenMu.Unlock()
