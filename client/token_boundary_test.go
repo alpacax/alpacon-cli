@@ -21,7 +21,7 @@ const accessTokenField = "accessToken"
 var accessTokenAccessors = map[string]bool{"AccessToken": true, "SetAccessToken": true}
 
 // Unexporting stops other packages; setHTTPHeader and the package's own tests
-// live here. The AST match ignores comments and any receiver name.
+// live here. The AST match ignores comments and the receiver's variable name.
 func TestAccessTokenFieldStaysBehindTheAccessors(t *testing.T) {
 	t.Parallel()
 
