@@ -227,3 +227,12 @@ func IsAwaitingPurposeStatus(status string) bool {
 func IsRejectedStatus(status string) bool {
 	return status == "rejected"
 }
+
+// IsStatusOnlyFailure reports the terminal failures whose whole outcome is a
+// line about the status: the command never reached a result worth printing. It
+// lives here so the polling path and the detach path read the triple from one
+// place—both decide alike on an unreadable output, and a fourth terminal status
+// must not reach one of them and miss the other.
+func IsStatusOnlyFailure(status string) bool {
+	return status == "stuck" || status == "error" || status == "cancelled"
+}

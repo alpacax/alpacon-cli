@@ -78,7 +78,7 @@ Run the command again later to check for completion.`,
 		// rest answer with a line of their own and an empty stdoutLine, so the
 		// round trip buys nothing and a chunk store that hangs costs the wait.
 		var readErr error
-		if !event.IsRunningStatus(details.Status) && !isStatusOnlyFailure(details.Status) {
+		if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
 			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
 			if oerr != nil {
 				readErr = oerr
@@ -120,12 +120,6 @@ func init() {
 	ExecCmd.AddCommand(logsCmd)
 }
 
-// isStatusOnlyFailure reports the statuses whose outcome is a line about the
-// status alone: the command never reached a result worth printing.
-func isStatusOnlyFailure(status string) bool {
-	return status == "stuck" || status == "error" || status == "cancelled"
-}
-
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
 // awaiting_purpose demand, the awaiting_approval hold, nor a rejection reaches
 // here: the caller answers all three on their own contracts first.
@@ -142,7 +136,7 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return "", stderrLine, 0
 	}
 
-	if isStatusOnlyFailure(details.Status) {
+	if event.IsStatusOnlyFailure(details.Status) {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",

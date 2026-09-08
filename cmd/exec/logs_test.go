@@ -30,6 +30,20 @@ func TestIsRunningStatus(t *testing.T) {
 	}
 }
 
+func TestIsStatusOnlyFailure(t *testing.T) {
+	t.Parallel()
+	statusOnly := []string{"stuck", "error", "cancelled"}
+	for _, s := range statusOnly {
+		assert.True(t, event.IsStatusOnlyFailure(s), "expected %q to carry no printable result", s)
+	}
+	// "failed" belongs to the other group: it carries the remote exit code and a
+	// result, so its output is fetched and printed.
+	withResult := []string{"completed", "success", "failed", "running", "queued", "awaiting_approval", "rejected"}
+	for _, s := range withResult {
+		assert.False(t, event.IsStatusOnlyFailure(s), "expected %q to not be a status-only failure", s)
+	}
+}
+
 func TestLogsCommandOutcome(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
