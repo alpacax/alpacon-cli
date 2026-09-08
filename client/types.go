@@ -10,13 +10,13 @@ type AlpaconClient struct {
 	BaseURL       string
 	WorkspaceName string // the workspace BaseURL points at; config can be rewritten mid-flight
 	Token         string
-	AccessToken   string
+	accessToken   string
 	Privileges    string
 	Username      string
 	UserAgent     string
 
-	// tokenMu guards AccessToken, which sendRequest renews mid-flight when the
-	// server reports it stale. No package outside this one reads the field.
+	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
+	// the field keeps other packages out, token_boundary_test.go keeps this one out.
 	tokenMu sync.Mutex
 	// refreshMu serializes the refresh-token grant so one expiry costs one round
 	// trip. The grant is unbounded network I/O, so it runs under this lock and

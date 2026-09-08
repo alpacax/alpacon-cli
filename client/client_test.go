@@ -723,11 +723,12 @@ func TestLoadCurrentUser_ErrorIsCachedOnFailure(t *testing.T) {
 // newBearerTestClient builds a client authenticated the way an Auth0 login
 // leaves it: an access token, no legacy API key.
 func newBearerTestClient(baseURL, accessToken string) *AlpaconClient {
-	return &AlpaconClient{
-		HTTPClient:  &http.Client{},
-		BaseURL:     baseURL,
-		AccessToken: accessToken,
+	ac := &AlpaconClient{
+		HTTPClient: &http.Client{},
+		BaseURL:    baseURL,
 	}
+	ac.SetAccessToken(accessToken)
+	return ac
 }
 
 // swapTokenRenewal points the refresh seam at renew for the rest of the test.
@@ -741,13 +742,13 @@ func swapTokenRenewal(t *testing.T, renew func(*AlpaconClient) error) {
 
 // stubTokenRenewal swaps the refresh seam for one that installs newToken and
 // counts its runs. The seam runs with refreshMu held, so it installs the token
-// through setAccessToken the way refreshLocked does.
+// through SetAccessToken the way refreshLocked does.
 func stubTokenRenewal(t *testing.T, newToken string) *int {
 	t.Helper()
 	calls := 0
 	swapTokenRenewal(t, func(ac *AlpaconClient) error {
 		calls++
-		ac.setAccessToken(newToken)
+		ac.SetAccessToken(newToken)
 		return nil
 	})
 	return &calls
@@ -1062,7 +1063,7 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	swapTokenRenewal(t, func(ac *AlpaconClient) error {
 		close(entered)
 		<-release
-		ac.setAccessToken("fresh")
+		ac.SetAccessToken("fresh")
 		return nil
 	})
 
@@ -1072,7 +1073,7 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	<-entered
 
 	read := make(chan string, 1)
-	go func() { read <- ac.accessToken() }()
+	go func() { read <- ac.AccessToken() }()
 	select {
 	case token := <-read:
 		assert.Equal(t, "stale", token, "a read during the grant sees the token still in force")
@@ -1172,5 +1173,75 @@ func TestSetWebsocketHeaderWithCapabilities(t *testing.T) {
 			assert.Equal(t, "alpacon-cli/9.9.9", header.Get("User-Agent"))
 			assert.Equal(t, "https://my-workspace.alpacon.io", header.Get("Origin"))
 		})
+	}
+}
+
+// Issue #397: the token is written on one goroutine while others read it for the
+// Authorization header. Nothing is stubbed, so the real grant runs. Serial because
+// t.Setenv panics alongside t.Parallel().
+func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	defer ts.Close()
+
+	mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth0":{"method":"auth0","client_id":"cli","domain":"` + strings.TrimPrefix(ts.URL, "https://") + `"}}`))
+	})
+	mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"fresh","expires_in":3600,"token_type":"Bearer"}`))
+	})
+	mux.HandleFunc("/api/test/", func(w http.ResponseWriter, r *http.Request) {
+		// Without this the torn header only shows up under -race.
+		if got := r.Header.Get("Authorization"); got != "Bearer stale" && got != "Bearer fresh" {
+			t.Errorf("Authorization header was torn: %q", got)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "ws", "", "", "stale", "r1", "alpacon.io", 0, false,
+	))
+
+	// A stalled round trip must fail the test, not hang it until the go test deadline.
+	httpClient := ts.Client()
+	httpClient.Timeout = 10 * time.Second
+
+	ac := &AlpaconClient{HTTPClient: httpClient, BaseURL: ts.URL}
+	ac.SetAccessToken("stale")
+
+	const readers, reads, refreshes = 8, 50, 20
+	errs := make(chan error, readers*reads+refreshes)
+
+	var wg sync.WaitGroup
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range reads {
+				_, err := ac.SendGetRequest("/api/test/")
+				errs <- err
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range refreshes {
+			errs <- ac.RefreshToken()
+		}
+	}()
+	wg.Wait()
+	close(errs)
+
+	// A deadlock surfaces as an unanswered request, not as a race report.
+	for err := range errs {
+		require.NoError(t, err)
 	}
 }

@@ -231,7 +231,8 @@ func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
 func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 	t.Parallel()
-	bearer := &client.AlpaconClient{AccessToken: "bearer-token"}
+	bearer := &client.AlpaconClient{}
+	bearer.SetAccessToken("bearer-token")
 	apiToken := &client.AlpaconClient{Token: "alpat-token"}
 
 	tests := []struct {
@@ -409,7 +410,8 @@ func TestResolveSubject(t *testing.T) {
 // A coded 403 never reaches the codeless branch, so it needs a case of its own.
 func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	t.Parallel()
-	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
+	ac := &client.AlpaconClient{}
+	ac.SetAccessToken("bearer-token")
 	coded := fmt.Errorf("request failed with status 403: {\"code\": %q}", codePermissionDenied)
 
 	got := describeRBACError(ac, gateRoleRead, coded)
@@ -419,7 +421,8 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 
 func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
 	t.Parallel()
-	ac := &client.AlpaconClient{AccessToken: "bearer-token"}
+	ac := &client.AlpaconClient{}
+	ac.SetAccessToken("bearer-token")
 	cause := statusOnlyError{status: http.StatusForbidden}
 
 	got := describeRBACError(ac, gateRoleWrite, cause)
