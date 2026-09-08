@@ -742,7 +742,7 @@ func swapTokenRenewal(t *testing.T, renew func(*AlpaconClient) error) {
 
 // stubTokenRenewal swaps the refresh seam for one that installs newToken and
 // counts its runs. The seam runs with refreshMu held, so it installs the token
-// through setAccessToken the way refreshLocked does.
+// through SetAccessToken the way refreshLocked does.
 func stubTokenRenewal(t *testing.T, newToken string) *int {
 	t.Helper()
 	calls := 0
