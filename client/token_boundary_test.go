@@ -16,7 +16,8 @@ import (
 const accessTokenField = "accessToken"
 
 // Only these two take tokenMu, so the rule rejects every other reference rather
-// than try to prove from the AST that a lock is held (issue #397).
+// than try to prove from the AST that a lock is held (issue #397). The receiver
+// match keeps a plain function of the same name from inheriting the pass.
 var accessTokenAccessors = map[string]bool{"AccessToken": true, "SetAccessToken": true}
 
 // Unexporting stops other packages; setHTTPHeader and the package's own tests
@@ -53,6 +54,18 @@ func TestAccessTokenFieldStaysBehindTheAccessors(t *testing.T) {
 	assert.Empty(t, offenders, "every access token reference must sit inside AccessToken() or SetAccessToken()")
 }
 
+func isAccessor(fn *ast.FuncDecl, allowed map[string]bool) bool {
+	if !allowed[fn.Name.Name] || fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return false
+	}
+	star, isPtr := fn.Recv.List[0].Type.(*ast.StarExpr)
+	if !isPtr {
+		return false
+	}
+	ident, isIdent := star.X.(*ast.Ident)
+	return isIdent && ident.Name == "AlpaconClient"
+}
+
 func structFieldNames(file *ast.File, structName string) []string {
 	var names []string
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -81,7 +94,7 @@ func fieldRefsOutside(fset *token.FileSet, file *ast.File, field string, allowed
 	for _, decl := range file.Decls {
 		where := "a declaration outside any function"
 		if fn, isFunc := decl.(*ast.FuncDecl); isFunc {
-			if allowed[fn.Name.Name] {
+			if isAccessor(fn, allowed) {
 				continue
 			}
 			where = fn.Name.Name
