@@ -2,9 +2,11 @@ package exec
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -256,4 +258,69 @@ func TestExecLogsChunkFetchFailureExitsNonZero(t *testing.T) {
 	// A bad verb would leave the marker in place of the reason the read failed.
 	assert.NotContains(t, stderr, "%!", "the fetch error must render, not print a bad-verb marker")
 	assert.Empty(t, stdout)
+}
+
+// TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure pins the order
+// runCommandFallbackFromID keeps on the polling path: the command's own failure
+// carries the exit code a script branches on, so an unreadable output must not
+// take its place. A status-only failure prints no output at all, so it is never
+// fetched for.
+func TestExecLogsChunkFetchFailureYieldsToTheCommandsOwnFailure(t *testing.T) {
+	t.Parallel()
+	const jobID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
+	tests := []struct {
+		name          string
+		detail        map[string]any
+		wantExitCode  int
+		wantStderr    string
+		wantChunkRead bool
+	}{
+		{
+			name:          "a remote failure keeps its own exit code",
+			detail:        map[string]any{"status": "completed", "success": false, "exit_code": 2, "result": ""},
+			wantExitCode:  2,
+			wantChunkRead: true,
+		},
+		{
+			name:         "a stuck command keeps its status line",
+			detail:       map[string]any{"status": "stuck", "result": ""},
+			wantExitCode: 1,
+			wantStderr:   "command failed with status: stuck",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var chunkReads atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/events/commands/" + jobID + "/chunks/":
+					chunkReads.Add(1)
+					w.WriteHeader(http.StatusInternalServerError)
+				case "/api/events/commands/" + jobID + "/":
+					w.Header().Set("Content-Type", "application/json")
+					detail := map[string]any{"id": jobID}
+					maps.Copy(detail, tt.detail)
+					_ = json.NewEncoder(w).Encode(detail)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+
+			stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, jobID)
+			assert.Equal(t, tt.wantExitCode, exitCode)
+			assert.NotContains(t, stderr, "failed to read command output")
+			if tt.wantStderr != "" {
+				assert.Contains(t, stderr, tt.wantStderr)
+			}
+			if tt.wantChunkRead {
+				assert.Positive(t, chunkReads.Load(), "the outcome prints the output, so it is read")
+			} else {
+				assert.Zero(t, chunkReads.Load(), "the outcome prints no output, so nothing is fetched")
+			}
+			assert.Empty(t, stdout)
+		})
+	}
 }

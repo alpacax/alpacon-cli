@@ -74,15 +74,17 @@ Run the command again later to check for completion.`,
 			return
 		}
 
-		// A running command's output is not printed here, so skip the fetch and
-		// keep an unreachable chunk store from burying the "still running" line.
-		if !event.IsRunningStatus(details.Status) {
+		// Only the statuses whose outcome prints the output are worth a fetch. A
+		// running command and a status-only failure both answer with a line of
+		// their own, which an unreachable chunk store would only bury.
+		var readErr error
+		if !event.IsRunningStatus(details.Status) && !isStatusOnlyFailure(details.Status) {
 			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
 			if oerr != nil {
-				utils.CliErrorWithExit("failed to read command output: %s", oerr)
-				return
+				readErr = oerr
+			} else {
+				details.Result = output
 			}
-			details.Result = output
 		}
 
 		// What the requester said the command was for, ahead of the outcome and
@@ -95,6 +97,13 @@ Run the command again later to check for completion.`,
 		}
 
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+		// The command's own failure carries the remote exit code this command
+		// propagates, so it outranks an unreadable output—the order
+		// runCommandFallbackFromID keeps on the polling path.
+		if exitCode == 0 && readErr != nil {
+			utils.CliErrorWithExit("failed to read command output: %s", readErr)
+			return
+		}
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
 		}
@@ -109,6 +118,12 @@ Run the command again later to check for completion.`,
 
 func init() {
 	ExecCmd.AddCommand(logsCmd)
+}
+
+// isStatusOnlyFailure reports the statuses whose outcome is a line about the
+// status alone: the command never reached a result worth printing.
+func isStatusOnlyFailure(status string) bool {
+	return status == "stuck" || status == "error" || status == "cancelled"
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
@@ -127,7 +142,7 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return "", stderrLine, 0
 	}
 
-	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
+	if isStatusOnlyFailure(details.Status) {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
