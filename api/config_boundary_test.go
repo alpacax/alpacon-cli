@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/alpacax/alpacon-cli/config"
 )
 
 const configPkgPath = "github.com/alpacax/alpacon-cli/config"
@@ -24,6 +26,15 @@ var configReaders = map[string]bool{
 	"GetActiveWorkSession": true,
 	"ResolveAuthMethod":    true,
 }
+
+// The walk matches on name, so renaming a reader would leave it nothing to find
+// and the guard would pass with nothing checked. These break the build instead.
+var (
+	_ = config.LoadConfig
+	_ = config.IsSaaS
+	_ = config.GetActiveWorkSession
+	_ = config.ResolveAuthMethod
+)
 
 // TestAPILayerNeverReadsConfig keeps the api layer off the config file: a read
 // here can name a workspace the request is no longer going to (issue #401). It
