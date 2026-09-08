@@ -1195,6 +1195,12 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 		_, _ = w.Write([]byte(`{"access_token":"fresh","expires_in":3600,"token_type":"Bearer"}`))
 	})
 	mux.HandleFunc("/api/test/", func(w http.ResponseWriter, r *http.Request) {
+		// Without this the torn header only shows up under -race.
+		if got := r.Header.Get("Authorization"); got != "Bearer stale" && got != "Bearer fresh" {
+			t.Errorf("Authorization header was torn: %q", got)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
 	})
