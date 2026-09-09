@@ -89,10 +89,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		// Resolve after argument/path validation so resolution errors don't
-		// mask early usage errors.
-		workSessionID := worksession.ResolveOrExit(flagWorkSession)
-
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -104,6 +100,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 				"  • Verify the API endpoint is accessible", err)
 			return
 		}
+
+		workSessionID := worksession.ResolveOrExitFor(alpaconClient.WorkspaceName, flagWorkSession)
 
 		if isLocalPaths(sources) && isRemotePath(dest) {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)

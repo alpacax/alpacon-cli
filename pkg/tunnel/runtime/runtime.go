@@ -55,6 +55,18 @@ type Runtime struct {
 
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
 func Start(opts StartOptions) (*Runtime, error) {
+	return start(nil, opts)
+}
+
+// StartWithClient keeps tunnel creation on the caller's pinned workspace.
+func StartWithClient(ac *client.AlpaconClient, opts StartOptions) (*Runtime, error) {
+	if ac == nil {
+		return nil, errors.New("alpacon API client is required")
+	}
+	return start(ac, opts)
+}
+
+func start(alpaconClient *client.AlpaconClient, opts StartOptions) (*Runtime, error) {
 	if opts.ServerName == "" {
 		return nil, errors.New("server name is required")
 	}
@@ -82,10 +94,12 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, fmt.Errorf("failed to resolve local port: %w", err)
 	}
 
-	alpaconClient, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		_ = listener.Close()
-		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
+	if alpaconClient == nil {
+		alpaconClient, err = client.NewAlpaconAPIClient()
+		if err != nil {
+			_ = listener.Close()
+			return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
+		}
 	}
 
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)

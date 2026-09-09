@@ -132,8 +132,12 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 }
 
 func runTunnel(cmd *cobra.Command, args []string) {
-	// Write resolved value back so handleTunnelStartError's retry reuses the same UUID.
-	tunnelFlags.workSessionID = worksession.ResolveOrExit(tunnelFlags.workSessionID)
+	ac, err := client.NewAlpaconAPIClient()
+	if err != nil {
+		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+		return
+	}
+	tunnelFlags.workSessionID = worksession.ResolveOrExitFor(ac.WorkspaceName, tunnelFlags.workSessionID)
 
 	var sigChan <-chan os.Signal
 	if cmd.ArgsLenAtDash() < 0 {
@@ -143,7 +147,7 @@ func runTunnel(cmd *cobra.Command, args []string) {
 		sigChan = ch
 	}
 
-	exitCode, err := executeTunnelCommand(cmd, args, sigChan)
+	exitCode, err := executeTunnelCommand(ac, cmd, args, sigChan)
 	if err != nil {
 		utils.CliError("%s", err)
 		if exitCode == 0 {
@@ -156,58 +160,40 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 }
 
-func executeTunnelCommand(cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
+func executeTunnelCommand(ac *client.AlpaconClient, cmd *cobra.Command, args []string, sigChan <-chan os.Signal) (int, error) {
 	dashIndex := cmd.ArgsLenAtDash()
 	if dashIndex >= 0 {
 		serverName, localCommand, err := extractRunInvocation(args, dashIndex)
 		if err != nil {
 			return 1, err
 		}
-		return executeTunnelRunWithInvocation(serverName, localCommand)
+		return executeTunnelRunWithInvocation(ac, serverName, localCommand)
 	}
 
-	return 0, executeTunnel(args[0], sigChan)
+	return 0, executeTunnel(ac, args[0], sigChan)
 }
 
-func handleTunnelStartError(err error, serverName string, retry func() error) error {
-	var ac *client.AlpaconClient
-	getClient := func() (*client.AlpaconClient, error) {
-		if ac != nil {
-			return ac, nil
-		}
-		var clientErr error
-		ac, clientErr = client.NewAlpaconAPIClient()
-		return ac, clientErr
-	}
-
+func handleTunnelStartError(ac *client.AlpaconClient, err error, serverName string, retry func() error) error {
 	return utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(srv string) error {
-			c, err := getClient()
-			if err != nil {
-				return err
-			}
-			return mfa.HandleMFAError(c, srv)
+			return mfa.HandleMFAError(ac, srv)
 		},
 		OnUsernameRequired: func() error {
 			_, err := iam.HandleUsernameRequired()
 			return err
 		},
 		RefreshToken: func() error {
-			c, err := getClient()
-			if err != nil {
-				return err
-			}
-			return c.RefreshToken()
+			return ac.RefreshToken()
 		},
 		RetryOperation: retry,
 	})
 }
 
-func executeTunnel(serverName string, sigChan <-chan os.Signal) error {
-	runtime, err := tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+func executeTunnel(ac *client.AlpaconClient, serverName string, sigChan <-chan os.Signal) error {
+	runtime, err := tunnelruntime.StartWithClient(ac, tunnelFlags.toStartOptions(serverName))
 	if err != nil {
-		err = handleTunnelStartError(err, serverName, func() error {
-			runtime, err = tunnelruntime.Start(tunnelFlags.toStartOptions(serverName))
+		err = handleTunnelStartError(ac, err, serverName, func() error {
+			runtime, err = tunnelruntime.StartWithClient(ac, tunnelFlags.toStartOptions(serverName))
 			return err
 		})
 		if err != nil {

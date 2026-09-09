@@ -163,8 +163,6 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		utils.OutputFormat = parsed.OutputFormat
 	}
 
-	workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
 	authMethod := config.ResolveAuthMethod()
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -172,6 +170,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		return
 	}
+
+	workSessionID := worksession.ResolveOrExitFor(alpaconClient.WorkspaceName, parsed.WorkSessionID)
 
 	env := parsed.Env
 

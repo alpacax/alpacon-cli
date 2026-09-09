@@ -209,7 +209,7 @@ func SetActiveWorkSessionFor(workspaceName, uuid string) error {
 func GetActiveWorkSession() (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
@@ -218,6 +218,18 @@ func GetActiveWorkSession() (string, error) {
 		return "", nil
 	}
 	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
+}
+
+// GetActiveWorkSessionFor looks up only the client's pinned workspace.
+func GetActiveWorkSessionFor(workspaceName string) (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return cfg.ActiveWorkSessions[workspaceName], nil
 }
 
 // IsServiceToken reports whether token is a service token, identified by its key

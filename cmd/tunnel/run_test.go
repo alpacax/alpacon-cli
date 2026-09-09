@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"errors"
+	"github.com/alpacax/alpacon-cli/client"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -250,7 +251,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	tunnelFlags.localPort = "5432"
 	tunnelFlags.remotePort = "invalid"
 
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
+	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, "prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

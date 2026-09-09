@@ -13,18 +13,36 @@ const WorkSessionEnvVar = "ALPACON_WORK_SESSION"
 
 // Resolve returns the effective work-session UUID using flag > env var > config priority.
 func Resolve(flagValue string) (string, error) {
+	return resolve(flagValue, config.GetActiveWorkSession)
+}
+
+func ResolveFor(workspaceName, flagValue string) (string, error) {
+	return resolve(flagValue, func() (string, error) {
+		return config.GetActiveWorkSessionFor(workspaceName)
+	})
+}
+
+func resolve(flagValue string, fromConfig func() (string, error)) (string, error) {
 	if flagValue != "" {
 		return flagValue, nil
 	}
 	if env := os.Getenv(WorkSessionEnvVar); env != "" {
 		return env, nil
 	}
-	return config.GetActiveWorkSession()
+	return fromConfig()
 }
 
 // ResolveOrExit resolves the work-session UUID and exits on error.
 func ResolveOrExit(flagValue string) string {
 	uuid, err := Resolve(flagValue)
+	if err != nil {
+		utils.CliErrorWithExit("%s", err)
+	}
+	return uuid
+}
+
+func ResolveOrExitFor(workspaceName, flagValue string) string {
+	uuid, err := ResolveFor(workspaceName, flagValue)
 	if err != nil {
 		utils.CliErrorWithExit("%s", err)
 	}
