@@ -37,7 +37,7 @@ func TestStartWithClientKeepsPinnedWorkspace(t *testing.T) {
 	defer ts.Close()
 	ac := &client.AlpaconClient{BaseURL: ts.URL, HTTPClient: ts.Client(), WorkspaceName: "a"}
 	require.NoError(t, config.CreateConfig("http://127.0.0.1:1", "b", "token", "", "", "", "", 0, false))
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		_, err := StartWithClient(ac, StartOptions{ServerName: "server", LocalPort: "0", RemotePort: "22", WorkSessionID: "session-a"})
 		require.ErrorContains(t, err, "failed to create tunnel session")
 		select {

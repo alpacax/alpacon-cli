@@ -1,11 +1,12 @@
 package tunnel
 
 import (
-	"github.com/alpacax/alpacon-cli/client"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/alpacax/alpacon-cli/client"
 )
 
 func parseTunnelCommandArgs(t *testing.T, rawArgs []string) (*cobra.Command, []string) {

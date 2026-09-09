@@ -2,7 +2,6 @@ package tunnel
 
 import (
 	"errors"
-	"github.com/alpacax/alpacon-cli/client"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/client"
 )
 
 type fakeRunRuntime struct {
