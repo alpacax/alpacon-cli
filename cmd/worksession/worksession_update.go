@@ -111,6 +111,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			changed++
 		}
 		if cmd.Flags().Changed("server") {
+			if !slices.ContainsFunc(updateServers, func(name string) bool { return strings.TrimSpace(name) != "" }) {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "--server must contain at least one valid server name.")
+			}
 			changed++ // names resolved to IDs below once the client exists
 		}
 		if cmd.Flags().Changed("sudo") {
