@@ -22,6 +22,8 @@ func TestConfigPermissions(t *testing.T) {
 		{"executable file", 0755, 0755, 0600, 0700},
 		{"strict", 0400, 0500, 0400, 0500},
 		{"search only directory", 0400, 0100, 0400, 0100},
+		{"wide search only directory", 0400, 0111, 0400, 0100},
+		{"wide writable searchable directory", 0600, 0311, 0600, 0300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setupTestConfig(t)
@@ -98,4 +100,41 @@ func TestRestrictFileModeUsesOpenFile(t *testing.T) {
 	assert.Equal(t, os.FileMode(0644), info.Mode().Perm())
 	require.NoError(t, file.Close())
 	assert.Error(t, restrictFileMode(file, 0600))
+}
+
+func TestSearchableConfigDirectoryOperations(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("requires searchable directory handles")
+	}
+	for _, tc := range []struct {
+		name     string
+		mode     os.FileMode
+		existing bool
+		run      func() error
+	}{
+		{"save config", 0311, false, func() error { return saveConfig(&Config{}) }},
+		{"create device", 0311, false, func() error { _, err := GetOrCreateDeviceID(); return err }},
+		{"read device", 0111, true, func() error {
+			id, err := GetOrCreateDeviceID()
+			if err == nil {
+				assert.Equal(t, "valid-device-id", id)
+			}
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestConfig(t)
+			dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)
+			require.NoError(t, os.Mkdir(dir, 0700))
+			t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+			if tc.existing {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, DeviceIDFileName), []byte("valid-device-id"), 0600))
+			}
+			require.NoError(t, os.Chmod(dir, tc.mode))
+			require.NoError(t, tc.run())
+			info, err := os.Stat(dir)
+			require.NoError(t, err)
+			assert.Equal(t, tc.mode&0700, info.Mode().Perm())
+		})
+	}
 }

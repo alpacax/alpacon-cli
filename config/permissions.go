@@ -7,6 +7,10 @@ import (
 )
 
 func restrictFileMode(file *os.File, allowed os.FileMode) error {
+	return restrictOpenFileMode(file, allowed, file.Chmod)
+}
+
+func restrictOpenFileMode(file *os.File, allowed os.FileMode, chmod func(os.FileMode) error) error {
 	if runtime.GOOS == "windows" {
 		// Windows chmod changes the read-only attribute, not Unix access permissions.
 		return nil
@@ -19,7 +23,7 @@ func restrictFileMode(file *os.File, allowed os.FileMode) error {
 	if perm == info.Mode().Perm() {
 		return nil
 	}
-	return file.Chmod(perm)
+	return chmod(perm)
 }
 
 func restrictConfigDirectoryMode(path string) error {
@@ -41,6 +45,12 @@ func restrictConfigDirectoryMode(path string) error {
 		return nil
 	}
 	dir, err := os.Open(path)
+	if os.IsPermission(err) {
+		if err = restrictSearchableDirectory(path); err != nil {
+			return fmt.Errorf("failed to restrict config directory permissions: %w", err)
+		}
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("failed to open config directory: %w", err)
 	}
