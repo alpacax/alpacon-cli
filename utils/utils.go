@@ -397,6 +397,17 @@ func Unzip(src string, dest string) error {
 		return err
 	}
 	destPrefix := strings.TrimSuffix(destDir, string(os.PathSeparator)) + string(os.PathSeparator)
+	if len(r.File) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
 
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
@@ -410,28 +421,32 @@ func Unzip(src string, dest string) error {
 		if !strings.HasPrefix(fpath, destPrefix) {
 			return fmt.Errorf("invalid file path: %s", f.Name)
 		}
+		relativePath, err := filepath.Rel(destDir, fpath)
+		if err != nil {
+			return err
+		}
 
 		if f.FileInfo().IsDir() {
-			err := os.MkdirAll(fpath, os.ModePerm)
+			err := root.MkdirAll(relativePath, os.ModePerm)
 			if err != nil {
 				return err
 			}
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+		if err := root.MkdirAll(filepath.Dir(relativePath), os.ModePerm); err != nil {
 			return err
 		}
 
-		if err := extractFile(fpath, f); err != nil {
+		if err := extractFile(root, relativePath, f); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func extractFile(fpath string, f *zip.File) (err error) {
-	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+func extractFile(root *os.Root, fpath string, f *zip.File) (err error) {
+	outFile, err := root.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode().Perm())
 	if err != nil {
 		return err
 	}
