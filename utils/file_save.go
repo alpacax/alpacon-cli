@@ -26,31 +26,8 @@ func IsReplacementTempName(name string) bool {
 }
 
 func SaveFile(fileName string, data []byte) error {
-	_, err := saveStream(fileName, bytes.NewReader(data))
+	_, err := SaveStreamAtomic(fileName, bytes.NewReader(data), 0666)
 	return err
-}
-
-func saveStream(fileName string, r io.Reader) (int64, error) {
-	dir := filepath.Dir(fileName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create directories: %w", err)
-	}
-
-	file, err := os.Create(fileName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create file: %w", err)
-	}
-
-	written, copyErr := io.Copy(file, r)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return written, fmt.Errorf("failed to write file: %w", copyErr)
-	}
-	if closeErr != nil {
-		return written, fmt.Errorf("failed to close file: %w", closeErr)
-	}
-
-	return written, nil
 }
 
 // SaveStreamAtomic writes r to fileName through a temp file in the same

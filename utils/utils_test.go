@@ -166,17 +166,35 @@ func TestRemovePrefixBeforeAPI(t *testing.T) {
 	}
 }
 
-func TestSaveStream(t *testing.T) {
+func TestSaveFile(t *testing.T) {
 	t.Parallel()
 	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
 
-	written, err := saveStream(dest, strings.NewReader("hello world"))
+	err := SaveFile(dest, []byte("hello world"))
 	require.NoError(t, err)
-	assert.Equal(t, int64(len("hello world")), written)
 
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(content))
+}
+
+func TestSaveFile_ReplacesExistingFileAtomically(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "file.txt")
+	original := filepath.Join(dir, "original.txt")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
+	require.NoError(t, os.Link(dest, original))
+
+	require.NoError(t, SaveFile(dest, []byte("replacement")))
+
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "replacement", string(content))
+
+	content, err = os.ReadFile(original)
+	require.NoError(t, err)
+	assert.Equal(t, "existing", string(content))
 }
 
 type failingReader struct {
@@ -207,6 +225,23 @@ func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
 	matches, err := filepath.Glob(filepath.Join(filepath.Dir(dest), ".alpacon-*.tmp"))
 	require.NoError(t, err)
 	assert.Empty(t, matches)
+}
+
+func TestSaveStreamAtomic_LeavesNewFileAbsentOnReadError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "file.txt")
+
+	written, err := SaveStreamAtomic(dest, &failingReader{reader: strings.NewReader("partial")}, 0666)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	assert.Equal(t, int64(len("partial")), written)
+
+	_, err = os.Stat(dest)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Empty(t, entries)
 }
 
 func requireUnixModes(t *testing.T) {
