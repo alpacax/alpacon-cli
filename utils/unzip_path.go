@@ -14,6 +14,7 @@ const maxZipSymlinkHops = 255
 func resolveZipPath(root *os.Root, rootNames []string, name string) (string, error) {
 	pending := strings.Split(name, string(os.PathSeparator))
 	var resolved []string
+	missing := false
 	links := 0
 	for len(pending) > 0 {
 		part := pending[0]
@@ -25,12 +26,18 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 			if len(resolved) == 0 {
 				return "", fmt.Errorf("zip path escapes destination: %s", name)
 			}
+			// Everything after the first absent component is absent too, so the
+			// kernel would stop here rather than let '..' select a sibling.
+			if missing {
+				return "", fmt.Errorf("zip path traverses a missing directory: %s", name)
+			}
 			resolved = resolved[:len(resolved)-1]
 			continue
 		}
 		candidate := filepath.Join(filepath.Join(resolved...), part)
 		info, err := root.Lstat(candidate)
 		if os.IsNotExist(err) {
+			missing = true
 			resolved = append(resolved, part)
 			continue
 		}
@@ -59,6 +66,7 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 				return "", err
 			}
 			resolved = nil
+			missing = false
 		} else if filepath.VolumeName(target) != "" || strings.HasPrefix(target, string(os.PathSeparator)) {
 			return "", fmt.Errorf("zip symlink escapes destination: %s", candidate)
 		}

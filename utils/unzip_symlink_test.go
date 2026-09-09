@@ -198,20 +198,31 @@ func TestUnzip_RejectsAbsoluteEscapesAndCycles(t *testing.T) {
 	}
 }
 
-func TestUnzip_RejectsParentAfterRegularFile(t *testing.T) {
+func TestUnzip_RejectsParentAfterNonDirectory(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	dest := filepath.Join(dir, "dest")
-	require.NoError(t, os.Mkdir(dest, 0755))
-	for _, name := range []string{"plain", "victim"} {
-		require.NoError(t, os.WriteFile(filepath.Join(dest, name), []byte("original"), 0600))
+	for _, tc := range []struct {
+		name   string
+		middle string
+	}{
+		{"regular file", "plain"},
+		{"missing component", "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			dest := filepath.Join(dir, "dest")
+			require.NoError(t, os.Mkdir(dest, 0755))
+			for _, name := range []string{"plain", "victim"} {
+				require.NoError(t, os.WriteFile(filepath.Join(dest, name), []byte("original"), 0600))
+			}
+			sep := string(os.PathSeparator)
+			makeUnzipSymlink(t, dest+sep+tc.middle+sep+".."+sep+"victim", filepath.Join(dest, "link"))
+			require.Error(t, Unzip(writeUnzipTestArchive(t, dir, "link"), dest))
+			data, err := os.ReadFile(filepath.Join(dest, "victim"))
+			require.NoError(t, err)
+			assert.Equal(t, "original", string(data))
+		})
 	}
-	target := dest + string(os.PathSeparator) + "plain" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "victim"
-	makeUnzipSymlink(t, target, filepath.Join(dest, "link"))
-	require.Error(t, Unzip(writeUnzipTestArchive(t, dir, "link"), dest))
-	data, err := os.ReadFile(filepath.Join(dest, "victim"))
-	require.NoError(t, err)
-	assert.Equal(t, "original", string(data))
 }
 
 func makeUnzipSymlink(t *testing.T, target, link string) {
