@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// Same cap filepath.walkSymlinks applies, so a zip path gives up where a plain one does.
+const maxZipSymlinkHops = 255
+
 func resolveZipPath(root *os.Root, rootNames []string, name string) (string, error) {
 	pending := strings.Split(name, string(os.PathSeparator))
 	var resolved []string
@@ -42,7 +45,7 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 			continue
 		}
 		links++
-		if links > 255 {
+		if links > maxZipSymlinkHops {
 			return "", fmt.Errorf("too many symlinks in zip path: %s", name)
 		}
 		target, err := root.Readlink(candidate)

@@ -412,6 +412,10 @@ func Unzip(src string, dest string) error {
 	if err != nil {
 		return err
 	}
+	rootNames := []string{destDir}
+	if canonicalDest != destDir {
+		rootNames = append(rootNames, canonicalDest)
+	}
 
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
@@ -425,11 +429,7 @@ func Unzip(src string, dest string) error {
 		if !strings.HasPrefix(fpath, destPrefix) {
 			return fmt.Errorf("invalid file path: %s", f.Name)
 		}
-		relativePath, err := filepath.Rel(destDir, fpath)
-		if err != nil {
-			return err
-		}
-		relativePath, err = resolveZipPath(root, []string{destDir, canonicalDest}, relativePath)
+		relativePath, err := resolveZipPath(root, rootNames, strings.TrimPrefix(fpath, destPrefix))
 		if err != nil {
 			return err
 		}
