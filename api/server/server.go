@@ -98,7 +98,19 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 	return err
 }
 
+func NormalizeServerName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("server name is required")
+	}
+	return name, nil
+}
+
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
+	serverName, err := NormalizeServerName(serverName)
+	if err != nil {
+		return "", err
+	}
 	params := map[string]string{
 		"name": serverName,
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const serverResolveConcurrency = 8
+
 var aclServerCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Manage server ACL rules for a token",
@@ -30,27 +32,32 @@ func init() {
 
 func resolveServerIDs(ac *client.AlpaconClient, names []string) ([]string, error) {
 	serverIDs := make([]string, len(names))
-	var mu sync.Mutex
+	errorsByIndex := make([]error, len(names))
 	var wg sync.WaitGroup
-	var firstErr error
-
-	for i, name := range names {
+	indices := make(chan int)
+	for range min(serverResolveConcurrency, len(names)) {
 		wg.Add(1)
-		go func(idx int, n string) {
+		go func() {
 			defer wg.Done()
-			id, err := serverapi.GetServerIDByName(ac, n)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
+			for idx := range indices {
+				id, err := serverapi.GetServerIDByName(ac, names[idx])
+				if err != nil {
+					errorsByIndex[idx] = fmt.Errorf("failed to resolve server '%s': %w", names[idx], err)
+				} else {
+					serverIDs[idx] = id
 				}
-				return
 			}
-			serverIDs[idx] = id
-		}(i, name)
+		}()
 	}
+	for i := range names {
+		indices <- i
+	}
+	close(indices)
 	wg.Wait()
-
-	return serverIDs, firstErr
+	for _, err := range errorsByIndex {
+		if err != nil {
+			return serverIDs, err
+		}
+	}
+	return serverIDs, nil
 }

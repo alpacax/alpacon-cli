@@ -168,13 +168,12 @@ so it is recorded and scoped accordingly.`,
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		serverNames := utils.CompactStrings(createServers)
-		if len(serverNames) == 0 {
-			utils.CliUsageErrorEnvelopeWithExit(opCreate, "--server must contain at least one valid server name.")
-		}
-		serverIDs, err := server.ResolveServerNames(ac, serverNames)
+		serverIDs, err := server.ResolveServerNames(ac, createServers)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s.", err)
+		}
+		if len(serverIDs) == 0 {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "--server must contain at least one valid server name.")
 		}
 
 		req := wsapi.WorkSessionCreateRequest{

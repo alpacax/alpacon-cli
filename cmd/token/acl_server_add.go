@@ -1,6 +1,7 @@
 package token
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -34,11 +35,10 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 	serverName, _ := cmd.Flags().GetString("server")
 	serversCSV, _ := cmd.Flags().GetString("servers")
 
-	if serverName == "" && serversCSV == "" {
-		utils.CliErrorWithExit("One of --server or --servers is required.")
-	}
-	if serverName != "" && serversCSV != "" {
-		utils.CliErrorWithExit("Use either --server or --servers, not both.")
+	serverName, names, err := parseServerACLNames(serverName, serversCSV)
+	if err != nil {
+		utils.CliErrorWithExit("%s", err)
+		return
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -66,11 +66,6 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	names := utils.SplitAndTrim(serversCSV, ",")
-	if len(names) == 0 {
-		utils.CliErrorWithExit("--servers must contain at least one server name.")
-	}
-
 	serverIDs, err := resolveServerIDs(alpaconClient, names)
 	if err != nil {
 		utils.CliErrorWithExit("%v.", err)
@@ -83,4 +78,22 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Failed to bulk-add server ACLs: %v.", err)
 	}
 	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
+}
+
+func parseServerACLNames(serverValue, serversCSV string) (string, []string, error) {
+	if serversCSV != "" {
+		if serverValue != "" {
+			return "", nil, errors.New("use either --server or --servers, not both")
+		}
+		names := utils.SplitAndTrim(serversCSV, ",")
+		if len(names) == 0 {
+			return "", nil, errors.New("--servers must contain at least one server name")
+		}
+		return "", names, nil
+	}
+	name, err := serverapi.NormalizeServerName(serverValue)
+	if err != nil {
+		return "", nil, errors.New("one of --server or --servers is required")
+	}
+	return name, nil, nil
 }
