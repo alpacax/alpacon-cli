@@ -95,7 +95,9 @@ func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T)
 	w := newProvisionedWSListener(nil, func() (string, error) { return "ws" + strings.TrimPrefix(server.URL, "http"), nil }, time.Second)
 	w.handleFrame = func([]byte) {}
 
-	assert.False(t, w.connectAndListen(), "failed handshake should not count as connected")
+	lifetime, retryAfter := w.connectAndListen()
+	assert.Zero(t, lifetime)
+	assert.Zero(t, retryAfter)
 	assert.False(t, w.WaitConnected(0), "connected must stay open after a failed dial")
 }
 
@@ -207,7 +209,9 @@ func TestWSListener_ProvisionErrorIsAFailedAttempt(t *testing.T) {
 	}, time.Second)
 	w.handleFrame = func([]byte) {}
 
-	assert.False(t, w.connectAndListen(), "a provision error must not count as connected")
+	lifetime, retryAfter := w.connectAndListen()
+	assert.Zero(t, lifetime)
+	assert.Zero(t, retryAfter)
 	assert.Equal(t, int32(1), provisions.Load())
 	assert.False(t, w.WaitConnected(0), "connected must stay open when provisioning fails")
 }
@@ -272,6 +276,8 @@ func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
 	w.handleFrame = func([]byte) {}
 	w.onConnected = func() error { return errors.New("subscribe rejected") }
 
-	assert.False(t, w.connectAndListen(), "an onConnected error must not count as connected")
+	lifetime, retryAfter := w.connectAndListen()
+	assert.Zero(t, lifetime)
+	assert.Zero(t, retryAfter)
 	assert.False(t, w.WaitConnected(0), "connected must stay open when onConnected fails")
 }

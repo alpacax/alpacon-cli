@@ -132,7 +132,7 @@ func TestSudoListener_ConnectAndListen_ExitsOnDisconnect(t *testing.T) {
 	readDone := make(chan struct{})
 	go func() {
 		defer close(readDone)
-		_ = sl.connectAndListen()
+		_, _ = sl.connectAndListen()
 	}()
 
 	require.Eventually(t, func() bool {

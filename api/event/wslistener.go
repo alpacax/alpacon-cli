@@ -1,6 +1,7 @@
 package event
 
 import (
+	"math/rand/v2"
 	"net/http"
 	"sync"
 	"time"
@@ -113,15 +114,16 @@ func (w *wsListener) listenLoop() {
 		default:
 		}
 
-		// Reset backoff if we had a successful connection that later dropped
-		if w.connectAndListen() {
+		lifetime, retryAfter := w.connectAndListen()
+		if lifetime > w.reconnectBaseDelay {
 			delay = w.reconnectBaseDelay
 		}
+		wait := reconnectWait(delay, retryAfter)
 
 		select {
 		case <-w.done:
 			return
-		case <-time.After(delay):
+		case <-time.After(wait):
 			delay = nextReconnectDelay(delay)
 		}
 	}
@@ -136,22 +138,32 @@ func nextReconnectDelay(delay time.Duration) time.Duration {
 	return delay
 }
 
-// connectAndListen dials the event WebSocket, runs onConnected if set, then reads
-// until the connection drops or Stop is called. Returns whether it connected and
-// subscribed, so the caller can reset backoff.
-func (w *wsListener) connectAndListen() (connected bool) {
+func reconnectWait(delay, retryAfter time.Duration) time.Duration {
+	half := delay / 2
+	jittered := half + time.Duration(rand.Int64N(int64(delay-half)+1))
+	return max(jittered, retryAfter)
+}
+
+// Lifetime excludes provisioning, dialing, and subscription work.
+func (w *wsListener) connectAndListen() (lifetime, retryAfter time.Duration) {
 	wsURL, err := w.provision()
 	if err != nil {
-		return false
+		return 0, utils.RetryAfter(err)
 	}
 
 	dialer := websocket.Dialer{HandshakeTimeout: w.handshakeTimeout}
-	conn, _, dialErr := dialer.Dial(wsURL, w.wsHeader)
+	conn, resp, dialErr := dialer.Dial(wsURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
 			w.onDialFailed(dialErr)
 		}
-		return false
+		if resp != nil {
+			retryAfter = utils.ParseRetryAfter(resp.Header.Get("Retry-After"))
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+		}
+		return 0, retryAfter
 	}
 
 	if w.readLimit > 0 {
@@ -171,22 +183,23 @@ func (w *wsListener) connectAndListen() (connected bool) {
 
 	if w.onConnected != nil {
 		if err := w.onConnected(); err != nil {
-			return false
+			return 0, utils.RetryAfter(err)
 		}
 	}
 
 	w.connectOnce.Do(func() { close(w.connected) })
+	connectedAt := time.Now()
 
 	for {
 		select {
 		case <-w.done:
-			return true
+			return time.Since(connectedAt), 0
 		default:
 		}
 
 		_, message, readErr := conn.ReadMessage()
 		if readErr != nil {
-			return true
+			return time.Since(connectedAt), 0
 		}
 
 		w.handleFrame(message)

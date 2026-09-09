@@ -7,12 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -690,19 +688,15 @@ func withStatus(err error, statusCode int) error {
 	return &statusError{err: err, statusCode: statusCode}
 }
 
-// withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
-// that is what DRF throttling sends, and misreading an HTTP-date would stall a poll.
 func withRetryAfter(err error, header http.Header) error {
 	if err == nil {
 		return nil
 	}
-	seconds, convErr := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	// The upper bound is what a time.Duration can hold: past it the multiplication
-	// below wraps, and a wrapped delay is worse than no hint at all.
-	if convErr != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
+	delay := utils.ParseRetryAfter(header.Get("Retry-After"))
+	if delay == 0 {
 		return err
 	}
-	return &retryAfterError{err: err, retryAfter: time.Duration(seconds) * time.Second}
+	return &retryAfterError{err: err, retryAfter: delay}
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
