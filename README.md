@@ -128,6 +128,41 @@ To go back to the version you had instead, rename `alpacon.exe.old.<timestamp>` 
 
 On an install the Windows script placed, running the one-liner again is the easier way out: it finds no `alpacon.exe`, treats the directory as empty and installs the latest release. The two leftover files stay where they are, and the next `alpacon update` sweeps them.
 
+### Version and shell completion
+
+Run `alpacon --version` to print the installed version without logging in or checking for updates. The `alpacon version` subcommand also checks for updates.
+
+Shell completion is available for Bash, Zsh, Fish, and PowerShell through `alpacon completion`. Run each setup in the corresponding shell.
+
+**Bash:** install and enable your OS's `bash-completion` package, then add this line to `~/.bashrc`:
+
+```bash
+source <(alpacon completion bash)
+```
+
+**Zsh:** add these lines to `~/.zshrc`. If your configuration already runs `compinit`, add only the `source` line after it:
+
+```zsh
+autoload -Uz compinit; compinit
+source <(alpacon completion zsh)
+```
+
+**Fish:** save the completion script:
+
+```fish
+mkdir -p ~/.config/fish/completions
+alpacon completion fish > ~/.config/fish/completions/alpacon.fish
+```
+
+**PowerShell:** create your profile if it does not exist, then add the completion command:
+
+```powershell
+if (!(Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+Add-Content -Path $PROFILE -Value 'alpacon completion powershell | Out-String | Invoke-Expression'
+```
+
+Start a new shell after setup. For more options, run `alpacon completion <shell> --help`.
+
 ## Quick start
 
 ```bash

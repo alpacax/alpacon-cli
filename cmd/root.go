@@ -37,6 +37,7 @@ import (
 
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
+	Version: utils.Version,
 	Aliases: []string{"ac"},
 	Short:   "Command-line client for Alpacon, the AI-native PAM",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
@@ -54,7 +55,8 @@ Quick start (for humans and AI agents):
   3. alpacon exec <SERVER> -- <COMMAND>     # run work inside the session
   4. alpacon work-session complete <SESSION_ID>  # finish the session when done
 
-See 'alpacon work-session --help' for session lifecycle and error codes.`,
+See 'alpacon work-session --help' for session lifecycle and error codes.
+Run 'alpacon completion --help' to set up shell completion.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
 		case utils.OutputFormatTable, utils.OutputFormatJSON:
