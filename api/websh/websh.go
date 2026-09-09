@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -340,8 +341,10 @@ func (wsClient *WebsocketClient) closeConn() {
 func (wsClient *WebsocketClient) finish(err error) {
 	wsClient.finishOnce.Do(func() {
 		var closeErr *websocket.CloseError
-		if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode && closeErr.Text != "" {
-			fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", utils.SanitizeTerminalText(closeErr.Text))
+		if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode {
+			if reason := strings.TrimSpace(utils.SanitizeTerminalText(closeErr.Text)); reason != "" {
+				fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", reason)
+			}
 		}
 		if endsSession(err) {
 			err = nil

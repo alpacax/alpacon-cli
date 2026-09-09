@@ -574,6 +574,8 @@ func TestFinish_ShowsSessionCloseReasonOnce(t *testing.T) {
 	}{
 		{"session end", sessionEndCloseCode, "idle timeout", "\r\nsession closed: idle timeout\r\n"},
 		{"empty reason", sessionEndCloseCode, "", ""},
+		{"only terminal controls", sessionEndCloseCode, "\x1b[31m\x1b[0m\r\n", ""},
+		{"only whitespace", sessionEndCloseCode, " \t ", ""},
 		{"normal close", websocket.CloseNormalClosure, "normal", ""},
 		{"terminal controls", sessionEndCloseCode, "\x1b[31midle\x1b[0m\ntimeout", "\r\nsession closed: idletimeout\r\n"},
 	}
@@ -587,7 +589,7 @@ func TestFinish_ShowsSessionCloseReasonOnce(t *testing.T) {
 			})
 			assert.Empty(t, stdout)
 			assert.Equal(t, tt.want, stderr)
-			assert.NoError(t, wsClient.err)
+			require.NoError(t, wsClient.err)
 			assertReported(t, wsClient)
 		})
 	}
