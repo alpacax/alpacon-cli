@@ -204,6 +204,9 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 	if err != nil {
 		return err
 	}
+	if len(memberDetails) == 0 {
+		return errors.New("no membership found for the given user and group")
+	}
 
 	_, err = ac.SendDeleteRequest(utils.BuildURL(membershipURL, memberDetails[0].ID, nil))
 	if err != nil {

@@ -397,3 +397,56 @@ func TestAddMember(t *testing.T) {
 		t.Error("membership POST was not called")
 	}
 }
+
+func TestDeleteMember(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		response   string
+		wantErr    string
+		wantDelete int32
+	}{
+		{"existing membership", `[{"id":"membership-1"}]`, "", 1},
+		{"empty list", `[]`, "no membership found for the given user and group", 0},
+		{"null list", `null`, "no membership found for the given user and group", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var deleteCount atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == groupURL:
+					assert.Equal(t, "admins", r.URL.Query().Get("name"))
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"group-1","name":"admins"}]}`))
+				case r.Method == http.MethodGet && r.URL.Path == userURL:
+					assert.Equal(t, "alice", r.URL.Query().Get("username"))
+					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"user-1","username":"alice"}]}`))
+				case r.Method == http.MethodGet && r.URL.Path == membershipURL:
+					assert.Equal(t, "group-1", r.URL.Query().Get("group"))
+					assert.Equal(t, "user-1", r.URL.Query().Get("user"))
+					_, _ = w.Write([]byte(tt.response))
+				case r.Method == http.MethodDelete:
+					deleteCount.Add(1)
+					assert.Equal(t, membershipURL+"membership-1/", r.URL.Path)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := DeleteMember(ac, MemberDeleteRequest{Group: "admins", User: "alice"})
+			if tt.wantErr != "" {
+				assert.EqualError(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantDelete, deleteCount.Load())
+		})
+	}
+}
