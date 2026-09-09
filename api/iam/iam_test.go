@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetUserList_Pagination(t *testing.T) {
@@ -442,9 +443,9 @@ func TestDeleteMember(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			err := DeleteMember(ac, MemberDeleteRequest{Group: "admins", User: "alice"})
 			if tt.wantErr != "" {
-				assert.EqualError(t, err, tt.wantErr)
+				require.EqualError(t, err, tt.wantErr)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 			assert.Equal(t, tt.wantDelete, deleteCount.Load())
 		})
