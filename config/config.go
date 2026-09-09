@@ -77,6 +77,10 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
+	if err = restrictConfigDirectoryMode(configDir); err != nil {
+		return err
+	}
+
 	file, err := os.CreateTemp(configDir, ConfigFileName+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
@@ -149,6 +153,10 @@ func LoadConfig() (Config, error) {
 	configDir := filepath.Join(homeDir, ConfigFileDir)
 	configFile := filepath.Join(configDir, ConfigFileName)
 
+	if err = restrictConfigDirectoryMode(configDir); err != nil {
+		return Config{}, err
+	}
+
 	file, err := os.Open(configFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -159,6 +167,10 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("failed to open config file: %v", err)
 	}
 	defer func() { _ = file.Close() }()
+
+	if err = restrictFileMode(file, 0600); err != nil {
+		return Config{}, fmt.Errorf("failed to restrict config file permissions: %w", err)
+	}
 
 	var config Config
 	decoder := json.NewDecoder(file)
