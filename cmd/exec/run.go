@@ -203,6 +203,13 @@ type Invocation string
 // status: keep waiting, take the grant, or stop because none is coming.
 type approvalOutcome int
 
+// commandRun submits one command and streams it to completion. The retry,
+// presence step-up and approval-wait layers take one so they serve the generic
+// lane and the verified file lane (ADR 0053) alike: the lane is decided once, by
+// whoever builds the closure, and a re-run after MFA or approval is the same
+// closure called again.
+type commandRun func() error
+
 // approvalOutcomeOf reads a command detail's sudo grant status into a decision
 // the wait loop can switch on. authorized is the only grant; rejected and
 // expired are both settled without one. Everything else—an in-progress status,
@@ -402,7 +409,14 @@ func credentialInlineHint(invokedAs Invocation) string {
 // verification link they can complete out of band. Reached via RunRemoteExec by
 // exec and websh command mode; interactive websh keeps its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runWithPresenceStepUp(ac, serverName, func() error {
+		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	})
+}
+
+// runWithPresenceStepUp is RunExecWithPresenceStepUp over a commandRun.
+func runWithPresenceStepUp(ac *client.AlpaconClient, serverName string, run commandRun) error {
+	err := run()
 	// A real presence denial makes sudo exit non-zero, so it always surfaces as a
 	// RemoteCommandError carrying the denial line. Require that error as well as
 	// the line match: a command that merely prints the line and SUCCEEDS
@@ -425,7 +439,7 @@ func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, us
 
 	// Presence is fresh—retry once. Any remaining denial falls through to the
 	// static hint in HandleCommandResult.
-	return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return run()
 }
 
 // printPresenceStepUpLink surfaces the verification link for a non-interactive
@@ -495,7 +509,29 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 // tick. The poll mirrors the MFA step-up structure (api/mfa/mfa.go): a spinner,
 // a timer, and a precise deadline.
 func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
-	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runWithApprovalWait(ac, func() error {
+		return runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	}, waitTimeout, out)
+}
+
+// RunFileExecWithApprovalWait is RunExecWithApprovalWait for the verified file
+// lane (ADR 0053). Only the submission differs—the file object in place of a
+// command line—so the presence step-up, the approval wait and the re-run after a
+// grant are the same layers the generic lane runs through.
+func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
+	return runWithApprovalWait(ac, func() error {
+		return runWithPresenceStepUp(ac, serverName, func() error {
+			return runWithRetry(ac, serverName, func() error {
+				return event.RunFileCommandStreaming(ac, serverName, file, username, groupname, workSessionID, purpose, out)
+			})
+		})
+	}, waitTimeout, out)
+}
+
+// runWithApprovalWait is RunExecWithApprovalWait over a commandRun: run is the
+// first attempt and, once a reviewer grants the request, the re-run.
+func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout time.Duration, out io.Writer) error {
+	err := run()
 
 	// Status-hold: the server parked this job at awaiting_approval (it never ran).
 	// With --wait, resubscribe to the same job and stream once approved instead of
@@ -605,7 +641,7 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 			switch outcome {
 			case outcomeApproved:
 				spinner.Stop()
-				return runAfterApproval(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+				return runAfterApproval(run)
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant. CommandRejectedError is what already carries
@@ -624,8 +660,8 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 // means the grant went somewhere else—it expired, or another attempt spent
 // it—so this reports that instead of opening a second wait the user never
 // asked for.
-func runAfterApproval(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := runPresenceStepUp(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+func runAfterApproval(run commandRun) error {
+	err := run()
 	// Either shape means the grant did not carry this run, and each gets the
 	// sentence its own way out needs. A repeated denial is answered by filing a
 	// fresh request; a job the server parked runs on its own once approved, so
@@ -759,14 +795,20 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 // handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	err := event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runWithRetry(ac, serverName, func() error {
+		return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	})
+}
+
+// runWithRetry is RunCommandWithRetry over a commandRun; the MFA retry is the
+// same closure called again.
+func runWithRetry(ac *client.AlpaconClient, serverName string, run commandRun) error {
+	err := run()
 	if propagated, ok := propagateCommandError(err); ok {
 		return propagated
 	}
 	if err != nil {
-		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, func() error {
-			return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
-		}))
+		err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(ac, run))
 		// RetryOperation may surface a propagated error; re-check after HandleCommonErrors.
 		if propagated, ok := propagateCommandError(err); ok {
 			return propagated

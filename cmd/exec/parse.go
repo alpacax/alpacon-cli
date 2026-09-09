@@ -62,6 +62,10 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
+	// File is set by --file and selects the verified file lane (ADR 0053), in
+	// which case Command is empty and the words after -- are the script's
+	// arguments. Nil on the generic lane, so every existing caller reads as before.
+	File *FileExecArgs
 }
 
 // ParseRemoteExecArgs parses raw CLI arguments with manual flag handling.
@@ -77,13 +81,19 @@ type RemoteExecArgs struct {
 // Without --, everything after the server name is the remote command.
 //
 // Layout: [flags] [USER@]SERVER [--] COMMAND...
+//
+// With --file the words after the server are the script's arguments and must
+// follow --: a command line and a verified file cannot be combined, and a word
+// list with no separator is how one would be mistaken for the other.
 func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	var (
 		username, groupname, workSessionID, outputFormat, server string
 		purpose                                                  string
+		filePath, fileFrom, interpreter                          string
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
+		separated                                                bool
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
@@ -93,6 +103,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 
 		// -- separator: everything remaining is the remote command
 		if arg == "--" {
+			separated = true
 			if server == "" {
 				// Nothing before -- that looked like a server name.
 				// Treat remaining args normally: first is server, rest is command.
@@ -160,6 +171,36 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
+		case arg == "--file" || strings.HasPrefix(arg, "--file="):
+			var errMsg string
+			filePath, i, errMsg = extractFlagValue(args, i, "--file")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			if filePath == "" {
+				return RemoteExecArgs{Err: "--file requires the script's absolute path on the target server"}
+			}
+			if !strings.HasPrefix(filePath, "/") {
+				return RemoteExecArgs{Err: fmt.Sprintf("--file must be an absolute path on the target server (starting with /): %s", filePath)}
+			}
+		case arg == "--file-from" || strings.HasPrefix(arg, "--file-from="):
+			var errMsg string
+			fileFrom, i, errMsg = extractFlagValue(args, i, "--file-from")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			if fileFrom == "" {
+				return RemoteExecArgs{Err: "--file-from requires a local path to read the script from"}
+			}
+		case arg == "--interpreter" || strings.HasPrefix(arg, "--interpreter="):
+			var errMsg string
+			interpreter, i, errMsg = extractFlagValue(args, i, "--interpreter")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			if !strings.HasPrefix(interpreter, "/") {
+				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
+			}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -196,6 +237,25 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
 		}
 	}
+	if filePath == "" {
+		if fileFrom != "" {
+			return RemoteExecArgs{Err: "--file-from requires --file"}
+		}
+		if interpreter != "" {
+			return RemoteExecArgs{Err: "--interpreter requires --file"}
+		}
+	} else {
+		if len(env) > 0 {
+			return RemoteExecArgs{
+				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
+			}
+		}
+		if len(commandParts) > 0 && !separated {
+			return RemoteExecArgs{
+				Err: "--file cannot be combined with a command line; put the script's arguments after --",
+			}
+		}
+	}
 
 	// Parse SSH-like user@host syntax
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
@@ -206,19 +266,29 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		server = sshTarget.Host
 	}
 
-	return RemoteExecArgs{
+	parsed := RemoteExecArgs{
 		Username:      username,
 		Groupname:     groupname,
 		WorkSessionID: workSessionID,
 		OutputFormat:  outputFormat,
 		Server:        server,
-		Command:       ShellJoin(commandParts),
 		Purpose:       purpose,
 		Env:           env,
 		WaitApproval:  waitApproval,
 		Detach:        detach,
 		Wait:          wait,
 	}
+	if filePath != "" {
+		parsed.File = &FileExecArgs{
+			Path:        filePath,
+			From:        fileFrom,
+			Interpreter: interpreter,
+			Args:        commandParts,
+		}
+		return parsed
+	}
+	parsed.Command = ShellJoin(commandParts)
+	return parsed
 }
 
 // ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,

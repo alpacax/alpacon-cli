@@ -39,6 +39,20 @@ Shell metacharacters (;, |, &, $) pass through unquoted to the remote shell.
 To send a literal metacharacter, wrap the argument in quotes:
   alpacon exec server 'echo hello;world'
 
+Verified file execution (--file) submits a script as structure instead of a
+command line: the platform hashes the bytes the reviewer sees, and the agent
+proves at execution time that the file it runs on the server is those bytes.
+The file must already exist at that path on the target server; the CLI reads
+the content from the same path locally (or from --file-from) so the reviewer
+and the assessor judge what you are about to run. An approval binds exactly
+those bytes, on that server, as that account, with those arguments—it does not
+mean "the file is safe". Environment, libraries, the interpreter's version and
+anything the script fetches at run time are yours; only the first entrypoint
+is verified. Composition (pipes, redirection, &&) goes inside the script, where
+it is reviewed and hashed with it; a one-off composition around a script stays
+on the ordinary command line. A reviewer can mark an approval standing, and an
+unchanged re-run then stops asking anyone—one changed byte re-queues review.
+
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
   -g, --groupname [GROUP_NAME]  Specify the group name for command execution.
@@ -50,6 +64,18 @@ Flags:
                                 stays on your local alpacon command line, so it lands
                                 in shell history, ps output, and CI job logs. Never
                                 pass credentials this way.
+  --file PATH                   Run the script at PATH on the server as a verified
+                                file instead of a command line. PATH is absolute on
+                                the target; the content is read from the same path
+                                locally and sent byte-for-byte (64 KB at most). The
+                                script's arguments go after --; --file takes no
+                                command line and no --env.
+  --file-from LOCAL_PATH        Read the script's content from LOCAL_PATH instead of
+                                PATH. The file on the server must be byte-identical,
+                                or the agent refuses to run it.
+  --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
+                                an absolute path; a bare name would let the server's
+                                PATH decide what runs.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -120,7 +146,13 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
   # State what the command is for, so it is judged with that in hand
   alpacon exec --purpose 'chronyd drifted 40s; the renewed cert reads as future-dated' \
-    prod-web -- systemctl restart chronyd`,
+    prod-web -- systemctl restart chronyd
+
+  # Run a script the reviewer can read, verified byte-for-byte on the server.
+  # /opt/deploy.sh must exist on prod-web; its content is read from the same path
+  # locally unless --file-from names another copy. Script arguments go after --.
+  alpacon exec --file /opt/deploy.sh root@prod-web -- --fast
+  alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.
@@ -144,8 +176,8 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
-		if parsed.Command == "" {
-			utils.CliErrorWithExit("You must specify a command to execute.")
+		if parsed.Command == "" && parsed.File == nil {
+			utils.CliErrorWithExit("You must specify a command to execute, or a script with --file.")
 			return
 		}
 
@@ -154,13 +186,26 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 }
 
 // RunRemoteExec is the shared post-parse execution path for exec and websh
-// command mode. Requires Server and Command to be non-empty.
+// command mode. Requires Server and either Command or File to be set.
 func RunRemoteExec(parsed RemoteExecArgs) {
 	if parsed.OutputFormat != "" {
 		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
 			utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
 		}
 		utils.OutputFormat = parsed.OutputFormat
+	}
+
+	// The script is read before anything reaches the network: a missing or
+	// oversized local file is answered here, not by a 400 after the session and
+	// the client were resolved.
+	var file *event.FileExecution
+	if parsed.File != nil {
+		loaded, msg := loadFileExecution(*parsed.File)
+		if msg != "" {
+			utils.CliErrorWithExit("%s", msg)
+			return
+		}
+		file = &loaded
 	}
 
 	workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
@@ -176,15 +221,24 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	env := parsed.Env
 
 	if parsed.Detach {
-		resp, err := event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
+		submit := func() (event.CommandResponse, error) {
+			if file != nil {
+				return event.SubmitFileCommand(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose)
+			}
+			return event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
+		}
+		resp, err := submit()
 		if err != nil {
 			err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(alpaconClient, func() error {
-				resp, err = event.SubmitCommand(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose)
+				resp, err = submit()
 				return err
 			}))
 		}
 		if err != nil {
 			utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+			if HandleFileExecRefusal(err, parsed.Server) {
+				return
+			}
 			utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
 			return
 		}
@@ -212,7 +266,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		out = buf
 	}
 
-	err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	if file != nil {
+		err = RunFileExecWithApprovalWait(alpaconClient, parsed.Server, *file, parsed.Username, parsed.Groupname, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	} else {
+		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
+	}
 	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 	// A command parked for its purpose is reported first: it has no approval
 	// request yet, so the pending-approval path below would name a queue it is
@@ -229,6 +287,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if buf != nil {
 		_, _ = os.Stdout.Write(buf.Bytes())
 	}
+	// A file-lane refusal names the server in its guidance, which
+	// HandleCommandResult does not know; it answers only its own codes.
+	if HandleFileExecRefusal(err, parsed.Server) {
+		return
+	}
 	HandleCommandResult(err, parsed.InvokedAs)
 }
 
@@ -242,6 +305,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // submit without those keys.
 // It names exec even when InvokedAs is websh: websh has no --wait, so the rerun
 // genuinely has to go through exec (README "Exit codes", row 4).
+// On the file lane it repeats the --file flags as the user gave them, so a
+// defaulted --file-from or --interpreter is not spelled out, and quotes each
+// script argument on its own: ShellJoin leaves a lone argument as it is, which
+// would split one that carries a space.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {
@@ -263,7 +330,24 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	for _, k := range keys {
 		parts = append(parts, "--env="+k)
 	}
-	parts = append(parts, parsed.Server, "--", parsed.Command)
+	if parsed.File != nil {
+		parts = append(parts, "--file "+shellQuote(parsed.File.Path))
+		if parsed.File.From != "" {
+			parts = append(parts, "--file-from "+shellQuote(parsed.File.From))
+		}
+		if parsed.File.Interpreter != "" {
+			parts = append(parts, "--interpreter "+shellQuote(parsed.File.Interpreter))
+		}
+		parts = append(parts, parsed.Server)
+		if len(parsed.File.Args) > 0 {
+			parts = append(parts, "--")
+			for _, a := range parsed.File.Args {
+				parts = append(parts, shellQuote(a))
+			}
+		}
+	} else {
+		parts = append(parts, parsed.Server, "--", parsed.Command)
+	}
 
 	action := utils.NextAction{Command: strings.Join(parts, " ")}
 	if len(keys) > 0 {
