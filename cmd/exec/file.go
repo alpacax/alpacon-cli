@@ -114,12 +114,12 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		return event.FileExecution{}, msg
 	}
 
-	// A copy, and never nil: the server's default for args is an empty list.
-	args := append([]string{}, spec.Args...)
+	// Args may be nil here; SubmitFileCommand sends it as the empty list the
+	// server defaults to.
 	return event.FileExecution{
 		Path:        spec.Path,
 		Interpreter: interpreter,
-		Args:        args,
+		Args:        spec.Args,
 		Content:     content,
 	}, ""
 }
@@ -141,7 +141,7 @@ func readFileContent(path string, defaultedPath bool) (string, string) {
 
 	data, err := io.ReadAll(io.LimitReader(f, FileContentMaxBytes+1))
 	if err != nil {
-		return "", fmt.Sprintf("cannot read the script from '%s': %s", path, err)
+		return "", fmt.Sprintf("cannot read the script from '%s': %s", path, describeOpenError(err))
 	}
 	switch {
 	case len(data) == 0:
@@ -152,6 +152,32 @@ func readFileContent(path string, defaultedPath bool) (string, string) {
 		return "", fmt.Sprintf("'%s' is not valid UTF-8; the content travels as JSON text, which would alter the bytes the agent hashes", path)
 	}
 	return string(data), ""
+}
+
+// argvQuote quotes one file-lane value for the re-run hint. These values were
+// argv on the first run and reached the server as a JSON list, so no shell ever
+// interpreted them; shellQuote quotes only on whitespace because the generic
+// lane wants metacharacters to reach the remote shell, and that would let `a;b`
+// or `$(...)` execute locally when the hint is pasted. Anything outside a
+// conservative POSIX-safe set is single-quoted.
+func argvQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	for _, r := range s {
+		if !isArgvSafe(r) {
+			return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+		}
+	}
+	return s
+}
+
+func isArgvSafe(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	}
+	return strings.ContainsRune("_./:=@%+,-", r)
 }
 
 // describeOpenError strips the "open <path>:" prefix os.Open puts on its error,

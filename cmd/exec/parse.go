@@ -198,6 +198,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if errMsg != "" {
 				return RemoteExecArgs{Err: errMsg}
 			}
+			if interpreter == "" {
+				return RemoteExecArgs{Err: "--interpreter requires the interpreter's absolute path on the target server"}
+			}
 			if !strings.HasPrefix(interpreter, "/") {
 				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
 			}

@@ -195,7 +195,7 @@ func TestLoadFileExecution(t *testing.T) {
 		assert.Equal(t, event.FileExecution{
 			Path:        rawPath,
 			Interpreter: DefaultInterpreter,
-			Args:        []string{},
+			Args:        nil,
 			Content:     string(raw),
 		}, got)
 	})
@@ -401,6 +401,21 @@ func TestReRunHint_File(t *testing.T) {
 		})
 		assert.Equal(t,
 			"alpacon exec -u root -g wheel --work-session ses-1 --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web -- --fast 'two words'",
+			hint.Command)
+	})
+	// The arguments were argv on the first run and reached the server as a
+	// JSON list; the hint must not hand a metacharacter to the local shell.
+	t.Run("metacharacters in argv are quoted", func(t *testing.T) {
+		t.Parallel()
+		hint := reRunHint(RemoteExecArgs{
+			Server: "prod-web",
+			File: &FileExecArgs{
+				Path: "/opt/$x.sh",
+				Args: []string{"a;b", "$(cat ~/.aws/credentials)", "*", "it's", ""},
+			},
+		})
+		assert.Equal(t,
+			`alpacon exec --file '/opt/$x.sh' prod-web -- 'a;b' '$(cat ~/.aws/credentials)' '*' 'it'\''s' ''`,
 			hint.Command)
 	})
 }

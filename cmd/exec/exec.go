@@ -69,7 +69,10 @@ Flags:
                                 the target; the content is read from the same path
                                 locally and sent byte-for-byte (64 KB at most). The
                                 script's arguments go after --; --file takes no
-                                command line and no --env.
+                                command line and no --env. Arguments are recorded
+                                with the command and shown to the reviewer, so a
+                                secret goes in a file or the environment the
+                                script reads at run time, never in an argument.
   --file-from LOCAL_PATH        Read the script's content from LOCAL_PATH instead of
                                 PATH. The file on the server must be byte-identical,
                                 or the agent refuses to run it.
@@ -307,8 +310,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // genuinely has to go through exec (README "Exit codes", row 4).
 // On the file lane it repeats the --file flags as the user gave them, so a
 // defaulted --file-from or --interpreter is not spelled out, and quotes each
-// script argument on its own: ShellJoin leaves a lone argument as it is, which
-// would split one that carries a space.
+// value with argvQuote: those were argv, never a shell line, so the hint must
+// keep a metacharacter from being interpreted when it is pasted.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {
@@ -331,18 +334,18 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		parts = append(parts, "--env="+k)
 	}
 	if parsed.File != nil {
-		parts = append(parts, "--file "+shellQuote(parsed.File.Path))
+		parts = append(parts, "--file "+argvQuote(parsed.File.Path))
 		if parsed.File.From != "" {
-			parts = append(parts, "--file-from "+shellQuote(parsed.File.From))
+			parts = append(parts, "--file-from "+argvQuote(parsed.File.From))
 		}
 		if parsed.File.Interpreter != "" {
-			parts = append(parts, "--interpreter "+shellQuote(parsed.File.Interpreter))
+			parts = append(parts, "--interpreter "+argvQuote(parsed.File.Interpreter))
 		}
 		parts = append(parts, parsed.Server)
 		if len(parsed.File.Args) > 0 {
 			parts = append(parts, "--")
 			for _, a := range parsed.File.Args {
-				parts = append(parts, shellQuote(a))
+				parts = append(parts, argvQuote(a))
 			}
 		}
 	} else {
