@@ -74,10 +74,20 @@ Run the command again later to check for completion.`,
 			return
 		}
 
-		// Output is stored as chunks (Result is empty under the streaming
-		// contract); reconstruct it, falling back to Result for legacy commands.
-		if output, oerr := event.GetCommandOutput(alpaconClient, jobID); oerr == nil && output != "" {
-			details.Result = output
+		// Only the statuses whose outcome prints the output are worth a fetch, for
+		// two different reasons. A status-only failure answers with a line of its
+		// own and an empty stdoutLine, so the round trip buys nothing and a chunk
+		// store that hangs costs the wait. A running status needs the skip to stay
+		// correct: its outcome exits 0, so a read error would take the
+		// exitCode == 0 gate below and bury the "still running" line.
+		var readErr error
+		if !event.IsRunningStatus(details.Status) && !event.IsStatusOnlyFailure(details.Status) {
+			output, oerr := event.ResolveCommandOutput(alpaconClient, jobID, details.Result)
+			if oerr != nil {
+				readErr = oerr
+			} else {
+				details.Result = output
+			}
 		}
 
 		// What the requester said the command was for, ahead of the outcome and
@@ -90,6 +100,13 @@ Run the command again later to check for completion.`,
 		}
 
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+		// The command's own failure carries the remote exit code this command
+		// propagates, so it outranks an unreadable output—the order
+		// runCommandFallbackFromID keeps on the polling path.
+		if exitCode == 0 && readErr != nil {
+			utils.CliErrorWithExit("failed to read command output: %s", readErr)
+			return
+		}
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
 		}
@@ -122,7 +139,7 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		return "", stderrLine, 0
 	}
 
-	if details.Status == "stuck" || details.Status == "error" || details.Status == "cancelled" {
+	if event.IsStatusOnlyFailure(details.Status) {
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",

@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// statusErr carries an HTTP status the way the API client's own errors do,
+// which is what utils.HTTPStatusCode reads out of the chain.
+type statusErr struct{ code int }
+
+func (e *statusErr) Error() string       { return fmt.Sprintf("HTTP %d", e.code) }
+func (e *statusErr) HTTPStatusCode() int { return e.code }
 
 func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 	t.Parallel()
@@ -140,6 +148,82 @@ func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 			for _, want := range tt.wantQ {
 				assert.Contains(t, capturedQuery, want)
 			}
+		})
+	}
+}
+
+func TestPickCommandOutput(t *testing.T) {
+	t.Parallel()
+	fetchErr := errors.New("unexpected response from server (HTTP 500)")
+	tests := []struct {
+		name    string
+		result  string
+		chunked string
+		err     error
+		want    string
+		wantErr error
+	}{
+		{name: "chunks win over the legacy field", result: "legacy", chunked: "chunked", want: "chunked"},
+		{name: "no chunks falls back to the legacy field", result: "legacy", want: "legacy"},
+		{name: "a command that printed nothing stays empty", want: ""},
+		{name: "fetch failure falls back to a legacy result", result: "legacy", err: fetchErr, want: "legacy"},
+		{name: "fetch failure with nothing to fall back on", err: fetchErr, wantErr: fetchErr},
+		// A server without the endpoint carries the whole output in result, so an
+		// empty one there is a command that printed nothing, not an unread result.
+		{name: "a 404 leaves an empty legacy result standing", err: &statusErr{code: http.StatusNotFound}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := pickCommandOutput(tt.result, tt.chunked, tt.err)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestResolveCommandOutputSurfacesFetchFailure pins the wiring pickCommandOutput
+// cannot: that the fetch error reaches the decision, and that result and the
+// chunks are not passed the wrong way round.
+func TestResolveCommandOutputSurfacesFetchFailure(t *testing.T) {
+	t.Parallel()
+	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	tests := []struct {
+		name    string
+		status  int
+		result  string
+		want    string
+		wantErr bool
+	}{
+		{name: "nothing to fall back on is an error", status: http.StatusInternalServerError, wantErr: true},
+		{name: "a legacy result stands in for the chunks", status: http.StatusInternalServerError, result: "legacy", want: "legacy"},
+		// The 404 tag has to survive the wrapping FetchAllPages puts around it,
+		// which is the half a pure table cannot see.
+		{name: "a server without the chunk endpoint is not a failure", status: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			got, err := ResolveCommandOutput(ac, cmdID, tt.result)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package event
 
 import (
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // noSeqBound is the toSeq sentinel that leaves getCommandChunks unbounded (seq
@@ -56,4 +58,30 @@ func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
 		b.WriteString(c.Content)
 	}
 	return b.String(), nil
+}
+
+// ResolveCommandOutput reconstructs a finished command's output from its chunks,
+// falling back to the result field the command detail carries.
+func ResolveCommandOutput(ac *client.AlpaconClient, cmdID, result string) (string, error) {
+	chunked, err := GetCommandOutput(ac, cmdID)
+	return pickCommandOutput(result, chunked, err)
+}
+
+// pickCommandOutput decides between the two. A chunk fetch failure is fatal only
+// when result carries nothing: a server predating the chunk endpoint answers the
+// legacy field alone, while an empty result leaves nothing to print, and
+// reporting success there describes a command that produced no output. A 404 is
+// that older server saying it has no chunk store at all, so its empty result is
+// the whole output rather than a result nobody could read.
+func pickCommandOutput(result, chunked string, chunkErr error) (string, error) {
+	if chunkErr != nil {
+		if result != "" || utils.HTTPStatusCode(chunkErr) == http.StatusNotFound {
+			return result, nil
+		}
+		return "", chunkErr
+	}
+	if chunked != "" {
+		return chunked, nil
+	}
+	return result, nil
 }

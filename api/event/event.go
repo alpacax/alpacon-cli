@@ -621,8 +621,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 // errorFromDetails maps a terminal command status to an error so unrecognized
 // statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
-	// A switch case cannot call a predicate, so the two approval statuses are
-	// matched ahead of it—a server-side rename then lands in types.go alone.
+	// A switch case cannot call a predicate, so every status this function answers
+	// specially is handled ahead of the switch—a server-side rename then lands in
+	// types.go alone.
 	if IsAwaitingPurposeStatus(d.Status) {
 		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
@@ -631,6 +632,16 @@ func errorFromDetails(d EventDetails) error {
 	}
 	if IsRejectedStatus(d.Status) {
 		return &CommandRejectedError{CommandID: d.ID}
+	}
+	if IsStatusOnlyFailure(d.Status) {
+		phase := ""
+		if d.ErrorPhase != nil {
+			phase = *d.ErrorPhase
+		}
+		if phase == "" {
+			return fmt.Errorf("command failed with status: %s", d.Status)
+		}
+		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
 	}
 	switch d.Status {
 	case "completed", "success", "failed":
@@ -646,15 +657,6 @@ func errorFromDetails(d EventDetails) error {
 			return &RemoteCommandError{Output: d.Result, ExitCode: exitCode, ErrorPhase: phase, CommandID: d.ID}
 		}
 		return nil
-	case "stuck", "error", "cancelled":
-		phase := ""
-		if d.ErrorPhase != nil {
-			phase = *d.ErrorPhase
-		}
-		if phase == "" {
-			return fmt.Errorf("command failed with status: %s", d.Status)
-		}
-		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
 	default:
 		return fmt.Errorf("unexpected command status: %s (command may still be running)", d.Status)
 	}
@@ -680,15 +682,18 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if err != nil {
 		return err
 	}
-	// Command has finished: reconstruct output from chunks best-effort, falling
-	// back to Result when chunks are empty or unavailable. No warning on failure—
-	// the polling-fallback warning above already covers it.
-	output := details.Result
-	if reconstructed, oerr := GetCommandOutput(ac, cmdID); oerr == nil && reconstructed != "" {
-		output = reconstructed
-	}
+	output, oerr := ResolveCommandOutput(ac, cmdID, details.Result)
 	if output != "" {
 		_, _ = fmt.Fprint(out, output)
 	}
-	return errorFromDetails(details)
+	// The command's own failure carries the remote exit code the caller
+	// propagates, so it outranks an unreadable output. The warning above names a
+	// lost stream, not a lost output, so it cannot stand in for this error.
+	if err := errorFromDetails(details); err != nil {
+		return err
+	}
+	if oerr != nil {
+		return fmt.Errorf("failed to read command output: %w", oerr)
+	}
+	return nil
 }
