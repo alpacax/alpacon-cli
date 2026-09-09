@@ -213,7 +213,9 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 		message, hint = r.message, r.hint
 		if r.needsServer {
 			message = fmt.Sprintf(message, serverName)
-			hint = fmt.Sprintf(hint, serverName)
+			if hint != "" {
+				hint = fmt.Sprintf(hint, serverName)
+			}
 		}
 		switch {
 		case r.clientBug:

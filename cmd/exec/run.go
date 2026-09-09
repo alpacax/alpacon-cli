@@ -850,6 +850,7 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		if isCommandInlineCredentialError(err) {
 			reportCodedRefusal("command", err, commandInlineCredentialMessage, credentialInlineHint(invokedAs))
+			return
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
