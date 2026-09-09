@@ -67,21 +67,9 @@ func StartWithClient(ac *client.AlpaconClient, opts StartOptions) (*Runtime, err
 }
 
 func start(alpaconClient *client.AlpaconClient, opts StartOptions) (*Runtime, error) {
-	if opts.ServerName == "" {
-		return nil, errors.New("server name is required")
-	}
-
-	targetPort, err := parsePort(opts.RemotePort, false)
+	targetPort, bindPort, err := opts.validate()
 	if err != nil {
-		return nil, fmt.Errorf("invalid remote port: %w", err)
-	}
-
-	bindPort := opts.LocalPort
-	if bindPort == "" {
-		bindPort = "0"
-	}
-	if _, err := parsePort(bindPort, true); err != nil {
-		return nil, fmt.Errorf("invalid local port: %w", err)
+		return nil, err
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%s", bindPort))
@@ -140,6 +128,32 @@ func start(alpaconClient *client.AlpaconClient, opts StartOptions) (*Runtime, er
 	}()
 
 	return runtime, nil
+}
+
+func (opts StartOptions) Validate() error {
+	_, _, err := opts.validate()
+	return err
+}
+
+func (opts StartOptions) validate() (int, string, error) {
+	if opts.ServerName == "" {
+		return 0, "", errors.New("server name is required")
+	}
+
+	targetPort, err := parsePort(opts.RemotePort, false)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid remote port: %w", err)
+	}
+
+	bindPort := opts.LocalPort
+	if bindPort == "" {
+		bindPort = "0"
+	}
+	if _, err := parsePort(bindPort, true); err != nil {
+		return 0, "", fmt.Errorf("invalid local port: %w", err)
+	}
+
+	return targetPort, bindPort, nil
 }
 
 // CheckReady validates that the tunnel session can open a stream and send metadata.

@@ -132,6 +132,10 @@ func validateTunnelArgs(cmd *cobra.Command, args []string) error {
 }
 
 func runTunnel(cmd *cobra.Command, args []string) {
+	if err := tunnelFlags.toStartOptions(args[0]).Validate(); err != nil {
+		utils.CliErrorWithExit("%s", err)
+		return
+	}
 	ac, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
