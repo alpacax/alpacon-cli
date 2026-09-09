@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -100,6 +101,33 @@ func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 			"content": "#!/bin/bash\nset -euo pipefail\n"
 		}
 	}`, string(body))
+}
+
+// TestFileLaneRequestMirrorsCommandRequest guards the hand-copied field list:
+// a field added to CommandRequest later must either be one the file lane
+// refuses (shell, line, env, data) or appear on fileLaneRequest under the same
+// name and json tag, or it silently never travels on that lane.
+func TestFileLaneRequestMirrorsCommandRequest(t *testing.T) {
+	t.Parallel()
+	refused := map[string]bool{"Shell": true, "Line": true, "Env": true, "Data": true}
+	fileLane := reflect.TypeOf(fileLaneRequest{})
+	generic := reflect.TypeOf(CommandRequest{})
+	for i := range generic.NumField() {
+		f := generic.Field(i)
+		if refused[f.Name] {
+			_, present := fileLane.FieldByName(f.Name)
+			assert.False(t, present, "%s must not travel on the file lane", f.Name)
+			continue
+		}
+		mirror, present := fileLane.FieldByName(f.Name)
+		if assert.True(t, present, "CommandRequest.%s is missing from fileLaneRequest", f.Name) {
+			// Only the wire name: omitempty is a per-lane choice (File is
+			// optional on the generic lane and required on this one).
+			assert.Equal(t, strings.Split(f.Tag.Get("json"), ",")[0], strings.Split(mirror.Tag.Get("json"), ",")[0], "json name of %s", f.Name)
+			assert.Equal(t, f.Type, mirror.Type, "type of %s", f.Name)
+		}
+	}
+	assert.Equal(t, generic.NumField()-len(refused), fileLane.NumField(), "fileLaneRequest carries a field CommandRequest does not")
 }
 
 // TestCommandRequestMarshal_GenericLaneUnchanged pins that a request without

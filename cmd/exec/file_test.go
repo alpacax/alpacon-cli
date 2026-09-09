@@ -236,6 +236,11 @@ func TestLoadFileExecution(t *testing.T) {
 		assert.Equal(t, "'"+overCeiling+"' exceeds 65536 bytes (64 KB), the ceiling for a verified file", msg)
 	})
 
+	t.Run("a directory is refused with the path once", func(t *testing.T) {
+		t.Parallel()
+		_, msg := loadFileExecution(FileExecArgs{Path: dir})
+		assert.Equal(t, fmt.Sprintf("cannot read the script from '%s': is a directory", dir), msg)
+	})
 	t.Run("refuses content that is not UTF-8", func(t *testing.T) {
 		t.Parallel()
 		_, msg := loadFileExecution(FileExecArgs{Path: invalidUTF8})
