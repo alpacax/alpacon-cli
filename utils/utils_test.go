@@ -237,7 +237,7 @@ func TestSaveStreamAtomic_LeavesNewFileAbsentOnReadError(t *testing.T) {
 	assert.Equal(t, int64(len("partial")), written)
 
 	_, err = os.Stat(dest)
-	assert.ErrorIs(t, err, os.ErrNotExist)
+	require.ErrorIs(t, err, os.ErrNotExist)
 
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
