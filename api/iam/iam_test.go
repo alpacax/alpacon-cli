@@ -5,13 +5,20 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	stubGroupName = "admins"
+	stubGroupID   = "group-uuid-111"
+	stubUserName  = "alice"
+	stubUserID    = "user-uuid-222"
 )
 
 func TestGetUserList_Pagination(t *testing.T) {
@@ -353,47 +360,97 @@ func TestInviteUser(t *testing.T) {
 	}
 }
 
+// newIAMStubServer answers the group and user lookups every membership test makes,
+// and hands every other request to membershipHandler.
+func newIAMStubServer(t *testing.T, membershipHandler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == groupURL:
+			assert.Equal(t, stubGroupName, r.URL.Query().Get("name"))
+			resp := api.ListResponse[GroupResponse]{Count: 1, Results: []GroupResponse{{ID: stubGroupID, Name: stubGroupName}}}
+			_ = json.NewEncoder(w).Encode(resp)
+		case r.Method == http.MethodGet && r.URL.Path == userURL:
+			assert.Equal(t, stubUserName, r.URL.Query().Get("username"))
+			resp := api.ListResponse[UserResponse]{Count: 1, Results: []UserResponse{{ID: stubUserID, Username: stubUserName}}}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			membershipHandler(w, r)
+		}
+	}))
+}
+
 func TestAddMember(t *testing.T) {
 	t.Parallel()
-	const (
-		groupID = "group-uuid-111"
-		userID  = "user-uuid-222"
-	)
-	var membershipPostCalled bool
+	var membershipPostCalled atomic.Bool
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := newIAMStubServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/groups/"):
-			resp := api.ListResponse[GroupResponse]{Count: 1, Results: []GroupResponse{{ID: groupID, Name: "admins"}}}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/users/"):
-			resp := api.ListResponse[UserResponse]{Count: 1, Results: []UserResponse{{ID: userID, Username: "alice"}}}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(resp)
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/memberships/"):
-			membershipPostCalled = true
+		case r.Method == http.MethodPost && r.URL.Path == membershipURL:
+			membershipPostCalled.Store(true)
 			var req MemberAddRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			if req.Group != groupID {
-				t.Errorf("expected group id %q, got %q", groupID, req.Group)
-			}
-			if req.User != userID {
-				t.Errorf("expected user id %q, got %q", userID, req.User)
-			}
+			assert.Equal(t, stubGroupID, req.Group)
+			assert.Equal(t, stubUserID, req.User)
 			w.WriteHeader(http.StatusCreated)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
 		}
-	}))
+	})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	err := AddMember(ac, MemberAddRequest{Group: "admins", User: "alice", Role: "member"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	err := AddMember(ac, MemberAddRequest{Group: stubGroupName, User: stubUserName, Role: "member"})
+	assert.True(t, membershipPostCalled.Load(), "membership POST was not called")
+	require.NoError(t, err)
+}
+
+func TestDeleteMember(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		response   string
+		wantErr    string
+		wantDelete int32
+	}{
+		{"existing membership", `[{"id":"membership-1"}]`, "", 1},
+		{"empty list", `[]`, "no membership found for the given user and group", 0},
+		{"null list", `null`, "no membership found for the given user and group", 0},
 	}
-	if !membershipPostCalled {
-		t.Error("membership POST was not called")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var deleteCount atomic.Int32
+			ts := newIAMStubServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == membershipURL:
+					assert.Equal(t, stubGroupID, r.URL.Query().Get("group"))
+					assert.Equal(t, stubUserID, r.URL.Query().Get("user"))
+					_, _ = w.Write([]byte(tt.response))
+				case r.Method == http.MethodDelete:
+					deleteCount.Add(1)
+					assert.Equal(t, membershipURL+"membership-1/", r.URL.Path)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			})
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			err := DeleteMember(ac, MemberDeleteRequest{Group: stubGroupName, User: stubUserName})
+			// The delete count is asserted first so a run that both returns the wrong
+			// error and issues a spurious DELETE reports both, not just the error.
+			assert.Equal(t, tt.wantDelete, deleteCount.Load())
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
 	}
 }
