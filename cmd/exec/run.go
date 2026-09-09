@@ -849,16 +849,25 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 			return
 		}
 		if isCommandInlineCredentialError(err) {
-			if utils.OutputFormat == utils.OutputFormatJSON {
-				utils.CliErrorEnvelopeWithExit("command", err, "%s.", commandInlineCredentialMessage)
-				return
-			}
-			fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), commandInlineCredentialMessage)
-			fmt.Fprint(os.Stderr, credentialInlineHint(invokedAs))
-			os.Exit(1)
+			reportCodedRefusal("command", err, commandInlineCredentialMessage, credentialInlineHint(invokedAs))
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+// reportCodedRefusal is the one way out for a server refusal the CLI has a
+// sentence for: under --output json the envelope carries the server's code and
+// the message; table mode prints the red Error line and the hint. Exits 1.
+func reportCodedRefusal(operation string, err error, message, hint string) {
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.CliErrorEnvelopeWithExit(operation, err, "%s.", message)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
+	if hint != "" {
+		fmt.Fprint(os.Stderr, hint)
+	}
+	os.Exit(1)
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged

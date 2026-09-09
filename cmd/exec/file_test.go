@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -291,7 +290,7 @@ func TestFileExecRefusal(t *testing.T) {
 		{
 			name:         "assessor disabled",
 			err:          coded("file_exec_assessor_disabled"),
-			wantMessage:  "this deployment has the command assessor disabled, so verified file execution is unavailable",
+			wantMessage:  "this deployment has the command assessor disabled, so 'prod-web' cannot run a verified file",
 			wantHintPart: "alpacon exec prod-web -- /bin/bash",
 			wantOK:       true,
 		},
@@ -367,7 +366,7 @@ func TestFileExecRefusal(t *testing.T) {
 			if tt.wantHintPart != "" {
 				assert.Contains(t, hint, "Hint:")
 				assert.Contains(t, hint, tt.wantHintPart)
-				assert.Equal(t, "\n", hint[len(hint)-1:], "hint must end with a newline: %q", hint)
+				assert.True(t, strings.HasSuffix(hint, "\n"), "hint must end with a newline: %q", hint)
 			}
 			if !tt.wantOK {
 				assert.Empty(t, hint)
@@ -461,36 +460,6 @@ func newFileLaneServer(capture *fileLaneHelperCapture, respond func(w http.Respo
 	}))
 }
 
-// runFileLaneHelper drives the real exec command in a helper process against a
-// fake server, with the script at scriptPath, and returns what it exited with.
-func runFileLaneHelper(t *testing.T, serverURL string, args ...string) (exitCode int, stdout, stderr string) {
-	t.Helper()
-	home := t.TempDir()
-	writeExecCommandTestConfig(t, home, serverURL)
-
-	helperArgs := append([]string{
-		"-test.run=^TestExecCommandWorkSessionGateHelperProcess$",
-		"--",
-		"exec-worksession-helper",
-	}, args...)
-	helper := osexec.Command(os.Args[0], helperArgs...)
-	helper.Env = append(os.Environ(),
-		"GO_WANT_EXEC_WORKSESSION_HELPER=1",
-		"ALPACON_WORK_SESSION=",
-		"HOME="+home,
-	)
-	var out, errOut bytes.Buffer
-	helper.Stdout = &out
-	helper.Stderr = &errOut
-	err := helper.Run()
-	if err == nil {
-		return 0, out.String(), errOut.String()
-	}
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	return exitErr.ExitCode(), out.String(), errOut.String()
-}
-
 // TestExecFileDetachSubmitsFileLane drives `exec --detach --file` end to end:
 // the body carries the file object with the local bytes verbatim and none of
 // the keys the server refuses, and the job id is printed as for any detach.
@@ -506,7 +475,7 @@ func TestExecFileDetachSubmitsFileLane(t *testing.T) {
 	content := "#!/bin/bash\nset -euo pipefail\necho deploy\n"
 	require.NoError(t, os.WriteFile(script, []byte(content), 0o600))
 
-	exitCode, stdout, stderr := runFileLaneHelper(t, ts.URL,
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL,
 		"--detach", "--file", "/opt/deploy.sh", "--file-from", script, "root@prod", "--", "--fast")
 	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	// The helper process is a go test binary, so it appends its own PASS line.
@@ -543,7 +512,7 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 		})
 		defer ts.Close()
 
-		exitCode, stdout, stderr := runFileLaneHelper(t, ts.URL,
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
 			"--file", "/opt/deploy.sh", "--file-from", script, "prod")
 		assert.Equal(t, 1, exitCode)
 		assert.Empty(t, stdout)
@@ -561,7 +530,7 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 		})
 		defer ts.Close()
 
-		exitCode, stdout, stderr := runFileLaneHelper(t, ts.URL,
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
 			"--output", "json", "--file", "/opt/deploy.sh", "--file-from", script, "prod")
 		assert.Equal(t, 1, exitCode)
 		assert.Empty(t, stdout)
@@ -592,7 +561,7 @@ func TestExecFileLocalRefusalNeverReachesServer(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "empty.sh")
 	require.NoError(t, os.WriteFile(script, nil, 0o600))
 
-	exitCode, stdout, stderr := runFileLaneHelper(t, ts.URL,
+	stdout, stderr, exitCode := runExecHelper(t, ts.URL,
 		"--file", "/opt/deploy.sh", "--file-from", script, "prod")
 	assert.Equal(t, 1, exitCode)
 	assert.Empty(t, stdout)

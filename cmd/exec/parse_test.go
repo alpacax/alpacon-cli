@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// The --file lane's parse tables (TestParseRemoteExecArgs_File*) live in
+// file_test.go with the rest of that lane.
 func TestParseRemoteExecArgs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

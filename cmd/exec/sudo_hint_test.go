@@ -429,6 +429,7 @@ func TestIsApprovalDenial(t *testing.T) {
 	}
 }
 
+// The --file lane's re-run hint cases (TestReRunHint_File) live in file_test.go.
 func TestReRunHint(t *testing.T) {
 	t.Parallel()
 	t.Run("minimal: server and command only", func(t *testing.T) {

@@ -137,8 +137,8 @@ type CommandRequest struct {
 	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
 	// File selects the verified file lane (ADR 0053). Its presence is what the
 	// server switches on, so it is omitted from every generic-lane request and
-	// no existing request changes shape. When set, MarshalJSON leaves line, env
-	// and data out of the body entirely—see fileLaneRequest.
+	// no existing request changes shape. When set, MarshalJSON leaves shell,
+	// line, env and data out of the body entirely—see fileLaneRequest.
 	File *FileExecution `json:"file,omitempty"`
 }
 

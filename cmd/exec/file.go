@@ -28,19 +28,22 @@ const DefaultInterpreter = "/bin/bash"
 // the request builder regressed, not that the user did anything wrong.
 var fileExecRefusals = []struct {
 	code, message, hint string
-	clientBug           bool
+	// needsServer says message and hint are Sprintf formats taking the server
+	// name; the rest are printed as they are.
+	needsServer bool
+	clientBug   bool
 }{
 	{
-		code:    "file_exec_unsupported_agent",
-		message: "the agent on '%s' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-		hint: "update Alpamon on the server, or run the script as an ordinary command until then:\n" +
-			"  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		code:        "file_exec_unsupported_agent",
+		message:     "the agent on '%s' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
+		hint:        "update Alpamon on the server, or run the script as an ordinary command until then:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		needsServer: true,
 	},
 	{
-		code:    "file_exec_assessor_disabled",
-		message: "this deployment has the command assessor disabled, so verified file execution is unavailable",
-		hint: "run the script as an ordinary command instead:\n" +
-			"  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		code:        "file_exec_assessor_disabled",
+		message:     "this deployment has the command assessor disabled, so '%s' cannot run a verified file",
+		hint:        "run the script as an ordinary command instead:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		needsServer: true,
 	},
 	{
 		code:    "file_exec_invalid_path",
@@ -207,19 +210,16 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 		if r.code != code {
 			continue
 		}
-		message = r.message
-		if strings.Contains(message, "%s") {
+		message, hint = r.message, r.hint
+		if r.needsServer {
 			message = fmt.Sprintf(message, serverName)
+			hint = fmt.Sprintf(hint, serverName)
 		}
 		switch {
 		case r.clientBug:
 			hint = denialHintLine(fmt.Sprintf(
 				"this is a bug in alpacon-cli, not in your request (%s). Please report it at https://github.com/alpacax/alpacon-cli/issues\n", code))
-		case r.hint != "":
-			hint = r.hint
-			if strings.Contains(hint, "%s") {
-				hint = fmt.Sprintf(hint, serverName)
-			}
+		case hint != "":
 			hint = denialHintLine(hint)
 		}
 		return message, hint, true
@@ -236,14 +236,6 @@ func HandleFileExecRefusal(err error, serverName string) bool {
 	if !ok {
 		return false
 	}
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		utils.CliErrorEnvelopeWithExit("command", err, "%s.", message)
-		return true
-	}
-	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
-	if hint != "" {
-		fmt.Fprint(os.Stderr, hint)
-	}
-	os.Exit(1)
+	reportCodedRefusal("command", err, message, hint)
 	return true
 }

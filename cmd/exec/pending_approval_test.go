@@ -119,7 +119,9 @@ func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, 
 	helper.Stderr = &errBuf
 
 	err := helper.Run()
-	require.Error(t, err, "helper exited 0; stderr: %s", errBuf.String())
+	if err == nil {
+		return outBuf.String(), errBuf.String(), 0
+	}
 	var exitErr *osexec.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	return outBuf.String(), errBuf.String(), exitErr.ExitCode()
