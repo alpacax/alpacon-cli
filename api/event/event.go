@@ -621,9 +621,9 @@ func drainRemainingChunks(ac *client.AlpaconClient, cmdID string, lastSeq int, o
 // errorFromDetails maps a terminal command status to an error so unrecognized
 // statuses are not masked as success.
 func errorFromDetails(d EventDetails) error {
-	// A switch case cannot call a predicate, so every status matched by one is
-	// handled ahead of the switch—a server-side rename then lands in types.go
-	// alone.
+	// A switch case cannot call a predicate, so every status this function answers
+	// specially is handled ahead of the switch—a server-side rename then lands in
+	// types.go alone.
 	if IsAwaitingPurposeStatus(d.Status) {
 		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
