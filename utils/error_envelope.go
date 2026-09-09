@@ -44,8 +44,14 @@ func buildCliErrorEnvelopeFromErr(operation string, err error, message string) J
 // CliErrorEnvelopeWithExit reports a command failure and exits(1): json mode prints the
 // envelope to stderr with the server code from err; table mode matches CliErrorWithExit.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
+	CliErrorEnvelopeWithNextActionsAndExit(operation, err, nil, format, args...)
+}
+
+func CliErrorEnvelopeWithNextActionsAndExit(operation string, err error, nextActions []NextAction, format string, args ...any) {
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...)))
+		envelope := buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...))
+		envelope.NextActions = nextActions
+		PrintJSONError(os.Stderr, envelope)
 		os.Exit(1)
 	}
 	CliErrorWithExit(format, args...)

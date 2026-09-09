@@ -808,7 +808,9 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		if isCommandInlineCredentialError(err) {
 			if utils.OutputFormat == utils.OutputFormatJSON {
-				utils.CliErrorEnvelopeWithExit("command", err, "%s.", commandInlineCredentialMessage)
+				utils.CliErrorEnvelopeWithNextActionsAndExit("command", err,
+					[]utils.NextAction{{Command: credentialInlineExample(invokedAs)}},
+					"%s.", commandInlineCredentialMessage)
 				return
 			}
 			fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), commandInlineCredentialMessage)
