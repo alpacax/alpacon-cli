@@ -61,18 +61,7 @@ func TestUnzip_AllowsInternalSymlink(t *testing.T) {
 func TestUnzip_MaterializesArchiveSymlinkAsFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	archive := filepath.Join(dir, "test.zip")
-	f, err := os.Create(archive)
-	require.NoError(t, err)
-	zw := zip.NewWriter(f)
-	header := &zip.FileHeader{Name: "link"}
-	header.SetMode(os.ModeSymlink | 0777)
-	w, err := zw.CreateHeader(header)
-	require.NoError(t, err)
-	_, err = w.Write([]byte("../outside"))
-	require.NoError(t, err)
-	require.NoError(t, zw.Close())
-	require.NoError(t, f.Close())
+	archive := writeUnzipSymlinkArchive(t, dir, "link", "../outside")
 	dest := filepath.Join(dir, "dest")
 	require.NoError(t, Unzip(archive, dest))
 	info, err := os.Lstat(filepath.Join(dest, "link"))
@@ -81,32 +70,6 @@ func TestUnzip_MaterializesArchiveSymlinkAsFile(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dest, "link"))
 	require.NoError(t, err)
 	assert.Equal(t, "../outside", string(content))
-}
-
-func makeUnzipSymlink(t *testing.T, target, link string) {
-	t.Helper()
-	err := os.Symlink(target, link)
-	if err != nil && runtime.GOOS == "windows" {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	require.NoError(t, err)
-}
-
-func writeUnzipTestArchive(t *testing.T, dir, entry string) string {
-	t.Helper()
-	archive := filepath.Join(dir, "test.zip")
-	f, err := os.Create(archive)
-	require.NoError(t, err)
-	zw := zip.NewWriter(f)
-	w, err := zw.Create(entry)
-	require.NoError(t, err)
-	if entry[len(entry)-1] != '/' {
-		_, err = w.Write([]byte("replacement"))
-		require.NoError(t, err)
-	}
-	require.NoError(t, zw.Close())
-	require.NoError(t, f.Close())
-	return archive
 }
 
 func TestUnzip_AllowsAbsoluteInternalSymlinks(t *testing.T) {
@@ -165,12 +128,14 @@ func TestUnzip_ResolvesLinkBeforeParentComponent(t *testing.T) {
 
 func TestUnzip_AbsoluteLinksWithDestinationAlias(t *testing.T) {
 	t.Parallel()
-	for _, canonical := range []bool{false, true} {
-		name := "original spelling"
-		if canonical {
-			name = "canonical spelling"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		canonical bool
+	}{
+		{"original spelling", false},
+		{"canonical spelling", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			real := filepath.Join(dir, "real")
@@ -178,7 +143,7 @@ func TestUnzip_AbsoluteLinksWithDestinationAlias(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Join(real, "files"), 0755))
 			makeUnzipSymlink(t, real, dest)
 			target := filepath.Join(dest, "files")
-			if canonical {
+			if tc.canonical {
 				var err error
 				target, err = filepath.EvalSymlinks(target)
 				require.NoError(t, err)
@@ -194,8 +159,23 @@ func TestUnzip_AbsoluteLinksWithDestinationAlias(t *testing.T) {
 
 func TestUnzip_RejectsAbsoluteEscapesAndCycles(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"external file", "external directory", "sibling prefix", "nested escape", "cycle", "parent escape"} {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		entry  string
+		target func(dir, dest, outside string) string
+		// A second symlink inside dest that the case's own target points at.
+		hop bool
+	}{
+		{"external file", "link", func(dir, dest, outside string) string { return filepath.Join(outside, "file") }, false},
+		{"external directory", "link/dest-other/file", func(dir, dest, outside string) string { return dir }, false},
+		{"sibling prefix", "link/file", func(dir, dest, outside string) string { return outside }, false},
+		{"nested escape", "link/file", func(dir, dest, outside string) string { return filepath.Join(dest, "second") }, true},
+		{"cycle", "link/file", func(dir, dest, outside string) string { return filepath.Join(dest, "link") }, false},
+		{"parent escape", "link/file", func(dir, dest, outside string) string {
+			return dest + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "dest-other"
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			dest := filepath.Join(dir, "dest")
@@ -203,25 +183,11 @@ func TestUnzip_RejectsAbsoluteEscapesAndCycles(t *testing.T) {
 			require.NoError(t, os.Mkdir(dest, 0755))
 			require.NoError(t, os.Mkdir(outside, 0755))
 			require.NoError(t, os.WriteFile(filepath.Join(outside, "file"), []byte("original"), 0600))
-			entry := "link/file"
-			target := outside
-			switch name {
-			case "external file":
-				target = filepath.Join(outside, "file")
-				entry = "link"
-			case "external directory":
-				target = dir
-				entry = "link/dest-other/file"
-			case "nested escape":
+			if tc.hop {
 				makeUnzipSymlink(t, outside, filepath.Join(dest, "second"))
-				target = filepath.Join(dest, "second")
-			case "cycle":
-				target = filepath.Join(dest, "link")
-			case "parent escape":
-				target = dest + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "dest-other"
 			}
-			makeUnzipSymlink(t, target, filepath.Join(dest, "link"))
-			require.Error(t, Unzip(writeUnzipTestArchive(t, dir, entry), dest))
+			makeUnzipSymlink(t, tc.target(dir, dest, outside), filepath.Join(dest, "link"))
+			require.Error(t, Unzip(writeUnzipTestArchive(t, dir, tc.entry), dest))
 			data, err := os.ReadFile(filepath.Join(outside, "file"))
 			require.NoError(t, err)
 			assert.Equal(t, "original", string(data))
@@ -246,4 +212,49 @@ func TestUnzip_RejectsParentAfterRegularFile(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(dest, "victim"))
 	require.NoError(t, err)
 	assert.Equal(t, "original", string(data))
+}
+
+func makeUnzipSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	err := os.Symlink(target, link)
+	if err != nil && runtime.GOOS == "windows" {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	require.NoError(t, err)
+}
+
+func writeUnzipTestArchive(t *testing.T, dir, entry string) string {
+	t.Helper()
+	return writeUnzipArchive(t, dir, func(zw *zip.Writer) {
+		w, err := zw.Create(entry)
+		require.NoError(t, err)
+		if entry[len(entry)-1] != '/' {
+			_, err = w.Write([]byte("replacement"))
+			require.NoError(t, err)
+		}
+	})
+}
+
+func writeUnzipSymlinkArchive(t *testing.T, dir, entry, target string) string {
+	t.Helper()
+	return writeUnzipArchive(t, dir, func(zw *zip.Writer) {
+		header := &zip.FileHeader{Name: entry}
+		header.SetMode(os.ModeSymlink | 0777)
+		w, err := zw.CreateHeader(header)
+		require.NoError(t, err)
+		_, err = w.Write([]byte(target))
+		require.NoError(t, err)
+	})
+}
+
+func writeUnzipArchive(t *testing.T, dir string, addEntry func(*zip.Writer)) string {
+	t.Helper()
+	archive := filepath.Join(dir, "test.zip")
+	f, err := os.Create(archive)
+	require.NoError(t, err)
+	zw := zip.NewWriter(f)
+	addEntry(zw)
+	require.NoError(t, zw.Close())
+	require.NoError(t, f.Close())
+	return archive
 }
