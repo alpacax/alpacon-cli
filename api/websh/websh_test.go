@@ -565,6 +565,45 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 	assert.Equal(t, first, wsClient.err)
 }
 
+func TestFinish_ShowsSessionCloseReasonOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		code int
+		text string
+		want string
+	}{
+		{"session end", sessionEndCloseCode, "idle timeout", "\r\nsession closed: idle timeout\r\n"},
+		{"empty reason", sessionEndCloseCode, "", ""},
+		{"normal close", websocket.CloseNormalClosure, "normal", ""},
+		{"terminal controls", sessionEndCloseCode, "\x1b[31midle\x1b[0m\ntimeout", "\r\nsession closed: idletimeout\r\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsClient := newWebsocketClient(nil)
+			err := &websocket.CloseError{Code: tt.code, Text: tt.text}
+			stdout, stderr := testutil.CaptureOutput(t, func() {
+				wsClient.finish(err)
+				wsClient.finish(err)
+			})
+			assert.Empty(t, stdout)
+			assert.Equal(t, tt.want, stderr)
+			assert.NoError(t, wsClient.err)
+			assertReported(t, wsClient)
+		})
+	}
+}
+
+func TestFinish_DoesNotShowALaterCloseReason(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		wsClient.finish(nil)
+		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
+	})
+	assert.Empty(t, stdout)
+	assert.Empty(t, stderr)
+	assert.NoError(t, wsClient.err)
+}
+
 func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

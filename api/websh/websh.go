@@ -338,10 +338,14 @@ func (wsClient *WebsocketClient) closeConn() {
 // saw done can read it. A deliberate close ends the session rather than failing it;
 // every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
-	if endsSession(err) {
-		err = nil
-	}
 	wsClient.finishOnce.Do(func() {
+		var closeErr *websocket.CloseError
+		if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode && closeErr.Text != "" {
+			fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", utils.SanitizeTerminalText(closeErr.Text))
+		}
+		if endsSession(err) {
+			err = nil
+		}
 		wsClient.err = err
 		close(wsClient.done)
 	})
