@@ -48,6 +48,11 @@ var gapFillNow = time.Now
 // throttle budget this pacing exists to protect.
 var errPollCancelled = errors.New("poll cancelled")
 
+// commandSubmitter creates one command on the server. The stream and the
+// polling fallback take one so the lane it submits on—a shell line or a
+// verified file—is decided once, by whoever builds the closure.
+type commandSubmitter func() (CommandResponse, error)
+
 // pollSeams are the hooks only a stream or a test supplies: cancellation, and a
 // clock in place of real time. The zero value polls uncancellably on the real one.
 // Passed rather than kept in package vars—a poll outlives the stream that started
@@ -217,10 +222,34 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	if err != nil {
 		return CommandResponse{}, err
 	}
-	commandRequest := &CommandRequest{
-		Shell:       "system",
-		Line:        command,
-		Env:         env,
+	commandRequest := newCommandRequest(serverID, username, groupname, workSessionID, purpose)
+	commandRequest.Shell = "system"
+	commandRequest.Line = command
+	commandRequest.Env = env
+	return postCommand(ac, commandRequest)
+}
+
+// SubmitFileCommand submits a verified file execution (ADR 0053): the same
+// endpoint as SubmitCommand, selected onto the file lane by the file object. The
+// body carries no line, data or env—the server derives the first two and
+// refuses all three by key presence. A nil Args is sent as an empty list, which
+// is the server's default and the shape the contract names.
+func SubmitFileCommand(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string) (CommandResponse, error) {
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return CommandResponse{}, err
+	}
+	if file.Args == nil {
+		file.Args = []string{}
+	}
+	commandRequest := newCommandRequest(serverID, username, groupname, workSessionID, purpose)
+	commandRequest.File = &file
+	return postCommand(ac, commandRequest)
+}
+
+// newCommandRequest fills the fields both lanes share; the caller sets the lane.
+func newCommandRequest(serverID, username, groupname, workSessionID, purpose string) *CommandRequest {
+	return &CommandRequest{
 		Username:    username,
 		Groupname:   groupname,
 		Server:      serverID,
@@ -232,6 +261,10 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 		// so nothing here can be left stalling for an answer it cannot give.
 		PurposeDemandSupported: true,
 	}
+}
+
+// postCommand sends one submission and decodes the command it created.
+func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (CommandResponse, error) {
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
 		return CommandResponse{}, err
@@ -373,14 +406,31 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
+		return SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
+	}, out)
+}
+
+// RunFileCommandStreaming is RunCommandStreaming for the file lane (ADR 0053).
+// Only the submission differs: the command it creates is followed, polled and
+// read like any other.
+func RunFileCommandStreaming(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {
+	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
+		return SubmitFileCommand(ac, serverName, file, username, groupname, workSessionID, purpose)
+	}, out)
+}
+
+// runSubmittedStreaming opens the output stream, submits through submit, and
+// streams the command it created; the lane is the closure's business.
+func runSubmittedStreaming(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer) error {
 	listener := NewCommandOutputListener(ac)
 	listener.Start()
 	if !listener.WaitConnected(commandOutputConnectTimeout) {
 		listener.Stop()
-		return runCommandFallback(ac, serverName, command, username, groupname, env, workSessionID, purpose, out, listenerFailure(listener))
+		return runCommandFallback(ac, submit, out, listenerFailure(listener))
 	}
 
-	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
+	cmdResp, err := submit()
 	if err != nil {
 		listener.Stop()
 		return err
@@ -663,8 +713,8 @@ func errorFromDetails(d EventDetails) error {
 }
 
 // runCommandFallback warns the user and delegates to the existing polling flow.
-func runCommandFallback(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer, cause error) error {
-	cmdResp, err := SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
+func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer, cause error) error {
+	cmdResp, err := submit()
 	if err != nil {
 		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err
