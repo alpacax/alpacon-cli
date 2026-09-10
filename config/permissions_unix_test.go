@@ -314,7 +314,10 @@ func TestLoadConfigRefusesAConfigFileOwnedByAnotherAccount(t *testing.T) {
 	// one names the host the CLI talks to and whether its certificate is checked.
 	// Linking a root-owned file is how macOS lets an attacker leave one behind;
 	// Linux refuses the link, and there the case has no local shape to build.
-	if err := os.Link("/etc/hosts", configFile); err != nil || os.Geteuid() == 0 {
+	if os.Geteuid() == 0 {
+		t.Skip("cannot plant a file owned by another account here")
+	}
+	if err := os.Link("/etc/hosts", configFile); err != nil {
 		t.Skip("cannot plant a file owned by another account here")
 	}
 
