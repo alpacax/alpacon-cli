@@ -17,12 +17,12 @@ jobs:
     name: golangci-lint (${{ matrix.goos }})
     runs-on: ubuntu-latest
 
-    # The self-update path has a file per platform; linting one GOOS leaves the
-    # other's unread.
+    # The self-update path has a file per platform, and so does the config
+    # narrowing; linting one GOOS leaves the others' unread.
     strategy:
       fail-fast: false
       matrix:
-        goos: [linux, windows]
+        goos: [linux, darwin, windows]
 
     env:
       GOOS: ${{ matrix.goos }}
