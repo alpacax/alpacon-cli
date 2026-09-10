@@ -84,7 +84,7 @@ func TestUnzip_ResolvesLinkBeforeParentComponent(t *testing.T) {
 	makeUnzipSymlink(t, filepath.Join("real", "subdir"), filepath.Join(dest, "alias"))
 	target := dest + string(os.PathSeparator) + "alias" + string(os.PathSeparator) + ".." + string(os.PathSeparator) + "file"
 	makeUnzipSymlink(t, target, filepath.Join(dest, "link"))
-	requireParentInLink(t, filepath.Join(dest, "link"))
+	skipUnlessParentInLink(t, filepath.Join(dest, "link"))
 	require.NoError(t, Unzip(writeUnzipTestArchive(t, dir, "link"), dest))
 	data, err := os.ReadFile(filepath.Join(dest, "real", "file"))
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestUnzip_RejectsParentAfterNonDirectory(t *testing.T) {
 			}
 			sep := string(os.PathSeparator)
 			makeUnzipSymlink(t, dest+sep+tc.middle+sep+".."+sep+"victim", filepath.Join(dest, "link"))
-			requireParentInLink(t, filepath.Join(dest, "link"))
+			skipUnlessParentInLink(t, filepath.Join(dest, "link"))
 			require.Error(t, Unzip(writeUnzipTestArchive(t, dir, "link"), dest))
 			data, err := os.ReadFile(filepath.Join(dest, "victim"))
 			require.NoError(t, err)
@@ -214,10 +214,10 @@ func makeUnzipSymlink(t *testing.T, target, link string) {
 	require.NoError(t, err)
 }
 
-// requireParentInLink skips a case whose subject is a ".." left for resolveZipPath
+// skipUnlessParentInLink skips a case whose subject is a ".." left for resolveZipPath
 // to consume. Windows normalizes an absolute target when the link is created, so
 // the ".." is already gone by the time Readlink sees it and the case cannot be built.
-func requireParentInLink(t *testing.T, link string) {
+func skipUnlessParentInLink(t *testing.T, link string) {
 	t.Helper()
 	target, err := os.Readlink(link)
 	require.NoError(t, err)
