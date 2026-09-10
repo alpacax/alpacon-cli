@@ -25,11 +25,13 @@ jobs:
     # ones that replace a running executable plus unzip_path.go's volume-name and
     # case-insensitive branches, which are unreachable on Unix, macOS the O_SEARCH
     # open that narrows a config directory it cannot read. macOS runs the whole
-    # suite, which passes there unchanged, and is the only leg that exercises the
-    # owner-refusal path—Linux will not let a test link a root-owned file into
-    # place, so that case skips there. Windows runs only the packages holding its
-    # own files: ./config is left out because every permission test in it skips on
-    # Windows and its stubs are covered by compiling, not running.
+    # suite, which passes there unchanged. The owner refusal is exercised on both
+    # Unix legs; what only macOS reaches is
+    # TestLoadConfigRefusesAConfigFileOwnedByAnotherAccount, the end-to-end case,
+    # because planting a foreign-owned file takes a hard link and Linux refuses
+    # to link one. Windows runs only the packages holding its own files: ./config
+    # is left out because every permission test in it skips on Windows and its
+    # stubs are covered by compiling, not running.
     strategy:
       fail-fast: false
       matrix:
