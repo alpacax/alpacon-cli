@@ -11,7 +11,25 @@ import (
 // Same cap filepath.walkSymlinks applies, so a zip path gives up where a plain one does.
 const maxZipSymlinkHops = 255
 
-func resolveZipPath(root *os.Root, rootNames []string, name string) (string, error) {
+// zipRoot is one spelling of the destination, paired with the prefix an absolute
+// symlink target must carry to be inside it. Both are fixed for a whole Unzip call.
+type zipRoot struct {
+	name   string
+	prefix string
+}
+
+func newZipRoots(names ...string) []zipRoot {
+	roots := make([]zipRoot, 0, len(names))
+	for _, name := range names {
+		roots = append(roots, zipRoot{
+			name:   name,
+			prefix: strings.TrimRight(name, string(os.PathSeparator)) + string(os.PathSeparator),
+		})
+	}
+	return roots
+}
+
+func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error) {
 	pending := strings.Split(name, string(os.PathSeparator))
 	var resolved []string
 	missing := false
@@ -63,7 +81,7 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 		}
 		target = filepath.FromSlash(target)
 		if filepath.IsAbs(target) {
-			target, err = zipRelativeTarget(rootNames, target)
+			target, err = zipRelativeTarget(roots, target)
 			if err != nil {
 				return "", err
 			}
@@ -81,14 +99,13 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 	return filepath.Join(resolved...), nil
 }
 
-func zipRelativeTarget(rootNames []string, target string) (string, error) {
-	for _, name := range rootNames {
-		prefix := strings.TrimRight(name, string(os.PathSeparator)) + string(os.PathSeparator)
-		if zipPathEqual(target, name) {
+func zipRelativeTarget(roots []zipRoot, target string) (string, error) {
+	for _, r := range roots {
+		if zipPathEqual(target, r.name) {
 			return ".", nil
 		}
-		if len(target) >= len(prefix) && zipPathEqual(target[:len(prefix)], prefix) {
-			return target[len(prefix):], nil
+		if len(target) >= len(r.prefix) && zipPathEqual(target[:len(r.prefix)], r.prefix) {
+			return target[len(r.prefix):], nil
 		}
 	}
 	return "", fmt.Errorf("zip symlink escapes destination: %s", target)
