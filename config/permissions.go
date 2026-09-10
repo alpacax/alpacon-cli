@@ -43,7 +43,17 @@ func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, 
 		return nil
 	}
 	if err := chmod(perm); err != nil {
-		return err
+		// A filesystem can refuse a mode it cannot represent while already
+		// granting no other account anything—Linux vfat answers EPERM for any
+		// mode outside the mount's fmask. Hold the refusal to the same standard
+		// as the read-back below rather than reporting an exposure that is not
+		// there; the device id fails closed on this error, so a mount whose
+		// fmask is already narrow would otherwise never yield an identifier.
+		kept, statErr := file.Stat()
+		if statErr != nil || kept.Mode().Perm()&^allowed&0077 != 0 {
+			return err
+		}
+		return nil
 	}
 	// A filesystem without permission bits, FAT above all, accepts the chmod and keeps the mode.
 	kept, err := file.Stat()

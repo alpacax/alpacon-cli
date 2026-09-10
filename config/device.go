@@ -217,6 +217,15 @@ func createDeviceIDFile(path, deviceID string) error {
 // anyway: GetOrCreateDeviceID's only caller drops the error, so failing here is
 // silent and permanent. Any link failure lands here, not only an unsupported
 // one, so an unrelated cause—no permission, no space—surfaces as this error.
+//
+// The file this writes still has to survive readDeviceID, which fails closed.
+// Linux vfat answers a chmod outside the mount's fmask with EPERM rather than
+// keeping the mode the way macOS does, so restrictOpenFileMode reads the mode
+// back after a refused chmod as well as after an accepted one: a mount whose
+// fmask already grants no other account access yields an identifier, and one
+// that hands out group or other access yields none. That second case is the
+// trade-off—no device id at all there, and MFA presence checks fall back to a
+// network fingerprint—and remounting with fmask=0077 is what lifts it.
 func createDeviceIDFileWithoutLink(path, deviceID string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
