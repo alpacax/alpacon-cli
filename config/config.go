@@ -327,7 +327,10 @@ func SetActiveWorkSessionFor(workspaceName, uuid string) error {
 func GetActiveWorkSession() (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
+		// errors.Is and not os.IsNotExist: LoadConfig wraps the missing-file
+		// error with %w, and os.IsNotExist unwraps only the error types the os
+		// package defines—so this used to report an absent config as a failure.
+		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
