@@ -34,7 +34,9 @@ func resolveZipPath(root *os.Root, rootNames []string, name string) (string, err
 			resolved = resolved[:len(resolved)-1]
 			continue
 		}
-		candidate := filepath.Join(filepath.Join(resolved...), part)
+		// resolved holds clean single components and part carries no separator,
+		// so joining the strings is what filepath.Join would return anyway.
+		candidate := strings.Join(append(resolved, part), string(os.PathSeparator))
 		info, err := root.Lstat(candidate)
 		if os.IsNotExist(err) {
 			missing = true
