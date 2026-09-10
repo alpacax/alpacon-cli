@@ -5,50 +5,28 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestUnzip_ValidFiles(t *testing.T) {
 	t.Parallel()
-	// Create a temporary zip file with valid content
 	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
 	extractDir := filepath.Join(tmpDir, "extract")
-
-	// Create test zip file
-	zf, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = zf.Close() }()
-
-	zw := zip.NewWriter(zf)
-	defer func() { _ = zw.Close() }()
-
-	// Add a valid file
-	fw, err := zw.Create("test.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = fw.Write([]byte("test content"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Add a file in subdirectory
-	fw, err = zw.Create("subdir/nested.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = fw.Write([]byte("nested content"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_ = zw.Close()
-	_ = zf.Close()
+	zipPath := writeUnzipArchive(t, tmpDir, func(zw *zip.Writer) {
+		for _, entry := range []struct{ name, content string }{
+			{"test.txt", "test content"},
+			{"subdir/nested.txt", "nested content"},
+		} {
+			fw, err := zw.Create(entry.name)
+			require.NoError(t, err)
+			_, err = fw.Write([]byte(entry.content))
+			require.NoError(t, err)
+		}
+	})
 
 	// Test extraction
-	err = Unzip(zipPath, extractDir)
+	err := Unzip(zipPath, extractDir)
 	if err != nil {
 		t.Errorf("Unzip failed for valid archive: %v", err)
 	}
@@ -114,37 +92,18 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			zipPath := filepath.Join(tmpDir, "test.zip")
 			extractDir := filepath.Join(tmpDir, "extract")
 
-			// Create malicious zip file
-			zf, err := os.Create(zipPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = zf.Close() }()
-
-			zw := zip.NewWriter(zf)
-
-			// Create file header manually to bypass path validation
-			header := &zip.FileHeader{
-				Name:   tt.filename,
-				Method: zip.Deflate,
-			}
-			fw, err := zw.CreateHeader(header)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = fw.Write([]byte("malicious content"))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			_ = zw.Close()
-			_ = zf.Close()
+			zipPath := writeUnzipArchive(t, tmpDir, func(zw *zip.Writer) {
+				// A hand-built header carries the path zw.Create would validate away.
+				fw, err := zw.CreateHeader(&zip.FileHeader{Name: tt.filename, Method: zip.Deflate})
+				require.NoError(t, err)
+				_, err = fw.Write([]byte("malicious content"))
+				require.NoError(t, err)
+			})
 
 			// Test extraction
-			err = Unzip(zipPath, extractDir)
+			err := Unzip(zipPath, extractDir)
 			if tt.wantErr && err == nil {
 				t.Errorf("Expected error for malicious path %q, but got none", tt.filename)
 			}
@@ -170,35 +129,18 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 func TestUnzip_DirectoryTraversal(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
 	extractDir := filepath.Join(tmpDir, "extract")
 
-	// Create zip with directory traversal
-	zf, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = zf.Close() }()
-
-	zw := zip.NewWriter(zf)
-
-	// Add a directory with parent path
-	header := &zip.FileHeader{
-		Name:   "../evil-dir/",
-		Method: zip.Deflate,
-	}
-	header.SetMode(os.ModeDir | 0755)
-	_, err = zw.CreateHeader(header)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_ = zw.Close()
-	_ = zf.Close()
+	zipPath := writeUnzipArchive(t, tmpDir, func(zw *zip.Writer) {
+		// Add a directory with parent path
+		header := &zip.FileHeader{Name: "../evil-dir/", Method: zip.Deflate}
+		header.SetMode(os.ModeDir | 0755)
+		_, err := zw.CreateHeader(header)
+		require.NoError(t, err)
+	})
 
 	// Test extraction should fail
-	err = Unzip(zipPath, extractDir)
-	if err == nil {
+	if err := Unzip(zipPath, extractDir); err == nil {
 		t.Error("Expected error for directory with path traversal, but got none")
 	}
 }
@@ -225,22 +167,12 @@ func TestUnzip_RelativeDestination(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			zipPath := filepath.Join(tmpDir, "test.zip")
-
-			zf, err := os.Create(zipPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			zw := zip.NewWriter(zf)
-			fw, err := zw.Create("file.txt")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := fw.Write([]byte("content")); err != nil {
-				t.Fatal(err)
-			}
-			_ = zw.Close()
-			_ = zf.Close()
+			zipPath := writeUnzipArchive(t, tmpDir, func(zw *zip.Writer) {
+				fw, err := zw.Create("file.txt")
+				require.NoError(t, err)
+				_, err = fw.Write([]byte("content"))
+				require.NoError(t, err)
+			})
 
 			workDir := filepath.Join(tmpDir, "work")
 			if err := os.MkdirAll(workDir, 0o755); err != nil {
