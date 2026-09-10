@@ -1,16 +1,21 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestConfigPermissions(t *testing.T) {
+func TestLoadConfigNarrowsWhatIsWideAndKeepsWhatIsStricter(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permissions are not enforced on Windows")
 	}
@@ -26,6 +31,10 @@ func TestConfigPermissions(t *testing.T) {
 		{"wide writable searchable directory", 0600, 0311, 0600, 0300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			// Root reads a directory with no owner read bit, so the searchable fallback never runs.
+			if os.Geteuid() == 0 && tc.dirMode&0400 == 0 {
+				t.Skip("root bypasses file permission checks")
+			}
 			setupTestConfig(t)
 			require.NoError(t, saveConfig(&Config{Token: "test-token"}))
 			dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)
@@ -46,7 +55,7 @@ func TestConfigPermissions(t *testing.T) {
 	}
 }
 
-func TestConfigDirectoryPermissions(t *testing.T) {
+func TestConfigOperationsNarrowAWideOpenDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permissions are not enforced on Windows")
 	}
@@ -106,6 +115,9 @@ func TestSearchableConfigDirectoryOperations(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("requires searchable directory handles")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
 	for _, tc := range []struct {
 		name     string
 		mode     os.FileMode
@@ -137,4 +149,90 @@ func TestSearchableConfigDirectoryOperations(t *testing.T) {
 			assert.Equal(t, tc.mode&0700, info.Mode().Perm())
 		})
 	}
+}
+
+// openKeptMode hands back a handle on a file whose mode a chmod will not move,
+// which is how a filesystem without permission bits answers one.
+func openKeptMode(t *testing.T, mode os.FileMode) (*os.File, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ConfigFileName)
+	require.NoError(t, os.WriteFile(path, []byte("{}"), 0600))
+	require.NoError(t, os.Chmod(path, mode))
+	file, err := os.Open(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = file.Close() })
+	return file, path
+}
+
+func TestRestrictOpenFileModeJudgesAModeAChmodKept(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions are not enforced on Windows")
+	}
+	// A FAT volume on macOS reports every file as 0700, which exposes nothing.
+	for _, tc := range []struct {
+		name      string
+		mode      os.FileMode
+		wantError bool
+	}{
+		{"other accounts keep access", 0644, true},
+		{"only the owner execute bit survives", 0700, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			file, path := openKeptMode(t, tc.mode)
+			err := restrictOpenFileMode(file, 0600, func(os.FileMode) error { return nil })
+			if !tc.wantError {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Equal(t, fmt.Sprintf("%s kept mode %04o after a chmod to 0600", path, tc.mode), err.Error())
+		})
+	}
+}
+
+func TestRestrictConfigDirectoryModeAcceptsADirectoryClosedToEveryone(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions are not enforced on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+	dir := filepath.Join(t.TempDir(), ConfigFileDir)
+	require.NoError(t, os.Mkdir(dir, 0700))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0700) })
+	// Mode 0000 hands out nothing, so there is nothing left to narrow. Only
+	// darwin can fail this: its search-only open needs an owner execute bit,
+	// while linux opens an O_PATH handle whatever the mode says.
+	require.NoError(t, os.Chmod(dir, 0000))
+	assert.NoError(t, restrictConfigDirectoryMode(dir))
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0000), info.Mode().Perm())
+}
+
+func TestWarnUnrestrictedSpeaksOncePerSubjectAndCause(t *testing.T) {
+	// Serial: it swaps os.Stderr and clears a package-level map.
+	warnedUnrestricted = sync.Map{}
+	t.Cleanup(func() { warnedUnrestricted = sync.Map{} })
+
+	readOnly := errors.New("read-only file system")
+	foreign := errors.New("owned by another account")
+	_, stderr := testutil.CaptureOutput(t, func() {
+		warnUnrestricted("config file", readOnly)
+		warnUnrestricted("config file", readOnly)
+		// A different cause on the same subject is a different condition, and
+		// silencing it would hide the one the user can still act on.
+		warnUnrestricted("config file", foreign)
+		warnUnrestricted("config directory", readOnly)
+		warnUnrestricted("config file", nil)
+	})
+
+	assert.Equal(t, 1, strings.Count(stderr, "config file permissions: read-only file system"))
+	assert.Equal(t, 1, strings.Count(stderr, "config file permissions: owned by another account"))
+	assert.Equal(t, 1, strings.Count(stderr, "config directory permissions: read-only file system"))
+	// The nil cause is not a failure and must not speak at all.
+	assert.Equal(t, 3, strings.Count(stderr, "could not restrict"))
 }

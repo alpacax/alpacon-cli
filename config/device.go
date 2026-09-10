@@ -63,10 +63,9 @@ func GetOrCreateDeviceID() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	configDir := filepath.Dir(path)
 
-	if err = restrictConfigDirectoryMode(filepath.Dir(path)); err != nil {
-		return "", err
-	}
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
 	deviceID, err := readDeviceID(path)
 	if err != nil {
@@ -76,13 +75,15 @@ func GetOrCreateDeviceID() (string, error) {
 		return deviceID, nil
 	}
 
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err = os.MkdirAll(configDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	if err = restrictConfigDirectoryMode(filepath.Dir(path)); err != nil {
-		return "", err
-	}
+	// Not a repeat of the call above: between the two, another process can create
+	// the directory this one found missing, or widen the one it narrowed, and
+	// MkdirAll leaves an existing directory's mode alone. The device id is
+	// written next, so the narrowing belongs after the directory exists.
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
 	return createDeviceID(path)
 }
@@ -93,18 +94,22 @@ func GetOrCreateDeviceID() (string, error) {
 // rather than reported as absent, which would hide a permissions problem behind
 // an identifier that changes on every invocation.
 func readDeviceID(path string) (string, error) {
-	file, err := os.Open(path)
+	// Fails closed where the config only warns, and reads the handle it narrowed
+	// rather than reopening the path: an MFA presence proof binds to whatever
+	// identifier this returns, so a mode this process could not narrow means no
+	// identifier rather than one another account may have chosen.
+	file, err := openNarrowedConfigFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("failed to read device id file: %v", err)
+		// Say the downgrade out loud: anyone who can write in the config directory
+		// can force it by leaving a link where the file belongs.
+		warnOnce("device id file", err, "ignoring the device id: %v. Multi-factor presence checks fall back to a weaker network fingerprint while that stands.", err)
+		return "", fmt.Errorf("cannot use the device id file: %w", err)
 	}
 
 	defer func() { _ = file.Close() }()
-	if err = restrictFileMode(file, 0600); err != nil {
-		return "", fmt.Errorf("failed to restrict device id file permissions: %w", err)
-	}
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read device id file: %v", err)

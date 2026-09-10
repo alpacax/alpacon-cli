@@ -1,0 +1,79 @@
+//go:build !windows
+
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+)
+
+const narrowFlags = os.O_RDONLY | syscall.O_NONBLOCK | syscall.O_NOFOLLOW
+
+func openNoFollow(path string) (*os.File, error) {
+	return os.OpenFile(path, narrowFlags, 0)
+}
+
+// openConfigDirectory opens the config directory as a base for openat, following
+// a symbolic link on it. Only the chmod of the directory's own mode refuses one.
+func openConfigDirectory(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK|unix.O_DIRECTORY, 0)
+}
+
+// openConfigForRead opens a config file for reading. O_NONBLOCK is what leaves
+// the caller a chance to reject a named pipe instead of parking on the open.
+func openConfigForRead(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+}
+
+func openNoFollowIn(dir *os.File, name string) (*os.File, error) {
+	fd, err := unix.Openat(int(dir.Fd()), name, narrowFlags|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "openat", Path: filepath.Join(dir.Name(), name), Err: err}
+	}
+	return os.NewFile(uintptr(fd), filepath.Join(dir.Name(), name)), nil
+}
+
+// refuseHardLinked rejects a file that answers to more than one name. O_NOFOLLOW
+// says nothing about hard links, so a link planted in a directory this process
+// could not narrow would otherwise aim the chmod at an inode that also lives
+// outside the config directory—and macOS lets any account link a file it can
+// merely read.
+func refuseHardLinked(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if sys.Nlink != 1 {
+		return fmt.Errorf("%s answers to %d names, so it may live outside the config directory", file.Name(), sys.Nlink)
+	}
+	return nil
+}
+
+// refuseForeignOwner rejects a handle on a file this process does not own. A
+// chmod would fail on it regardless; the point is the read that follows. A file
+// another account owns is one another account can rewrite, and under a sudo
+// that keeps HOME this is what stops an unprivileged user's own file from
+// standing in as root's device id—where mode bits alone say nothing, because
+// root can read anything.
+func refuseForeignOwner(file *os.File) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if int(sys.Uid) != os.Geteuid() {
+		return fmt.Errorf("%s is owned by uid %d, not by uid %d", file.Name(), sys.Uid, os.Geteuid())
+	}
+	return nil
+}

@@ -77,9 +77,7 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	if err = restrictConfigDirectoryMode(configDir); err != nil {
-		return err
-	}
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
 	file, err := os.CreateTemp(configDir, ConfigFileName+".*.tmp")
 	if err != nil {
@@ -153,11 +151,20 @@ func LoadConfig() (Config, error) {
 	configDir := filepath.Join(homeDir, ConfigFileDir)
 	configFile := filepath.Join(configDir, ConfigFileName)
 
-	if err = restrictConfigDirectoryMode(configDir); err != nil {
-		return Config{}, err
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+	// The one refusal that is not best effort. A mode this process could not
+	// narrow still leaves a file it wrote itself, but a file another account owns
+	// is one another account can rewrite, and this one names the host the CLI
+	// talks to and decides whether its certificate is checked. Reading it would
+	// hand the next login's token to whoever chose those values.
+	if err = restrictConfigFileMode(configFile); err != nil {
+		if errors.Is(err, errUnsafeConfigFile) {
+			return Config{}, err
+		}
+		warnUnrestricted("config file", err)
 	}
 
-	file, err := os.Open(configFile)
+	file, err := openConfigForRead(configFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Wrap with %w so callers can detect the missing-config case
@@ -167,9 +174,15 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("failed to open config file: %v", err)
 	}
 	defer func() { _ = file.Close() }()
-
-	if err = restrictFileMode(file, 0600); err != nil {
-		return Config{}, fmt.Errorf("failed to restrict config file permissions: %w", err)
+	// Reached only when the path is a symbolic link, which the narrowing above
+	// warns about rather than following—so this is the first look at what it
+	// resolves to, and a pipe there would park the decode below forever.
+	info, err := file.Stat()
+	if err != nil {
+		return Config{}, fmt.Errorf("failed to inspect config file: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		return Config{}, fmt.Errorf("%s is not a regular file: %w", configFile, errUnsafeConfigFile)
 	}
 
 	var config Config
