@@ -6,8 +6,8 @@ import "os"
 var symlinkErrnos []error
 
 // Windows has neither O_NOFOLLOW nor openat. openNoFollow and openConfigForRead
-// are reached on every run and open the file plainly; the three below are not,
-// because the callers that would use them return on GOOS first.
+// are reached on every run and open the file plainly; the rest are not, because
+// the callers that would use them return on GOOS first.
 func openNoFollow(path string) (*os.File, error) { return os.Open(path) }
 
 func openConfigForRead(path string) (*os.File, error) { return os.Open(path) }
