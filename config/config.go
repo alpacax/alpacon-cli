@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,38 +153,12 @@ func LoadConfig() (Config, error) {
 	configFile := filepath.Join(configDir, ConfigFileName)
 
 	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
-	// The one refusal that is not best effort. A mode this process could not
-	// narrow still leaves a file it wrote itself, but a file another account owns
-	// is one another account can rewrite, and this one names the host the CLI
-	// talks to and decides whether its certificate is checked. Reading it would
-	// hand the next login's token to whoever chose those values.
-	if err = restrictConfigFileMode(configFile); err != nil {
-		if errors.Is(err, errUnsafeConfigFile) {
-			return Config{}, err
-		}
-		warnUnrestricted("config file", err)
-	}
 
-	file, err := openConfigForRead(configFile)
+	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Wrap with %w so callers can detect the missing-config case
-			// via errors.Is(err, os.ErrNotExist).
-			return Config{}, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
-		}
-		return Config{}, fmt.Errorf("failed to open config file: %v", err)
+		return Config{}, err
 	}
 	defer func() { _ = file.Close() }()
-	// Reached only when the path is a symbolic link, which the narrowing above
-	// warns about rather than following—so this is the first look at what it
-	// resolves to, and a pipe there would park the decode below forever.
-	info, err := file.Stat()
-	if err != nil {
-		return Config{}, fmt.Errorf("failed to inspect config file: %v", err)
-	}
-	if !info.Mode().IsRegular() {
-		return Config{}, fmt.Errorf("%s is not a regular file: %w", configFile, errUnsafeConfigFile)
-	}
 
 	var config Config
 	decoder := json.NewDecoder(file)
@@ -192,6 +167,58 @@ func LoadConfig() (Config, error) {
 	}
 
 	return config, nil
+}
+
+// openCheckedConfigFile hands back a handle nothing else may stand in for. The
+// handle the narrowing already opened is the one that is read: closing it and
+// resolving the path again leaves a window for the file to be replaced between
+// the checks and the decode, and costs a second open on each of the two to five
+// times a command loads the config.
+//
+// A refusal is fatal where a failed narrowing is not. A mode this process could
+// not change still leaves a file it wrote itself—a read-only mount is the usual
+// reason—so that warns and the read goes on through the path. But a file
+// another account owns is one another account can rewrite, and this one names
+// the host the CLI talks to and decides whether its certificate is checked, so
+// reading it would hand the next login's token to whoever chose those values.
+func openCheckedConfigFile(configFile string) (*os.File, error) {
+	file, err := openNarrowedConfigFile(configFile)
+	if err == nil {
+		return file, nil
+	}
+	if errors.Is(err, errUnsafeConfigFile) {
+		return nil, err
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		// Wrap with %w so callers can detect the missing-config case
+		// via errors.Is(err, os.ErrNotExist).
+		return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
+	}
+	warnUnrestricted("config file", err)
+
+	// Reached for a symbolic link above all, which is refused a chmod but not a
+	// read—keeping one config.json in a dotfiles tree is a supported setup. So
+	// this is the first look at what the path resolves to, and it gets the same
+	// refusal the narrowed handle got: a pipe there would park the decode
+	// forever, and a link is the one way a file another account owns can reach
+	// this far.
+	file, err = openConfigForRead(configFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
+		}
+		return nil, fmt.Errorf("failed to open config file: %v", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to inspect config file: %v", err)
+	}
+	if err = refuseUnsafeConfigFile(file, info); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 // IsSaaS returns true if the workspace is an Alpacon Cloud (SaaS) deployment authenticated

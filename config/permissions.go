@@ -118,23 +118,6 @@ func openToNarrow(path string) (*os.File, error) {
 	return file, wrapSymlinkErr(path, err)
 }
 
-// restrictConfigFileMode narrows a file inside the config directory to 0600 for
-// a caller that reads the file its own way. A missing file is nothing to do.
-func restrictConfigFileMode(path string) error {
-	file, err := openNarrowedConfigFile(path)
-	if err != nil {
-		// errors.Is and not os.IsNotExist throughout this file: these errors are
-		// wrapped, and os.IsNotExist unwraps only the error types the os package
-		// defines, so it stops matching the moment an open is wrapped once more.
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	_ = file.Close()
-	return nil
-}
-
 // openNarrowedConfigFile narrows a file inside the config directory to 0600 and
 // hands back the handle it narrowed, so a caller that must not be fooled reads
 // the very inode this checked instead of resolving the path a second time.
@@ -155,6 +138,9 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 	// refusal is for is aiming a chmod at a link someone else planted, and every
 	// guard on the file itself still runs inside the directory it resolves to.
 	dir, err := openConfigDirectory(dirPath)
+	// errors.Is and not os.IsPermission throughout this file: these errors are
+	// wrapped, and the os helpers unwrap only the error types the os package
+	// defines, so they stop matching the moment an open is wrapped once more.
 	if errors.Is(err, fs.ErrPermission) {
 		// A directory that permits traversal but not reads still hands out a
 		// search-only handle, which is all openat asks of it.

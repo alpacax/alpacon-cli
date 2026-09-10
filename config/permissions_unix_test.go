@@ -55,7 +55,7 @@ func TestNarrowingRefusesASymbolicLink(t *testing.T) {
 		create   func(target string) error
 		narrow   func(path string) error
 	}{
-		{"config file", ConfigFileName, func(target string) error { return os.WriteFile(target, []byte("{}"), 0644) }, restrictConfigFileMode},
+		{"config file", ConfigFileName, func(target string) error { return os.WriteFile(target, []byte("{}"), 0644) }, narrowConfigFile},
 		{"config directory", ConfigFileDir, func(target string) error { return os.Mkdir(target, 0755) }, restrictConfigDirectoryMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestRestrictConfigFileModeNarrowsThroughASymlinkedConfigDirectory(t *testin
 	require.NoError(t, os.Chmod(stored, 0644))
 	link := filepath.Join(home, ConfigFileDir)
 	require.NoError(t, os.Symlink(target, link))
-	require.NoError(t, restrictConfigFileMode(filepath.Join(link, ConfigFileName)))
+	require.NoError(t, narrowConfigFile(filepath.Join(link, ConfigFileName)))
 	info, err := os.Stat(stored)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
@@ -142,7 +142,7 @@ func TestRestrictConfigFileModeRefusesAHardLink(t *testing.T) {
 	require.NoError(t, os.WriteFile(outside, []byte("{}"), 0600))
 	require.NoError(t, os.Chmod(outside, 0644))
 	require.NoError(t, os.Link(outside, filepath.Join(dir, ConfigFileName)))
-	err := restrictConfigFileMode(filepath.Join(dir, ConfigFileName))
+	err := narrowConfigFile(filepath.Join(dir, ConfigFileName))
 	require.ErrorContains(t, err, "answers to 2 names")
 	info, err := os.Stat(outside)
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestRestrictConfigFileModeAcceptsAHardLinkedFileAlreadyWithinTheMask(t *tes
 	outside := filepath.Join(home, "outside")
 	require.NoError(t, os.WriteFile(outside, []byte("{}"), 0600))
 	require.NoError(t, os.Link(outside, filepath.Join(dir, ConfigFileName)))
-	assert.NoError(t, restrictConfigFileMode(filepath.Join(dir, ConfigFileName)))
+	assert.NoError(t, narrowConfigFile(filepath.Join(dir, ConfigFileName)))
 }
 
 func TestLoadConfigRefusesAConfigFileOwnedByAnotherAccount(t *testing.T) {
@@ -356,4 +356,33 @@ func TestIsSymlinkErrnoReadsThePlatformList(t *testing.T) {
 	}
 	assert.False(t, isSymlinkErrno(&os.PathError{Op: "open", Path: "/x", Err: syscall.EPERM}),
 		"an unrelated errno must not read as a symbolic link: %v", syscall.EPERM)
+}
+
+func TestLoadConfigRefusesASymlinkToAFileOwnedByAnotherAccount(t *testing.T) {
+	setupTestConfig(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root owns the file this borrows")
+	}
+	dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	// A link is refused a chmod but not a read, so the owner refusal has to run
+	// a second time on whatever it resolves to. Without it the one file that
+	// names the host and decides whether its certificate is checked can be
+	// handed over by anyone who can write in the config directory.
+	require.NoError(t, os.Symlink("/etc/hosts", filepath.Join(dir, ConfigFileName)))
+
+	_, err := LoadConfig()
+	require.ErrorIs(t, err, errUnsafeConfigFile)
+	assert.ErrorContains(t, err, "is owned by uid 0")
+}
+
+// narrowConfigFile runs the narrowing for its effect on the mode alone, the way
+// a caller that only wants the file protected before reading it its own way
+// would. Every caller in production keeps the handle instead.
+func narrowConfigFile(path string) error {
+	file, err := openNarrowedConfigFile(path)
+	if err != nil {
+		return err
+	}
+	return file.Close()
 }
