@@ -25,6 +25,10 @@ import (
 const (
 	// DefaultApprovalWaitTimeout is the shared --wait default so exec, work-session create, and event wait match; not a ceiling (--wait-approval exceeds it), preserving the old 30 × 10s window.
 	DefaultApprovalWaitTimeout = 5 * time.Minute
+
+	// zipDirPerm is what a directory an archive asks for is created as. An archive
+	// dictates no permission bits here, the same reason extractFile takes only Perm().
+	zipDirPerm = 0o755
 )
 
 var (
@@ -390,6 +394,12 @@ func Unzip(src string, dest string) error {
 	}
 	defer func() { _ = r.Close() }()
 
+	if len(r.File) == 0 {
+		// An empty archive creates nothing, as it did before the destination was
+		// pinned: the MkdirAll below would otherwise leave a directory behind.
+		return nil
+	}
+
 	// Absolute so a relative dest such as "." keeps the prefix filepath.Join cleans away.
 	// CodeQL's go/zipslip accepts only this prefix form; TrimSuffix keeps a root dest off "//".
 	destDir, err := filepath.Abs(dest)
@@ -397,6 +407,23 @@ func Unzip(src string, dest string) error {
 		return err
 	}
 	destPrefix := strings.TrimSuffix(destDir, string(os.PathSeparator)) + string(os.PathSeparator)
+	if err := os.MkdirAll(destDir, zipDirPerm); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	canonicalDest, err := filepath.EvalSymlinks(destDir)
+	if err != nil {
+		return err
+	}
+	rootNames := []string{destDir}
+	if canonicalDest != destDir {
+		rootNames = append(rootNames, canonicalDest)
+	}
+	roots := newZipRoots(rootNames...)
 
 	for _, f := range r.File {
 		// Prevent zip slip vulnerability by validating file path
@@ -410,28 +437,32 @@ func Unzip(src string, dest string) error {
 		if !strings.HasPrefix(fpath, destPrefix) {
 			return fmt.Errorf("invalid file path: %s", f.Name)
 		}
+		relativePath, err := resolveZipPath(root, roots, strings.TrimPrefix(fpath, destPrefix))
+		if err != nil {
+			return err
+		}
 
 		if f.FileInfo().IsDir() {
-			err := os.MkdirAll(fpath, os.ModePerm)
+			err := root.MkdirAll(relativePath, zipDirPerm)
 			if err != nil {
 				return err
 			}
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+		if err := root.MkdirAll(filepath.Dir(relativePath), zipDirPerm); err != nil {
 			return err
 		}
 
-		if err := extractFile(fpath, f); err != nil {
+		if err := extractFile(root, relativePath, f); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func extractFile(fpath string, f *zip.File) (err error) {
-	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+func extractFile(root *os.Root, name string, f *zip.File) (err error) {
+	outFile, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode().Perm())
 	if err != nil {
 		return err
 	}

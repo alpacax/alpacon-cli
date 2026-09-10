@@ -209,7 +209,7 @@ func TestSaveStreamAtomic_RetainsExistingFileOnReadError(t *testing.T) {
 	assert.Empty(t, matches)
 }
 
-func requireUnixModes(t *testing.T) {
+func skipUnlessUnixModes(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix file modes are not enforced on Windows")
@@ -218,7 +218,7 @@ func requireUnixModes(t *testing.T) {
 
 func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 	t.Parallel()
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0600))
@@ -237,7 +237,7 @@ func TestSaveStreamAtomic_PreservesExistingFileMode(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "id_rsa")
 	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
@@ -259,7 +259,7 @@ func TestSaveStreamAtomic_WarnsWhenKeptModeIsWiderThanANewFile(t *testing.T) {
 // the setup mode retires the branch instead of testing it.
 func TestKeptModeIsWider(t *testing.T) {
 	t.Parallel()
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	tests := []struct {
 		name        string
@@ -279,7 +279,7 @@ func TestKeptModeIsWider(t *testing.T) {
 }
 
 func TestSaveStreamAtomic_NoWarningForANewFile(t *testing.T) {
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	stderr := captureStderr(t, func() {
 		_, err := SaveStreamAtomic(filepath.Join(t.TempDir(), "fresh"), strings.NewReader("x"), 0600)
@@ -314,7 +314,7 @@ func (r *tempModeReader) Read(p []byte) (int, error) {
 
 func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 	t.Parallel()
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "file.txt")
@@ -343,7 +343,7 @@ func TestSaveStreamAtomic_KeepsPartialReplacementUnreadable(t *testing.T) {
 
 func TestSaveStreamAtomic_AppliesRequestedModeToNewFile(t *testing.T) {
 	t.Parallel()
-	requireUnixModes(t)
+	skipUnlessUnixModes(t)
 
 	dest := filepath.Join(t.TempDir(), "file.txt")
 
