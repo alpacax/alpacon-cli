@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -42,14 +43,18 @@ func openNoFollowIn(dir *os.File, name string) (*os.File, error) {
 // could not narrow would otherwise aim the chmod at an inode that also lives
 // outside the config directory—and macOS lets any account link a file it can
 // merely read.
+//
+// This one reads the handle again rather than taking the caller's info: it runs
+// inside the chmod callback, and the link it refuses can be planted after the
+// guards ahead of it have looked.
 func refuseHardLinked(file *os.File) error {
 	info, err := file.Stat()
 	if err != nil {
 		return err
 	}
-	sys, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil
+	sys, err := statT(file, info)
+	if err != nil {
+		return err
 	}
 	if sys.Nlink != 1 {
 		return fmt.Errorf("%s answers to %d names, so it may live outside the config directory", file.Name(), sys.Nlink)
@@ -64,12 +69,25 @@ func refuseHardLinked(file *os.File) error {
 // standing in as root's device id—where mode bits alone say nothing, because
 // root can read anything.
 func refuseForeignOwner(file *os.File, info os.FileInfo) error {
-	sys, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil
+	sys, err := statT(file, info)
+	if err != nil {
+		return err
 	}
 	if int(sys.Uid) != os.Geteuid() {
 		return fmt.Errorf("%s is owned by uid %d, not by uid %d", file.Name(), sys.Uid, os.Geteuid())
 	}
 	return nil
+}
+
+// statT reaches the Unix stat behind an os.FileInfo. Refusing rather than
+// returning nil is the point: both callers exist to turn something away, and a
+// guard that answers "allowed" when it could not look is worse than one that
+// says it could not look. No Unix reaches this—os.File always carries a
+// syscall.Stat_t—so nothing working is turned away by it either.
+func statT(file *os.File, info os.FileInfo) (*syscall.Stat_t, error) {
+	sys, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil, fmt.Errorf("cannot read the owner and link count of %s on %s", file.Name(), runtime.GOOS)
+	}
+	return sys, nil
 }
