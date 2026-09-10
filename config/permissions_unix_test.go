@@ -4,6 +4,7 @@ package config
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -374,6 +375,74 @@ func TestLoadConfigRefusesASymlinkToAFileOwnedByAnotherAccount(t *testing.T) {
 	_, err := LoadConfig()
 	require.ErrorIs(t, err, errUnsafeConfigFile)
 	assert.ErrorContains(t, err, "is owned by uid 0")
+}
+
+func TestSaveConfigWritesThroughASymlinkedConfigFile(t *testing.T) {
+	setupTestConfig(t)
+	stored, configFile := symlinkedConfigFile(t, &Config{Token: "first"})
+
+	require.NoError(t, saveConfig(&Config{Token: "second"}))
+
+	// The rename replaces the last component, so an unresolved path would leave
+	// a regular file here and the dotfiles tree holding a stale token.
+	info, err := os.Lstat(configFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeSymlink, info.Mode()&os.ModeSymlink)
+	data, err := os.ReadFile(stored)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "second")
+}
+
+func TestDeleteConfigRemovesWhatASymlinkedConfigFileNames(t *testing.T) {
+	setupTestConfig(t)
+	stored, configFile := symlinkedConfigFile(t, &Config{Token: "first"})
+
+	require.NoError(t, DeleteConfig())
+
+	// Removing the link alone would leave the refresh token in the dotfiles tree
+	// after a logout that reported success.
+	_, err := os.Lstat(stored)
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	info, err := os.Lstat(configFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeSymlink, info.Mode()&os.ModeSymlink)
+
+	// The link logout left dangling is written through rather than replaced, so
+	// one login later the setup is still the one the user built.
+	require.NoError(t, saveConfig(&Config{Token: "again"}))
+	data, err := os.ReadFile(stored)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "again")
+}
+
+func TestSaveConfigRefusesASymlinkToAFileOwnedByAnotherAccount(t *testing.T) {
+	setupTestConfig(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root owns the file this borrows")
+	}
+	dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	// Following the link is what keeps a dotfiles tree working, so the write has
+	// to refuse the same targets the read does: writing the refresh token into
+	// another account's file hands it over as surely as reading one does.
+	require.NoError(t, os.Symlink("/etc/hosts", filepath.Join(dir, ConfigFileName)))
+
+	err := saveConfig(&Config{Token: "leaked"})
+	require.ErrorIs(t, err, errUnsafeConfigFile)
+	assert.ErrorContains(t, err, "is owned by uid 0")
+}
+
+// symlinkedConfigFile stands up the dotfiles shape: the real config.json lives
+// outside the config directory and a link inside it points there.
+func symlinkedConfigFile(t *testing.T, config *Config) (stored, configFile string) {
+	t.Helper()
+	home := os.Getenv("HOME")
+	require.NoError(t, saveConfig(config))
+	stored = filepath.Join(home, "dotfiles-config.json")
+	configFile = filepath.Join(home, ConfigFileDir, ConfigFileName)
+	require.NoError(t, os.Rename(configFile, stored))
+	require.NoError(t, os.Symlink(stored, configFile))
+	return stored, configFile
 }
 
 // narrowConfigFile runs the narrowing for its effect on the mode alone, the way

@@ -80,7 +80,18 @@ func saveConfig(config *Config) error {
 
 	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
-	file, err := os.CreateTemp(configDir, ConfigFileName+".*.tmp")
+	// The rename below replaces whatever the last path component names, so a
+	// config.json kept as a link into a dotfiles tree would be swapped for a
+	// regular file on the first access-token refresh and the tree left stale.
+	// Resolving first is what makes that setup survive a write, and the temp
+	// file is created beside the target so the rename stays inside one
+	// filesystem even when the tree is on another mount.
+	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	if err != nil {
+		return err
+	}
+
+	file, err := os.CreateTemp(filepath.Dir(configFile), ConfigFileName+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
 	}
@@ -106,7 +117,6 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 
-	configFile := filepath.Join(configDir, ConfigFileName)
 	if err = os.Rename(tempFile, configFile); err != nil {
 		return fmt.Errorf("failed to replace config file: %v", err)
 	}
@@ -133,7 +143,13 @@ func DeleteConfig() error {
 	}
 
 	configDir := filepath.Join(homeDir, ConfigFileDir)
-	configFile := filepath.Join(configDir, ConfigFileName)
+	// Removing the link alone would leave the refresh token sitting in the
+	// dotfiles tree it names. The link stays: the next login writes through it
+	// and the setup survives a logout.
+	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	if err != nil {
+		return err
+	}
 
 	err = os.Remove(configFile)
 	if err != nil {
@@ -219,6 +235,56 @@ func openCheckedConfigFile(configFile string) (*os.File, error) {
 		return nil, err
 	}
 	return file, nil
+}
+
+// resolveConfigWritePath returns the path a write must replace. os.Rename and
+// os.Remove act on the last component itself, so a config.json that is a link
+// into a dotfiles tree would be swapped for a regular file by the first token
+// refresh and emptied of nothing by logout.
+//
+// What the link names is checked the way a read checks it, since writing the
+// refresh token into a file another account owns hands it over just as surely
+// as reading one does.
+func resolveConfigWritePath(configFile string) (string, error) {
+	info, err := os.Lstat(configFile)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		// Missing, or an ordinary file: the path names what the write replaces.
+		return configFile, nil
+	}
+	target, err := filepath.EvalSymlinks(configFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A link left dangling by logout. Recreating what it names is what lets
+		// the next login write through it instead of replacing it.
+		return readlinkTarget(configFile)
+	}
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve config file %s: %v", configFile, err)
+	}
+	file, err := openToNarrow(target)
+	if err != nil {
+		return "", fmt.Errorf("cannot check config file %s: %v", target, err)
+	}
+	defer func() { _ = file.Close() }()
+	targetInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect config file: %v", err)
+	}
+	if err = refuseUnsafeConfigFile(file, targetInfo); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// readlinkTarget names what a link points at, as an absolute path.
+func readlinkTarget(configFile string) (string, error) {
+	target, err := os.Readlink(configFile)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve config file %s: %v", configFile, err)
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(configFile), target)
+	}
+	return target, nil
 }
 
 // IsSaaS returns true if the workspace is an Alpacon Cloud (SaaS) deployment authenticated
