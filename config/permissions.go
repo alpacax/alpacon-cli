@@ -111,8 +111,9 @@ func openToNarrow(path string) (*os.File, error) {
 func restrictConfigFileMode(path string) error {
 	file, err := openNarrowedConfigFile(path)
 	if err != nil {
-		// errors.Is and not os.IsNotExist: the error is wrapped, and os.IsNotExist
-		// unwraps only the error types the os package defines.
+		// errors.Is and not os.IsNotExist throughout this file: these errors are
+		// wrapped, and os.IsNotExist unwraps only the error types the os package
+		// defines, so it stops matching the moment an open is wrapped once more.
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -142,7 +143,7 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 	// refusal is for is aiming a chmod at a link someone else planted, and every
 	// guard on the file itself still runs inside the directory it resolves to.
 	dir, err := openConfigDirectory(dirPath)
-	if os.IsPermission(err) {
+	if errors.Is(err, fs.ErrPermission) {
 		// A directory that permits traversal but not reads still hands out a
 		// search-only handle, which is all openat asks of it.
 		dir, err = openSearchableDirectory(dirPath)
@@ -184,14 +185,14 @@ func restrictConfigDirectoryMode(path string) error {
 		return nil
 	}
 	dir, err := openToNarrow(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	// A directory that allows traversal but not reads has no ordinary handle, so
 	// its mode has to be read from the path. Granting no other account anything
 	// already satisfies the mask, and the platform fallbacks refuse a directory
 	// whose owner holds no execute bit.
-	if os.IsPermission(err) {
+	if errors.Is(err, fs.ErrPermission) {
 		info, statErr := os.Lstat(path)
 		if statErr != nil {
 			return statErr
