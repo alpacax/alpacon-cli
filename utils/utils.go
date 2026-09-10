@@ -390,6 +390,12 @@ func Unzip(src string, dest string) error {
 	}
 	defer func() { _ = r.Close() }()
 
+	if len(r.File) == 0 {
+		// An empty archive creates nothing, as it did before the destination was
+		// pinned: the MkdirAll below would otherwise leave a directory behind.
+		return nil
+	}
+
 	// Absolute so a relative dest such as "." keeps the prefix filepath.Join cleans away.
 	// CodeQL's go/zipslip accepts only this prefix form; TrimSuffix keeps a root dest off "//".
 	destDir, err := filepath.Abs(dest)
@@ -397,9 +403,6 @@ func Unzip(src string, dest string) error {
 		return err
 	}
 	destPrefix := strings.TrimSuffix(destDir, string(os.PathSeparator)) + string(os.PathSeparator)
-	if len(r.File) == 0 {
-		return nil
-	}
 	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
 		return err
 	}
