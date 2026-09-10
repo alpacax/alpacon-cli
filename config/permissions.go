@@ -34,8 +34,11 @@ func restrictFileMode(file *os.File, allowed os.FileMode) error {
 // inode state, so one fstat covers them all. The stats inside the chmod
 // callback and the read-back below are the ones that need their own look.
 func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, chmod func(os.FileMode) error) error {
+	// Defense in depth rather than a live branch: every caller returns on GOOS
+	// before reaching here, so nothing on Windows arrives at this line today.
+	// It stays because the next caller might not, and a chmod on Windows would
+	// flip the read-only attribute instead of narrowing anything.
 	if runtime.GOOS == "windows" {
-		// Windows chmod changes the read-only attribute, not Unix access permissions.
 		return nil
 	}
 	perm := info.Mode().Perm() & allowed
