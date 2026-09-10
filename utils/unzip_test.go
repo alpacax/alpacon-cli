@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,9 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 		{
 			name:     "absolute path unix",
 			filename: "/etc/passwd",
-			wantErr:  true,
+			// Windows reads a leading slash as rooted but not absolute, so the entry
+			// is joined onto the destination rather than rejected. It stays confined.
+			wantErr: runtime.GOOS != "windows",
 		},
 		{
 			name:     "parent directory only",
