@@ -453,8 +453,8 @@ func Unzip(src string, dest string) error {
 	return nil
 }
 
-func extractFile(root *os.Root, fpath string, f *zip.File) (err error) {
-	outFile, err := root.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode().Perm())
+func extractFile(root *os.Root, name string, f *zip.File) (err error) {
+	outFile, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode().Perm())
 	if err != nil {
 		return err
 	}
