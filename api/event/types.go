@@ -1,6 +1,7 @@
 package event
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -134,6 +135,41 @@ type CommandRequest struct {
 	// because every exec path surfaces the demand to its caller instead of
 	// stalling on it.
 	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
+	// File selects the verified file lane (ADR 0053). Its presence is what the
+	// server switches on, so it is omitted from every generic-lane request and
+	// no existing request changes shape. When set, MarshalJSON leaves shell,
+	// line, env and data out of the body entirely—see fileLaneRequest.
+	File *FileExecution `json:"file,omitempty"`
+}
+
+// FileExecution is what a file-lane submission runs (ADR 0053): the file at Path
+// on the target host, through Interpreter, with Args. Content is the bytes the
+// reviewer and the assessor judge and the server hashes; the agent hashes the
+// file on the target's disk and runs it only when the two digests match, so
+// Content is sent byte-for-byte—never trimmed, re-encoded, or normalized.
+// Content itself never travels to the agent.
+type FileExecution struct {
+	Path        string   `json:"path"`
+	Interpreter string   `json:"interpreter"`
+	Args        []string `json:"args"`
+	Content     string   `json:"content"`
+}
+
+// fileLaneRequest is the wire shape of a file-lane submission: CommandRequest
+// minus shell, line, env and data. The server refuses a file-lane body that
+// carries line, data or env by key presence—an empty string counts—so those
+// fields cannot simply be omitempty: the generic lane sends them as it always
+// has, and this struct is what keeps them out of the other lane.
+type fileLaneRequest struct {
+	Username               string         `json:"username"`
+	Groupname              string         `json:"groupname"`
+	ScheduledAt            *time.Time     `json:"scheduled_at"`
+	Server                 string         `json:"server"`
+	RunAfter               []string       `json:"run_after"`
+	WorkSession            string         `json:"work_session,omitempty"`
+	Purpose                string         `json:"purpose,omitempty"`
+	PurposeDemandSupported bool           `json:"purpose_demand_supported,omitempty"`
+	File                   *FileExecution `json:"file"`
 }
 
 // CommandPurposeRequest is the body of the purpose-demand answer. Write-only on
@@ -154,6 +190,29 @@ type CommandResponse struct {
 	Server      types.ServerSummary `json:"server"`
 	RequestedBy types.UserSummary   `json:"requested_by"`
 	RunAfter    []any               `json:"run_after"`
+}
+
+// MarshalJSON renders a generic-lane request as its fields stand and a file-lane
+// request as fileLaneRequest, so the keys the server refuses on that lane are
+// absent rather than empty.
+func (r CommandRequest) MarshalJSON() ([]byte, error) {
+	if r.File == nil {
+		// A local alias type carries the fields but not this method, so the
+		// default encoding applies instead of recursing.
+		type generic CommandRequest
+		return json.Marshal(generic(r))
+	}
+	return json.Marshal(fileLaneRequest{
+		Username:               r.Username,
+		Groupname:              r.Groupname,
+		ScheduledAt:            r.ScheduledAt,
+		Server:                 r.Server,
+		RunAfter:               r.RunAfter,
+		WorkSession:            r.WorkSession,
+		Purpose:                r.Purpose,
+		PurposeDemandSupported: r.PurposeDemandSupported,
+		File:                   r.File,
+	})
 }
 
 func (e *RemoteCommandError) Error() string {

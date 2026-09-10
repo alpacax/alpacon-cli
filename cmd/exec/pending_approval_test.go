@@ -75,9 +75,9 @@ type pendingApprovalSignal struct {
 	NextActions []utils.NextAction `json:"next_actions"`
 }
 
-// runExecHelper runs the exec command tree in a subprocess against workspaceURL
-// and returns its stdout, stderr, and exit code. Every caller asserts a refusal,
-// so a clean exit fails the test rather than returning 0.
+// runExecHelper drives the real exec command in a helper process against a
+// fake server and returns its stdout, stderr, and exit code; the caller asserts
+// the exit code it expects.
 func runExecHelper(t *testing.T, workspaceURL string, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	return runHelperProcess(t, workspaceURL,
@@ -119,7 +119,9 @@ func runHelperProcess(t *testing.T, workspaceURL, testName, marker string, env, 
 	helper.Stderr = &errBuf
 
 	err := helper.Run()
-	require.Error(t, err, "helper exited 0; stderr: %s", errBuf.String())
+	if err == nil {
+		return outBuf.String(), errBuf.String(), 0
+	}
 	var exitErr *osexec.ExitError
 	require.ErrorAs(t, err, &exitErr)
 	return outBuf.String(), errBuf.String(), exitErr.ExitCode()

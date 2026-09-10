@@ -225,6 +225,20 @@ Flags go before the server name; everything after is the remote command.
 
 Never put a secret on the command line: the server refuses the recognizable forms before the command runs. Pass it with `--env="KEY"` as shown above. The same applies to `alpacon websh` when it runs a command. See [When a command is denied](#when-a-command-is-denied) for the exact forms the server rejects and the machine-readable refusal.
 
+#### Verified file execution
+```bash
+# Run /opt/deploy.sh on the server as a verified file. The content is read from
+# the same path locally and sent byte-for-byte; script arguments go after --.
+$ alpacon exec --file /opt/deploy.sh root@<server> -- --fast
+
+# Read the content from another local copy, and pick the interpreter.
+$ alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh <server>
+```
+
+`--file` submits a script as structure instead of a command line: the platform hashes the bytes the reviewer sees, and the agent proves at execution time that the file it runs on the server is those bytes. The file must already exist at that path on the target server, and the local copy the CLI reads must be byte-identical, or the agent refuses to run it. Both the path and `--interpreter` (default `/bin/bash`) must be absolute; the content is limited to 64 KB; `--env` does not combine with `--file`. Script arguments are recorded with the command, shown to the reviewer, and repeated in the re-run hint, so a secret goes in a file or the environment the script reads at run time, never in an argument.
+
+An approval binds exactly those bytes, on that server, as that account, with those arguments. It does not mean "the file is safe": environment, libraries, the interpreter's version and anything the script fetches at run time are yours, and only the first entrypoint is verified. Composition (pipes, redirection, `&&`) goes inside the script, where it is reviewed and hashed with it. A reviewer can mark an approval standing, and an unchanged re-run then stops asking anyone; one changed byte re-queues review. A target whose Alpamon is older than 2.6.0, or a deployment with the command assessor disabled, refuses the lane with guidance to run the script as an ordinary command instead.
+
 ### File transfer
 ```bash
 $ alpacon cp ./local.txt <server>:/home/user/
