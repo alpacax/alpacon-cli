@@ -22,33 +22,38 @@ var (
 )
 
 func restrictFileMode(file *os.File, allowed os.FileMode) error {
-	return restrictOpenFileMode(file, allowed, file.Chmod)
-}
-
-func restrictOpenFileMode(file *os.File, allowed os.FileMode, chmod func(os.FileMode) error) error {
-	if runtime.GOOS == "windows" {
-		// Windows chmod changes the read-only attribute, not Unix access permissions.
-		return nil
-	}
 	info, err := file.Stat()
 	if err != nil {
 		return err
+	}
+	return restrictOpenFileMode(file, info, allowed, file.Chmod)
+}
+
+// restrictOpenFileMode narrows a handle to allowed, deciding from the info the
+// caller already read: every guard that runs before the chmod sees the same
+// inode state, so one fstat covers them all. The stats inside the chmod
+// callback and the read-back below are the ones that need their own look.
+func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, chmod func(os.FileMode) error) error {
+	if runtime.GOOS == "windows" {
+		// Windows chmod changes the read-only attribute, not Unix access permissions.
+		return nil
 	}
 	perm := info.Mode().Perm() & allowed
 	if perm == info.Mode().Perm() {
 		return nil
 	}
-	if err = chmod(perm); err != nil {
+	if err := chmod(perm); err != nil {
 		return err
 	}
 	// A filesystem without permission bits, FAT above all, accepts the chmod and keeps the mode.
-	if info, err = file.Stat(); err != nil {
+	kept, err := file.Stat()
+	if err != nil {
 		return err
 	}
 	// Only the bits that hand another account access matter here; a surviving
 	// owner execute bit exposes nothing and FAT hands one out on every file.
-	if info.Mode().Perm()&^allowed&0077 != 0 {
-		return fmt.Errorf("%s kept mode %04o after a chmod to %04o", file.Name(), info.Mode().Perm(), perm)
+	if kept.Mode().Perm()&^allowed&0077 != 0 {
+		return fmt.Errorf("%s kept mode %04o after a chmod to %04o", file.Name(), kept.Mode().Perm(), perm)
 	}
 	return nil
 }
@@ -80,20 +85,16 @@ func wrapSymlinkErr(path string, err error) error {
 	return err
 }
 
-// refuseUnsafeConfigFile rejects a handle nothing should read. A named pipe at
-// the path is the reason for the first check: O_NONBLOCK keeps the open from
-// parking, but says nothing about the read behind it—os.NewFile hands a
-// non-blocking descriptor to the poller, and io.ReadAll then waits there for a
-// writer that never arrives.
-func refuseUnsafeConfigFile(file *os.File) error {
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
+// refuseUnsafeConfigFile rejects a handle nothing should read, judging from the
+// info the caller already read. A named pipe at the path is the reason for the
+// first check: O_NONBLOCK keeps the open from parking, but says nothing about
+// the read behind it—os.NewFile hands a non-blocking descriptor to the poller,
+// and io.ReadAll then waits there for a writer that never arrives.
+func refuseUnsafeConfigFile(file *os.File, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file: %w", file.Name(), errUnsafeConfigFile)
 	}
-	if err = refuseForeignOwner(file); err != nil {
+	if err := refuseForeignOwner(file, info); err != nil {
 		return fmt.Errorf("%w: %w", err, errUnsafeConfigFile)
 	}
 	return nil
@@ -160,16 +161,21 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 	if err != nil {
 		return nil, wrapSymlinkErr(path, err)
 	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
 	// Always, unlike the hard-link guard below: this decides whether the handle
 	// may be read from, not just whether it may be chmod'ed.
-	if err = refuseUnsafeConfigFile(file); err != nil {
+	if err = refuseUnsafeConfigFile(file, info); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
 	// The guard sits on the chmod rather than ahead of it, so a file already
 	// within the mask is accepted without it: publishing the device id leaves a
 	// second name on the new file for as long as its temporary copy lives.
-	if err = restrictOpenFileMode(file, 0600, func(mode os.FileMode) error {
+	if err = restrictOpenFileMode(file, info, 0600, func(mode os.FileMode) error {
 		if err := refuseHardLinked(file); err != nil {
 			return err
 		}
@@ -222,7 +228,7 @@ func restrictConfigDirectoryMode(path string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("config directory is not a directory: %s", path)
 	}
-	return restrictFileMode(dir, 0700)
+	return restrictOpenFileMode(dir, info, 0700, dir.Chmod)
 }
 
 // warnUnrestricted reports a mode this process could not narrow and carries on.

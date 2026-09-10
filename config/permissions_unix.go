@@ -63,11 +63,7 @@ func refuseHardLinked(file *os.File) error {
 // that keeps HOME this is what stops an unprivileged user's own file from
 // standing in as root's device id—where mode bits alone say nothing, because
 // root can read anything.
-func refuseForeignOwner(file *os.File) error {
-	info, err := file.Stat()
-	if err != nil {
-		return err
-	}
+func refuseForeignOwner(file *os.File, info os.FileInfo) error {
 	sys, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return nil

@@ -18,4 +18,4 @@ func openNoFollowIn(dir *os.File, name string) (*os.File, error) { return nil, o
 
 func refuseHardLinked(*os.File) error { return nil }
 
-func refuseForeignOwner(*os.File) error { return nil }
+func refuseForeignOwner(*os.File, os.FileInfo) error { return nil }

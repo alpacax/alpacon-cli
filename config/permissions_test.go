@@ -181,7 +181,9 @@ func TestRestrictOpenFileModeJudgesAModeAChmodKept(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			file, path := openKeptMode(t, tc.mode)
-			err := restrictOpenFileMode(file, 0600, func(os.FileMode) error { return nil })
+			info, err := file.Stat()
+			require.NoError(t, err)
+			err = restrictOpenFileMode(file, info, 0600, func(os.FileMode) error { return nil })
 			if !tc.wantError {
 				assert.NoError(t, err)
 				return

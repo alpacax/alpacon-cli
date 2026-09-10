@@ -199,11 +199,13 @@ func TestRefuseForeignOwner(t *testing.T) {
 			file, err := os.Open(tc.open(t))
 			require.NoError(t, err)
 			defer func() { _ = file.Close() }()
+			info, err := file.Stat()
+			require.NoError(t, err)
 			if tc.wantError == "" {
-				assert.NoError(t, refuseForeignOwner(file))
+				assert.NoError(t, refuseForeignOwner(file, info))
 				return
 			}
-			assert.ErrorContains(t, refuseForeignOwner(file), tc.wantError)
+			assert.ErrorContains(t, refuseForeignOwner(file, info), tc.wantError)
 		})
 	}
 }
@@ -235,7 +237,9 @@ func TestRefuseUnsafeConfigFileNamesWhatMustNotBeRead(t *testing.T) {
 			file, err := openConfigForRead(tc.open(t))
 			require.NoError(t, err)
 			defer func() { _ = file.Close() }()
-			err = refuseUnsafeConfigFile(file)
+			info, err := file.Stat()
+			require.NoError(t, err)
+			err = refuseUnsafeConfigFile(file, info)
 			require.ErrorIs(t, err, errUnsafeConfigFile)
 			assert.ErrorContains(t, err, tc.wantError)
 		})
