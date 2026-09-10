@@ -65,11 +65,12 @@ func isSymlinkErrno(err error) bool {
 	return false
 }
 
-// asSymlink names the refusal behind that errno so a caller can tell it from a
-// filesystem failure. O_NOFOLLOW is what produces it: following the link would
-// let anyone who can write in the config directory aim the chmod at a file they
-// do not own, and the mask only ever takes access away.
-func asSymlink(path string, err error) error {
+// wrapSymlinkErr names the refusal behind that errno so a caller can tell it
+// from a filesystem failure, and returns anything else unchanged. O_NOFOLLOW is
+// what produces it: following the link would let anyone who can write in the
+// config directory aim the chmod at a file they do not own, and the mask only
+// ever takes access away.
+func wrapSymlinkErr(path string, err error) error {
 	if isSymlinkErrno(err) {
 		// Both wrapped: this is the neck every open error in the package passes
 		// through, and dropping the errno would silently misclassify the next
@@ -103,7 +104,7 @@ func refuseUnsafeConfigFile(file *os.File) error {
 // hang every command before it printed a thing.
 func openToNarrow(path string) (*os.File, error) {
 	file, err := openNoFollow(path)
-	return file, asSymlink(path, err)
+	return file, wrapSymlinkErr(path, err)
 }
 
 // restrictConfigFileMode narrows a file inside the config directory to 0600 for
@@ -157,7 +158,7 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 	defer func() { _ = dir.Close() }()
 	file, err := openNoFollowIn(dir, filepath.Base(path))
 	if err != nil {
-		return nil, asSymlink(path, err)
+		return nil, wrapSymlinkErr(path, err)
 	}
 	// Always, unlike the hard-link guard below: this decides whether the handle
 	// may be read from, not just whether it may be chmod'ed.
