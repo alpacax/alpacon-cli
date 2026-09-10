@@ -114,15 +114,13 @@ func TestUnzip_PathTraversalAttack(t *testing.T) {
 				t.Errorf("Unexpected error for valid path %q: %v", tt.filename, err)
 			}
 
-			// Verify malicious file was not created outside extract directory
-			if tt.wantErr {
-				// Check that no files were created outside extractDir
-				parentDir := filepath.Dir(extractDir)
-				entries, _ := os.ReadDir(parentDir)
-				for _, entry := range entries {
-					if entry.Name() != "extract" && entry.Name() != "test.zip" {
-						t.Errorf("File created outside extract directory: %s", entry.Name())
-					}
+			// A rejected entry and an accepted one both stay inside extractDir, so
+			// this holds for every case—including the one Windows relocates.
+			parentDir := filepath.Dir(extractDir)
+			entries, _ := os.ReadDir(parentDir)
+			for _, entry := range entries {
+				if entry.Name() != "extract" && entry.Name() != "test.zip" {
+					t.Errorf("File created outside extract directory: %s", entry.Name())
 				}
 			}
 		})
