@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -239,7 +240,7 @@ func writeUnzipTestArchive(t *testing.T, dir, entry string) string {
 	return writeUnzipArchive(t, dir, func(zw *zip.Writer) {
 		w, err := zw.Create(entry)
 		require.NoError(t, err)
-		if entry[len(entry)-1] != '/' {
+		if !strings.HasSuffix(entry, "/") {
 			_, err = w.Write([]byte("replacement"))
 			require.NoError(t, err)
 		}
