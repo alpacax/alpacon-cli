@@ -22,7 +22,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
-            echo "Release ${GITHUB_REF_NAME} already exists — skipping."
+            # A release published from the GitHub UI is already public when its
+            # tag starts this run, so it is releases/latest with no assets yet.
+            # Hide it as a draft until publish-release; one with assets is a
+            # finished release being re-run and stays as it is.
+            if [ "$(gh release view "${GITHUB_REF_NAME}" --json isDraft,assets --jq '(.isDraft | not) and (.assets | length == 0)')" = "true" ]; then
+              echo "Release ${GITHUB_REF_NAME} is public with no assets — hiding it as a draft until goreleaser uploads them."
+              gh release edit "${GITHUB_REF_NAME}" --draft
+            else
+              echo "Release ${GITHUB_REF_NAME} already exists — skipping."
+            fi
             exit 0
           fi
           # Create as a draft to hide it until all jobs succeed (publish-release makes it public).
@@ -40,9 +49,9 @@ jobs:
     uses: ./.github/workflows/build-and-test.yaml
 
   # The end-to-end job inside this workflow installs from the release that is
-  # already public: create-release leaves this tag as a draft, and a draft is
-  # not releases/latest. So it proves the script still works, not that this
-  # tag's assets install.
+  # already public: create-release leaves this tag as a draft—and demotes a
+  # hand-published one back to a draft—and a draft is not releases/latest. So
+  # it proves the script still works, not that this tag's assets install.
   install-script:
     needs: [create-release]
     permissions:
