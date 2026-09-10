@@ -12,41 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUnzip_ConfinesSymlinks(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		target string
-		entry  string
-	}{
-		{"file", "../outside/file", "link"},
-		{"directory", "../outside", "link/file"},
-		{"new directory", "../outside", "link/new/"},
-		{"new file", "../outside", "link/new/file"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			dest := filepath.Join(dir, "dest")
-			outside := filepath.Join(dir, "outside")
-			require.NoError(t, os.Mkdir(dest, 0755))
-			require.NoError(t, os.Mkdir(outside, 0755))
-			require.NoError(t, os.WriteFile(filepath.Join(outside, "file"), []byte("original"), 0600))
-			makeUnzipSymlink(t, filepath.FromSlash(tt.target), filepath.Join(dest, "link"))
-			archive := writeUnzipTestArchive(t, dir, tt.entry)
-
-			require.Error(t, Unzip(archive, dest))
-			content, err := os.ReadFile(filepath.Join(outside, "file"))
-			require.NoError(t, err)
-			assert.Equal(t, "original", string(content))
-			entries, err := os.ReadDir(outside)
-			require.NoError(t, err)
-			assert.Len(t, entries, 1)
-		})
-	}
-}
-
 func TestUnzip_AllowsInternalSymlink(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -158,7 +123,7 @@ func TestUnzip_AbsoluteLinksWithDestinationAlias(t *testing.T) {
 	}
 }
 
-func TestUnzip_RejectsAbsoluteEscapesAndCycles(t *testing.T) {
+func TestUnzip_ConfinesSymlinks(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name   string
@@ -167,6 +132,18 @@ func TestUnzip_RejectsAbsoluteEscapesAndCycles(t *testing.T) {
 		// A second symlink inside dest that the case's own target points at.
 		hop bool
 	}{
+		{"relative file", "link", func(dir, dest, outside string) string {
+			return filepath.Join("..", "dest-other", "file")
+		}, false},
+		{"relative directory", "link/file", func(dir, dest, outside string) string {
+			return filepath.Join("..", "dest-other")
+		}, false},
+		{"relative new directory", "link/new/", func(dir, dest, outside string) string {
+			return filepath.Join("..", "dest-other")
+		}, false},
+		{"relative new file", "link/new/file", func(dir, dest, outside string) string {
+			return filepath.Join("..", "dest-other")
+		}, false},
 		{"external file", "link", func(dir, dest, outside string) string { return filepath.Join(outside, "file") }, false},
 		{"external directory", "link/dest-other/file", func(dir, dest, outside string) string { return dir }, false},
 		{"sibling prefix", "link/file", func(dir, dest, outside string) string { return outside }, false},
