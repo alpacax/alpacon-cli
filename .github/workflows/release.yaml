@@ -25,8 +25,10 @@ jobs:
             # A release published from the GitHub UI is already public when its
             # tag starts this run, so it is releases/latest with no assets yet.
             # Hide it as a draft until publish-release; one with assets is a
-            # finished release being re-run and stays as it is.
-            if [ "$(gh release view "${GITHUB_REF_NAME}" --json isDraft,assets --jq '(.isDraft | not) and (.assets | length == 0)')" = "true" ]; then
+            # finished release being re-run and stays as it is. Assigned first
+            # so a failed lookup stops the job instead of taking the skip branch.
+            public_without_assets="$(gh release view "${GITHUB_REF_NAME}" --json isDraft,assets --jq '(.isDraft | not) and (.assets | length == 0)')"
+            if [ "${public_without_assets}" = "true" ]; then
               echo "Release ${GITHUB_REF_NAME} is public with no assets — hiding it as a draft until goreleaser uploads them."
               gh release edit "${GITHUB_REF_NAME}" --draft
             else
