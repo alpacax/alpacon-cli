@@ -810,7 +810,7 @@ Describe 'What the installer promises about itself and about the release' {
         $section | Should -Match '\{\{ \.ProjectName \}\}-\{\{ trimprefix \.Version "v" \}\}-\{\{ \.Os \}\}-\{\{ \.Arch \}\}'
         # One list item, not two: a lazy dot-all match would happily pair a
         # windows override with a zip belonging to some later entry.
-        $section | Should -Match '- goos: windows\r?\n\s+format: zip'
+        $section | Should -Match '- goos: windows\r?\n\s+formats: \[zip\]'
     }
 
     It 'keeps the archive flat, since install.ps1 moves alpacon.exe from its root' {
