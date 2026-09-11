@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,20 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	file, err := os.CreateTemp(configDir, ConfigFileName+".*.tmp")
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+
+	// The rename below replaces whatever the last path component names, so a
+	// config.json kept as a link into a dotfiles tree would be swapped for a
+	// regular file on the first access-token refresh and the tree left stale.
+	// Resolving first is what makes that setup survive a write, and the temp
+	// file is created beside the target so the rename stays inside one
+	// filesystem even when the tree is on another mount.
+	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	if err != nil {
+		return err
+	}
+
+	file, err := os.CreateTemp(filepath.Dir(configFile), ConfigFileName+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create config file: %v", err)
 	}
@@ -103,7 +117,6 @@ func saveConfig(config *Config) error {
 		return fmt.Errorf("failed to write config file: %v", err)
 	}
 
-	configFile := filepath.Join(configDir, ConfigFileName)
 	if err = os.Rename(tempFile, configFile); err != nil {
 		return fmt.Errorf("failed to replace config file: %v", err)
 	}
@@ -130,7 +143,13 @@ func DeleteConfig() error {
 	}
 
 	configDir := filepath.Join(homeDir, ConfigFileDir)
-	configFile := filepath.Join(configDir, ConfigFileName)
+	// Removing the link alone would leave the refresh token sitting in the
+	// dotfiles tree it names. The link stays: the next login writes through it
+	// and the setup survives a logout.
+	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	if err != nil {
+		return err
+	}
 
 	err = os.Remove(configFile)
 	if err != nil {
@@ -149,14 +168,11 @@ func LoadConfig() (Config, error) {
 	configDir := filepath.Join(homeDir, ConfigFileDir)
 	configFile := filepath.Join(configDir, ConfigFileName)
 
-	file, err := os.Open(configFile)
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+
+	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			// Wrap with %w so callers can detect the missing-config case
-			// via errors.Is(err, os.ErrNotExist).
-			return Config{}, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
-		}
-		return Config{}, fmt.Errorf("failed to open config file: %v", err)
+		return Config{}, err
 	}
 	defer func() { _ = file.Close() }()
 
@@ -167,6 +183,123 @@ func LoadConfig() (Config, error) {
 	}
 
 	return config, nil
+}
+
+// openCheckedConfigFile hands back a handle nothing else may stand in for. The
+// handle the narrowing already opened is the one that is read: closing it and
+// resolving the path again leaves a window for the file to be replaced between
+// the checks and the decode, and costs a second open on each of the two to five
+// times a command loads the config.
+//
+// A refusal is fatal where a failed narrowing is not. A mode this process could
+// not change still leaves a file it wrote itself—a read-only mount is the usual
+// reason—so that warns and the read goes on through the path. But a file
+// another account owns is one another account can rewrite, and this one names
+// the host the CLI talks to and decides whether its certificate is checked, so
+// reading it would hand the next login's token to whoever chose those values.
+func openCheckedConfigFile(configFile string) (*os.File, error) {
+	file, narrowErr := openNarrowedConfigFile(configFile)
+	if narrowErr == nil {
+		return file, nil
+	}
+	if errors.Is(narrowErr, errUnsafeConfigFile) {
+		return nil, narrowErr
+	}
+	if errors.Is(narrowErr, fs.ErrNotExist) {
+		// Wrap with %w so callers can detect the missing-config case
+		// via errors.Is(err, os.ErrNotExist).
+		return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, narrowErr)
+	}
+	// A symbolic link is the one failure whose exposure is still unknown here:
+	// the chmod was refused on the link, and what it names has not been looked
+	// at yet. Every other failure is a mode this process could not change on a
+	// file it did see, so that one speaks straight away.
+	symlinked := errors.Is(narrowErr, errSymlink)
+	if !symlinked {
+		warnUnrestricted("config file", narrowErr)
+	}
+
+	// Reached for a symbolic link above all, which is refused a chmod but not a
+	// read—keeping one config.json in a dotfiles tree is a supported setup. So
+	// this is the first look at what the path resolves to, and it gets the same
+	// refusal the narrowed handle got: a pipe there would park the decode
+	// forever, and a link is the one way a file another account owns can reach
+	// this far.
+	file, err := openConfigForRead(configFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
+		}
+		return nil, fmt.Errorf("failed to open config file: %v", err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("failed to inspect config file: %v", err)
+	}
+	if err = refuseUnsafeConfigFile(file, info); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	// The target's mode is known now, so the warning can be true. A dotfiles
+	// config.json kept at 0600 exposes nothing, and saying otherwise on every
+	// command is how a user learns to read past the warning that matters. The
+	// handle already open is what answers it: resolving the path again would
+	// cost an open and read a file this one no longer has to be.
+	if symlinked && grantsOtherAccounts(info.Mode().Perm()) {
+		warnUnrestricted("config file", narrowErr)
+	}
+	return file, nil
+}
+
+// resolveConfigWritePath returns the path a write must replace. os.Rename and
+// os.Remove act on the last component itself, so a config.json that is a link
+// into a dotfiles tree would be swapped for a regular file by the first token
+// refresh and emptied of nothing by logout.
+//
+// What the link names is checked the way a read checks it, since writing the
+// refresh token into a file another account owns hands it over just as surely
+// as reading one does.
+func resolveConfigWritePath(configFile string) (string, error) {
+	info, err := os.Lstat(configFile)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		// Missing, or an ordinary file: the path names what the write replaces.
+		return configFile, nil
+	}
+	target, err := filepath.EvalSymlinks(configFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A link left dangling by logout. Recreating what it names is what lets
+		// the next login write through it instead of replacing it.
+		return readlinkTarget(configFile)
+	}
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve config file %s: %w", configFile, err)
+	}
+	file, err := openToNarrow(target)
+	if err != nil {
+		return "", fmt.Errorf("cannot check config file %s: %w", target, err)
+	}
+	defer func() { _ = file.Close() }()
+	targetInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect config file: %v", err)
+	}
+	if err = refuseUnsafeConfigFile(file, targetInfo); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
+// readlinkTarget names what a link points at, as an absolute path.
+func readlinkTarget(configFile string) (string, error) {
+	target, err := os.Readlink(configFile)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve config file %s: %w", configFile, err)
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(configFile), target)
+	}
+	return target, nil
 }
 
 // IsSaaS returns true if the workspace is an Alpacon Cloud (SaaS) deployment authenticated
@@ -209,7 +342,10 @@ func SetActiveWorkSessionFor(workspaceName, uuid string) error {
 func GetActiveWorkSession() (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
-		if os.IsNotExist(err) {
+		// errors.Is and not os.IsNotExist: LoadConfig wraps the missing-file
+		// error with %w, and os.IsNotExist unwraps only the error types the os
+		// package defines—so this used to report an absent config as a failure.
+		if errors.Is(err, fs.ErrNotExist) {
 			return "", nil
 		}
 		return "", err

@@ -20,16 +20,25 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
 
-    # Windows is not a portability formality: the files that replace a running
-    # executable are compiled out everywhere else and would ship untested without
-    # this runner, and unzip_path.go's volume-name and case-insensitive branches
-    # are unreachable on Unix. It runs only the packages that carry them—the rest
-    # of the suite asserts Unix file modes in tests that predate this job.
+    # Windows and macOS each carry files every other platform compiles out, and
+    # without a runner of their own those files ship untested: Windows holds the
+    # ones that replace a running executable plus unzip_path.go's volume-name and
+    # case-insensitive branches, which are unreachable on Unix, macOS the O_SEARCH
+    # open that narrows a config directory it cannot read. macOS runs the whole
+    # suite, which passes there unchanged. The owner refusal is exercised on both
+    # Unix legs; what only macOS reaches is
+    # TestLoadConfigRefusesAConfigFileOwnedByAnotherAccount, the end-to-end case,
+    # because planting a foreign-owned file takes a hard link and Linux refuses
+    # to link one. Windows runs only the packages holding its own files: ./config
+    # is left out because every permission test in it skips on Windows and its
+    # stubs are covered by compiling, not running.
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            packages: ./...
+          - os: macos-latest
             packages: ./...
           - os: windows-latest
             packages: ./pkg/selfupdate/... ./cmd ./utils

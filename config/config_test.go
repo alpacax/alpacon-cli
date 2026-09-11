@@ -355,3 +355,13 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 		reads++
 	}
 }
+
+func TestGetActiveWorkSessionReportsNoSessionWhenNoConfigExists(t *testing.T) {
+	setupTestConfig(t)
+	// LoadConfig wraps the missing-file error with %w, and os.IsNotExist unwraps
+	// only the error types the os package defines—so the promise this makes had
+	// been reporting the absence of a config as a failure to read one.
+	uuid, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Empty(t, uuid)
+}

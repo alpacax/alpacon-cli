@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,9 +20,6 @@ const (
 	// identifier must outlive it. This mirrors the web client, which keeps its
 	// own identifier in localStorage rather than alongside its session.
 	DeviceIDFileName = "device_id"
-
-	// deviceIDFileExcessPerm is every permission bit outside owner read and write.
-	deviceIDFileExcessPerm = os.FileMode(0177)
 )
 
 var (
@@ -65,6 +63,9 @@ func GetOrCreateDeviceID() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	configDir := filepath.Dir(path)
+
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
 	deviceID, err := readDeviceID(path)
 	if err != nil {
@@ -74,9 +75,15 @@ func GetOrCreateDeviceID() (string, error) {
 		return deviceID, nil
 	}
 
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err = os.MkdirAll(configDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create config directory: %v", err)
 	}
+
+	// Not a repeat of the call above: between the two, another process can create
+	// the directory this one found missing, or widen the one it narrowed, and
+	// MkdirAll leaves an existing directory's mode alone. The device id is
+	// written next, so the narrowing belongs after the directory exists.
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
 
 	return createDeviceID(path)
 }
@@ -87,10 +94,23 @@ func GetOrCreateDeviceID() (string, error) {
 // rather than reported as absent, which would hide a permissions problem behind
 // an identifier that changes on every invocation.
 func readDeviceID(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	// Fails closed where the config only warns, and reads the handle it narrowed
+	// rather than reopening the path: an MFA presence proof binds to whatever
+	// identifier this returns, so a mode this process could not narrow means no
+	// identifier rather than one another account may have chosen.
+	file, err := openNarrowedConfigFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
+	if err != nil {
+		// Say the downgrade out loud: anyone who can write in the config directory
+		// can force it by leaving a link where the file belongs.
+		warnOnce("device id file", err, "ignoring the device id: %v. Multi-factor presence checks fall back to a weaker network fingerprint while that stands.", err)
+		return "", fmt.Errorf("cannot use the device id file: %w", err)
+	}
+
+	defer func() { _ = file.Close() }()
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("failed to read device id file: %v", err)
 	}
@@ -98,9 +118,6 @@ func readDeviceID(path string) (string, error) {
 	deviceID := strings.TrimSpace(string(data))
 	if !IsValidDeviceID(deviceID) {
 		return "", nil
-	}
-	if err = restrictDeviceIDFileMode(path); err != nil {
-		return "", err
 	}
 
 	return deviceID, nil
@@ -200,6 +217,15 @@ func createDeviceIDFile(path, deviceID string) error {
 // anyway: GetOrCreateDeviceID's only caller drops the error, so failing here is
 // silent and permanent. Any link failure lands here, not only an unsupported
 // one, so an unrelated cause—no permission, no space—surfaces as this error.
+//
+// The file this writes still has to survive readDeviceID, which fails closed.
+// Linux vfat answers a chmod outside the mount's fmask with EPERM rather than
+// keeping the mode the way macOS does, so restrictOpenFileMode reads the mode
+// back after a refused chmod as well as after an accepted one: a mount whose
+// fmask already grants no other account access yields an identifier, and one
+// that hands out group or other access yields none. That second case is the
+// trade-off—no device id at all there, and MFA presence checks fall back to a
+// network fingerprint—and remounting with fmask=0077 is what lifts it.
 func createDeviceIDFileWithoutLink(path, deviceID string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -271,7 +297,7 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 
 // narrowToPublishedFileMode drops from file every permission bit the file at
 // path lacks, so publishing over that file cannot widen what it had. Bits are
-// only removed, as in restrictDeviceIDFileMode: of the mode os.CreateTemp chose
+// only removed, as in restrictFileMode: of the mode os.CreateTemp chose
 // and the mode being stood in for, the stricter wins.
 //
 // It runs before the caller publishes the file, because a rename publishes
@@ -308,41 +334,6 @@ func narrowToPublishedFileMode(file *os.File, path string) error {
 	}
 	if err = file.Chmod(perm); err != nil {
 		return fmt.Errorf("failed to restrict temporary device id file permissions: %v", err)
-	}
-
-	return nil
-}
-
-// restrictDeviceIDFileMode drops from a file that already exists every
-// permission bit outside owner read and write. A mode argument only applies to
-// a file the call creates, so an identifier file some other path left
-// world-readable would otherwise keep that mode for the life of the
-// installation while this package claims 0600.
-//
-// The mask covers the owner execute bit as well as group and other, so what
-// survives is at most 0600 and the claim above is the whole truth. Nothing runs
-// this file as a program, so that bit has nothing to say here.
-//
-// Bits are only ever removed, never added: a stricter umask legitimately
-// produces something tighter than 0600, and loosening that back would be this
-// function undoing the protection it exists to provide.
-func restrictDeviceIDFileMode(path string) error {
-	if runtime.GOOS == "windows" {
-		// Windows has no Unix mode bits; os.Chmod there toggles the read-only
-		// attribute, which is not what this is about.
-		return nil
-	}
-
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to inspect device id file: %v", err)
-	}
-	perm := fileInfo.Mode().Perm()
-	if perm&deviceIDFileExcessPerm == 0 {
-		return nil
-	}
-	if err = os.Chmod(path, perm&^deviceIDFileExcessPerm); err != nil {
-		return fmt.Errorf("failed to restrict device id file permissions: %v", err)
 	}
 
 	return nil
