@@ -170,25 +170,38 @@ func TestRestrictOpenFileModeJudgesAModeAChmodKept(t *testing.T) {
 		t.Skip("Unix permissions are not enforced on Windows")
 	}
 	// A FAT volume on macOS reports every file as 0700, which exposes nothing.
+	// Linux vfat refuses the call instead of keeping the mode, so a refusal is
+	// judged the same way: what it left behind is what says whether anything is
+	// exposed. That branch decides whether a vfat user gets a device id at all.
+	refused := errors.New("operation not permitted")
 	for _, tc := range []struct {
 		name      string
 		mode      os.FileMode
+		chmodErr  error
 		wantError bool
 	}{
-		{"other accounts keep access", 0644, true},
-		{"only the owner execute bit survives", 0700, false},
+		{"the chmod reported success and other accounts keep access", 0644, nil, true},
+		{"the chmod reported success and only the owner execute bit survives", 0700, nil, false},
+		{"the chmod was refused and other accounts keep access", 0644, refused, true},
+		{"the chmod was refused over a mode no other account can use", 0700, refused, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			file, path := openKeptMode(t, tc.mode)
 			info, err := file.Stat()
 			require.NoError(t, err)
-			err = restrictOpenFileMode(file, info, 0600, func(os.FileMode) error { return nil })
+			err = restrictOpenFileMode(file, info, 0600, func(os.FileMode) error { return tc.chmodErr })
 			if !tc.wantError {
 				assert.NoError(t, err)
 				return
 			}
 			require.Error(t, err)
+			if tc.chmodErr != nil {
+				// The refusal is handed back as it came, so a caller can still
+				// sort on the errno behind it.
+				assert.ErrorIs(t, err, tc.chmodErr)
+				return
+			}
 			assert.Equal(t, fmt.Sprintf("%s kept mode %04o after a chmod to 0600", path, tc.mode), err.Error())
 		})
 	}
