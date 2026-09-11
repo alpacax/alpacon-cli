@@ -273,11 +273,11 @@ func resolveConfigWritePath(configFile string) (string, error) {
 		return readlinkTarget(configFile)
 	}
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve config file %s: %v", configFile, err)
+		return "", fmt.Errorf("cannot resolve config file %s: %w", configFile, err)
 	}
 	file, err := openToNarrow(target)
 	if err != nil {
-		return "", fmt.Errorf("cannot check config file %s: %v", target, err)
+		return "", fmt.Errorf("cannot check config file %s: %w", target, err)
 	}
 	defer func() { _ = file.Close() }()
 	targetInfo, err := file.Stat()
@@ -294,7 +294,7 @@ func resolveConfigWritePath(configFile string) (string, error) {
 func readlinkTarget(configFile string) (string, error) {
 	target, err := os.Readlink(configFile)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve config file %s: %v", configFile, err)
+		return "", fmt.Errorf("cannot resolve config file %s: %w", configFile, err)
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(configFile), target)
