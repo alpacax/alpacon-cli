@@ -78,15 +78,16 @@ nfpms:
     bindir: /usr/local/bin/
 
 release:
-  # The create-release job in .github/workflows/release.yaml leaves a draft
+  # create-release in .github/workflows/release.yaml leaves this tag a draft
   # titled with the tag. Looking a release up by tag never returns a draft,
-  # so without use_existing_draft goreleaser created a second release and
-  # the draft's notes were orphaned. Match the draft by title, keep its
-  # notes, and leave it a draft: publish-release makes it public once every
-  # job has succeeded.
+  # so without use_existing_draft goreleaser made a second release and the
+  # draft's notes were orphaned. It stays a draft: publish-release makes it
+  # public once every job has succeeded.
   use_existing_draft: true
   mode: keep-existing
   draft: true
+  # A re-run meets its own assets on the demoted draft; without this the first one stops the upload.
+  replace_existing_artifacts: true
   # Agree with create-release, which marks a tag such as v1.2.3-rc1 as a prerelease.
   prerelease: auto
   # The Windows one-line installer is fetched from the release rather than from

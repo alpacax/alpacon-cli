@@ -22,19 +22,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
-            # A release published from the GitHub UI is already public when its
-            # tag starts this run, so it is releases/latest with no assets yet.
-            # Hide it as a draft: goreleaser reuses the draft (use_existing_draft)
-            # and publish-release makes it public. One with assets is a finished
-            # release being re-run and stays as it is. Assigned first so a
-            # failed lookup stops the job instead of taking the skip branch.
-            public_without_assets="$(gh release view "${GITHUB_REF_NAME}" --json isDraft,assets --jq '(.isDraft | not) and (.assets | length == 0)')"
-            if [ "${public_without_assets}" = "true" ]; then
-              echo "Release ${GITHUB_REF_NAME} is public with no assets — hiding it as a draft until goreleaser uploads them."
-              gh release edit "${GITHUB_REF_NAME}" --draft
-            else
-              echo "Release ${GITHUB_REF_NAME} already exists — skipping."
-            fi
+            # use_existing_draft finds the release by listing drafts titled
+            # with the tag, so that is what any release this tag already has
+            # must become.
+            echo "Release ${GITHUB_REF_NAME} exists — keeping it a draft titled with the tag until goreleaser uploads the assets."
+            gh release edit "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}"
             exit 0
           fi
           # Create as a draft to hide it until all jobs succeed (publish-release makes it public).
@@ -53,7 +45,7 @@ jobs:
 
   # The end-to-end job inside this workflow installs from the release that is
   # already public: create-release leaves this tag as a draft, demoting a
-  # hand-published one if it has to, and a draft is not releases/latest. So
+  # published one if it has to, and a draft is not releases/latest. So
   # it proves the script still works, not that this tag's assets install.
   install-script:
     needs: [create-release]
