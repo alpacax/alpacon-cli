@@ -76,12 +76,12 @@ func TestAssetNamesStillMatchTheGoreleaserTemplates(t *testing.T) {
 
 	var formats []string
 	for _, line := range archives {
-		if strings.HasPrefix(line, "format:") {
+		if strings.HasPrefix(line, "formats:") {
 			formats = append(formats, line)
 		}
 	}
-	assert.Equal(t, []string{"format: zip"}, formats,
-		"ArchiveName builds .tar.gz everywhere but windows; an archives-level format would change that too")
+	assert.Equal(t, []string{"formats: [zip]"}, formats,
+		"ArchiveName builds .tar.gz everywhere but windows; an archives-level formats would change that too")
 }
 
 func goreleaserSection(config, key string) []string {
