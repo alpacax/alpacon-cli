@@ -7,10 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -457,4 +459,84 @@ func narrowConfigFile(path string) error {
 		return err
 	}
 	return file.Close()
+}
+
+// TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide pins what the
+// warning is about. A link is refused a chmod, not a read, and the README calls
+// a config.json kept in a dotfiles tree a supported setup—so warning on the link
+// alone told that user, on every single command, about an exposure that was not
+// there.
+func TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide(t *testing.T) {
+	// Serial: it sets HOME, swaps os.Stderr, and clears a package-level map.
+	for _, tc := range []struct {
+		name     string
+		mode     os.FileMode
+		wantWarn bool
+	}{
+		{"a dotfiles config no other account can read", 0600, false},
+		{"a dotfiles config other accounts can read", 0644, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupTestConfig(t)
+			warnedUnrestricted = sync.Map{}
+			t.Cleanup(func() { warnedUnrestricted = sync.Map{} })
+			stored, _ := symlinkedConfigFile(t, &Config{Token: "test-token"})
+			require.NoError(t, os.Chmod(stored, tc.mode))
+
+			var config Config
+			_, stderr := testutil.CaptureOutput(t, func() {
+				var err error
+				config, err = LoadConfig()
+				require.NoError(t, err)
+			})
+
+			assert.Equal(t, "test-token", config.Token)
+			// The link's target is never narrowed, whichever way this goes.
+			info, err := os.Stat(stored)
+			require.NoError(t, err)
+			assert.Equal(t, tc.mode, info.Mode().Perm())
+			if tc.wantWarn {
+				assert.Contains(t, stderr, "could not restrict config file permissions")
+				return
+			}
+			assert.NotContains(t, stderr, "could not restrict")
+		})
+	}
+}
+
+// TestRestrictConfigDirectoryModeReportsASymlinkOnlyWhenItsTargetIsWide is the
+// same question one level up: pointing ~/.alpacon at a dotfiles tree is
+// supported, and the caller warns on whatever this returns.
+func TestRestrictConfigDirectoryModeReportsASymlinkOnlyWhenItsTargetIsWide(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		mode    os.FileMode
+		wantErr bool
+	}{
+		{"a dotfiles directory no other account can enter", 0700, false},
+		{"a dotfiles directory other accounts can enter", 0755, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			target := filepath.Join(home, "dotfiles")
+			require.NoError(t, os.Mkdir(target, 0700))
+			require.NoError(t, os.Chmod(target, tc.mode))
+			link := filepath.Join(home, ConfigFileDir)
+			require.NoError(t, os.Symlink(target, link))
+
+			err := restrictConfigDirectoryMode(link)
+			// The chmod is refused on the link either way, so the target keeps
+			// the mode it had.
+			info, statErr := os.Stat(target)
+			require.NoError(t, statErr)
+			assert.Equal(t, tc.mode, info.Mode().Perm())
+			if !tc.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, errSymlink)
+		})
+	}
 }

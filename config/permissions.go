@@ -42,6 +42,13 @@
 // to, and the file is reached with openat on that handle, so O_NOFOLLOW covers
 // the last component the link could not.
 //
+// A refused chmod is not by itself an exposure, so neither the file nor the
+// directory warns on a link alone. What the link resolves to is read for its
+// mode—the handle LoadConfig already holds for the file, a fresh O_NOFOLLOW open
+// for the directory—and the warning is kept back unless that mode grants another
+// account access. A dotfiles tree usually keeps its config.json at 0600, and a
+// notice on every command there teaches the reader to skip the one that matters.
+//
 // The chmod separately refuses a file that answers to more than one name,
 // because O_NOFOLLOW says nothing about hard links and macOS lets any account
 // link a file it can merely read. That guard sits inside the chmod callback
@@ -119,6 +126,41 @@ func restrictFileMode(file *os.File, allowed os.FileMode) error {
 	return restrictOpenFileMode(file, info, allowed, file.Chmod)
 }
 
+// grantsOtherAccounts reports whether a mode hands any account but the owner
+// access. The owner's own bits are not part of the question: macOS reports every
+// file on a FAT volume as 0700, and that exposes nothing.
+func grantsOtherAccounts(perm os.FileMode) bool {
+	return perm&0077 != 0
+}
+
+// symlinkTargetGrantsOtherAccounts reports whether what a link resolves to hands
+// another account access. A link is refused a chmod but not a read, so whether
+// that refusal is worth telling the user about is a question about the target
+// rather than about the link—and keeping the config in a dotfiles tree, where
+// the file is usually already 0600, is a setup this CLI supports.
+//
+// It answers true when it cannot look. A mode nothing could read is not one
+// anything may vouch for, and the caller's warning is the safe way to be wrong.
+func symlinkTargetGrantsOtherAccounts(path string) bool {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return true
+	}
+	// O_NOFOLLOW on the resolved path: EvalSymlinks has walked every link
+	// already, so a link still standing at the last component was planted
+	// between the two calls.
+	file, err := openToNarrow(target)
+	if err != nil {
+		return true
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return true
+	}
+	return grantsOtherAccounts(info.Mode().Perm())
+}
+
 // restrictOpenFileMode narrows a handle to allowed, deciding from the info the
 // caller already read: every guard that runs before the chmod sees the same
 // inode state, so one fstat covers them all. The stats inside the chmod
@@ -143,7 +185,7 @@ func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, 
 		// there; the device id fails closed on this error, so a mount whose
 		// fmask is already narrow would otherwise never yield an identifier.
 		kept, statErr := file.Stat()
-		if statErr != nil || kept.Mode().Perm()&^allowed&0077 != 0 {
+		if statErr != nil || grantsOtherAccounts(kept.Mode().Perm()&^allowed) {
 			return err
 		}
 		return nil
@@ -155,7 +197,7 @@ func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, 
 	}
 	// Only the bits that hand another account access matter here; a surviving
 	// owner execute bit exposes nothing and FAT hands one out on every file.
-	if kept.Mode().Perm()&^allowed&0077 != 0 {
+	if grantsOtherAccounts(kept.Mode().Perm() &^ allowed) {
 		return fmt.Errorf("%s kept mode %04o after a chmod to %04o", file.Name(), kept.Mode().Perm(), perm)
 	}
 	return nil
@@ -296,12 +338,20 @@ func restrictConfigDirectoryMode(path string) error {
 		if !info.IsDir() {
 			return fmt.Errorf("config directory is not a directory: %s", path)
 		}
-		if info.Mode().Perm()&0077 == 0 {
+		if !grantsOtherAccounts(info.Mode().Perm()) {
 			return nil
 		}
 		return restrictSearchableDirectory(path)
 	}
 	if errors.Is(err, errSymlink) {
+		// Pointing ~/.alpacon at a dotfiles tree is supported, and the chmod is
+		// refused on the link rather than on what it names—so nothing is exposed
+		// unless the target's own mode says so. Reporting the link either way
+		// warned on every command for a setup that was fine, which is how a user
+		// learns to read past the warning that matters.
+		if !symlinkTargetGrantsOtherAccounts(path) {
+			return nil
+		}
 		// Already says what is wrong; naming the open on top of it reads as a
 		// filesystem failure rather than a refusal.
 		return err

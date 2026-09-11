@@ -198,19 +198,26 @@ func LoadConfig() (Config, error) {
 // the host the CLI talks to and decides whether its certificate is checked, so
 // reading it would hand the next login's token to whoever chose those values.
 func openCheckedConfigFile(configFile string) (*os.File, error) {
-	file, err := openNarrowedConfigFile(configFile)
-	if err == nil {
+	file, narrowErr := openNarrowedConfigFile(configFile)
+	if narrowErr == nil {
 		return file, nil
 	}
-	if errors.Is(err, errUnsafeConfigFile) {
-		return nil, err
+	if errors.Is(narrowErr, errUnsafeConfigFile) {
+		return nil, narrowErr
 	}
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(narrowErr, fs.ErrNotExist) {
 		// Wrap with %w so callers can detect the missing-config case
 		// via errors.Is(err, os.ErrNotExist).
-		return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
+		return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, narrowErr)
 	}
-	warnUnrestricted("config file", err)
+	// A symbolic link is the one failure whose exposure is still unknown here:
+	// the chmod was refused on the link, and what it names has not been looked
+	// at yet. Every other failure is a mode this process could not change on a
+	// file it did see, so that one speaks straight away.
+	symlinked := errors.Is(narrowErr, errSymlink)
+	if !symlinked {
+		warnUnrestricted("config file", narrowErr)
+	}
 
 	// Reached for a symbolic link above all, which is refused a chmod but not a
 	// read—keeping one config.json in a dotfiles tree is a supported setup. So
@@ -218,7 +225,7 @@ func openCheckedConfigFile(configFile string) (*os.File, error) {
 	// refusal the narrowed handle got: a pipe there would park the decode
 	// forever, and a link is the one way a file another account owns can reach
 	// this far.
-	file, err = openConfigForRead(configFile)
+	file, err := openConfigForRead(configFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("config file does not exist: %s: %w", configFile, err)
@@ -233,6 +240,14 @@ func openCheckedConfigFile(configFile string) (*os.File, error) {
 	if err = refuseUnsafeConfigFile(file, info); err != nil {
 		_ = file.Close()
 		return nil, err
+	}
+	// The target's mode is known now, so the warning can be true. A dotfiles
+	// config.json kept at 0600 exposes nothing, and saying otherwise on every
+	// command is how a user learns to read past the warning that matters. The
+	// handle already open is what answers it: resolving the path again would
+	// cost an open and read a file this one no longer has to be.
+	if symlinked && grantsOtherAccounts(info.Mode().Perm()) {
+		warnUnrestricted("config file", narrowErr)
 	}
 	return file, nil
 }
