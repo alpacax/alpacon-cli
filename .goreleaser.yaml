@@ -88,7 +88,7 @@ release:
   draft: true
   # A re-run meets its own assets on the demoted draft; without this the first one stops the upload.
   replace_existing_artifacts: true
-  # Agree with create-release, which marks a tag such as v1.2.3-rc1 as a prerelease.
+  # The only prerelease judgment: create-release passes no flag and publish-release reads this back.
   prerelease: auto
   # The Windows one-line installer is fetched from the release rather than from
   # a branch, so a user always runs the script that shipped with a tag.

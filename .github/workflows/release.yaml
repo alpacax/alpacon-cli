@@ -30,12 +30,8 @@ jobs:
             exit 0
           fi
           # Create as a draft to hide it until all jobs succeed (publish-release makes it public).
-          # Pre-release tags (e.g. v1.2.3-rc1) are published as prereleases so they aren't shown as latest.
-          prerelease_flag=""
-          case "${GITHUB_REF_NAME}" in
-            *-*) prerelease_flag="--prerelease" ;;
-          esac
-          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes ${prerelease_flag}
+          # No --prerelease: goreleaser's prerelease: auto rewrites the flag when it reuses the draft.
+          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes
 
   build-and-test:
     needs: [create-release]
@@ -260,12 +256,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Every build/test/publish job has succeeded, so flip the draft
-          # Release public. Pre-release tags (e.g. v1.2.3-rc1) must not become
-          # the latest release shown to end users.
+          # Release public. A prerelease must not become latest; goreleaser's
+          # prerelease: auto decided that, so read it back rather than judge
+          # the tag again. Assigned first so a failed lookup stops the job.
+          is_prerelease="$(gh release view "${GITHUB_REF_NAME}" --json isPrerelease --jq .isPrerelease)"
           latest_flag="--latest"
-          case "${GITHUB_REF_NAME}" in
-            *-*) latest_flag="--latest=false" ;;
-          esac
+          if [ "${is_prerelease}" = "true" ]; then
+            latest_flag="--latest=false"
+          fi
           # --draft=false is idempotent: re-running after a previously published
           # Release leaves it public, so retries on the same tag are safe.
           gh release edit "${GITHUB_REF_NAME}" --draft=false ${latest_flag}
