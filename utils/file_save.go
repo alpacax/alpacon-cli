@@ -30,7 +30,12 @@ func SaveFile(fileName string, data []byte) error {
 	return err
 }
 
-func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) { // an existing file keeps its own mode; a new one gets newFilePerm minus the umask
+// SaveStreamAtomic writes r to fileName through a temp file in the same
+// directory, then renames it into place. The mode is decided when the write
+// starts: a destination already on disk keeps its own mode, so a write does not
+// re-permission a file the user set up, and one that is not there yet gets
+// newFilePerm minus the umask.
+func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) {
 	targetName, err := resolveWritePath(fileName)
 	if err != nil {
 		return 0, err
