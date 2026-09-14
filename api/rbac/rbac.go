@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -44,10 +45,14 @@ func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleRespons
 	return api.FetchAllPages[RoleResponse](ac, rolesURL, params)
 }
 
-// The name filter is exact and case-sensitive. Role lists are narrowed to what the caller
-// may see rather than refused, so an invisible role yields an empty page and never a 403—the
-// not-found message covers both readings.
+// ResolveRole refuses a blank name: the API drops an empty filter and would answer with the
+// whole list. The name filter is exact and case-sensitive; an invisible role reads as not found.
 func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
+	if nameOrID == "" {
+		return nil, errors.New("role name is required")
+	}
+
 	if utils.IsUUID(nameOrID) {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
 		if err != nil {

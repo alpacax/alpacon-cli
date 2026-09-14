@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -544,4 +546,64 @@ func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))
 	assert.Empty(t, tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
+}
+
+// TestResolveRole_BlankNameResolvesNothing pins that a blank name never reaches the API,
+// which drops the filter and would answer with the whole role list.
+func TestResolveRole_BlankNameResolvesNothing(t *testing.T) {
+	t.Parallel()
+	roles := []RoleResponse{
+		{ID: "role-uuid-first", Name: "auditor"},
+		{ID: adminRoleID, Name: "admin"},
+	}
+
+	tests := []struct {
+		name     string
+		roleName string
+		wantID   string
+		wantCall bool
+	}{
+		{"exact name", "admin", adminRoleID, true},
+		{"padded name", "  admin  ", adminRoleID, true},
+		{"unknown name", "ghost-role", "", true},
+		{"whitespace only name", "   ", "", false},
+		{"empty name", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := roles
+				if filter != "" {
+					results = nil
+					for _, role := range roles {
+						if role.Name == filter {
+							results = append(results, role)
+						}
+					}
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[RoleResponse]{Count: len(results), Results: results})
+			}))
+			defer ts.Close()
+
+			role, err := ResolveRole(newTestClient(ts), tt.roleName)
+
+			if tt.wantID == "" {
+				require.Error(t, err)
+				assert.Nil(t, role)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, role.ID)
+			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
+		})
+	}
 }
