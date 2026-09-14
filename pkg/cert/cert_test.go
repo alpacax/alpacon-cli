@@ -53,5 +53,5 @@ func TestGenerateKey_ReusesExistingKey(t *testing.T) {
 	second, err := generateKey(keyPath)
 	require.NoError(t, err)
 
-	assert.Equal(t, first.N, second.N)
+	assert.True(t, first.Equal(second), "generateKey should reuse the existing key")
 }
