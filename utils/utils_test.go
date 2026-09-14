@@ -166,17 +166,40 @@ func TestRemovePrefixBeforeAPI(t *testing.T) {
 	}
 }
 
-func TestSaveStream(t *testing.T) {
+func TestSaveFile_CreatesNestedDirectories(t *testing.T) {
 	t.Parallel()
 	dest := filepath.Join(t.TempDir(), "nested", "file.txt")
 
-	written, err := saveStream(dest, strings.NewReader("hello world"))
+	err := SaveFile(dest, []byte("hello world"))
 	require.NoError(t, err)
-	assert.Equal(t, int64(len("hello world")), written)
 
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(content))
+}
+
+// TestSaveFile_RetainsExistingFileOnWriteError proves dest stays untouched when
+// the write can't even start; TestSaveStreamAtomic_RetainsExistingFileOnReadError covers the mid-copy case.
+func TestSaveFile_RetainsExistingFileOnWriteError(t *testing.T) {
+	t.Parallel()
+	skipUnlessUnixModes(t)
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permission checks")
+	}
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "file.txt")
+	require.NoError(t, os.WriteFile(dest, []byte("existing"), 0644))
+	require.NoError(t, os.Chmod(dir, 0555))
+	defer func() { _ = os.Chmod(dir, 0755) }()
+
+	err := SaveFile(dest, []byte("replacement"))
+	require.Error(t, err)
+
+	require.NoError(t, os.Chmod(dir, 0755))
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Equal(t, "existing", string(content))
 }
 
 type failingReader struct {

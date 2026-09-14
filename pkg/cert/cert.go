@@ -1,6 +1,7 @@
 package cert
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -117,20 +118,16 @@ func savePrivateKey(fileName string, key *rsa.PrivateKey) error {
 		return fmt.Errorf("failed to create directories: %v", err)
 	}
 
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create private key file: %v", err)
-	}
-	defer func() { _ = file.Close() }()
-
-	var privateKey = &pem.Block{
+	keyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	}
+	})
 
-	err = pem.Encode(file, privateKey)
-	if err != nil {
-		return errors.New("failed to PEM block in the key file")
+	// Goes through SaveStreamAtomic (stage in a temp file, then rename) rather
+	// than truncating fileName directly, so a write that fails partway never
+	// leaves a corrupt key on disk for generateKey to pick back up (#439).
+	if _, err := utils.SaveStreamAtomic(fileName, bytes.NewReader(keyPEM), 0600); err != nil {
+		return fmt.Errorf("failed to save private key file: %v", err)
 	}
 
 	return nil
