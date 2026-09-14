@@ -27,10 +27,12 @@ func TestGenerateKey_WritesOwnerOnlyKeyFile(t *testing.T) {
 
 	info, err := os.Stat(keyPath)
 	require.NoError(t, err)
+	// 0600 has no group/other bits, so no umask can widen it.
 	assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
 
 	dirInfo, err := os.Stat(filepath.Dir(keyPath))
 	require.NoError(t, err)
+	// 0700 has no other bits, so no umask can widen it.
 	assert.Equal(t, os.FileMode(0700), dirInfo.Mode().Perm())
 
 	reread, err := readPrivateKey(keyPath)
