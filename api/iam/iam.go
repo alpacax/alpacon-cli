@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -217,6 +218,11 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 }
 
 func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return "", errors.New("username is required")
+	}
+
 	params := map[string]string{
 		"username": userName,
 	}
@@ -255,6 +261,11 @@ func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 }
 
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
+	groupName = strings.TrimSpace(groupName)
+	if groupName == "" {
+		return "", errors.New("group name is required")
+	}
+
 	params := map[string]string{
 		"name": groupName,
 	}

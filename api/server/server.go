@@ -98,7 +98,14 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 	return err
 }
 
+// GetServerIDByName refuses a name that trims to empty: the API drops a blank filter and
+// answers with the whole list, so Count > 0 would mean "unfiltered", not "found".
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" {
+		return "", errors.New("server name is required")
+	}
+
 	params := map[string]string{
 		"name": serverName,
 	}

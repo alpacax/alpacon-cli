@@ -12,6 +12,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetWebhookList_Pagination(t *testing.T) {
@@ -143,5 +145,52 @@ func TestDeleteWebhook(t *testing.T) {
 	}
 	if !deleteCalled {
 		t.Error("DELETE request was not sent")
+	}
+}
+
+// TestGetWebhookIDByName_BlankNameResolvesNothing pins that a blank name never reaches
+// the API, which drops the filter and would answer with the whole webhook list.
+func TestGetWebhookIDByName_BlankNameResolvesNothing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		webhookName string
+		wantID      string
+		wantCall    bool
+	}{
+		{"exact name", "deploy-hook", "hook-uuid-abc", true},
+		{"padded name", "  deploy-hook  ", "hook-uuid-abc", true},
+		{"whitespace only name", "   ", "", false},
+		{"empty name", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called.Store(true)
+				results := []WebhookResponse{{ID: "hook-uuid-abc", Name: "deploy-hook"}}
+				if filter := strings.TrimSpace(r.URL.Query().Get("name")); filter != "" && filter != "deploy-hook" {
+					results = nil
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[WebhookResponse]{Count: len(results), Results: results})
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			id, err := GetWebhookIDByName(ac, tt.webhookName)
+
+			if tt.wantID == "" {
+				require.Error(t, err)
+				assert.Empty(t, id)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
+			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
+		})
 	}
 }

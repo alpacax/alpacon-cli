@@ -31,7 +31,8 @@ func init() {
 
 func runServerAclAdd(cmd *cobra.Command, args []string) {
 	tokenArg := args[0]
-	serverName, _ := cmd.Flags().GetString("server")
+	rawServerName, _ := cmd.Flags().GetString("server")
+	serverName := strings.TrimSpace(rawServerName)
 	serversCSV, _ := cmd.Flags().GetString("servers")
 
 	if serverName == "" && serversCSV == "" {

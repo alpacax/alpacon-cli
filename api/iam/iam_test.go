@@ -454,3 +454,54 @@ func TestDeleteMember(t *testing.T) {
 		})
 	}
 }
+
+// TestGetIDByName_BlankNameResolvesNothing pins that a blank name never reaches the API
+// for either resolver, which would otherwise hand back an arbitrary user or group.
+func TestGetIDByName_BlankNameResolvesNothing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		lookup   string
+		wantID   string
+		wantCall bool
+	}{
+		{"exact name", stubUserName, stubUserID, true},
+		{"padded name", "  " + stubUserName + "  ", stubUserID, true},
+		{"whitespace only name", "   ", "", false},
+		{"empty name", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			run := func(param, wantID string, resolve func(*client.AlpaconClient, string) (string, error)) {
+				var called atomic.Bool
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called.Store(true)
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"count":   1,
+						"results": []map[string]string{{"id": wantID}},
+					})
+				}))
+				defer ts.Close()
+
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				id, err := resolve(ac, tt.lookup)
+
+				if tt.wantID == "" {
+					require.Error(t, err, param)
+					assert.Empty(t, id, param)
+				} else {
+					require.NoError(t, err, param)
+					assert.Equal(t, wantID, id, param)
+				}
+				assert.Equal(t, tt.wantCall, called.Load(), "whether %s reached the API", param)
+			}
+
+			run("username", stubUserID, GetUserIDByName)
+			run("group name", stubGroupID, GetGroupIDByName)
+		})
+	}
+}

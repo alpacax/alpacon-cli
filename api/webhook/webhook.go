@@ -3,6 +3,7 @@ package webhook
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -92,6 +93,11 @@ func DeleteWebhook(ac *client.AlpaconClient, webhookName string) error {
 }
 
 func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, error) {
+	webhookName = strings.TrimSpace(webhookName)
+	if webhookName == "" {
+		return "", errors.New("webhook name is required")
+	}
+
 	params := map[string]string{
 		"name": webhookName,
 	}

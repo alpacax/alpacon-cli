@@ -170,6 +170,11 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 }
 
 func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, error) {
+	tokenName = strings.TrimSpace(tokenName)
+	if tokenName == "" {
+		return "", errors.New("token name is required")
+	}
+
 	params := map[string]string{
 		"name": tokenName,
 	}

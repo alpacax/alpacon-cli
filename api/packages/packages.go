@@ -68,6 +68,11 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 }
 
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
+	fileName = strings.TrimSpace(fileName)
+	if fileName == "" {
+		return "", errors.New("package name is required")
+	}
+
 	params := map[string]string{"name": fileName}
 	body, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), "", params))
 	if err != nil {

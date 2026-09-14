@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type (
@@ -458,5 +461,58 @@ func TestGetPythonPackageEntry_Pagination(t *testing.T) {
 	}
 	if len(packages) != 150 {
 		t.Errorf("expected 150 packages, got %d", len(packages))
+	}
+}
+
+// TestGetPackageIDByName_BlankNameResolvesNothing pins that a blank name never reaches
+// the API, which drops the filter and would answer with the whole entry list.
+func TestGetPackageIDByName_BlankNameResolvesNothing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileName string
+		wantID   string
+		wantCall bool
+	}{
+		{"exact name", "numpy-2.0.0.whl", "pkg-uuid-abc", true},
+		{"padded name", "  numpy-2.0.0.whl  ", "pkg-uuid-abc", true},
+		{"whitespace only name", "   ", "", false},
+		{"empty name", "", "", false},
+	}
+
+	for _, packageType := range []string{"python", "system"} {
+		for _, tt := range tests {
+			t.Run(packageType+" "+tt.name, func(t *testing.T) {
+				t.Parallel()
+				var called atomic.Bool
+
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called.Store(true)
+					count := 1
+					if filter := strings.TrimSpace(r.URL.Query().Get("name")); filter != "" && filter != "numpy-2.0.0.whl" {
+						count = 0
+					}
+					results := []map[string]string{}
+					if count == 1 {
+						results = append(results, map[string]string{"id": "pkg-uuid-abc", "name": "numpy-2.0.0.whl"})
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"count": count, "results": results})
+				}))
+				defer ts.Close()
+
+				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+				id, err := GetPackageIDByName(ac, tt.fileName, packageType)
+
+				if tt.wantID == "" {
+					require.Error(t, err)
+					assert.Empty(t, id)
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, tt.wantID, id)
+				}
+				assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
+			})
+		}
 	}
 }
