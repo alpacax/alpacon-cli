@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-// stagingPerm is the mode a replacement is written under, never a final mode:
-// it hides partial content from other local accounts until the write completes.
-const stagingPerm = 0600
+const stagingPerm = 0600 // temporary while a replacement write is staged; the real mode lands once it completes
+
+const saveFilePerm = 0666 // matches os.Create's implicit mode so this fix doesn't narrow access to the non-secret certs, CRLs, and CSRs SaveFile's callers write; umask still applies
 
 var replacementTempPattern = regexp.MustCompile(`^\.alpacon-\d+-\d+-\d+\.tmp$`)
 
@@ -26,39 +26,11 @@ func IsReplacementTempName(name string) bool {
 }
 
 func SaveFile(fileName string, data []byte) error {
-	_, err := saveStream(fileName, bytes.NewReader(data))
+	_, err := SaveStreamAtomic(fileName, bytes.NewReader(data), saveFilePerm) // delegates rather than truncating fileName directly before the write succeeds
 	return err
 }
 
-func saveStream(fileName string, r io.Reader) (int64, error) {
-	dir := filepath.Dir(fileName)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return 0, fmt.Errorf("failed to create directories: %w", err)
-	}
-
-	file, err := os.Create(fileName)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create file: %w", err)
-	}
-
-	written, copyErr := io.Copy(file, r)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return written, fmt.Errorf("failed to write file: %w", copyErr)
-	}
-	if closeErr != nil {
-		return written, fmt.Errorf("failed to close file: %w", closeErr)
-	}
-
-	return written, nil
-}
-
-// SaveStreamAtomic writes r to fileName through a temp file in the same
-// directory, then renames it into place. The mode is decided when the write
-// starts: a destination already on disk keeps its own mode, so a write does not
-// re-permission a file the user set up, and one that is not there yet gets
-// newFilePerm minus the umask.
-func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) {
+func SaveStreamAtomic(fileName string, r io.Reader, newFilePerm os.FileMode) (int64, error) { // an existing file keeps its own mode; a new one gets newFilePerm minus the umask
 	targetName, err := resolveWritePath(fileName)
 	if err != nil {
 		return 0, err
