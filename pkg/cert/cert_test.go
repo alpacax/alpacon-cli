@@ -37,7 +37,7 @@ func TestGenerateKey_WritesOwnerOnlyKeyFile(t *testing.T) {
 
 	reread, err := readPrivateKey(keyPath)
 	require.NoError(t, err)
-	assert.Equal(t, key.N, reread.N)
+	assert.True(t, key.Equal(reread), "generateKey should round-trip the same key")
 }
 
 // generateKey's own cache: a second call must reuse the key on disk rather
