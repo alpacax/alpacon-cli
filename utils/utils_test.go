@@ -178,11 +178,8 @@ func TestSaveFile_CreatesNestedDirectories(t *testing.T) {
 	assert.Equal(t, "hello world", string(content))
 }
 
-// A read-only directory blocks SaveStreamAtomic before it can stage a temp
-// file—it never reaches io.Copy, so this doesn't reproduce #439's mid-copy
-// failure (only TestSaveStreamAtomic_RetainsExistingFileOnReadError does,
-// since SaveFile's bytes.Reader can never error). What this proves instead:
-// when SaveFile can't even start the write, dest is left untouched.
+// TestSaveFile_RetainsExistingFileOnWriteError proves dest stays untouched when
+// the write can't even start; TestSaveStreamAtomic_RetainsExistingFileOnReadError covers the mid-copy case.
 func TestSaveFile_RetainsExistingFileOnWriteError(t *testing.T) {
 	t.Parallel()
 	skipUnlessUnixModes(t)
