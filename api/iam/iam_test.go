@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -151,27 +152,48 @@ func TestGetGroupList_Pagination(t *testing.T) {
 	}
 }
 
+// TestGetUserIDByName puts the decoy first, so a dropped filter or the wrong key answers with it.
 func TestGetUserIDByName(t *testing.T) {
 	t.Parallel()
+	users := []UserResponse{
+		{ID: "id-first", Username: "first-user"},
+		{ID: "user-uuid-abc", Username: stubUserName},
+	}
+
 	tests := []struct {
 		name     string
 		username string
-		count    int
 		wantID   string
 		wantErr  bool
+		wantCall bool
 	}{
-		{"found", "alice", 1, "user-uuid-abc", false},
-		{"not found", "nobody", 0, "", true},
+		{"found", stubUserName, "user-uuid-abc", false, true},
+		{"padded name", "  " + stubUserName + "  ", "user-uuid-abc", false, true},
+		{"unknown name", "nobody", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []UserResponse
-				if tt.count > 0 {
-					results = append(results, UserResponse{ID: tt.wantID, Username: tt.username})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("username"))
+
+				results := users
+				if filter != "" {
+					results = nil
+					for _, u := range users {
+						if u.Username == filter {
+							results = append(results, u)
+						}
+					}
 				}
-				resp := api.ListResponse[UserResponse]{Count: tt.count, Results: results}
+
+				resp := api.ListResponse[UserResponse]{Count: len(results), Results: results}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
@@ -181,42 +203,62 @@ func TestGetUserIDByName(t *testing.T) {
 			id, err := GetUserIDByName(ac, tt.username)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if tt.username == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
 
+// TestGetGroupIDByName puts the decoy first, so a dropped filter or the wrong key answers with it.
 func TestGetGroupIDByName(t *testing.T) {
 	t.Parallel()
+	groups := []GroupResponse{
+		{ID: "id-first", Name: "first-group"},
+		{ID: "group-uuid-xyz", Name: stubGroupName},
+	}
+
 	tests := []struct {
 		name      string
 		groupName string
-		count     int
 		wantID    string
 		wantErr   bool
+		wantCall  bool
 	}{
-		{"found", "admins", 1, "group-uuid-xyz", false},
-		{"not found", "ghost-group", 0, "", true},
+		{"found", stubGroupName, "group-uuid-xyz", false, true},
+		{"padded name", "  " + stubGroupName + "  ", "group-uuid-xyz", false, true},
+		{"unknown name", "ghost-group", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []GroupResponse
-				if tt.count > 0 {
-					results = append(results, GroupResponse{ID: tt.wantID, Name: tt.groupName})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := groups
+				if filter != "" {
+					results = nil
+					for _, g := range groups {
+						if g.Name == filter {
+							results = append(results, g)
+						}
+					}
 				}
-				resp := api.ListResponse[GroupResponse]{Count: tt.count, Results: results}
+
+				resp := api.ListResponse[GroupResponse]{Count: len(results), Results: results}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
@@ -226,17 +268,16 @@ func TestGetGroupIDByName(t *testing.T) {
 			id, err := GetGroupIDByName(ac, tt.groupName)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if tt.groupName == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
@@ -451,57 +492,6 @@ func TestDeleteMember(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-		})
-	}
-}
-
-// TestGetIDByName_BlankNameResolvesNothing pins that a blank name never reaches the API
-// for either resolver, which would otherwise hand back an arbitrary user or group.
-func TestGetIDByName_BlankNameResolvesNothing(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		lookup   string
-		wantID   string
-		wantCall bool
-	}{
-		{"exact name", stubUserName, stubUserID, true},
-		{"padded name", "  " + stubUserName + "  ", stubUserID, true},
-		{"whitespace only name", "   ", "", false},
-		{"empty name", "", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			run := func(param, wantID string, resolve func(*client.AlpaconClient, string) (string, error)) {
-				var called atomic.Bool
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					called.Store(true)
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"count":   1,
-						"results": []map[string]string{{"id": wantID}},
-					})
-				}))
-				defer ts.Close()
-
-				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-				id, err := resolve(ac, tt.lookup)
-
-				if tt.wantID == "" {
-					require.Error(t, err, param)
-					assert.Empty(t, id, param)
-				} else {
-					require.NoError(t, err, param)
-					assert.Equal(t, wantID, id, param)
-				}
-				assert.Equal(t, tt.wantCall, called.Load(), "whether %s reached the API", param)
-			}
-
-			run("username", stubUserID, GetUserIDByName)
-			run("group name", stubGroupID, GetGroupIDByName)
 		})
 	}
 }

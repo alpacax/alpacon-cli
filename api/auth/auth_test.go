@@ -191,27 +191,48 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 	}
 }
 
+// TestGetAPITokenIDByName puts the decoy first, so a dropped or wrong-key filter answers with it.
 func TestGetAPITokenIDByName(t *testing.T) {
 	t.Parallel()
+	tokens := []APITokenResponse{
+		{ID: "id-first", Name: "first-token"},
+		{ID: "token-uuid-abc", Name: "ci-token"},
+	}
+
 	tests := []struct {
 		name      string
 		tokenName string
-		count     int
 		wantID    string
 		wantErr   bool
+		wantCall  bool
 	}{
-		{"found", "ci-token", 1, "token-uuid-abc", false},
-		{"not found", "ghost-token", 0, "", true},
+		{"found", "ci-token", "token-uuid-abc", false, true},
+		{"padded name", "  ci-token  ", "token-uuid-abc", false, true},
+		{"not found", "ghost-token", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []APITokenResponse
-				if tt.count > 0 {
-					results = append(results, APITokenResponse{ID: tt.wantID, Name: tt.tokenName})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := tokens
+				if filter != "" {
+					results = nil
+					for _, tok := range tokens {
+						if tok.Name == filter {
+							results = append(results, tok)
+						}
+					}
 				}
-				resp := api.ListResponse[APITokenResponse]{Count: tt.count, Results: results}
+
+				resp := api.ListResponse[APITokenResponse]{Count: len(results), Results: results}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
@@ -221,17 +242,16 @@ func TestGetAPITokenIDByName(t *testing.T) {
 			id, err := GetAPITokenIDByName(ac, tt.tokenName)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if tt.tokenName == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
@@ -563,52 +583,5 @@ func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
 	if _, err := GetWhoami(ac); err == nil {
 		t.Fatal("GetWhoami returned nil error for a response missing principal_type; want fail-closed error")
-	}
-}
-
-// TestGetAPITokenIDByName_BlankNameResolvesNothing pins that a blank name never reaches
-// the API, which drops the filter and would answer with the whole token list.
-func TestGetAPITokenIDByName_BlankNameResolvesNothing(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name      string
-		tokenName string
-		wantID    string
-		wantCall  bool
-	}{
-		{"exact name", "deploy-token", "token-uuid-abc", true},
-		{"padded name", "  deploy-token  ", "token-uuid-abc", true},
-		{"whitespace only name", "   ", "", false},
-		{"empty name", "", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var called atomic.Bool
-
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called.Store(true)
-				results := []APITokenResponse{{ID: "token-uuid-abc", Name: "deploy-token"}}
-				if filter := strings.TrimSpace(r.URL.Query().Get("name")); filter != "" && filter != "deploy-token" {
-					results = nil
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(api.ListResponse[APITokenResponse]{Count: len(results), Results: results})
-			}))
-			defer ts.Close()
-
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			id, err := GetAPITokenIDByName(ac, tt.tokenName)
-
-			if tt.wantID == "" {
-				require.Error(t, err)
-				assert.Empty(t, id)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.wantID, id)
-			}
-			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
-		})
 	}
 }

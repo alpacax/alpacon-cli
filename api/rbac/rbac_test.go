@@ -100,41 +100,67 @@ func TestScopeLabel(t *testing.T) {
 	}
 }
 
+// TestResolveRole_ByName puts the decoy first, so a dropped or wrong-key filter answers with it.
 func TestResolveRole_ByName(t *testing.T) {
 	t.Parallel()
+	roles := []RoleResponse{
+		{ID: "role-uuid-first", Name: "auditor"},
+		{ID: adminRoleID, Name: "admin"},
+	}
+
 	tests := []struct {
-		name    string
-		count   int
-		wantErr bool
+		name     string
+		roleName string
+		wantID   string
+		wantErr  bool
+		wantCall bool
 	}{
-		{"found", 1, false},
-		{"not found or not visible", 0, true},
+		{"found", "admin", adminRoleID, false, true},
+		{"padded name", "  admin  ", adminRoleID, false, true},
+		{"not found or not visible", "ghost-role", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotName string
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotName = r.URL.Query().Get("name")
+			t.Parallel()
+			var called atomic.Bool
 
-				var results []RoleResponse
-				if tt.count > 0 {
-					results = append(results, RoleResponse{ID: adminRoleID, Name: "admin"})
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := roles
+				if filter != "" {
+					results = nil
+					for _, role := range roles {
+						if role.Name == filter {
+							results = append(results, role)
+						}
+					}
 				}
+
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(api.ListResponse[RoleResponse]{Count: tt.count, Results: results})
+				_ = json.NewEncoder(w).Encode(api.ListResponse[RoleResponse]{Count: len(results), Results: results})
 			}))
 			defer ts.Close()
 
-			role, err := ResolveRole(newTestClient(ts), "admin")
-			assert.Equal(t, "admin", gotName)
+			role, err := ResolveRole(newTestClient(ts), tt.roleName)
+
 			if tt.wantErr {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "case-sensitive")
-				return
+				assert.Nil(t, role)
+				if tt.roleName == "" {
+					require.ErrorIs(t, err, ErrBlankName)
+				} else if strings.TrimSpace(tt.roleName) != "" {
+					assert.Contains(t, err.Error(), "case-sensitive")
+				}
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, role.ID)
 			}
-			require.NoError(t, err)
-			assert.Equal(t, adminRoleID, role.ID)
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
@@ -546,64 +572,4 @@ func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))
 	assert.Empty(t, tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
-}
-
-// TestResolveRole_BlankNameResolvesNothing pins that a blank name never reaches the API,
-// which drops the filter and would answer with the whole role list.
-func TestResolveRole_BlankNameResolvesNothing(t *testing.T) {
-	t.Parallel()
-	roles := []RoleResponse{
-		{ID: "role-uuid-first", Name: "auditor"},
-		{ID: adminRoleID, Name: "admin"},
-	}
-
-	tests := []struct {
-		name     string
-		roleName string
-		wantID   string
-		wantCall bool
-	}{
-		{"exact name", "admin", adminRoleID, true},
-		{"padded name", "  admin  ", adminRoleID, true},
-		{"unknown name", "ghost-role", "", true},
-		{"whitespace only name", "   ", "", false},
-		{"empty name", "", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var called atomic.Bool
-
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called.Store(true)
-				filter := strings.TrimSpace(r.URL.Query().Get("name"))
-
-				results := roles
-				if filter != "" {
-					results = nil
-					for _, role := range roles {
-						if role.Name == filter {
-							results = append(results, role)
-						}
-					}
-				}
-
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(api.ListResponse[RoleResponse]{Count: len(results), Results: results})
-			}))
-			defer ts.Close()
-
-			role, err := ResolveRole(newTestClient(ts), tt.roleName)
-
-			if tt.wantID == "" {
-				require.Error(t, err)
-				assert.Nil(t, role)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.wantID, role.ID)
-			}
-			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
-		})
-	}
 }
