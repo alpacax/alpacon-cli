@@ -30,6 +30,12 @@ on:
   # suite has never seen. release.yaml calls this before goreleaser runs.
   workflow_call:
 
+# Not github.workflow (that's the caller's name here) and never cancelled
+# on a tag, so release.yaml's two calls don't collide under goreleaser.
+concurrency:
+  group: install-script-tests-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 permissions:
   contents: read
 
