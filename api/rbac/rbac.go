@@ -2,7 +2,6 @@ package rbac
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -33,6 +32,10 @@ const (
 	CodeRoleAssignmentDuplicate = "rbac_role_assignment_duplicate"
 )
 
+// ErrBlankName is re-exported so a caller can tell ResolveRole's blank-name refusal from an
+// ordinary not-found.
+var ErrBlankName = api.ErrBlankName
+
 // auto_assigned is a name-suffix match on ':owner', ':master', ':member' and
 // ':manager', not a judgement of assignability: true returns nothing but the
 // object-scoped plumbing roles, and false also hides hand-granted service_token:manager.
@@ -45,13 +48,8 @@ func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleRespons
 	return api.FetchAllPages[RoleResponse](ac, rolesURL, params)
 }
 
-// ResolveRole refuses a blank name: the API drops an empty filter and would answer with the
-// whole list. The name filter is exact and case-sensitive; an invisible role reads as not found.
 func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
-	if nameOrID == "" {
-		return nil, errors.New("role name is required")
-	}
 
 	if utils.IsUUID(nameOrID) {
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
@@ -66,16 +64,9 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 		return &role, nil
 	}
 
-	// The name filter is exact, so a second round trip would be wasted.
-	roles, err := api.FetchPagesUpTo[RoleResponse](ac, rolesURL, map[string]string{"name": nameOrID}, 1)
-	if err != nil {
-		return nil, err
-	}
-	if len(roles) == 0 {
-		return nil, fmt.Errorf("no role named %q is visible to you; the name is matched exactly and is case-sensitive", nameOrID)
-	}
-
-	return &roles[0], nil
+	return api.ResolveByName[RoleResponse](ac, rolesURL, "name", nameOrID,
+		"role name is required",
+		fmt.Sprintf("no role named %q is visible to you; the name is matched exactly and is case-sensitive", nameOrID))
 }
 
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {

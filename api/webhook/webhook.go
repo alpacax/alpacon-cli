@@ -1,10 +1,6 @@
 package webhook
 
 import (
-	"encoding/json"
-	"errors"
-	"strings"
-
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -93,29 +89,11 @@ func DeleteWebhook(ac *client.AlpaconClient, webhookName string) error {
 }
 
 func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, error) {
-	webhookName = strings.TrimSpace(webhookName)
-	if webhookName == "" {
-		return "", errors.New("webhook name is required")
-	}
-
-	params := map[string]string{
-		"name": webhookName,
-	}
-
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(webhookURL, "", params))
+	result, err := api.ResolveByName[WebhookResponse](ac, webhookURL, "name", webhookName,
+		"webhook name is required", "no webhook found with the given name")
 	if err != nil {
 		return "", err
 	}
 
-	var response api.ListResponse[WebhookResponse]
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return "", err
-	}
-
-	if response.Count == 0 {
-		return "", errors.New("no webhook found with the given name")
-	}
-
-	return response.Results[0].ID, nil
+	return result.ID, nil
 }

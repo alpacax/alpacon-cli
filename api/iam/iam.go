@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -218,31 +217,13 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 }
 
 func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) {
-	userName = strings.TrimSpace(userName)
-	if userName == "" {
-		return "", errors.New("username is required")
-	}
-
-	params := map[string]string{
-		"username": userName,
-	}
-
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, "", params))
+	result, err := api.ResolveByName[UserResponse](ac, userURL, "username", userName,
+		"username is required", "no user found with the given name")
 	if err != nil {
 		return "", err
 	}
 
-	var response api.ListResponse[UserResponse]
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return "", err
-	}
-
-	if response.Count == 0 {
-		return "", errors.New("no user found with the given name")
-	}
-
-	return response.Results[0].ID, nil
+	return result.ID, nil
 }
 
 // A role binding embeds a display name, not the username other commands accept.
@@ -261,30 +242,13 @@ func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 }
 
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
-	groupName = strings.TrimSpace(groupName)
-	if groupName == "" {
-		return "", errors.New("group name is required")
-	}
-
-	params := map[string]string{
-		"name": groupName,
-	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(groupURL, "", params))
+	result, err := api.ResolveByName[GroupResponse](ac, groupURL, "name", groupName,
+		"group name is required", "no group found with the given name")
 	if err != nil {
 		return "", err
 	}
 
-	var response api.ListResponse[GroupResponse]
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		return "", err
-	}
-
-	if response.Count == 0 {
-		return "", errors.New("no group found with the given name")
-	}
-
-	return response.Results[0].ID, nil
+	return result.ID, nil
 }
 
 func getUserStatus(isActive bool, isStaff bool, isSuperuser bool) string {

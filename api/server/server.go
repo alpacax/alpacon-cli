@@ -98,33 +98,14 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 	return err
 }
 
-// GetServerIDByName refuses a name that trims to empty: the API drops a blank filter and
-// answers with the whole list, so Count > 0 would mean "unfiltered", not "found".
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
-	serverName = strings.TrimSpace(serverName)
-	if serverName == "" {
-		return "", errors.New("server name is required")
-	}
-
-	params := map[string]string{
-		"name": serverName,
-	}
-	body, err := ac.SendGetRequest(utils.BuildURL(serverURL, "", params))
+	result, err := api.ResolveByName[ServerDetails](ac, serverURL, "name", serverName,
+		"server name is required", "no server found with the given name")
 	if err != nil {
 		return "", err
 	}
 
-	var response api.ListResponse[ServerDetails]
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		return "", err
-	}
-
-	if response.Count == 0 {
-		return "", errors.New("no server found with the given name")
-	}
-
-	return response.Results[0].ID, nil
+	return result.ID, nil
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
