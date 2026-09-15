@@ -149,7 +149,7 @@ func TestGetServerIDByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Empty(t, id)
-				if tt.serverName == "" {
+				if strings.TrimSpace(tt.serverName) == "" {
 					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {

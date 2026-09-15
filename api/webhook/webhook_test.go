@@ -124,7 +124,7 @@ func TestGetWebhookIDByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Empty(t, id)
-				if tt.webhookName == "" {
+				if strings.TrimSpace(tt.webhookName) == "" {
 					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {

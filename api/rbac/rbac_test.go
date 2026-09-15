@@ -151,7 +151,7 @@ func TestResolveRole_ByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, role)
-				if tt.roleName == "" {
+				if strings.TrimSpace(tt.roleName) == "" {
 					require.ErrorIs(t, err, ErrBlankName)
 				} else if strings.TrimSpace(tt.roleName) != "" {
 					assert.Contains(t, err.Error(), "case-sensitive")

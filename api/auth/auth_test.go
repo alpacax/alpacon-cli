@@ -244,7 +244,7 @@ func TestGetAPITokenIDByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Empty(t, id)
-				if tt.tokenName == "" {
+				if strings.TrimSpace(tt.tokenName) == "" {
 					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
@@ -273,6 +273,7 @@ func TestResolveTokenID(t *testing.T) {
 		wantErr  bool
 	}{
 		{"uuid fast-path — no HTTP request", validUUID, 0, validUUID, false, false},
+		{"padded uuid fast-path — no HTTP request", "  " + validUUID + "  ", 0, validUUID, false, false},
 		{"name found", tokenName, 1, tokenID, true, false},
 		{"name not found", "ghost-token", 0, "", true, true},
 	}

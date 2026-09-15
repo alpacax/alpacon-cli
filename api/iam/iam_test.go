@@ -205,7 +205,7 @@ func TestGetUserIDByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Empty(t, id)
-				if tt.username == "" {
+				if strings.TrimSpace(tt.username) == "" {
 					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
@@ -270,7 +270,7 @@ func TestGetGroupIDByName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Empty(t, id)
-				if tt.groupName == "" {
+				if strings.TrimSpace(tt.groupName) == "" {
 					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
