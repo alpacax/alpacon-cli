@@ -136,6 +136,7 @@ func packageDownloadResponseError(resp *http.Response) error {
 }
 
 func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, packageType string) error {
+	fileName = strings.TrimSpace(fileName)
 	packageID, err := GetPackageIDByName(ac, fileName, packageType)
 	if err != nil {
 		return err
