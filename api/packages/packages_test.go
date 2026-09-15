@@ -9,11 +9,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type (
@@ -458,5 +461,71 @@ func TestGetPythonPackageEntry_Pagination(t *testing.T) {
 	}
 	if len(packages) != 150 {
 		t.Errorf("expected 150 packages, got %d", len(packages))
+	}
+}
+
+// TestGetPackageIDByName names the decoy so that it merely contains fileName, which only the
+// exact compare can reject.
+func TestGetPackageIDByName(t *testing.T) {
+	t.Parallel()
+	entries := []packageEntryRef{
+		{ID: "id-decoy", Name: "numpy-2.0.0.whl.sig"},
+		{ID: "pkg-uuid-abc", Name: "numpy-2.0.0.whl"},
+	}
+
+	tests := []struct {
+		name     string
+		fileName string
+		wantID   string
+		wantErr  bool
+		wantCall bool
+	}{
+		{"found", "numpy-2.0.0.whl", "pkg-uuid-abc", false, true},
+		{"padded name", "  numpy-2.0.0.whl  ", "pkg-uuid-abc", false, true},
+		{"not found", "ghost-package.whl", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
+	}
+
+	for _, packageType := range []string{"python", "system"} {
+		t.Run(packageType, func(t *testing.T) {
+			t.Parallel()
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					var called atomic.Bool
+
+					ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						called.Store(true)
+						search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+						var results []packageEntryRef
+						for _, e := range entries {
+							if search == "" || strings.Contains(e.Name, search) {
+								results = append(results, e)
+							}
+						}
+
+						resp := api.ListResponse[packageEntryRef]{Count: len(results), Results: results}
+						w.Header().Set("Content-Type", "application/json")
+						_ = json.NewEncoder(w).Encode(resp)
+					}))
+					defer ts.Close()
+
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+					id, err := GetPackageIDByName(ac, tt.fileName, packageType)
+
+					if tt.wantErr {
+						require.Error(t, err)
+						assert.Empty(t, id)
+					} else {
+						require.NoError(t, err)
+						assert.Equal(t, tt.wantID, id)
+					}
+					assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
+				})
+			}
+		})
 	}
 }
