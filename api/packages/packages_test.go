@@ -464,55 +464,68 @@ func TestGetPythonPackageEntry_Pagination(t *testing.T) {
 	}
 }
 
-// TestGetPackageIDByName_BlankNameResolvesNothing pins that a blank name never reaches
-// the API, which drops the filter and would answer with the whole entry list.
-func TestGetPackageIDByName_BlankNameResolvesNothing(t *testing.T) {
+// TestGetPackageIDByName names the decoy so that it merely contains fileName, which only the
+// exact compare can reject.
+func TestGetPackageIDByName(t *testing.T) {
 	t.Parallel()
+	entries := []packageEntryRef{
+		{ID: "id-decoy", Name: "numpy-2.0.0.whl.sig"},
+		{ID: "pkg-uuid-abc", Name: "numpy-2.0.0.whl"},
+	}
+
 	tests := []struct {
 		name     string
 		fileName string
 		wantID   string
+		wantErr  bool
 		wantCall bool
 	}{
-		{"exact name", "numpy-2.0.0.whl", "pkg-uuid-abc", true},
-		{"padded name", "  numpy-2.0.0.whl  ", "pkg-uuid-abc", true},
-		{"whitespace only name", "   ", "", false},
-		{"empty name", "", "", false},
+		{"found", "numpy-2.0.0.whl", "pkg-uuid-abc", false, true},
+		{"padded name", "  numpy-2.0.0.whl  ", "pkg-uuid-abc", false, true},
+		{"not found", "ghost-package.whl", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, packageType := range []string{"python", "system"} {
-		for _, tt := range tests {
-			t.Run(packageType+" "+tt.name, func(t *testing.T) {
-				t.Parallel()
-				var called atomic.Bool
+		t.Run(packageType, func(t *testing.T) {
+			t.Parallel()
 
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					called.Store(true)
-					count := 1
-					if filter := strings.TrimSpace(r.URL.Query().Get("name")); filter != "" && filter != "numpy-2.0.0.whl" {
-						count = 0
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					t.Parallel()
+					var called atomic.Bool
+
+					ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						called.Store(true)
+						search := strings.TrimSpace(r.URL.Query().Get("search"))
+
+						var results []packageEntryRef
+						for _, e := range entries {
+							if search == "" || strings.Contains(e.Name, search) {
+								results = append(results, e)
+							}
+						}
+
+						resp := api.ListResponse[packageEntryRef]{Count: len(results), Results: results}
+						w.Header().Set("Content-Type", "application/json")
+						_ = json.NewEncoder(w).Encode(resp)
+					}))
+					defer ts.Close()
+
+					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+					id, err := GetPackageIDByName(ac, tt.fileName, packageType)
+
+					if tt.wantErr {
+						require.Error(t, err)
+						assert.Empty(t, id)
+					} else {
+						require.NoError(t, err)
+						assert.Equal(t, tt.wantID, id)
 					}
-					results := []map[string]string{}
-					if count == 1 {
-						results = append(results, map[string]string{"id": "pkg-uuid-abc", "name": "numpy-2.0.0.whl"})
-					}
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{"count": count, "results": results})
-				}))
-				defer ts.Close()
-
-				ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-				id, err := GetPackageIDByName(ac, tt.fileName, packageType)
-
-				if tt.wantID == "" {
-					require.Error(t, err)
-					assert.Empty(t, id)
-				} else {
-					require.NoError(t, err)
-					assert.Equal(t, tt.wantID, id)
-				}
-				assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
-			})
-		}
+					assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
+				})
+			}
+		})
 	}
 }

@@ -21,6 +21,11 @@ const (
 	pythonPackageEntryURL = "/api/packages/python/entries/"
 )
 
+type packageEntryRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 func packageEntryURL(packageType string) string {
 	if packageType == "python" {
 		return pythonPackageEntryURL
@@ -67,37 +72,26 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 	return packageList, nil
 }
 
+// GetPackageIDByName matches client-side because the entries endpoints filter on package__name,
+// never name, so an unknown name query is dropped and the whole list comes back.
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
 	fileName = strings.TrimSpace(fileName)
 	if fileName == "" {
 		return "", errors.New("package name is required")
 	}
 
-	params := map[string]string{"name": fileName}
-	body, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), "", params))
+	entries, err := api.FetchAllPages[packageEntryRef](ac, packageEntryURL(packageType), map[string]string{"search": fileName})
 	if err != nil {
 		return "", err
 	}
 
-	if packageType == "python" {
-		var response api.ListResponse[PythonPackageDetail]
-		if err := json.Unmarshal(body, &response); err != nil {
-			return "", err
+	for _, e := range entries {
+		if e.Name == fileName {
+			return e.ID, nil
 		}
-		if response.Count == 0 {
-			return "", errors.New("no package found with the given name")
-		}
-		return response.Results[0].ID, nil
 	}
 
-	var response api.ListResponse[SystemPackageDetail]
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", err
-	}
-	if response.Count == 0 {
-		return "", errors.New("no package found with the given name")
-	}
-	return response.Results[0].ID, nil
+	return "", errors.New("no package found with the given name")
 }
 
 func UploadPackage(ac *client.AlpaconClient, file string, packageType string) error {
