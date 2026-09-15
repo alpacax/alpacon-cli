@@ -180,6 +180,7 @@ func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, er
 }
 
 func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
+	nameOrID = strings.TrimSpace(nameOrID)
 	if utils.IsUUID(nameOrID) {
 		return nameOrID, nil
 	}
