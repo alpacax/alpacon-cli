@@ -5,8 +5,7 @@ on:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
 
-# false, unlike the other workflows: a re-push of the same tag must queue
-# behind the run already publishing it, never cancel goreleaser mid-release.
+# Not cancelled, unlike the called workflows: never cut goreleaser off mid-release.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -45,10 +44,8 @@ jobs:
       contents: read
     uses: ./.github/workflows/build-and-test.yaml
 
-  # The end-to-end job inside this workflow installs from the release that is
-  # already public: create-release leaves this tag as a draft, demoting a
-  # published one if it has to, and a draft is not releases/latest. So
-  # it proves the script still works, not that this tag's assets install.
+  # create-release keeps this tag a draft, and a draft is not releases/latest, so the
+  # end-to-end job installs the latest public release, not this tag's assets.
   install-script:
     needs: [create-release]
     permissions:
@@ -88,12 +85,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # GoReleaser needs write access to two repositories with a single
-      # token: this repo (to attach release assets) and homebrew-alpacon
-      # (to push the updated Formula commit into the tap). The built-in
-      # `secrets.GITHUB_TOKEN` is scoped to this repo only, so we mint a
-      # cross-repo installation token from the alpacax-release-publisher
-      # GitHub App instead.
+      # One token must cover two repos: this one for release assets, homebrew-alpacon
+      # for the Formula commit. secrets.GITHUB_TOKEN covers only this one.
       - name: Generate App token
         id: release-publisher-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -104,10 +97,8 @@ jobs:
           repositories: |
             alpacon-cli
             homebrew-alpacon
-          # Pin the minted installation token to the single permission
-          # GoReleaser actually needs. If the App's installation
-          # permissions are expanded in the future for another use case,
-          # this step continues to issue a contents-only token.
+          # Pin the token to the one permission GoReleaser needs, so widening the App's
+          # installation permissions later does not widen this token.
           permission-contents: write
 
       - name: Run GoReleaser
@@ -119,10 +110,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ steps.release-publisher-token.outputs.token }}
 
-      # The checksums file says an archive is the one this release names; the
-      # attestation says which workflow, at which commit, built it. Stealing a
-      # release token is enough to rewrite the first and not the second.
-      # The pushed Docker image has no dist/ file, so it's attested below by digest.
+      # Checksums say an archive is the one this release names; the attestation says which
+      # workflow and commit built it. A stolen token rewrites archive and checksum alike.
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -132,8 +121,8 @@ jobs:
             dist/*.deb
             dist/*.rpm
 
-      # Both tags share one manifest, so one digest covers them. A bare
-      # field template silently no-ops here, so JSON plus jq reads the digest.
+      # The image has no dist/ file, so the step below attests it by digest; both tags
+      # share one manifest. A bare field template no-ops here, so JSON plus jq reads it.
       - name: Read the pushed image digest
         id: image-digest
         run: |
@@ -256,8 +245,7 @@ jobs:
     steps:
       - name: Promote draft Release to public
         env:
-          # gh reads GH_REPO (not GITHUB_REPOSITORY), so gh resolves the repo
-          # without an actions/checkout step.
+          # gh reads GH_REPO, not GITHUB_REPOSITORY, so it needs no checkout.
           GH_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

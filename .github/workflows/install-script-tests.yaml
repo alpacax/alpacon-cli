@@ -1,5 +1,4 @@
-# install.ps1 is PowerShell that ships as a release asset, so it gets its own
-# suite: unit (Pester, mocked), analyze (linter), end-to-end (a real install).
+# install.ps1 ships as a release asset, so it gets a suite of its own.
 name: Install script tests
 
 on:
@@ -26,12 +25,11 @@ on:
       - "README.md"
       - ".goreleaser.yaml"
 
-  # install.ps1 is a release asset, so a tag must not publish a script this
-  # suite has never seen. release.yaml calls this before goreleaser runs.
+  # release.yaml calls this before goreleaser, so no tag publishes an unseen install.ps1.
   workflow_call:
 
-# Not github.workflow (that's the caller's name here) and never cancelled
-# on a tag, so release.yaml's two calls don't collide under goreleaser.
+# Not github.workflow: under release.yaml it is "Release", shared with the other call.
+# No cancel on a tag: a re-pushed tag would kill the run goreleaser is waiting on.
 concurrency:
   group: install-script-tests-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -40,12 +38,8 @@ permissions:
   contents: read
 
 jobs:
-  # No `name:` on any job here, following build-and-test.yaml: the job id is
-  # then the check context, and a matrix leg reads as `unit (powershell)`.
-  #
-  # The script parses, and reads a redirect, differently on each edition, so run
-  # the suite on both. The redirect tests themselves are mocked; only the
-  # end-to-end job below talks to GitHub, and it runs on 5.1 alone.
+  # No `name:` on any job: the job id is the check context, so a leg reads `unit (powershell)`.
+  # 5.1 and 7 parse and run the script differently, so the suite runs under both.
   unit:
     runs-on: windows-latest
     strategy:
@@ -57,8 +51,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The matrix is not available in a step's `shell:`, so the edition is the
-      # host this step launches rather than the shell GitHub picks for it.
+      # No matrix context in `shell:`, so the edition is the host this step launches.
       - name: Run Pester
         run: ${{ matrix.edition }} -NoProfile -File .github/scripts/run-installer-tests.ps1
 
@@ -90,15 +83,13 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        # Windows PowerShell 5.1 is what a user actually has, so exercise the
-        # script there rather than in the PowerShell 7 that runners also ship.
+        # Users have Windows PowerShell 5.1, so exercise the script there, not in 7.
         shell: powershell
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The script preserves whatever value kind the user PATH already has, so
-      # record it before installing rather than asserting one afterwards.
+      # The script preserves the PATH value kind, so record it before installing.
       - name: Remember the install location and the user PATH value kind
         run: |
           $dir = Join-Path $env:LOCALAPPDATA 'Alpacon\bin'
@@ -141,8 +132,8 @@ jobs:
           $hits = @($raw -split ';' | Where-Object { $_ -eq $env:INSTALL_DIR }).Count
           if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
 
-      # Both PATHs are emptied first because both are what a re-run has to repair:
-      # the shell can predate the install, the entry can have been wiped by another installer.
+      # Both PATHs are emptied first because both are what a re-run repairs: the shell
+      # can predate the install, the entry can be wiped by another installer.
       - name: Running it again reports it is already current and repairs both PATHs
         run: |
           $env:Path = (@($env:Path -split ';' | Where-Object { $_ -and $_ -ne $env:INSTALL_DIR }) -join ';')
@@ -169,8 +160,7 @@ jobs:
           $hits = @($raw -split ';' | Where-Object { $_ -eq $env:INSTALL_DIR }).Count
           if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
 
-      # 1.10.0 is simply an older release that still ships Windows archives.
-      # Any published version older than the latest one does the job.
+      # Nothing special about 1.10.0: any older release with Windows archives does.
       - name: Pinning an older version installs that version
         run: |
           ./install.ps1 -Version 1.10.0
@@ -187,9 +177,8 @@ jobs:
           $ErrorActionPreference = $prior
           if ($reported -notmatch '1\.10\.0') { throw "alpacon reports '$reported', expected 1.10.0" }
 
-      # The shape a pipeline actually hits: -Version reads a variable nobody
-      # set, so it arrives as an empty string. That has to be refused, because
-      # installing the latest release is the one thing a pin rules out.
+      # -Version reading a variable nobody set arrives as an empty string, the shape a
+      # pipeline hits. It must be refused: installing latest is what a pin rules out.
       - name: An empty -Version is refused instead of falling back to latest
         run: |
           $marker = Join-Path $env:INSTALL_DIR 'installed-version.txt'
