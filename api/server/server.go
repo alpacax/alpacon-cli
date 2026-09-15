@@ -99,8 +99,13 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 }
 
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
-	result, err := api.ResolveByName[ServerDetails](ac, serverURL, "name", serverName,
-		"server name is required", "no server found with the given name")
+	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
+		Endpoint:    serverURL,
+		FilterKey:   "name",
+		Name:        serverName,
+		BlankMsg:    "server name is required",
+		NotFoundMsg: "no server found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}

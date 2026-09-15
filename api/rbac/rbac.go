@@ -64,9 +64,13 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 		return &role, nil
 	}
 
-	return api.ResolveByName[RoleResponse](ac, rolesURL, "name", nameOrID,
-		"role name is required",
-		fmt.Sprintf("no role named %q is visible to you; the name is matched exactly and is case-sensitive", nameOrID))
+	return api.ResolveByName[RoleResponse](ac, api.ResolveByNameOptions{
+		Endpoint:    rolesURL,
+		FilterKey:   "name",
+		Name:        nameOrID,
+		BlankMsg:    "role name is required",
+		NotFoundMsg: fmt.Sprintf("no role named %q is visible to you; the name is matched exactly and is case-sensitive", nameOrID),
+	})
 }
 
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {

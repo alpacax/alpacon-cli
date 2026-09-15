@@ -89,8 +89,13 @@ func DeleteWebhook(ac *client.AlpaconClient, webhookName string) error {
 }
 
 func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, error) {
-	result, err := api.ResolveByName[WebhookResponse](ac, webhookURL, "name", webhookName,
-		"webhook name is required", "no webhook found with the given name")
+	result, err := api.ResolveByName[WebhookResponse](ac, api.ResolveByNameOptions{
+		Endpoint:    webhookURL,
+		FilterKey:   "name",
+		Name:        webhookName,
+		BlankMsg:    "webhook name is required",
+		NotFoundMsg: "no webhook found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}

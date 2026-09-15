@@ -217,8 +217,13 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 }
 
 func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) {
-	result, err := api.ResolveByName[UserResponse](ac, userURL, "username", userName,
-		"username is required", "no user found with the given name")
+	result, err := api.ResolveByName[UserResponse](ac, api.ResolveByNameOptions{
+		Endpoint:    userURL,
+		FilterKey:   "username",
+		Name:        userName,
+		BlankMsg:    "username is required",
+		NotFoundMsg: "no user found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}
@@ -242,8 +247,13 @@ func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 }
 
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
-	result, err := api.ResolveByName[GroupResponse](ac, groupURL, "name", groupName,
-		"group name is required", "no group found with the given name")
+	result, err := api.ResolveByName[GroupResponse](ac, api.ResolveByNameOptions{
+		Endpoint:    groupURL,
+		FilterKey:   "name",
+		Name:        groupName,
+		BlankMsg:    "group name is required",
+		NotFoundMsg: "no group found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}

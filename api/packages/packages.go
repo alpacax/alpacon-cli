@@ -75,9 +75,9 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 // GetPackageIDByName matches client-side because the entries endpoints filter on package__name,
 // never name, so an unknown name query is dropped and the whole list comes back.
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
-	fileName = strings.TrimSpace(fileName)
-	if fileName == "" {
-		return "", errors.New("package name is required")
+	fileName, err := api.RequireName(fileName, "package name is required")
+	if err != nil {
+		return "", err
 	}
 
 	entries, err := api.FetchAllPages[packageEntryRef](ac, packageEntryURL(packageType), map[string]string{"search": fileName})

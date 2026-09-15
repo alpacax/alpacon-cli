@@ -170,8 +170,13 @@ func GetAPITokenList(ac *client.AlpaconClient) ([]APITokenAttributes, error) {
 }
 
 func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, error) {
-	result, err := api.ResolveByName[APITokenResponse](ac, tokenURL, "name", tokenName,
-		"token name is required", "no token found with the given name")
+	result, err := api.ResolveByName[APITokenResponse](ac, api.ResolveByNameOptions{
+		Endpoint:    tokenURL,
+		FilterKey:   "name",
+		Name:        tokenName,
+		BlankMsg:    "token name is required",
+		NotFoundMsg: "no token found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}
