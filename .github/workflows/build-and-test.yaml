@@ -11,27 +11,22 @@ on:
 
   workflow_call:
 
+# Not github.workflow: under release.yaml it is "Release", shared with the other call.
+# No cancel on a tag: a re-pushed tag would kill the run goreleaser is waiting on.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 permissions:
   contents: read
 
 jobs:
-  # A matrix reports one check context per leg, and the org ruleset on main
-  # requires the flat `build-and-test`. The job below is what reports it.
+  # A matrix gives one check per leg, so the flat `build-and-test` the ruleset wants is a job.
   test:
     runs-on: ${{ matrix.os }}
 
-    # Windows and macOS each carry files every other platform compiles out, and
-    # without a runner of their own those files ship untested: Windows holds the
-    # ones that replace a running executable plus unzip_path.go's volume-name and
-    # case-insensitive branches, which are unreachable on Unix, macOS the O_SEARCH
-    # open that narrows a config directory it cannot read. macOS runs the whole
-    # suite, which passes there unchanged. The owner refusal is exercised on both
-    # Unix legs; what only macOS reaches is
-    # TestLoadConfigRefusesAConfigFileOwnedByAnotherAccount, the end-to-end case,
-    # because planting a foreign-owned file takes a hard link and Linux refuses
-    # to link one. Windows runs only the packages holding its own files: ./config
-    # is left out because every permission test in it skips on Windows and its
-    # stubs are covered by compiling, not running.
+    # Windows and macOS each compile in files the others drop, so without a leg of their
+    # own those ship untested. ./config is out on Windows: its permission tests all skip.
     strategy:
       fail-fast: false
       matrix:
@@ -69,9 +64,8 @@ jobs:
         run: go build -v .
 
       - name: Run Tests
-        run: go test -race -v -shuffle=on ${{ matrix.packages }}
+        run: go test -race -v -shuffle=on -count=1 ${{ matrix.packages }}
 
-  # success only if every leg was.
   build-and-test:
     needs: [test]
     if: always()
