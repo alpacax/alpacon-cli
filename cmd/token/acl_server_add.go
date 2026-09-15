@@ -1,6 +1,7 @@
 package token
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -31,15 +32,13 @@ func init() {
 
 func runServerAclAdd(cmd *cobra.Command, args []string) {
 	tokenArg := args[0]
-	rawServerName, _ := cmd.Flags().GetString("server")
-	serverName := strings.TrimSpace(rawServerName)
+	serverName, _ := cmd.Flags().GetString("server")
+	serverName = strings.TrimSpace(serverName)
 	serversCSV, _ := cmd.Flags().GetString("servers")
+	serversCSV = strings.TrimSpace(serversCSV)
 
-	if serverName == "" && serversCSV == "" {
-		utils.CliErrorWithExit("One of --server or --servers is required.")
-	}
-	if serverName != "" && serversCSV != "" {
-		utils.CliErrorWithExit("Use either --server or --servers, not both.")
+	if err := validateServerAclFlags(serverName, serversCSV); err != nil {
+		utils.CliErrorWithExit("%s.", err)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -84,4 +83,17 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Failed to bulk-add server ACLs: %v.", err)
 	}
 	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
+}
+
+// validateServerAclFlags takes both values already trimmed, so a blank one means the flag was
+// absent or whitespace-only.
+func validateServerAclFlags(serverName, serversCSV string) error {
+	if serverName == "" && serversCSV == "" {
+		return errors.New("one of --server or --servers is required")
+	}
+	if serverName != "" && serversCSV != "" {
+		return errors.New("use either --server or --servers, not both")
+	}
+
+	return nil
 }
