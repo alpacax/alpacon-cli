@@ -33,11 +33,10 @@ func init() {
 func runServerAclAdd(cmd *cobra.Command, args []string) {
 	tokenArg := args[0]
 	serverName, _ := cmd.Flags().GetString("server")
-	serverName = strings.TrimSpace(serverName)
 	serversCSV, _ := cmd.Flags().GetString("servers")
-	serversCSV = strings.TrimSpace(serversCSV)
 
-	if err := validateServerAclFlags(serverName, serversCSV); err != nil {
+	serverName, serversCSV, err := validateServerAclFlags(serverName, serversCSV)
+	if err != nil {
 		utils.CliErrorWithExit("%s.", err)
 	}
 
@@ -85,15 +84,18 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
 }
 
-// validateServerAclFlags takes both values already trimmed, so a blank one means the flag was
-// absent or whitespace-only.
-func validateServerAclFlags(serverName, serversCSV string) error {
+// validateServerAclFlags trims both values so a whitespace-only flag counts as absent, and
+// hands the trimmed ones back so the caller resolves the same name it validated.
+func validateServerAclFlags(serverName, serversCSV string) (string, string, error) {
+	serverName = strings.TrimSpace(serverName)
+	serversCSV = strings.TrimSpace(serversCSV)
+
 	if serverName == "" && serversCSV == "" {
-		return errors.New("one of --server or --servers is required")
+		return serverName, serversCSV, errors.New("one of --server or --servers is required")
 	}
 	if serverName != "" && serversCSV != "" {
-		return errors.New("use either --server or --servers, not both")
+		return serverName, serversCSV, errors.New("use either --server or --servers, not both")
 	}
 
-	return nil
+	return serverName, serversCSV, nil
 }
