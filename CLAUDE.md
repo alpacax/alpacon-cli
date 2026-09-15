@@ -19,9 +19,9 @@ go build -o alpacon .
 ### Test
 
 ```bash
-# With race detection and a shuffled order (same as CI); shuffling is what
-# catches a test that only passes after its neighbor
-go test -race -v -shuffle=on ./...
+# With race detection and a shuffled order (same as CI); shuffling catches a
+# test that only passes after its neighbor. -count=1 bypasses the test cache
+go test -race -v -shuffle=on -count=1 ./...
 ```
 
 The Windows installer has its own suite. `.github/workflows/install-script-tests.yaml` runs three jobs: Pester on both PowerShell editions, PSScriptAnalyzer on Windows PowerShell alone, and an end-to-end job that installs on a real runner, re-runs it after emptying both the session and the user PATH, reinstalls after the binary is deleted but the version marker survives, pins a version, and checks that a locked binary is refused. `release.yaml` calls that workflow before GoReleaser publishes anything. To run the same checks by hand on a Windows machine:
