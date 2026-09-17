@@ -59,10 +59,6 @@ type TransferStatusResponse struct {
 	Message string `json:"message"`
 }
 
-type TransferErrorResponse struct {
-	Code string `json:"code"`
-}
-
 type UploadRequest struct {
 	Name           string `json:"name"`
 	Path           string `json:"path"`
