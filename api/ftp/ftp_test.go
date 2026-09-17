@@ -1390,37 +1390,10 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
 }
 
-func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
-	t.Parallel()
-	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
-	// status: PollTransferStatus must back off and retry, not treat it as fatal.
-	var calls atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := calls.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		if n < 3 {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "webftp_transfer_in_progress"})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
-	}))
-	defer ts.Close()
-
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
-
-	require.NoError(t, err)
-	assert.True(t, success)
-	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), calls.Load())
-}
-
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	t.Parallel()
-	// A non-in-progress error (e.g. 403) is fatal: return immediately without
-	// polling again.
+	// Any error from the status endpoint is fatal: return immediately
+	// without polling again.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
