@@ -122,6 +122,15 @@ type codedError interface {
 	ErrorSource() string
 }
 
+// gateGuidanceError is the optional pair a codedError may also carry: which
+// gate refused the request and what it was missing. A coded 402/403/405/429
+// sends no human "detail" on these routes, so a caller that wants to say more
+// than the generic fallback message reads these instead.
+type gateGuidanceError interface {
+	ErrorGate() string
+	ErrorMissing() []string
+}
+
 type statusCoder interface {
 	HTTPStatusCode() int
 }
@@ -213,4 +222,21 @@ func ParseErrorResponse(err error) (string, string) {
 	}
 
 	return "", ""
+}
+
+// ParseErrorGateAndMissing returns the "gate" and "missing" fields a coded
+// 402/403/405/429 carried, or ("", nil) if err carries none. Unlike
+// ParseErrorResponse this has no textual fallback: every producer of these
+// fields is a *apiError in client/client.go, which always implements
+// gateGuidanceError, so there is no legacy string form to recover one from.
+func ParseErrorGateAndMissing(err error) (string, []string) {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if gg, ok := e.(gateGuidanceError); ok {
+			gate, missing := gg.ErrorGate(), gg.ErrorMissing()
+			if gate != "" || len(missing) > 0 {
+				return gate, missing
+			}
+		}
+	}
+	return "", nil
 }

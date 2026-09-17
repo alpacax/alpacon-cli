@@ -55,6 +55,27 @@ func TestBuildCliErrorEnvelopeFromErr_PlainErr(t *testing.T) {
 	assert.Empty(t, env.ErrorCode)
 }
 
+// The RBAC role gate and the token-scope gate now answer a 403 with a coded
+// body instead of DRF's bare {"detail": ...}—--output json must still carry
+// error_code for these two new families the same way it always has for any
+// other coded refusal.
+func TestBuildCliErrorEnvelopeFromErr_ExtractsRBACPermissionRequiredCode(t *testing.T) {
+	t.Parallel()
+	err := errors.New(`request failed with status 403: {"code": "rbac_permission_required", "gate": "role", "missing": "role"}`)
+	env := buildCliErrorEnvelopeFromErr("role grant", err, "Failed to grant role: you do not have permission to make that change.")
+
+	assert.Equal(t, "rbac_permission_required", env.ErrorCode)
+	assert.Equal(t, "role grant", env.Context.Operation)
+}
+
+func TestBuildCliErrorEnvelopeFromErr_ExtractsTokenScopeMissingCode(t *testing.T) {
+	t.Parallel()
+	err := errors.New(`request failed with status 403: {"code": "api_token_scope_missing", "gate": "token_scope", "missing": ["scope:server:create"]}`)
+	env := buildCliErrorEnvelopeFromErr("server create", err, "Failed to create server: this API token is missing the required scope(s): scope:server:create.")
+
+	assert.Equal(t, "api_token_scope_missing", env.ErrorCode)
+}
+
 func TestUsageErrorCodeConstant(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "usage_error", UsageErrorCode)

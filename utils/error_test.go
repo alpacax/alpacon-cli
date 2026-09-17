@@ -121,6 +121,57 @@ func TestParseErrorResponse_WrappedTextFormat(t *testing.T) {
 	assert.Equal(t, "server", source)
 }
 
+// gateGuidanceStub is a minimal gateGuidanceError, standing in for
+// client.apiError—the only real producer—without importing the client
+// package (which itself imports utils, so the reverse import would cycle).
+type gateGuidanceStub struct {
+	gate    string
+	missing []string
+}
+
+func (e *gateGuidanceStub) Error() string          { return "stub" }
+func (e *gateGuidanceStub) ErrorGate() string      { return e.gate }
+func (e *gateGuidanceStub) ErrorMissing() []string { return e.missing }
+
+func TestParseErrorGateAndMissing_NilError(t *testing.T) {
+	t.Parallel()
+	gate, missing := ParseErrorGateAndMissing(nil)
+	assert.Empty(t, gate)
+	assert.Empty(t, missing)
+}
+
+func TestParseErrorGateAndMissing_NoInterfaceIsEmpty(t *testing.T) {
+	t.Parallel()
+	gate, missing := ParseErrorGateAndMissing(errors.New("boom"))
+	assert.Empty(t, gate)
+	assert.Empty(t, missing)
+}
+
+func TestParseErrorGateAndMissing_ReadsGateAndMissing(t *testing.T) {
+	t.Parallel()
+	err := &gateGuidanceStub{gate: "token_scope", missing: []string{"scope:server:create", "scope:server:read"}}
+	gate, missing := ParseErrorGateAndMissing(err)
+	assert.Equal(t, "token_scope", gate)
+	assert.Equal(t, []string{"scope:server:create", "scope:server:read"}, missing)
+}
+
+func TestParseErrorGateAndMissing_GateWithoutMissing(t *testing.T) {
+	t.Parallel()
+	err := &gateGuidanceStub{gate: "role"}
+	gate, missing := ParseErrorGateAndMissing(err)
+	assert.Equal(t, "role", gate)
+	assert.Empty(t, missing)
+}
+
+func TestParseErrorGateAndMissing_WrappedError(t *testing.T) {
+	t.Parallel()
+	inner := &gateGuidanceStub{gate: "role", missing: []string{"role"}}
+	wrapped := fmt.Errorf("request failed: %w", inner)
+	gate, missing := ParseErrorGateAndMissing(wrapped)
+	assert.Equal(t, "role", gate)
+	assert.Equal(t, []string{"role"}, missing)
+}
+
 func TestWorkSessionConstants(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "work_session_required", WorkSessionRequired)

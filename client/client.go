@@ -44,9 +44,17 @@ const (
 var refreshAccessToken = (*AlpaconClient).refreshLocked
 
 type apiError struct {
-	message    string
-	code       string
-	source     string
+	message string
+	code    string
+	source  string
+	// gate and missing carry the optional "gate"/"missing" fields a coded
+	// 402/403/405/429 may send beside "code": alpacon-server states which gate
+	// refused the request and what it was missing, but sends no human "detail"
+	// on these routes, so a caller such as cmd/iam's RBAC guidance table reads
+	// these instead of trying to parse one out of nothing. missing is normalized
+	// to a slice regardless of whether the server sent one scope string or a list.
+	gate       string
+	missing    []string
 	statusCode int
 	// apiPayload records that the body was a JSON object—the shape every
 	// alpacon-server error response has. It is a filter, not a provenance flag:
@@ -154,11 +162,13 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
 		return nil
 	}
-	detail, code, source, hasDetail := parseAuthStatusErrorPayload(body)
+	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body)
 	return &apiError{
-		message:    authStatusMessage(statusCode, code, detail, hasDetail),
+		message:    authStatusMessage(statusCode, code, detail, hasDetail, missing),
 		code:       code,
 		source:     source,
+		gate:       gate,
+		missing:    missing,
 		apiPayload: isJSONObject(body),
 	}
 }
@@ -177,7 +187,7 @@ func isJSONObject(body []byte) bool {
 // clear message. A code-less 401 is the only case that suggests re-login—an
 // authenticated user who merely needs MFA, or who hit a policy denial, must not
 // be told to log in again.
-func authStatusMessage(statusCode int, code, detail string, hasDetail bool) string {
+func authStatusMessage(statusCode int, code, detail string, hasDetail bool, missing []string) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized && code == "" {
 			return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
@@ -198,6 +208,13 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool) stri
 		// no-raw-code contract that TestSendRequest_403CodeWithoutDetailKeepsCodeSource guards.
 		return "request denied by server"
 	}
+	// A coded 403 with no detail but a stated "missing" scope: name it rather than
+	// fall back to the generic line. A caller with more specific guidance for its
+	// own code (cmd/iam's RBAC gates) overrides this; this is the floor for every
+	// other caller that just surfaces the error as-is.
+	if len(missing) > 0 {
+		return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
+	}
 	return "permission denied: you do not have the required privileges for this action"
 }
 
@@ -214,20 +231,21 @@ func authStatusCodeMessage(code string) (string, bool) {
 }
 
 // parseAuthStatusErrorPayload returns ok=true only with a clean "detail" message;
-// code/source are returned regardless so the WorkSession gate can route to exit 3.
-func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, ok bool) {
-	message, code, source, ok = parseAPIErrorPayload(body)
+// code/source/gate/missing are returned regardless so the WorkSession gate can
+// route to exit 3 and a coded refusal without detail still carries what it can.
+func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
+	message, code, source, gate, missing, ok = parseAPIErrorPayload(body)
 	if !ok || message == "" {
-		return "", code, source, false
+		return "", code, source, gate, missing, false
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", code, source, false
+		return "", code, source, gate, missing, false
 	}
 	if stringField(parsed, "detail") == "" {
-		return "", code, source, false
+		return "", code, source, gate, missing, false
 	}
-	return message, code, source, true
+	return message, code, source, gate, missing, true
 }
 
 // SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
@@ -668,12 +686,20 @@ func (e *apiError) ErrorSource() string {
 	return e.source
 }
 
+func (e *apiError) ErrorGate() string {
+	return e.gate
+}
+
+func (e *apiError) ErrorMissing() []string {
+	return e.missing
+}
+
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
 
-func newAPIError(message, code, source string) error {
-	return &apiError{message: message, code: code, source: source}
+func newAPIError(message, code, source, gate string, missing []string) error {
+	return &apiError{message: message, code: code, source: source, gate: gate, missing: missing}
 }
 
 // withStatus tags err with its HTTP status so callers can tell 404 from 401,
@@ -708,29 +734,30 @@ func withRetryAfter(err error, header http.Header) error {
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
 func parseAPIError(body []byte) error {
-	message, code, source, _ := parseAPIErrorPayload(body)
-	return newAPIError(message, code, source)
+	message, code, source, gate, missing, _ := parseAPIErrorPayload(body)
+	return newAPIError(message, code, source, gate, missing)
 }
 
-func parseAPIErrorPayload(body []byte) (message string, code string, source string, ok bool) {
+func parseAPIErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return "server returned an empty error response", "", "", false
+		return "server returned an empty error response", "", "", "", nil, false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
-		return truncateBody(raw), "", "", false
+		return truncateBody(raw), "", "", "", nil, false
 	}
 
 	code = stringField(parsed, "code")
 	source = stringField(parsed, "source")
+	gate, missing = parseGateAndMissing(parsed)
 
 	// Case 1: {"detail": "..."}
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
-		return detail, code, source, true
+		return detail, code, source, gate, missing, true
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
@@ -760,11 +787,38 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 	}
 
 	if len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, true
+		return strings.Join(messages, "; "), code, source, gate, missing, true
 	}
 
 	// Fallback: return truncated raw body
-	return truncateBody(raw), code, source, true
+	return truncateBody(raw), code, source, gate, missing, true
+}
+
+// parseGateAndMissing extracts the optional "gate" and "missing" fields a coded
+// 402/403/405/429 response may carry beside "code": alpacon-server states which
+// gate refused the request and what it was missing, but sends no human "detail"
+// on these routes, so a caller such as cmd/iam's RBAC guidance table reads these
+// instead. "missing" is accepted as either one scope string or a list of them—
+// either way it comes back as a slice, trimmed and with empty entries dropped.
+func parseGateAndMissing(parsed map[string]any) (gate string, missing []string) {
+	gate = stringField(parsed, "gate")
+	switch v := parsed["missing"].(type) {
+	case string:
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			missing = []string{trimmed}
+		}
+	case []any:
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				missing = append(missing, trimmed)
+			}
+		}
+	}
+	return gate, missing
 }
 
 func stringField(values map[string]any, field string) string {

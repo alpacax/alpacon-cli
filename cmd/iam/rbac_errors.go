@@ -1,7 +1,9 @@
 package iam
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
@@ -9,7 +11,9 @@ import (
 )
 
 // Codes this surface receives. All but permission_denied come from the binding endpoints;
-// that one is the troubleshoot read.
+// that one is the troubleshoot read. The four below are new: alpacon-server used to answer
+// every role and token-scope refusal with a bare DRF {"detail": ...} 403, and now answers
+// with one of these instead, carrying no detail of its own—the message has to be the CLI's.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -17,6 +21,20 @@ const (
 	codeBulkLimitExceeded    = "rbac_bulk_limit_exceeded"
 	codeInvalidInput         = "invalid_input"
 	codeWorkspaceSuspended   = "workspace_suspended"
+
+	// codeRolePermissionRequired and codeRoleObjectPermissionRequired are the role
+	// gate's refusals—missing the permission outright, or missing it on the specific
+	// object named. Both route through the same per-gate guidance a code-less 403
+	// from the role gate always got: the refusal reason has not changed, only
+	// whether the server states a code for it.
+	codeRolePermissionRequired       = "rbac_permission_required"
+	codeRoleObjectPermissionRequired = "rbac_object_permission_required"
+
+	// codeTokenScopeMissing and codeTokenScopeActionUnresolved are the token-scope
+	// gate's refusals—an API token whose bound scopes do not cover this call, or a
+	// call whose action the server could not resolve to a scope at all.
+	codeTokenScopeMissing          = "api_token_scope_missing"
+	codeTokenScopeActionUnresolved = "api_token_scope_action_unresolved"
 )
 
 // Gates for describeRBACError. gateRoleRead is first so the zero value is the safest gate.
@@ -79,10 +97,17 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	case codeWorkspaceSuspended:
 		return rewrite(err, "this workspace is suspended, so it accepts no changes")
 	case codePermissionDenied:
-		return rewrite(err, "that is not an account you may read; your own is always readable")
+		return rewrite(err, permissionDeniedMessage(gate))
+	case codeTokenScopeMissing:
+		return rewrite(err, tokenScopeMissingMessage(err))
+	case codeTokenScopeActionUnresolved:
+		return rewrite(err, "this token cannot be used for this command; use a login session or a token with an explicit scope")
 	}
 
-	if utils.HTTPStatusCode(err) == http.StatusForbidden && code == "" {
+	// codeRolePermissionRequired and codeRoleObjectPermissionRequired are the coded
+	// shape of the same role-gate refusal the code-less 403 below has always meant—
+	// widen the guard rather than duplicate the five gate-specific messages.
+	if utils.HTTPStatusCode(err) == http.StatusForbidden && isRoleGateCode(code) {
 		switch {
 		case gate == gateUserRead:
 			return rewrite(err, "reading another account's effective permissions requires the user:read permission on that account; your own are always readable")
@@ -105,6 +130,44 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	}
 
 	return err
+}
+
+// isRoleGateCode reports whether code is compatible with the per-gate 403 guidance
+// above: either no code at all (the legacy DRF {"detail": ...} refusal every
+// call site here predates) or one of the role gate's two coded refusals, whose
+// payload states no human detail and means exactly what the code-less 403
+// always meant.
+func isRoleGateCode(code string) bool {
+	switch code {
+	case "", codeRolePermissionRequired, codeRoleObjectPermissionRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// permissionDeniedMessage renders codePermissionDenied, the troubleshoot read's
+// refusal. Every other call site of that code is a read (user_permission_list,
+// user_permission_cani), where "that is not an account you may read" holds—but
+// describeRBACError is reachable from the role-write gate too, and that wording
+// would misdescribe a write refusal as a visibility problem.
+func permissionDeniedMessage(gate rbacGate) string {
+	if gate == gateRoleWrite {
+		return "you do not have permission to make that change"
+	}
+	return "that is not an account you may read; your own is always readable"
+}
+
+// tokenScopeMissingMessage names the scope(s) the token lacks, read off the
+// payload's "missing" field (a single scope string or a list of them). The
+// server sends no detail on this code, so without this the operator would see
+// only the generic client-side fallback and not which scope to add.
+func tokenScopeMissingMessage(err error) string {
+	_, missing := utils.ParseErrorGateAndMissing(err)
+	if len(missing) == 0 {
+		return "this API token is missing a scope this command requires; widen the token's scopes, or run 'alpacon login' to authenticate through a browser session"
+	}
+	return fmt.Sprintf("this API token is missing the required scope(s): %s; widen the token's scopes, or run 'alpacon login' to authenticate through a browser session", strings.Join(missing, ", "))
 }
 
 func (e *rewritten) Error() string { return e.message }

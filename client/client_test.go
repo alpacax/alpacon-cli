@@ -429,6 +429,125 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+// The RBAC role gate and the token-scope gate now answer a refusal with one of
+// these four codes instead of DRF's bare {"detail": ...}, and send no detail of
+// their own—checkAuthStatus must keep "gate"/"missing" on the error (for
+// cmd/iam's guidance table to read) and fall back to naming the missing
+// scope(s) in the generic message when there is one.
+func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		body        string
+		wantCode    string
+		wantGate    string
+		wantMissing []string
+		wantMessage string
+	}{
+		{
+			name:        "role permission required names the single missing value",
+			body:        `{"code": "rbac_permission_required", "gate": "role", "missing": "role"}`,
+			wantCode:    "rbac_permission_required",
+			wantGate:    "role",
+			wantMissing: []string{"role"},
+			wantMessage: "permission denied: missing scope role",
+		},
+		{
+			name:        "role object permission required without missing falls back generically",
+			body:        `{"code": "rbac_object_permission_required", "gate": "role"}`,
+			wantCode:    "rbac_object_permission_required",
+			wantGate:    "role",
+			wantMissing: nil,
+			wantMessage: "permission denied: you do not have the required privileges for this action",
+		},
+		{
+			name:        "token scope missing joins a list-form missing",
+			body:        `{"code": "api_token_scope_missing", "gate": "token_scope", "missing": ["scope:server:create", "scope:server:read"]}`,
+			wantCode:    "api_token_scope_missing",
+			wantGate:    "token_scope",
+			wantMissing: []string{"scope:server:create", "scope:server:read"},
+			wantMessage: "permission denied: missing scope scope:server:create, scope:server:read",
+		},
+		{
+			name:        "token scope action unresolved without missing falls back generically",
+			body:        `{"code": "api_token_scope_action_unresolved", "gate": "token_scope"}`,
+			wantCode:    "api_token_scope_action_unresolved",
+			wantGate:    "token_scope",
+			wantMissing: nil,
+			wantMessage: "permission denied: you do not have the required privileges for this action",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, tt.wantMessage, err.Error())
+
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.wantCode, code)
+
+			gate, missing := utils.ParseErrorGateAndMissing(err)
+			assert.Equal(t, tt.wantGate, gate)
+			assert.Equal(t, tt.wantMissing, missing)
+		})
+	}
+}
+
+// Every one of these codes is documented as never carrying a "detail"—but if a
+// future response does, the existing rule still applies: the server's human
+// text wins over any client-side rendering of "missing".
+func TestSendRequest_403DetailStillWinsOverMissing(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "api_token_scope_missing", "gate": "token_scope", "missing": "scope:server:create", "detail": "custom detail"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.ErrorContains(t, err, "custom detail")
+	assert.NotContains(t, err.Error(), "missing scope")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "api_token_scope_missing", code)
+	gate, missing := utils.ParseErrorGateAndMissing(err)
+	assert.Equal(t, "token_scope", gate)
+	assert.Equal(t, []string{"scope:server:create"}, missing)
+}
+
+// A 405/429 never reaches checkAuthStatus (401/403 only), so parseAPIError is
+// what must keep gate/missing for those—the same struct field, populated on a
+// different path.
+func TestSendRequest_429KeepsGateAndMissing(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code": "api_token_scope_missing", "gate": "token_scope", "missing": ["scope:server:create"]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusTooManyRequests, utils.HTTPStatusCode(err))
+
+	gate, missing := utils.ParseErrorGateAndMissing(err)
+	assert.Equal(t, "token_scope", gate)
+	assert.Equal(t, []string{"scope:server:create"}, missing)
+}
+
 func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	t.Parallel()
 	callCount := 0
