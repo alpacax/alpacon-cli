@@ -99,25 +99,18 @@ func RequestServerAction(ac *client.AlpaconClient, serverName, action string, fo
 }
 
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
-	params := map[string]string{
-		"name": serverName,
-	}
-	body, err := ac.SendGetRequest(utils.BuildURL(serverURL, "", params))
+	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
+		Endpoint:    serverURL,
+		FilterKey:   "name",
+		Name:        serverName,
+		BlankMsg:    "server name is required",
+		NotFoundMsg: "no server found with the given name",
+	})
 	if err != nil {
 		return "", err
 	}
 
-	var response api.ListResponse[ServerDetails]
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		return "", err
-	}
-
-	if response.Count == 0 {
-		return "", errors.New("no server found with the given name")
-	}
-
-	return response.Results[0].ID, nil
+	return result.ID, nil
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).

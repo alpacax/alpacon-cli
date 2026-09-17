@@ -14,6 +14,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetServerList_PaginationBug(t *testing.T) {
@@ -94,28 +96,49 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 	}
 }
 
+// TestGetServerIDByName puts the decoy first, so a dropped or wrong-key filter answers with it.
 func TestGetServerIDByName(t *testing.T) {
 	t.Parallel()
+	servers := []ServerDetails{
+		{ID: "id-first", Name: "first-server"},
+		{ID: "id-target", Name: "web-editor"},
+	}
+
 	tests := []struct {
 		name       string
 		serverName string
-		count      int
 		wantID     string
 		wantErr    bool
+		wantCall   bool
 	}{
-		{"found", "my-server", 1, "server-uuid-abc", false},
-		{"not found", "missing-server", 0, "", true},
+		{"found", "web-editor", "id-target", false, true},
+		{"padded name", "  web-editor  ", "id-target", false, true},
+		{"not found", "ghost-server", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []ServerDetails
-				if tt.count > 0 {
-					results = append(results, ServerDetails{ID: tt.wantID, Name: tt.serverName})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := servers
+				if filter != "" {
+					results = nil
+					for _, s := range servers {
+						if s.Name == filter {
+							results = append(results, s)
+						}
+					}
 				}
-				resp := api.ListResponse[ServerDetails]{Count: tt.count, Results: results}
+
 				w.Header().Set("Content-Type", "application/json")
+				resp := api.ListResponse[ServerDetails]{Count: len(results), Results: results}
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
 			defer ts.Close()
@@ -124,17 +147,16 @@ func TestGetServerIDByName(t *testing.T) {
 			id, err := GetServerIDByName(ac, tt.serverName)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if strings.TrimSpace(tt.serverName) == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package token
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -34,11 +35,9 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 	serverName, _ := cmd.Flags().GetString("server")
 	serversCSV, _ := cmd.Flags().GetString("servers")
 
-	if serverName == "" && serversCSV == "" {
-		utils.CliErrorWithExit("One of --server or --servers is required.")
-	}
-	if serverName != "" && serversCSV != "" {
-		utils.CliErrorWithExit("Use either --server or --servers, not both.")
+	serverName, serversCSV, err := validateServerAclFlags(serverName, serversCSV)
+	if err != nil {
+		utils.CliErrorWithExit("%s.", err)
 	}
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -83,4 +82,20 @@ func runServerAclAdd(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Failed to bulk-add server ACLs: %v.", err)
 	}
 	utils.CliSuccess("Server ACLs added: token %s can access [%s]", tokenArg, strings.Join(names, ", "))
+}
+
+// validateServerAclFlags trims both values so a whitespace-only flag counts as absent, and
+// hands the trimmed ones back so the caller resolves the same name it validated.
+func validateServerAclFlags(serverName, serversCSV string) (string, string, error) {
+	serverName = strings.TrimSpace(serverName)
+	serversCSV = strings.TrimSpace(serversCSV)
+
+	if serverName == "" && serversCSV == "" {
+		return serverName, serversCSV, errors.New("one of --server or --servers is required")
+	}
+	if serverName != "" && serversCSV != "" {
+		return serverName, serversCSV, errors.New("use either --server or --servers, not both")
+	}
+
+	return serverName, serversCSV, nil
 }

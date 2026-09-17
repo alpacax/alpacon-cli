@@ -14,6 +14,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	configpkg "github.com/alpacax/alpacon-cli/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoginAndSaveCredentialsTokenPreservesTargetMetadata(t *testing.T) {
@@ -189,27 +191,48 @@ func TestGetAPITokenList_Pagination(t *testing.T) {
 	}
 }
 
+// TestGetAPITokenIDByName puts the decoy first, so a dropped or wrong-key filter answers with it.
 func TestGetAPITokenIDByName(t *testing.T) {
 	t.Parallel()
+	tokens := []APITokenResponse{
+		{ID: "id-first", Name: "first-token"},
+		{ID: "token-uuid-abc", Name: "ci-token"},
+	}
+
 	tests := []struct {
 		name      string
 		tokenName string
-		count     int
 		wantID    string
 		wantErr   bool
+		wantCall  bool
 	}{
-		{"found", "ci-token", 1, "token-uuid-abc", false},
-		{"not found", "ghost-token", 0, "", true},
+		{"found", "ci-token", "token-uuid-abc", false, true},
+		{"padded name", "  ci-token  ", "token-uuid-abc", false, true},
+		{"not found", "ghost-token", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []APITokenResponse
-				if tt.count > 0 {
-					results = append(results, APITokenResponse{ID: tt.wantID, Name: tt.tokenName})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := tokens
+				if filter != "" {
+					results = nil
+					for _, tok := range tokens {
+						if tok.Name == filter {
+							results = append(results, tok)
+						}
+					}
 				}
-				resp := api.ListResponse[APITokenResponse]{Count: tt.count, Results: results}
+
+				resp := api.ListResponse[APITokenResponse]{Count: len(results), Results: results}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
@@ -219,17 +242,16 @@ func TestGetAPITokenIDByName(t *testing.T) {
 			id, err := GetAPITokenIDByName(ac, tt.tokenName)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if strings.TrimSpace(tt.tokenName) == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
@@ -251,6 +273,7 @@ func TestResolveTokenID(t *testing.T) {
 		wantErr  bool
 	}{
 		{"uuid fast-path — no HTTP request", validUUID, 0, validUUID, false, false},
+		{"padded uuid fast-path — no HTTP request", "  " + validUUID + "  ", 0, validUUID, false, false},
 		{"name found", tokenName, 1, tokenID, true, false},
 		{"name not found", "ghost-token", 0, "", true, true},
 	}

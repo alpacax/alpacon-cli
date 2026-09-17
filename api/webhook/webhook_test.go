@@ -12,6 +12,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetWebhookList_Pagination(t *testing.T) {
@@ -69,27 +71,48 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 	}
 }
 
+// TestGetWebhookIDByName puts the decoy first, so a dropped or wrong-key filter answers with it.
 func TestGetWebhookIDByName(t *testing.T) {
 	t.Parallel()
+	webhooks := []WebhookResponse{
+		{ID: "id-first", Name: "first-webhook"},
+		{ID: "wh-uuid-abc", Name: "alert-webhook"},
+	}
+
 	tests := []struct {
 		name        string
 		webhookName string
-		count       int
 		wantID      string
 		wantErr     bool
+		wantCall    bool
 	}{
-		{"found", "alert-webhook", 1, "wh-uuid-abc", false},
-		{"not found", "ghost-webhook", 0, "", true},
+		{"found", "alert-webhook", "wh-uuid-abc", false, true},
+		{"padded name", "  alert-webhook  ", "wh-uuid-abc", false, true},
+		{"not found", "ghost-webhook", "", true, true},
+		{"whitespace only name", "   ", "", true, false},
+		{"empty name", "", "", true, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var called atomic.Bool
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var results []WebhookResponse
-				if tt.count > 0 {
-					results = append(results, WebhookResponse{ID: tt.wantID, Name: tt.webhookName})
+				called.Store(true)
+				filter := strings.TrimSpace(r.URL.Query().Get("name"))
+
+				results := webhooks
+				if filter != "" {
+					results = nil
+					for _, wh := range webhooks {
+						if wh.Name == filter {
+							results = append(results, wh)
+						}
+					}
 				}
-				resp := api.ListResponse[WebhookResponse]{Count: tt.count, Results: results}
+
+				resp := api.ListResponse[WebhookResponse]{Count: len(results), Results: results}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(resp)
 			}))
@@ -99,17 +122,16 @@ func TestGetWebhookIDByName(t *testing.T) {
 			id, err := GetWebhookIDByName(ac, tt.webhookName)
 
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got nil")
+				require.Error(t, err)
+				assert.Empty(t, id)
+				if strings.TrimSpace(tt.webhookName) == "" {
+					require.ErrorIs(t, err, api.ErrBlankName)
 				}
 			} else {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				if id != tt.wantID {
-					t.Errorf("expected id %q, got %q", tt.wantID, id)
-				}
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantID, id)
 			}
+			assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 		})
 	}
 }
