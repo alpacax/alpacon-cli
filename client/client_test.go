@@ -445,12 +445,14 @@ func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "role permission required names the single missing value",
+			// The role gate's "missing" names a permission/role, not a scope, so the
+			// fallback must not claim a "scope" is missing.
+			name:        "role permission required names the single missing value without calling it a scope",
 			body:        `{"code": "rbac_permission_required", "gate": "role", "missing": "role"}`,
 			wantCode:    "rbac_permission_required",
 			wantGate:    "role",
 			wantMissing: []string{"role"},
-			wantMessage: "permission denied: missing scope role",
+			wantMessage: "permission denied: missing role",
 		},
 		{
 			name:        "role object permission required without missing falls back generically",
@@ -475,6 +477,16 @@ func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 			wantGate:    "token_scope",
 			wantMissing: nil,
 			wantMessage: "permission denied: you do not have the required privileges for this action",
+		},
+		{
+			// No "gate" at all—an unknown future code with a "missing" this CLI
+			// cannot classify—must default to neutral wording, not scope wording.
+			name:        "missing without a gate stays neutral",
+			body:        `{"code": "some_future_code", "missing": "widget:create"}`,
+			wantCode:    "some_future_code",
+			wantGate:    "",
+			wantMissing: []string{"widget:create"},
+			wantMessage: "permission denied: missing widget:create",
 		},
 	}
 

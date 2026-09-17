@@ -37,6 +37,13 @@ const (
 	// resumes the session when the connection drops, so closing the connection
 	// for a transient reason does not take the session with it.
 	CapabilityWebsocketReconnect = "websocket-reconnect"
+
+	// serverGateTokenScope is the "gate" value alpacon-server sends on a
+	// token-scope refusal (api_token_scope_missing, api_token_scope_action_unresolved).
+	// It is the only gate whose "missing" is a scope string; every other gate's
+	// "missing" names a permission or role, so authStatusMessage's fallback
+	// message only uses "scope" wording when the gate is this one.
+	serverGateTokenScope = "token_scope"
 )
 
 // refreshAccessToken is a test seam so a unit test can drive the stale-token
@@ -164,7 +171,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	}
 	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body)
 	return &apiError{
-		message:    authStatusMessage(statusCode, code, detail, hasDetail, missing),
+		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing),
 		code:       code,
 		source:     source,
 		gate:       gate,
@@ -187,7 +194,7 @@ func isJSONObject(body []byte) bool {
 // clear message. A code-less 401 is the only case that suggests re-login—an
 // authenticated user who merely needs MFA, or who hit a policy denial, must not
 // be told to log in again.
-func authStatusMessage(statusCode int, code, detail string, hasDetail bool, missing []string) string {
+func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized && code == "" {
 			return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
@@ -208,12 +215,19 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, miss
 		// no-raw-code contract that TestSendRequest_403CodeWithoutDetailKeepsCodeSource guards.
 		return "request denied by server"
 	}
-	// A coded 403 with no detail but a stated "missing" scope: name it rather than
-	// fall back to the generic line. A caller with more specific guidance for its
-	// own code (cmd/iam's RBAC gates) overrides this; this is the floor for every
-	// other caller that just surfaces the error as-is.
+	// A coded 403 with no detail but a stated "missing": name it rather than fall
+	// back to the generic line. A caller with more specific guidance for its own
+	// code (cmd/iam's RBAC gates) overrides this; this is the floor for every
+	// other caller that just surfaces the error as-is. "missing" is not always a
+	// scope—the role gate's "missing" names a permission/role, not a
+	// "scope:..." string—so only the token-scope gate gets scope wording; every
+	// other gate (including an absent one, from a server this CLI does not yet
+	// know) gets gate-neutral wording instead.
 	if len(missing) > 0 {
-		return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
+		if gate == serverGateTokenScope {
+			return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
+		}
+		return fmt.Sprintf("permission denied: missing %s", strings.Join(missing, ", "))
 	}
 	return "permission denied: you do not have the required privileges for this action"
 }
