@@ -229,6 +229,23 @@ type statusOnlyError struct{ status int }
 func (e statusOnlyError) Error() string       { return "forbidden" }
 func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
+// codedForbiddenError is a 403 that also carries the code/gate/missing a real
+// alpacon-server RBAC or token-scope refusal sends—everything the new routing
+// in describeRBACError reads, without round-tripping through an httptest
+// server and the client package's JSON parsing to get there.
+type codedForbiddenError struct {
+	code    string
+	gate    string
+	missing []string
+}
+
+func (e codedForbiddenError) Error() string          { return "forbidden" }
+func (e codedForbiddenError) HTTPStatusCode() int    { return http.StatusForbidden }
+func (e codedForbiddenError) ErrorCode() string      { return e.code }
+func (e codedForbiddenError) ErrorSource() string    { return "" }
+func (e codedForbiddenError) ErrorGate() string      { return e.gate }
+func (e codedForbiddenError) ErrorMissing() []string { return e.missing }
+
 func TestDescribeRBACError_CodelessForbidden(t *testing.T) {
 	t.Parallel()
 	bearer := &client.AlpaconClient{}
@@ -417,6 +434,102 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	got := describeRBACError(ac, gateRoleRead, coded)
 	require.Error(t, got)
 	assert.Contains(t, got.Error(), "not an account you may read")
+}
+
+// codePermissionDenied's wording assumed a read (user_permission_list,
+// user_permission_cani); describeRBACError is reachable from the role-write
+// gate too, where "that is not an account you may read" misdescribes a write
+// refusal as a visibility problem.
+func TestDescribeRBACError_MapsPermissionDeniedForWrite(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{}
+	ac.SetAccessToken("bearer-token")
+	coded := fmt.Errorf("request failed with status 403: {\"code\": %q}", codePermissionDenied)
+
+	got := describeRBACError(ac, gateRoleWrite, coded)
+	require.Error(t, got)
+	assert.NotContains(t, got.Error(), "not an account you may read")
+	assert.Contains(t, got.Error(), "permission to make that change")
+}
+
+// alpacon-server's role gate now answers a refusal with a coded 403 instead of
+// a bare {"detail": ...}. The guidance must not change with it: a coded
+// refusal and the code-less one it replaces name exactly the same fix, for
+// every gate and both credential kinds.
+func TestDescribeRBACError_CodedRoleGateMatchesCodelessWording(t *testing.T) {
+	t.Parallel()
+	bearer := &client.AlpaconClient{}
+	bearer.SetAccessToken("bearer-token")
+	apiToken := &client.AlpaconClient{Token: "alpat-token"}
+
+	for _, code := range []string{codeRolePermissionRequired, codeRoleObjectPermissionRequired} {
+		t.Run(code, func(t *testing.T) {
+			coded := codedForbiddenError{code: code}
+			codeless := statusOnlyError{status: http.StatusForbidden}
+
+			for _, gate := range []rbacGate{gateRoleRead, gateRoleWrite, gateAuditRead, gateUserRead, gatePermissionIntrospect} {
+				gotCoded := describeRBACError(apiToken, gate, coded)
+				gotCodeless := describeRBACError(apiToken, gate, codeless)
+				require.Error(t, gotCoded)
+				require.Error(t, gotCodeless)
+				assert.Equal(t, gotCodeless.Error(), gotCoded.Error())
+			}
+
+			// The role-write wording also branches on IsBearerAuth; cover a bearer too.
+			gotCoded := describeRBACError(bearer, gateRoleWrite, coded)
+			gotCodeless := describeRBACError(bearer, gateRoleWrite, codeless)
+			assert.Equal(t, gotCodeless.Error(), gotCoded.Error())
+		})
+	}
+}
+
+func TestDescribeRBACError_TokenScopeMissingNamesTheScope(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{Token: "alpat-token"}
+
+	tests := []struct {
+		name    string
+		missing []string
+		want    string
+	}{
+		{name: "single scope", missing: []string{"scope:server:create"}, want: "scope:server:create"},
+		{
+			name:    "list-form missing joins every scope",
+			missing: []string{"scope:server:create", "scope:server:read"},
+			want:    "scope:server:create, scope:server:read",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coded := codedForbiddenError{code: codeTokenScopeMissing, gate: "token_scope", missing: tt.missing}
+			got := describeRBACError(ac, gateRoleRead, coded)
+			require.Error(t, got)
+			assert.Contains(t, got.Error(), tt.want)
+			assert.Contains(t, got.Error(), "widen the token's scopes")
+		})
+	}
+}
+
+func TestDescribeRBACError_TokenScopeMissingWithoutMissingFallsBackGenerically(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{Token: "alpat-token"}
+	coded := codedForbiddenError{code: codeTokenScopeMissing, gate: "token_scope"}
+
+	got := describeRBACError(ac, gateRoleRead, coded)
+	require.Error(t, got)
+	assert.Contains(t, got.Error(), "missing a scope this command requires")
+}
+
+func TestDescribeRBACError_TokenScopeActionUnresolved(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{Token: "alpat-token"}
+	coded := codedForbiddenError{code: codeTokenScopeActionUnresolved, gate: "token_scope"}
+
+	got := describeRBACError(ac, gateRoleRead, coded)
+	require.Error(t, got)
+	assert.Contains(t, got.Error(), "cannot be used for this command")
+	assert.Contains(t, got.Error(), "explicit scope")
 }
 
 func TestDescribeRBACError_KeepsTheCauseInTheChain(t *testing.T) {
