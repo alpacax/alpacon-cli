@@ -1420,8 +1420,6 @@ func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	t.Parallel()
-	// Any error from the status endpoint is fatal: return immediately
-	// without polling again.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
