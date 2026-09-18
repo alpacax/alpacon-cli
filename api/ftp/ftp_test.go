@@ -791,7 +791,7 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 	}
 
 	// Use a very short timeout to make the test fast
-	success, _, err := PollTransferStatus(ac, "upload", "test-id", 3*time.Second)
+	success, _, err := PollTransferStatus(ac, "upload", "test-id", 1*time.Second)
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
