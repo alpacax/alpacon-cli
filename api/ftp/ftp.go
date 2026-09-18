@@ -126,7 +126,7 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 		}
 		var statusResp TransferStatusResponse
 		if err := json.Unmarshal(respBody, &statusResp); err != nil {
-			return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+			return false, "", fmt.Errorf("failed to parse transfer status response: %w", err)
 		}
 		if statusResp.Success != nil {
 			return *statusResp.Success, statusResp.Message, nil
