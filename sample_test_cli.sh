@@ -337,7 +337,7 @@ echo "         8. CLEANUP AND SUMMARY"
 echo "=========================================="
 
 # Clean up additional test files
-rm -f "$LOCAL_PATH/$TEST_FILE
+rm -f "$LOCAL_PATH/$TEST_FILE"
 rm -f "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt"
 rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE"
 

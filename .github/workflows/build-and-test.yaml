@@ -65,6 +65,10 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+      - name: Sample CLI script parses as Bash
+        if: runner.os == 'Linux'
+        run: bash -n sample_test_cli.sh
+
       - name: Build
         run: go build -v .
 
