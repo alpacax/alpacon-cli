@@ -66,12 +66,12 @@ cleanup() {
 
     # Remove remote test files and folders
     log_info "Cleaning up remote test files..."
-    alpacon exec $SERVER_NAME "rm -f $REMOTE_ROOT_PATH/$TEST_FILE $REMOTE_USER_PATH/$TEST_FILE" 2>/dev/null || true
-    alpacon exec -u root $SERVER_NAME "rm -f $REMOTE_ROOT_PATH/$TEST_FILE" 2>/dev/null || true
+    alpacon exec "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE $REMOTE_USER_PATH/$TEST_FILE" 2>/dev/null || true
+    alpacon exec -u root "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE" 2>/dev/null || true
 
     # Clean up remote test folders
-    alpacon exec $SERVER_NAME "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-    alpacon exec -u root $SERVER_NAME "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
+    alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
+    alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
 }
 
 # Trap to cleanup on exit
@@ -337,7 +337,7 @@ echo "         8. CLEANUP AND SUMMARY"
 echo "=========================================="
 
 # Clean up additional test files
-rm -f "$LOCAL_PATH/$TEST_FILE
+rm -f "$LOCAL_PATH/$TEST_FILE"
 rm -f "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt"
 rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE"
 
@@ -345,10 +345,10 @@ rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TES
 rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
 
 # Remote cleanup
-alpacon exec $SERVER_NAME "rm -f $REMOTE_USER_PATH/test*.txt" 2>/dev/null || true
-alpacon exec $SERVER_NAME "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
-alpacon exec $SERVER_NAME "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-alpacon exec -u root $SERVER_NAME "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
+alpacon exec "$SERVER_NAME" "rm -f $REMOTE_USER_PATH/test*.txt" 2>/dev/null || true
+alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
+alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
+alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
 
 log_success "Test suite completed!"
 echo
