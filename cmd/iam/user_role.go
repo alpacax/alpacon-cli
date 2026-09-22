@@ -21,8 +21,9 @@ var userRoleCmd = &cobra.Command{
 A role binding is immutable—the server has no update path, so changing a user's
 roles means revoking one binding and granting another. Bindings created here are
 workspace-wide, and only workspace-wide bindings decide whether someone is an
-admin or a superuser. Object-scoped bindings such as server:owner appear in
-'alpacon user role ls' but are managed by the owning resource's own command.
+admin or a superuser. Object-scoped bindings, such as a role held on a single
+server, appear in 'alpacon user role ls', but these commands neither grant nor
+revoke them.
 
 Granting 'superuser' also creates a companion 'admin' binding. Revoking
 'superuser' leaves that companion in place—pass --cascade to remove both,
