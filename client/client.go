@@ -44,6 +44,10 @@ const (
 	// "missing" names a permission or role, so authStatusMessage's fallback
 	// message only uses "scope" wording when the gate is this one.
 	serverGateTokenScope = "token_scope"
+
+	// reauthenticateMessage covers a code-less 401 and the two codes whose
+	// remedy is the same: auth_token_missing, auth_authentication_failed.
+	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
 )
 
 // refreshAccessToken is a test seam so a unit test can drive the stale-token
@@ -191,9 +195,9 @@ func isJSONObject(body []byte) bool {
 
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
 // the server's human detail; absent that, a known structured code maps to a
-// clear message. A code-less 401 is the only case that suggests re-login—an
-// authenticated user who merely needs MFA, or who hit a policy denial, must not
-// be told to log in again.
+// clear message. Re-login is suggested only for a code-less 401 or one coded
+// auth_token_missing/auth_authentication_failed—an authenticated user who
+// merely needs MFA, or who hit a policy denial, must not be told to log in again.
 func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized && code == "" {
@@ -231,8 +235,6 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 	}
 	return "permission denied: you do not have the required privileges for this action"
 }
-
-const reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
 // without a human detail to a clear, actionable message.
@@ -824,12 +826,35 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 	return truncateBody(raw), code, source, gate, missing, true
 }
 
-// isEnvelopeOnly reports whether parsed has no keys beyond the shared error envelope.
+// isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
+// string for "code"/"source"/"gate"/"detail", a list of strings for "missing".
 func isEnvelopeOnly(parsed map[string]any) bool {
-	for key := range parsed {
+	for key, value := range parsed {
 		switch key {
-		case "code", "source", "gate", "missing", "detail":
+		case "code", "source", "gate", "detail":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "missing":
+			if !isStringList(value) {
+				return false
+			}
 		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isStringList reports whether v is a JSON array of strings—"missing"'s shape
+// in both the envelope and, ambiguously, a single-string field error's list.
+func isStringList(v any) bool {
+	list, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		if _, ok := item.(string); !ok {
 			return false
 		}
 	}

@@ -487,6 +487,23 @@ func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) 
 	assert.Contains(t, err.Error(), "name: This field is required.")
 }
 
+func TestSendRequest_ValidationBodyWithCodeAndSourceFieldKeepsItsMessage(t *testing.T) {
+	t.Parallel()
+	// "source" is a real serializer field here too; a "code" alongside it must
+	// not make isEnvelopeOnly mistake the field error for the refusal envelope.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "validation_error", "source": ["This field is required."]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source: This field is required.")
+}
+
 func TestSendRequest_RefusalBodyWithGateAndMissingIsEnvelopeOnly(t *testing.T) {
 	t.Parallel()
 	// gate/missing ride only on refusals; 402 keeps this off checkAuthStatus's 401/403 path.
@@ -1229,6 +1246,29 @@ func TestSendRequest_CodedUnauthorizedIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, utils.AuthMFARequired, code, "the code must still reach the MFA handler")
+}
+
+// auth_authentication_failed is a deliberate Auth0 rejection, not a stale
+// token—unlike newTestClient's legacy path, a bearer client actually reaches
+// isStaleCredential, so this is what proves it does not renew here either.
+func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_authentication_failed"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 0, *renewals, "a coded 401 is the server's decision, not a stale credential")
+	assert.Equal(t, 1, requests)
 }
 
 // A service token or a legacy API key has no refresh token behind it, so a
