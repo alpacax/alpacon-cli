@@ -205,7 +205,7 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return detail
 	}
-	if msg, ok := authStatusCodeMessage(code); ok {
+	if msg, ok := authStatusCodeMessage(statusCode, code); ok {
 		return msg
 	}
 	if statusCode == http.StatusUnauthorized {
@@ -237,22 +237,27 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
-// without a human detail to a clear, actionable message.
-func authStatusCodeMessage(code string) (string, bool) {
+// without a human detail to a clear, actionable message. auth_token_missing and
+// auth_authentication_failed are 401-only server codes; on a 403 they fall
+// through to the generic permission-denied floor instead of a login hint.
+func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
 		return "multi-factor authentication required—complete MFA to continue", true
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
-		return reauthenticateMessage, true
+		if statusCode == http.StatusUnauthorized {
+			return reauthenticateMessage, true
+		}
 	}
 	return "", false
 }
 
-// parseAuthStatusErrorPayload returns ok=true only with a clean "detail" message;
-// code/source/gate/missing are returned regardless so the WorkSession gate can
-// route to exit 3 and a coded refusal without detail still carries what it can.
+// parseAuthStatusErrorPayload returns ok=true with a "detail" message or with
+// rendered field_errors messages; code/source/gate/missing are returned
+// regardless so the WorkSession gate can route to exit 3 and a coded refusal
+// without either still carries what it can.
 func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
 	message, code, source, gate, missing, ok = parseAPIErrorPayload(body)
 	if !ok || message == "" {
@@ -262,10 +267,13 @@ func parseAuthStatusErrorPayload(body []byte) (message string, code string, sour
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", code, source, gate, missing, false
 	}
-	if stringField(parsed, "detail") == "" {
-		return "", code, source, gate, missing, false
+	if stringField(parsed, "detail") != "" {
+		return message, code, source, gate, missing, true
 	}
-	return message, code, source, gate, missing, true
+	if len(fieldErrorMessages(parsed["field_errors"])) > 0 {
+		return message, code, source, gate, missing, true
+	}
+	return "", code, source, gate, missing, false
 }
 
 // SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
@@ -752,7 +760,8 @@ func withRetryAfter(err error, header http.Header) error {
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
-// Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
+// Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
+// {"field_errors": {"path": [{"code", "message"}, ...]}}
 func parseAPIError(body []byte) error {
 	message, code, source, gate, missing, _ := parseAPIErrorPayload(body)
 	return newAPIError(message, code, source, gate, missing)
@@ -785,12 +794,23 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 		return codeOnlyMessage(code), code, source, gate, missing, true
 	}
 
-	// Case 2: field validation errors {"field": ["msg1", ...]}. The code stays out;
-	// callers read it via ErrorCode(). Keys are sorted for deterministic output.
+	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
+		return strings.Join(messages, "; "), code, source, gate, missing, true
+	}
+
+	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
+	// value is the envelope's string code stays out; a list "code" field is a
+	// real serializer field and is rendered like any other. Keys are sorted
+	// for deterministic output.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {
-		if field == "code" {
+		if field == "field_errors" {
 			continue
+		}
+		if field == "code" {
+			if _, isString := parsed[field].(string); isString {
+				continue
+			}
 		}
 		fields = append(fields, field)
 	}
@@ -827,7 +847,8 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 }
 
 // isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
-// string for "code"/"source"/"gate"/"detail", a list of strings for "missing".
+// string for "code"/"source"/"gate"/"detail", and for "missing" either a
+// single scope string or a list of them.
 func isEnvelopeOnly(parsed map[string]any) bool {
 	for key, value := range parsed {
 		switch key {
@@ -836,6 +857,9 @@ func isEnvelopeOnly(parsed map[string]any) bool {
 				return false
 			}
 		case "missing":
+			if _, ok := value.(string); ok {
+				continue
+			}
 			if !isStringList(value) {
 				return false
 			}
@@ -846,8 +870,8 @@ func isEnvelopeOnly(parsed map[string]any) bool {
 	return true
 }
 
-// isStringList reports whether v is a JSON array of strings—"missing"'s shape
-// in both the envelope and, ambiguously, a single-string field error's list.
+// isStringList reports whether v is a JSON array of strings, "missing"'s
+// list shape in the envelope.
 func isStringList(v any) bool {
 	list, ok := v.([]any)
 	if !ok {
@@ -859,6 +883,46 @@ func isStringList(v any) bool {
 		}
 	}
 	return true
+}
+
+// fieldErrorMessages renders a "field_errors" object—{"path": [{"code",
+// "message"}, ...]}—into sorted "path: message" strings, "non_field_errors"
+// bare. A malformed entry contributes nothing.
+func fieldErrorMessages(raw any) []string {
+	fieldErrors, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	paths := make([]string, 0, len(fieldErrors))
+	for path := range fieldErrors {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	var messages []string
+	for _, path := range paths {
+		entries, ok := fieldErrors[path].([]any)
+		if !ok {
+			continue
+		}
+		for _, entry := range entries {
+			fields, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			message := stringField(fields, "message")
+			if message == "" {
+				continue
+			}
+			if path == "non_field_errors" {
+				messages = append(messages, message)
+			} else {
+				messages = append(messages, fmt.Sprintf("%s: %s", path, message))
+			}
+		}
+	}
+	return messages
 }
 
 // codeOnlyMessage renders a code sent with no detail or field errors.

@@ -318,6 +318,25 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
+	t.Parallel()
+	// A code-only envelope with field_errors and no "detail" must still surface
+	// the field error message rather than falling back to the generic floor.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"permission_denied","field_errors":{"non_field_errors":[{"code":"permission_denied","message":"You cannot edit this server."}]}}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.ErrorContains(t, err, "You cannot edit this server.")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "permission_denied", code)
+}
+
 func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 	t.Parallel()
 	// An ACL refusal (exec, websh, cp) arrives as a bare {"code": ...} 403—the
@@ -539,6 +558,90 @@ func TestSendRequest_RefusalBodyWithMissingButNoGateIsEnvelopeOnly(t *testing.T)
 	assert.NotContains(t, err.Error(), "missing:")
 }
 
+func TestSendRequest_RefusalBodyWithStringMissingIsEnvelopeOnly(t *testing.T) {
+	t.Parallel()
+	// "missing" may arrive as a single scope string rather than a list.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code": "api_rate_limited", "gate": "token_scope", "missing": "scope:server:create"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "too many requests—please try again later", err.Error())
+
+	var apiErr interface{ ErrorMissing() []string }
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, []string{"scope:server:create"}, apiErr.ErrorMissing())
+}
+
+func TestSendRequest_FieldErrorsRenderSortedMessages(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "required", "field_errors": {"username": [{"code": "required", "message": "This field is required."}], "non_field_errors": [{"code": "invalid", "message": "Invalid combination."}], "websh_preferences.scrollback": [{"code":"max_value","message":"Ensure this value is less than or equal to 10000."}]}}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "Invalid combination.; username: This field is required.; websh_preferences.scrollback: Ensure this value is less than or equal to 10000.", err.Error())
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "required", code)
+}
+
+func TestSendRequest_MalformedFieldErrorsFallBackToCodeOnlyMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "required", "field_errors": {"username": ["not an object"], "empty": [{"code": "required", "message": ""}]}}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "request failed (code: required)", err.Error())
+}
+
+func TestSendRequest_DetailWinsOverFieldErrors(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail": "Custom message.", "code": "required", "field_errors": {"username": [{"code": "required", "message": "This field is required."}]}}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "Custom message.", err.Error())
+}
+
+func TestSendRequest_StringCodeFieldRendersAsFlatField(t *testing.T) {
+	t.Parallel()
+	// A legacy/direct view can send a flat field literally named "code".
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": ["This field is required."]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "code: This field is required.", err.Error())
+}
+
 func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
 	t.Parallel()
 	for _, code := range []string{"auth_token_missing", "auth_authentication_failed"} {
@@ -674,6 +777,32 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 	code, source := utils.ParseErrorResponse(err)
 	assert.Equal(t, "some_policy_denial", code)
 	assert.Equal(t, "command", source)
+}
+
+func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
+	t.Parallel()
+	// auth_token_missing/auth_authentication_failed only ever arrive on a 401;
+	// a 403 carrying either must not tell the user to log in again.
+	for _, code := range []string{"auth_token_missing", "auth_authentication_failed"} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
+			assert.NotContains(t, err.Error(), "alpacon login")
+
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
 }
 
 // The RBAC role gate and the token-scope gate now answer a refusal with one of
@@ -1170,7 +1299,6 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
-// The same rejection coded auth_token_missing must still renew.
 func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
