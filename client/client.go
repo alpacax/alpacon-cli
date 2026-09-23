@@ -206,7 +206,7 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 	}
 	if statusCode == http.StatusUnauthorized {
 		if code == "" {
-			return "authentication failed: please run 'alpacon login' again"
+			return reauthenticateMessage
 		}
 		// A coded 401 is a deliberate server decision, not a stale token; do not
 		// mislabel it as an authentication failure or suggest re-login.
@@ -232,6 +232,8 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 	return "permission denied: you do not have the required privileges for this action"
 }
 
+const reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
+
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
 // without a human detail to a clear, actionable message.
 func authStatusCodeMessage(code string) (string, bool) {
@@ -240,6 +242,8 @@ func authStatusCodeMessage(code string) (string, bool) {
 		return "multi-factor authentication required—complete MFA to continue", true
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
+	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
+		return reauthenticateMessage, true
 	}
 	return "", false
 }
@@ -411,13 +415,13 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // plausibly move. alpacon-server's Auth0 authenticator returns no user on every
 // bearer rejection, whether it absorbs an exception or declines outright
 // (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
-// raises DRF's NotAuthenticated—which no branch of the server's
-// error_code_handler rewrites, leaving a 401 with a detail and no code. An
-// expired token lands there, and so does every other Auth0-bearer rejection: a
-// workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
+// raises DRF's NotAuthenticated—a 401 older servers leave uncoded and newer ones
+// code auth_token_missing. An expired token lands there, and so does every other
+// Auth0-bearer rejection: a workspace-claim mismatch, the authenticator-level MFA
+// gate, an uninvited user.
 // Those cost one grant and one replay before surfacing the same error, and the
-// MFA case a refresh may genuinely fix. So the empty code slot is not proof of
-// expiry—it is the only 401 worth spending one retry on, because a coded refusal
+// MFA case a refresh may genuinely fix. So that 401 is not proof of
+// expiry—it is the only one worth spending one retry on, because a coded refusal
 // (MFA required, IP not allowed, token ACL) names what it wants and a new token
 // is not it.
 func isStaleCredential(err error) bool {
@@ -433,7 +437,7 @@ func isStaleCredential(err error) bool {
 		return false
 	}
 	code, _ := utils.ParseErrorResponse(err)
-	return code == ""
+	return code == "" || code == utils.AuthTokenMissing
 }
 
 // replayableClone clones req with a rewound body, reporting false when the body
@@ -774,10 +778,18 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 		return detail, code, source, gate, missing, true
 	}
 
-	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
-	// Sort keys for deterministic output order
+	// A refusal envelope carries no field errors; gate/missing are not validation messages.
+	if code != "" && isEnvelopeOnly(parsed) {
+		return codeOnlyMessage(code), code, source, gate, missing, true
+	}
+
+	// Case 2: field validation errors {"field": ["msg1", ...]}. The code stays out;
+	// callers read it via ErrorCode(). Keys are sorted for deterministic output.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {
+		if field == "code" {
+			continue
+		}
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
@@ -804,8 +816,41 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 		return strings.Join(messages, "; "), code, source, gate, missing, true
 	}
 
+	if code != "" {
+		return codeOnlyMessage(code), code, source, gate, missing, true
+	}
+
 	// Fallback: return truncated raw body
 	return truncateBody(raw), code, source, gate, missing, true
+}
+
+// isEnvelopeOnly reports whether parsed has no keys beyond the shared error envelope.
+func isEnvelopeOnly(parsed map[string]any) bool {
+	for key := range parsed {
+		switch key {
+		case "code", "source", "gate", "missing", "detail":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// codeOnlyMessage renders a code sent with no detail or field errors.
+// It serves every status, so it carries no denial-specific wording.
+func codeOnlyMessage(code string) string {
+	switch code {
+	case utils.APINotFound:
+		return "the requested resource was not found"
+	case utils.APIRateLimited:
+		return "too many requests—please try again later"
+	case utils.APINotAcceptable:
+		return "the server cannot produce a response in the format requested"
+	case utils.APIUnsupportedMediaType:
+		return "the server does not support the request's content type"
+	default:
+		return fmt.Sprintf("request failed (code: %s)", code)
+	}
 }
 
 // parseGateAndMissing extracts the optional "gate" and "missing" fields a coded

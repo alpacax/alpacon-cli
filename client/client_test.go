@@ -364,6 +364,236 @@ func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T)
 	assert.NotContains(t, err.Error(), "token access control")
 }
 
+func TestSendRequest_CodeOnlyBodyRendersReadableMessage(t *testing.T) {
+	t.Parallel()
+	// Each code is paired with the status DRF actually sends it on.
+	tests := []struct {
+		name       string
+		statusCode int
+		code       string
+		wantText   string
+	}{
+		{"api_not_found on 404", http.StatusNotFound, "api_not_found", "not found"},
+		{"api_rate_limited on 429", http.StatusTooManyRequests, "api_rate_limited", "too many requests"},
+		{"api_not_acceptable on 406", http.StatusNotAcceptable, "api_not_acceptable", "cannot produce a response"},
+		{"api_unsupported_media_type on 415", http.StatusUnsupportedMediaType, "api_unsupported_media_type", "content type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.statusCode)
+				_, _ = w.Write([]byte(`{"code": "` + tt.code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantText)
+			assert.NotContains(t, err.Error(), "code: "+tt.code)
+
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+		})
+	}
+}
+
+func TestSendRequest_UnknownCodeOnlyBodyNamesTheCodeInAFallback(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "some_future_code"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request failed")
+	assert.Contains(t, err.Error(), "some_future_code")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "some_future_code", code)
+}
+
+func TestSendRequest_400DetailWinsOverCode(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "api_not_found", "detail": "server-provided detail"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "server-provided detail", err.Error())
+}
+
+func TestSendRequest_FieldErrorsUnaffectedByCodeMapping(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"username": ["This field is required."], "non_field_errors": ["Invalid combination."]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "username: This field is required.")
+	assert.Contains(t, err.Error(), "Invalid combination.")
+}
+
+func TestSendRequest_CodeWithFieldErrorsKeepsFieldMessagesVisible(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "validation_error", "username": ["This field is required."]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "username: This field is required.")
+	assert.NotContains(t, err.Error(), "validation_error")
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "validation_error", code)
+}
+
+func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) {
+	t.Parallel()
+	// "source" is also a real serializer field name, so this is field errors, not the envelope.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"source": ["This field is required."], "name": ["This field is required."]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source: This field is required.")
+	assert.Contains(t, err.Error(), "name: This field is required.")
+}
+
+func TestSendRequest_RefusalBodyWithGateAndMissingIsEnvelopeOnly(t *testing.T) {
+	t.Parallel()
+	// gate/missing ride only on refusals; 402 keeps this off checkAuthStatus's 401/403 path.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "x", "gate": "g", "missing": ["a"]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request failed")
+	assert.NotContains(t, err.Error(), "gate:")
+	assert.NotContains(t, err.Error(), "missing:")
+}
+
+func TestSendRequest_RefusalBodyWithMissingButNoGateIsEnvelopeOnly(t *testing.T) {
+	t.Parallel()
+	// An unknown gate is dropped server-side, so "missing" can arrive alone.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "x", "missing": ["a"]}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "request failed")
+	assert.NotContains(t, err.Error(), "missing:")
+}
+
+func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"auth_token_missing", "auth_authentication_failed"} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, "authentication failed: please run 'alpacon login' again", err.Error())
+
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
+func TestSendRequest_401OtherCodedDenialGetsGenericMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "some_other_denial"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "request denied by server", err.Error())
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "some_other_denial", code)
+}
+
+func TestSendRequest_EmptyBodyUnaffectedByCodeMapping(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty error response")
+}
+
+func TestSendRequest_NonJSONBodyUnaffectedByCodeMapping(t *testing.T) {
+	t.Parallel()
+	// A non-JSON body on an error status is rejected by its Content-Type before
+	// parseAPIErrorPayload ever runs, so the code mapping cannot apply here.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`<html>not json</html>`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 400")
+	assert.NotContains(t, err.Error(), "code:")
+}
+
 func TestSendRequest_401MFARequiredCodeNoReLoginHint(t *testing.T) {
 	t.Parallel()
 	// Accessing root / a system account requires MFA: the server returns 401
@@ -907,6 +1137,33 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 		sent = append(sent, r.Header.Get("Authorization"))
 		if len(sent) == 1 {
 			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status": "approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	body, err := ac.SendGetRequest("/api/test/")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status": "approved"}`, string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
+}
+
+// The same rejection coded auth_token_missing must still renew.
+func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code": "auth_token_missing"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
