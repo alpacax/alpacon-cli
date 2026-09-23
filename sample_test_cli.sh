@@ -11,8 +11,47 @@ LOCAL_PATH="/your/local/path"
 REMOTE_ROOT_PATH="/root"
 REMOTE_USER_PATH="/your/remote/path"
 TEST_FILE="test.txt"
+TEST_FOLDER="test_folder"
 WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
 TEST_CONTENT="Hello from Alpacon CLI test! $(date)"
+
+# Paths this run created; cleanup removes only these
+CREATED_LOCAL=()
+CREATED_REMOTE_USER=()
+CREATED_REMOTE_ROOT=()
+
+# Records only paths absent now, so cleanup never removes a directory that predates the run.
+track_local() {
+    local p
+    for p in "$@"; do
+        [ -e "$p" ] || CREATED_LOCAL+=("$p")
+    done
+}
+
+# Appends to array $1 the candidates ($3..) absent on the server as $2 (user|root).
+# Only exact candidate matches count, so stray exec output never becomes an rm target.
+check_remote_absent() {
+    local target="$1" ctx="$2"
+    shift 2
+    local -a candidates=("$@")
+    local -a exec_opts=()
+    [ "$ctx" = "root" ] && exec_opts=(-u root)
+    local quoted
+    quoted=$(printf '%q ' "${candidates[@]}")
+    local output
+    output=$(alpacon exec "${exec_opts[@]}" "$SERVER_NAME" \
+        "for p in $quoted; do [ -e \"\$p\" ] || printf '%s\n' \"\$p\"; done" 2>/dev/null) || return 1
+    local line c
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        for c in "${candidates[@]}"; do
+            if [ "$line" = "$c" ]; then
+                eval "$target+=(\"\$line\")"
+                break
+            fi
+        done
+    done <<< "$output"
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -56,22 +95,19 @@ run_test() {
 }
 
 cleanup() {
-    log_info "Cleaning up test files..."
+    if [ ${#CREATED_LOCAL[@]} -gt 0 ]; then
+        log_info "Cleaning up test files..."
+        rm -rf -- "${CREATED_LOCAL[@]}" 2>/dev/null || true
+    fi
 
-    # Remove downloaded test files only (keep original test.txt)
-    rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
+    if [ ${#CREATED_REMOTE_USER[@]} -gt 0 ]; then
+        log_info "Cleaning up remote test files..."
+        alpacon exec "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
+    fi
 
-    # Remove downloaded test folders
-    rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
-
-    # Remove remote test files and folders
-    log_info "Cleaning up remote test files..."
-    alpacon exec "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE $REMOTE_USER_PATH/$TEST_FILE" 2>/dev/null || true
-    alpacon exec -u root "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE" 2>/dev/null || true
-
-    # Clean up remote test folders
-    alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-    alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
+    if [ ${#CREATED_REMOTE_ROOT[@]} -gt 0 ]; then
+        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
+    fi
 }
 
 # Trap to cleanup on exit
@@ -119,12 +155,13 @@ fi
 
 # Create test file locally
 log_info "Creating local test file..."
+track_local "$LOCAL_PATH/$TEST_FILE"
 echo "$TEST_CONTENT" > "$LOCAL_PATH/$TEST_FILE"
 log_success "Created test file: $LOCAL_PATH/$TEST_FILE"
 
 # Create test folder and files for folder upload/download tests
 log_info "Creating test folder and files..."
-TEST_FOLDER="test_folder"
+track_local "$LOCAL_PATH/$TEST_FOLDER"
 mkdir -p "$LOCAL_PATH/$TEST_FOLDER"
 echo "Content of test1.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test1.txt"
 echo "Content of test2.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test2.txt"
@@ -173,6 +210,27 @@ run_test "Directory listing" \
 run_test "Environment check" \
     "alpacon exec $SERVER_NAME 'env | grep -E \"(USER|HOME|PATH)\" | head -5'"
 
+# Check, in one call per user context, which remote paths this run is about
+# to create already exist, so cleanup never deletes something it did not create.
+log_info "Checking for pre-existing remote paths..."
+REMOTE_USER_CANDIDATES=(
+    "$REMOTE_USER_PATH/$TEST_FILE"
+    "$REMOTE_USER_PATH/$TEST_FOLDER"
+    "$REMOTE_USER_PATH/test1.txt"
+    "$REMOTE_USER_PATH/test2.txt"
+    "$REMOTE_USER_PATH/test_dir"
+)
+REMOTE_ROOT_CANDIDATES=(
+    "$REMOTE_ROOT_PATH/$TEST_FILE"
+    "$REMOTE_ROOT_PATH/$TEST_FOLDER"
+)
+
+check_remote_absent CREATED_REMOTE_USER user "${REMOTE_USER_CANDIDATES[@]}" ||
+    log_warning "Could not check pre-existing remote user paths; cleanup will not remove any of them."
+
+check_remote_absent CREATED_REMOTE_ROOT root "${REMOTE_ROOT_CANDIDATES[@]}" ||
+    log_warning "Could not check pre-existing remote root paths; cleanup will not remove any of them."
+
 echo
 echo "=========================================="
 echo "         3. FILE TRANSFER TESTS (UPLOAD)"
@@ -203,11 +261,12 @@ echo "=========================================="
 run_test "Download from user directory" \
     "alpacon cp '$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FILE' '$LOCAL_PATH/'"
 
-# Test 14: Verify downloaded file (원본 파일이 다운로드됨)
+# Test 14: Verify downloaded file
 run_test "Verify downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
-# Clean up downloaded file to prepare for root download test (원본 파일은 보존, 복사본 생성)
+# Preserve a copy of the downloaded file before it is overwritten by the root download test
+track_local "$LOCAL_PATH/downloaded_user_$TEST_FILE"
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_user_$TEST_FILE" 2>/dev/null || true
 
 # Test 15: Download from root directory (as root)
@@ -218,7 +277,8 @@ run_test "Download from root directory as root" \
 run_test "Verify root downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
-# Rename root downloaded file to avoid conflicts (원본 파일은 보존, 복사본 생성)
+# Preserve a copy of the root-downloaded file to avoid conflicts with later tests
+track_local "$LOCAL_PATH/downloaded_root_$TEST_FILE"
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
 
 echo
@@ -251,6 +311,7 @@ run_test "Verify downloaded folder contents" \
     "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/test1.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/test1.txt' | grep -q 'Content of test1.txt in folder'"
 
 # Rename downloaded folder to avoid conflicts
+track_local "$LOCAL_PATH/downloaded_user_$TEST_FOLDER"
 mv "$LOCAL_PATH/$TEST_FOLDER" "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" 2>/dev/null || true
 
 # Test 23: Download folder from root directory (as root)
@@ -262,6 +323,7 @@ run_test "Verify root downloaded folder contents" \
     "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' | grep -q 'Nested folder content'"
 
 # Rename root downloaded folder to avoid conflicts
+track_local "$LOCAL_PATH/downloaded_root_$TEST_FOLDER"
 mv "$LOCAL_PATH/$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
 
 echo
@@ -288,6 +350,7 @@ echo "=========================================="
 
 # Test 28: Multiple file operations
 log_info "Creating additional test files..."
+track_local "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt"
 echo "File 1 content" > "$LOCAL_PATH/test1.txt"
 echo "File 2 content" > "$LOCAL_PATH/test2.txt"
 
@@ -333,22 +396,8 @@ run_test "System information gathering" \
 
 echo
 echo "=========================================="
-echo "         8. CLEANUP AND SUMMARY"
+echo "         8. SUMMARY"
 echo "=========================================="
-
-# Clean up additional test files
-rm -f "$LOCAL_PATH/$TEST_FILE"
-rm -f "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt"
-rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE"
-
-# Clean up test folders
-rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
-
-# Remote cleanup
-alpacon exec "$SERVER_NAME" "rm -f $REMOTE_USER_PATH/test*.txt" 2>/dev/null || true
-alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
-alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
 
 log_success "Test suite completed!"
 echo

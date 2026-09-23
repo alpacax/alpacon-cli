@@ -55,6 +55,10 @@ jobs:
         if: runner.os == 'Linux'
         run: bash -n sample_test_cli.sh
 
+      - name: Lint the sample CLI script with shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck sample_test_cli.sh
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
