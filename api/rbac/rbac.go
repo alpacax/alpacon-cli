@@ -36,11 +36,9 @@ const (
 // ordinary not-found.
 var ErrBlankName = api.ErrBlankName
 
-// auto_assigned asks the server to split the catalog by whether it counts a role as
-// assigned on its own—user:owner, group:member, the per-resource roles—rather than picked
-// by a person; false is not a list of what the caller may grant. Which roles it counts
-// differs by Alpacon release, and the role response carries no such field, so asking the
-// server is the only way to tell.
+// auto_assigned asks the server which roles it counts as assigned on its own; false is not
+// a list of what the caller may grant. Which roles count differs by Alpacon release and the
+// response carries no such field, so only the server can tell.
 func GetRoleCatalog(ac *client.AlpaconClient, autoAssigned *bool) ([]RoleResponse, error) {
 	var params map[string]string
 	if autoAssigned != nil {
