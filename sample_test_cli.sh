@@ -209,11 +209,11 @@ echo "=========================================="
 run_test "Download from user directory" \
     "alpacon cp '$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FILE' '$LOCAL_PATH/'"
 
-# Test 14: Verify downloaded file (원본 파일이 다운로드됨)
+# Test 14: Verify downloaded file
 run_test "Verify downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
-# Clean up downloaded file to prepare for root download test (원본 파일은 보존, 복사본 생성)
+# Preserve a copy of the downloaded file before it is overwritten by the root download test
 CREATED_LOCAL+=("$LOCAL_PATH/downloaded_user_$TEST_FILE")
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_user_$TEST_FILE" 2>/dev/null || true
 
@@ -225,7 +225,7 @@ run_test "Download from root directory as root" \
 run_test "Verify root downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
-# Rename root downloaded file to avoid conflicts (원본 파일은 보존, 복사본 생성)
+# Preserve a copy of the root-downloaded file to avoid conflicts with later tests
 CREATED_LOCAL+=("$LOCAL_PATH/downloaded_root_$TEST_FILE")
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
 
