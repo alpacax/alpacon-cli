@@ -163,14 +163,40 @@ jobs:
           $hits = @($raw -split ';' | Where-Object { $_ -eq $env:INSTALL_DIR }).Count
           if ($hits -ne 1) { throw "install directory appears $hits times on PATH, expected 1" }
 
-      # 1.10.0 is simply an older release that still ships Windows archives.
-      # Any published version older than the latest one does the job.
-      - name: Pinning an older version installs that version
+      # Resolved, not hard-coded: a fixed pin goes stale once that release retires.
+      - name: Resolve an older pinned version
+        id: pinned-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          ./install.ps1 -Version 1.10.0
+          # Relaxed like the alpacon call below, so gh's exit code decides, not a stderr line.
+          $prior = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          $json = gh release list --exclude-drafts --exclude-pre-releases --json tagName,isLatest --limit 50
+          $ErrorActionPreference = $prior
+          if ($LASTEXITCODE -ne 0) { throw "gh release list failed with exit code $LASTEXITCODE" }
+          # No @() here: Windows PowerShell 5.1 emits the parsed array as one object,
+          # so wrapping it would yield a single element holding every release.
+          $releases = $json | ConvertFrom-Json
+          $latestIndex = -1
+          for ($i = 0; $i -lt $releases.Count; $i++) {
+              if ($releases[$i].isLatest) { $latestIndex = $i; break }
+          }
+          if ($latestIndex -eq -1) { throw "no release is marked isLatest" }
+          if ($latestIndex + 1 -ge $releases.Count) { throw "no published release is older than releases/latest" }
+          $version = $releases[$latestIndex + 1].tagName.TrimStart('v', 'V')
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding ascii -Value "version=$version"
+
+      - name: Pinning an older version installs that version
+        env:
+          PINNED_VERSION: ${{ steps.pinned-version.outputs.version }}
+        run: |
+          Write-Host "pinned install target: $env:PINNED_VERSION"
+          ./install.ps1 -Version $env:PINNED_VERSION
           $marker = Join-Path $env:INSTALL_DIR 'installed-version.txt'
           $got = (Get-Content $marker -Raw).Trim()
-          if ($got -ne '1.10.0') { throw "version marker says '$got', expected '1.10.0'" }
+          if ($got -ne $env:PINNED_VERSION) { throw "version marker says '$got', expected '$env:PINNED_VERSION'" }
           # The marker is what the script wrote about itself, so ask the binary
           # too. alpacon prints it on stderr, and capturing a native command's
           # stderr while $ErrorActionPreference is 'Stop' makes it terminating,
@@ -179,7 +205,10 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $reported = (& $env:INSTALL_EXE version 2>&1) | Out-String
           $ErrorActionPreference = $prior
-          if ($reported -notmatch '1\.10\.0') { throw "alpacon reports '$reported', expected 1.10.0" }
+          # Anchored at the line end, else 1.13.1 would match 1.13.10. No ^: Windows
+          # PowerShell prefixes the first captured stderr line with the program name.
+          $pattern = "(?m)Current version: $([regex]::Escape($env:PINNED_VERSION))\s*`$"
+          if ($reported -notmatch $pattern) { throw "alpacon reports '$reported', expected $env:PINNED_VERSION" }
 
       # The shape a pipeline actually hits: -Version reads a variable nobody
       # set, so it arrives as an empty string. That has to be refused, because
