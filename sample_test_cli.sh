@@ -64,18 +64,16 @@ run_test() {
 cleanup() {
     if [ ${#CREATED_LOCAL[@]} -gt 0 ]; then
         log_info "Cleaning up test files..."
-        for path in "${CREATED_LOCAL[@]}"; do
-            rm -rf -- "$path" 2>/dev/null || true
-        done
+        rm -rf -- "${CREATED_LOCAL[@]}" 2>/dev/null || true
     fi
 
     if [ ${#CREATED_REMOTE_USER[@]} -gt 0 ]; then
         log_info "Cleaning up remote test files..."
-        alpacon exec "$SERVER_NAME" "rm -rf ${CREATED_REMOTE_USER[*]}" 2>/dev/null || true
+        alpacon exec "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
     fi
 
     if [ ${#CREATED_REMOTE_ROOT[@]} -gt 0 ]; then
-        alpacon exec -u root "$SERVER_NAME" "rm -rf ${CREATED_REMOTE_ROOT[*]}" 2>/dev/null || true
+        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
     fi
 }
 
