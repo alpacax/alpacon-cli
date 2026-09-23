@@ -19,8 +19,9 @@ With no USER the subject is you.
 
 By default this reports provenance: the roles in effect, whether each is bound
 directly or inherited from a group, and the capabilities they add up to. Roles
-scoped to a single object are left out—an owner role is one binding per object, so
-listing them would be unbounded. They are visible in 'alpacon user role ls'.
+scoped to a single object are left out—their number grows with the number of
+objects, so listing them would be unbounded. They are visible in
+'alpacon user role ls'.
 
 --patterns switches to the raw permission patterns instead, split into the ones
 granted workspace-wide and the ones reachable only through a narrower binding. The

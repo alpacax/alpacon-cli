@@ -44,7 +44,7 @@ func TestGetUserBindings_DecodesNestedRoleAndNullScope(t *testing.T) {
 	    {
 	      "id": "b2",
 	      "user": {"id": "` + userID + `", "name": "Jane Doe", "email": "jane@example.com"},
-	      "role": {"id": "r2", "name": "server:owner"},
+	      "role": {"id": "r2", "name": "server:maintainer"},
 	      "content_type": 42, "object_id": "web-01",
 	      "added_at": "2026-08-02T00:00:00Z", "updated_at": "2026-08-02T00:00:00Z"
 	    }
@@ -405,7 +405,7 @@ func TestWorkspaceRoleNames_SortsAndSkipsObjectScopedRows(t *testing.T) {
 	contentType := 42
 	names := WorkspaceRoleNames([]UserRoleResponse{
 		{Role: RoleNested{Name: "superuser"}},
-		{Role: RoleNested{Name: "server:owner"}, ContentType: &contentType},
+		{Role: RoleNested{Name: "server:maintainer"}, ContentType: &contentType},
 		{Role: RoleNested{Name: "admin"}},
 	})
 

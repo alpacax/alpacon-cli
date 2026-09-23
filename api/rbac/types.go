@@ -119,8 +119,8 @@ type RoleAuditAttributes struct {
 	At        string `json:"at"`
 }
 
-// Roles omits object-scoped bindings: an owner role is one row per object, so the payload
-// would be unbounded.
+// Roles omits object-scoped bindings: their number grows with the number of objects, so
+// the payload would be unbounded.
 type EffectivePermissionsResponse struct {
 	User        types.UserSummary  `json:"user"`
 	Summary     EffectiveSummary   `json:"summary"`
