@@ -15,6 +15,11 @@ TEST_FOLDER="test_folder"
 WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
 TEST_CONTENT="Hello from Alpacon CLI test! $(date)"
 
+# Paths this run created; cleanup removes only these
+CREATED_LOCAL=()
+CREATED_REMOTE_USER=()
+CREATED_REMOTE_ROOT=()
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,24 +62,21 @@ run_test() {
 }
 
 cleanup() {
-    log_info "Cleaning up test files..."
+    if [ ${#CREATED_LOCAL[@]} -gt 0 ]; then
+        log_info "Cleaning up test files..."
+        for path in "${CREATED_LOCAL[@]}"; do
+            rm -rf -- "$path" 2>/dev/null || true
+        done
+    fi
 
-    rm -f "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt" 2>/dev/null || true
-    rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
+    if [ ${#CREATED_REMOTE_USER[@]} -gt 0 ]; then
+        log_info "Cleaning up remote test files..."
+        alpacon exec "$SERVER_NAME" "rm -rf ${CREATED_REMOTE_USER[*]}" 2>/dev/null || true
+    fi
 
-    rm -rf "$LOCAL_PATH/$TEST_FOLDER" 2>/dev/null || true
-    rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
-
-    # Remove remote test files and folders
-    log_info "Cleaning up remote test files..."
-    alpacon exec "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE $REMOTE_USER_PATH/$TEST_FILE" 2>/dev/null || true
-    alpacon exec -u root "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE" 2>/dev/null || true
-    alpacon exec "$SERVER_NAME" "rm -f $REMOTE_USER_PATH/test1.txt $REMOTE_USER_PATH/test2.txt" 2>/dev/null || true
-    alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
-
-    # Clean up remote test folders
-    alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-    alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
+    if [ ${#CREATED_REMOTE_ROOT[@]} -gt 0 ]; then
+        alpacon exec -u root "$SERVER_NAME" "rm -rf ${CREATED_REMOTE_ROOT[*]}" 2>/dev/null || true
+    fi
 }
 
 # Trap to cleanup on exit
@@ -122,11 +124,13 @@ fi
 
 # Create test file locally
 log_info "Creating local test file..."
+CREATED_LOCAL+=("$LOCAL_PATH/$TEST_FILE")
 echo "$TEST_CONTENT" > "$LOCAL_PATH/$TEST_FILE"
 log_success "Created test file: $LOCAL_PATH/$TEST_FILE"
 
 # Create test folder and files for folder upload/download tests
 log_info "Creating test folder and files..."
+CREATED_LOCAL+=("$LOCAL_PATH/$TEST_FOLDER")
 mkdir -p "$LOCAL_PATH/$TEST_FOLDER"
 echo "Content of test1.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test1.txt"
 echo "Content of test2.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test2.txt"
@@ -181,6 +185,7 @@ echo "         3. FILE TRANSFER TESTS (UPLOAD)"
 echo "=========================================="
 
 # Test 9: Upload to user home directory
+CREATED_REMOTE_USER+=("$REMOTE_USER_PATH/$TEST_FILE")
 run_test "Upload to user home directory" \
     "alpacon cp '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_USER_PATH/'"
 
@@ -189,6 +194,7 @@ run_test "Verify uploaded file in user home" \
     "alpacon exec $SERVER_NAME 'cat $REMOTE_USER_PATH/$TEST_FILE'"
 
 # Test 11: Upload to root directory (as root)
+CREATED_REMOTE_ROOT+=("$REMOTE_ROOT_PATH/$TEST_FILE")
 run_test "Upload to root directory as root" \
     "alpacon cp -u root '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_ROOT_PATH/'"
 
@@ -210,6 +216,7 @@ run_test "Verify downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
 # Clean up downloaded file to prepare for root download test (원본 파일은 보존, 복사본 생성)
+CREATED_LOCAL+=("$LOCAL_PATH/downloaded_user_$TEST_FILE")
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_user_$TEST_FILE" 2>/dev/null || true
 
 # Test 15: Download from root directory (as root)
@@ -221,6 +228,7 @@ run_test "Verify root downloaded file content" \
     "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
 
 # Rename root downloaded file to avoid conflicts (원본 파일은 보존, 복사본 생성)
+CREATED_LOCAL+=("$LOCAL_PATH/downloaded_root_$TEST_FILE")
 cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
 
 echo
@@ -229,6 +237,7 @@ echo "         5. FOLDER TRANSFER TESTS (RECURSIVE)"
 echo "=========================================="
 
 # Test 17: Upload folder to user directory
+CREATED_REMOTE_USER+=("$REMOTE_USER_PATH/$TEST_FOLDER")
 run_test "Upload folder to user directory" \
     "alpacon cp -r '$LOCAL_PATH/$TEST_FOLDER' '$SERVER_NAME:$REMOTE_USER_PATH/'"
 
@@ -237,6 +246,7 @@ run_test "Verify uploaded folder contents" \
     "alpacon exec $SERVER_NAME 'ls -la $REMOTE_USER_PATH/$TEST_FOLDER/ && cat $REMOTE_USER_PATH/$TEST_FOLDER/test1.txt'"
 
 # Test 19: Upload folder to root directory (as root)
+CREATED_REMOTE_ROOT+=("$REMOTE_ROOT_PATH/$TEST_FOLDER")
 run_test "Upload folder to root directory as root" \
     "alpacon cp -r -u root '$LOCAL_PATH/$TEST_FOLDER' '$SERVER_NAME:$REMOTE_ROOT_PATH/'"
 
@@ -253,6 +263,7 @@ run_test "Verify downloaded folder contents" \
     "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/test1.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/test1.txt' | grep -q 'Content of test1.txt in folder'"
 
 # Rename downloaded folder to avoid conflicts
+CREATED_LOCAL+=("$LOCAL_PATH/downloaded_user_$TEST_FOLDER")
 mv "$LOCAL_PATH/$TEST_FOLDER" "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" 2>/dev/null || true
 
 # Test 23: Download folder from root directory (as root)
@@ -264,6 +275,7 @@ run_test "Verify root downloaded folder contents" \
     "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' | grep -q 'Nested folder content'"
 
 # Rename root downloaded folder to avoid conflicts
+CREATED_LOCAL+=("$LOCAL_PATH/downloaded_root_$TEST_FOLDER")
 mv "$LOCAL_PATH/$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
 
 echo
@@ -290,9 +302,11 @@ echo "=========================================="
 
 # Test 28: Multiple file operations
 log_info "Creating additional test files..."
+CREATED_LOCAL+=("$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt")
 echo "File 1 content" > "$LOCAL_PATH/test1.txt"
 echo "File 2 content" > "$LOCAL_PATH/test2.txt"
 
+CREATED_REMOTE_USER+=("$REMOTE_USER_PATH/test1.txt" "$REMOTE_USER_PATH/test2.txt")
 run_test "Multiple file upload" \
     "alpacon cp '$LOCAL_PATH/test1.txt' '$LOCAL_PATH/test2.txt' '$SERVER_NAME:$REMOTE_USER_PATH/'"
 
@@ -301,6 +315,7 @@ run_test "Verify multiple uploaded files" \
     "alpacon exec $SERVER_NAME 'ls -la $REMOTE_USER_PATH/test*.txt'"
 
 # Test 30: Directory creation and file operations
+CREATED_REMOTE_USER+=("$REMOTE_USER_PATH/test_dir")
 run_test "Create directory and upload" \
     "alpacon exec $SERVER_NAME 'mkdir -p $REMOTE_USER_PATH/test_dir' && alpacon cp '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_USER_PATH/test_dir/'"
 
