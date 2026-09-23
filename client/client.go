@@ -44,6 +44,10 @@ const (
 	// "missing" names a permission or role, so authStatusMessage's fallback
 	// message only uses "scope" wording when the gate is this one.
 	serverGateTokenScope = "token_scope"
+
+	// reauthenticateMessage covers a code-less 401 and the two codes whose
+	// remedy is the same: auth_token_missing, auth_authentication_failed.
+	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
 )
 
 // refreshAccessToken is a test seam so a unit test can drive the stale-token
@@ -191,9 +195,9 @@ func isJSONObject(body []byte) bool {
 
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
 // the server's human detail; absent that, a known structured code maps to a
-// clear message. A code-less 401 is the only case that suggests re-login—an
-// authenticated user who merely needs MFA, or who hit a policy denial, must not
-// be told to log in again.
+// clear message. Re-login is suggested only for a code-less 401 or one coded
+// auth_token_missing/auth_authentication_failed—an authenticated user who
+// merely needs MFA, or who hit a policy denial, must not be told to log in again.
 func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized && code == "" {
@@ -201,12 +205,12 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return detail
 	}
-	if msg, ok := authStatusCodeMessage(code); ok {
+	if msg, ok := authStatusCodeMessage(statusCode, code); ok {
 		return msg
 	}
 	if statusCode == http.StatusUnauthorized {
 		if code == "" {
-			return "authentication failed: please run 'alpacon login' again"
+			return reauthenticateMessage
 		}
 		// A coded 401 is a deliberate server decision, not a stale token; do not
 		// mislabel it as an authentication failure or suggest re-login.
@@ -233,20 +237,27 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
-// without a human detail to a clear, actionable message.
-func authStatusCodeMessage(code string) (string, bool) {
+// without a human detail to a clear, actionable message. auth_token_missing and
+// auth_authentication_failed are 401-only server codes; on a 403 they fall
+// through to the generic permission-denied floor instead of a login hint.
+func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
 		return "multi-factor authentication required—complete MFA to continue", true
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
+	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
+		if statusCode == http.StatusUnauthorized {
+			return reauthenticateMessage, true
+		}
 	}
 	return "", false
 }
 
-// parseAuthStatusErrorPayload returns ok=true only with a clean "detail" message;
-// code/source/gate/missing are returned regardless so the WorkSession gate can
-// route to exit 3 and a coded refusal without detail still carries what it can.
+// parseAuthStatusErrorPayload returns ok=true with a "detail" message or with
+// rendered field_errors messages; code/source/gate/missing are returned
+// regardless so the WorkSession gate can route to exit 3 and a coded refusal
+// without either still carries what it can.
 func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
 	message, code, source, gate, missing, ok = parseAPIErrorPayload(body)
 	if !ok || message == "" {
@@ -256,10 +267,13 @@ func parseAuthStatusErrorPayload(body []byte) (message string, code string, sour
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return "", code, source, gate, missing, false
 	}
-	if stringField(parsed, "detail") == "" {
-		return "", code, source, gate, missing, false
+	if stringField(parsed, "detail") != "" {
+		return message, code, source, gate, missing, true
 	}
-	return message, code, source, gate, missing, true
+	if len(fieldErrorMessages(parsed["field_errors"])) > 0 {
+		return message, code, source, gate, missing, true
+	}
+	return "", code, source, gate, missing, false
 }
 
 // SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
@@ -411,13 +425,13 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // plausibly move. alpacon-server's Auth0 authenticator returns no user on every
 // bearer rejection, whether it absorbs an exception or declines outright
 // (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
-// raises DRF's NotAuthenticated—which no branch of the server's
-// error_code_handler rewrites, leaving a 401 with a detail and no code. An
-// expired token lands there, and so does every other Auth0-bearer rejection: a
-// workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
+// raises DRF's NotAuthenticated—a 401 older servers leave uncoded and newer ones
+// code auth_token_missing. An expired token lands there, and so does every other
+// Auth0-bearer rejection: a workspace-claim mismatch, the authenticator-level MFA
+// gate, an uninvited user.
 // Those cost one grant and one replay before surfacing the same error, and the
-// MFA case a refresh may genuinely fix. So the empty code slot is not proof of
-// expiry—it is the only 401 worth spending one retry on, because a coded refusal
+// MFA case a refresh may genuinely fix. So that 401 is not proof of
+// expiry—it is the only one worth spending one retry on, because a coded refusal
 // (MFA required, IP not allowed, token ACL) names what it wants and a new token
 // is not it.
 func isStaleCredential(err error) bool {
@@ -433,7 +447,7 @@ func isStaleCredential(err error) bool {
 		return false
 	}
 	code, _ := utils.ParseErrorResponse(err)
-	return code == ""
+	return code == "" || code == utils.AuthTokenMissing
 }
 
 // replayableClone clones req with a rewound body, reporting false when the body
@@ -746,7 +760,8 @@ func withRetryAfter(err error, header http.Header) error {
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
-// Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]}
+// Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
+// {"field_errors": {"path": [{"code", "message"}, ...]}}
 func parseAPIError(body []byte) error {
 	message, code, source, gate, missing, _ := parseAPIErrorPayload(body)
 	return newAPIError(message, code, source, gate, missing)
@@ -774,10 +789,29 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 		return detail, code, source, gate, missing, true
 	}
 
-	// Case 2: field validation errors {"field": ["msg1", "msg2"], ...}
-	// Sort keys for deterministic output order
+	// A refusal envelope carries no field errors; gate/missing are not validation messages.
+	if code != "" && isEnvelopeOnly(parsed) {
+		return codeOnlyMessage(code), code, source, gate, missing, true
+	}
+
+	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
+		return strings.Join(messages, "; "), code, source, gate, missing, true
+	}
+
+	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
+	// value is the envelope's string code stays out; a list "code" field is a
+	// real serializer field and is rendered like any other. Keys are sorted
+	// for deterministic output.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {
+		if field == "field_errors" {
+			continue
+		}
+		if field == "code" {
+			if _, isString := parsed[field].(string); isString {
+				continue
+			}
+		}
 		fields = append(fields, field)
 	}
 	sort.Strings(fields)
@@ -804,8 +838,108 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 		return strings.Join(messages, "; "), code, source, gate, missing, true
 	}
 
+	if code != "" {
+		return codeOnlyMessage(code), code, source, gate, missing, true
+	}
+
 	// Fallback: return truncated raw body
 	return truncateBody(raw), code, source, gate, missing, true
+}
+
+// isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
+// string for "code"/"source"/"gate"/"detail", and for "missing" either a
+// single scope string or a list of them.
+func isEnvelopeOnly(parsed map[string]any) bool {
+	for key, value := range parsed {
+		switch key {
+		case "code", "source", "gate", "detail":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "missing":
+			if _, ok := value.(string); ok {
+				continue
+			}
+			if !isStringList(value) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isStringList reports whether v is a JSON array of strings, "missing"'s
+// list shape in the envelope.
+func isStringList(v any) bool {
+	list, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range list {
+		if _, ok := item.(string); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// fieldErrorMessages renders a "field_errors" object—{"path": [{"code",
+// "message"}, ...]}—into sorted "path: message" strings, "non_field_errors"
+// bare. A malformed entry contributes nothing.
+func fieldErrorMessages(raw any) []string {
+	fieldErrors, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	paths := make([]string, 0, len(fieldErrors))
+	for path := range fieldErrors {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	var messages []string
+	for _, path := range paths {
+		entries, ok := fieldErrors[path].([]any)
+		if !ok {
+			continue
+		}
+		for _, entry := range entries {
+			fields, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			message := stringField(fields, "message")
+			if message == "" {
+				continue
+			}
+			if path == "non_field_errors" {
+				messages = append(messages, message)
+			} else {
+				messages = append(messages, fmt.Sprintf("%s: %s", path, message))
+			}
+		}
+	}
+	return messages
+}
+
+// codeOnlyMessage renders a code sent with no detail or field errors.
+// It serves every status, so it carries no denial-specific wording.
+func codeOnlyMessage(code string) string {
+	switch code {
+	case utils.APINotFound:
+		return "the requested resource was not found"
+	case utils.APIRateLimited:
+		return "too many requests—please try again later"
+	case utils.APINotAcceptable:
+		return "the server cannot produce a response in the format requested"
+	case utils.APIUnsupportedMediaType:
+		return "the server does not support the request's content type"
+	default:
+		return fmt.Sprintf("request failed (code: %s)", code)
+	}
 }
 
 // parseGateAndMissing extracts the optional "gate" and "missing" fields a coded
