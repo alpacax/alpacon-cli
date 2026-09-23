@@ -11,6 +11,7 @@ LOCAL_PATH="/your/local/path"
 REMOTE_ROOT_PATH="/root"
 REMOTE_USER_PATH="/your/remote/path"
 TEST_FILE="test.txt"
+TEST_FOLDER="test_folder"
 WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
 TEST_CONTENT="Hello from Alpacon CLI test! $(date)"
 
@@ -58,16 +59,18 @@ run_test() {
 cleanup() {
     log_info "Cleaning up test files..."
 
-    # Remove downloaded test files only (keep original test.txt)
+    rm -f "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt" 2>/dev/null || true
     rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE" 2>/dev/null || true
 
-    # Remove downloaded test folders
+    rm -rf "$LOCAL_PATH/$TEST_FOLDER" 2>/dev/null || true
     rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
 
     # Remove remote test files and folders
     log_info "Cleaning up remote test files..."
     alpacon exec "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE $REMOTE_USER_PATH/$TEST_FILE" 2>/dev/null || true
     alpacon exec -u root "$SERVER_NAME" "rm -f $REMOTE_ROOT_PATH/$TEST_FILE" 2>/dev/null || true
+    alpacon exec "$SERVER_NAME" "rm -f $REMOTE_USER_PATH/test1.txt $REMOTE_USER_PATH/test2.txt" 2>/dev/null || true
+    alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
 
     # Clean up remote test folders
     alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
@@ -124,7 +127,6 @@ log_success "Created test file: $LOCAL_PATH/$TEST_FILE"
 
 # Create test folder and files for folder upload/download tests
 log_info "Creating test folder and files..."
-TEST_FOLDER="test_folder"
 mkdir -p "$LOCAL_PATH/$TEST_FOLDER"
 echo "Content of test1.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test1.txt"
 echo "Content of test2.txt in folder $(date)" > "$LOCAL_PATH/$TEST_FOLDER/test2.txt"
@@ -333,22 +335,8 @@ run_test "System information gathering" \
 
 echo
 echo "=========================================="
-echo "         8. CLEANUP AND SUMMARY"
+echo "         8. SUMMARY"
 echo "=========================================="
-
-# Clean up additional test files
-rm -f "$LOCAL_PATH/$TEST_FILE"
-rm -f "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt"
-rm -f "$LOCAL_PATH/downloaded_user_$TEST_FILE" "$LOCAL_PATH/downloaded_root_$TEST_FILE"
-
-# Clean up test folders
-rm -rf "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" "$LOCAL_PATH/downloaded_root_$TEST_FOLDER" 2>/dev/null || true
-
-# Remote cleanup
-alpacon exec "$SERVER_NAME" "rm -f $REMOTE_USER_PATH/test*.txt" 2>/dev/null || true
-alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/test_dir" 2>/dev/null || true
-alpacon exec "$SERVER_NAME" "rm -rf $REMOTE_USER_PATH/$TEST_FOLDER" 2>/dev/null || true
-alpacon exec -u root "$SERVER_NAME" "rm -rf $REMOTE_ROOT_PATH/$TEST_FOLDER" 2>/dev/null || true
 
 log_success "Test suite completed!"
 echo
