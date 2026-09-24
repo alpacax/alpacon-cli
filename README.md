@@ -425,7 +425,7 @@ Also separate from the work session gate: when you authenticate with an API toke
 git clone https://github.com/alpacax/alpacon-cli.git
 cd alpacon-cli
 go build
-go test ./...
+go test -race -v -shuffle=on -count=1 ./...
 ```
 
 ### End-to-end tests against a live workspace
