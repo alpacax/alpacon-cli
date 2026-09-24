@@ -59,6 +59,20 @@ const (
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
 
+	// WorkSession extension approval. Some workspaces gate 'work-session extend'
+	// behind approval: a reason is then required on every request, a session may
+	// hold only one pending extension request at a time, and a policy row may
+	// refuse the request outright. See cmd/worksession's extend command.
+	WorkSessionExtensionReasonRequired = "work_session_extension_reason_required"
+	WorkSessionExtensionAlreadyPending = "work_session_extension_already_pending"
+	// WorkSessionAdmissionDenied: a workspace policy resolved deny for this
+	// request (session creation, or an approval-gated extension).
+	WorkSessionAdmissionDenied = "work_session_admission_denied"
+	// ApprovalRequestExpired: an approval decision arrived after the request's
+	// own deadline lapsed and was refused on that basis—returned by the approval
+	// decision endpoints (e.g. 'alpacon approval approve'), not by 'extend' itself.
+	ApprovalRequestExpired = "approval_request_expired"
+
 	// ExitCodeGeneralError is the process exit code for an ordinary failure—what
 	// CliErrorWithExit already exits with. Name it when calling CliErrorWithExitCode
 	// so the general case reads like the specific ones beside it.

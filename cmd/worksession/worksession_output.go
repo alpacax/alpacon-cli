@@ -50,6 +50,18 @@ func newWorkSessionExtendOutput(id, expiresAt string) workSessionMutationOutput 
 	}
 }
 
+// extendPendingMessage describes an extension request an approval-gated
+// workspace filed instead of applying immediately (202). req.ExpiresAt is the
+// request's own deadline, not the session's—the session's current expiry is
+// unchanged until the request is decided, so the message says so rather than
+// implying the session already moved.
+func extendPendingMessage(id string, req *wsapi.PendingExtensionRequest) string {
+	return fmt.Sprintf(
+		"Work session %s: extension to %s is pending approval (request %s). Undecided, the request lapses at %s and the session's current expiry is unchanged.",
+		id, formatMutationExpiresAt(req.RequestedExpiresAt), req.ID, formatMutationExpiresAt(req.ExpiresAt),
+	)
+}
+
 func newWorkSessionCancelOutput(id string) workSessionMutationOutput {
 	return workSessionMutationOutput{
 		OK:            true,

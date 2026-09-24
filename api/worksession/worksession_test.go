@@ -163,14 +163,82 @@ func TestExtendWorkSession(t *testing.T) {
 		var req WorkSessionExtendRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		assert.Equal(t, newExpiry, req.ExpiresAt)
+		assert.Empty(t, req.Reason)
 
+		w.Header().Set("Content-Type", "application/json")
+		expiresAt, _ := time.Parse(time.RFC3339, newExpiry)
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "active", ExpiresAt: expiresAt})
+	}))
+	defer ts.Close()
+
+	session, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry})
+	require.NoError(t, err)
+	assert.Equal(t, "ses-abc", session.ID)
+	assert.Nil(t, session.PendingExtensionRequest)
+}
+
+// TestExtendWorkSession_ReasonSent covers the wire shape a workspace with
+// approval-gated extension expects: the CLI sends --reason as 'reason' on the
+// same request body, not a separate call.
+func TestExtendWorkSession_ReasonSent(t *testing.T) {
+	t.Parallel()
+	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)
+	var gotBody WorkSessionExtendRequest
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(WorkSession{ID: "ses-abc", Status: "active"})
 	}))
 	defer ts.Close()
 
-	err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry})
-	assert.NoError(t, err)
+	_, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry, Reason: "customer escalation"})
+	require.NoError(t, err)
+	assert.Equal(t, "customer escalation", gotBody.Reason)
+}
+
+// TestExtendWorkSession_PendingApproval covers the 202 shape: same WorkSession
+// body, with PendingExtensionRequest populated instead of ExpiresAt already
+// advanced. The caller distinguishes 200 from 202 by this field, not the
+// status code, so the test asserts on the parsed struct rather than the
+// response's HTTP status.
+func TestExtendWorkSession_PendingApproval(t *testing.T) {
+	t.Parallel()
+	addedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	requested := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
+	requestDeadline := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
+	currentExpiry := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(WorkSession{
+			ID:        "ses-abc",
+			Status:    "active",
+			ExpiresAt: currentExpiry,
+			PendingExtensionRequest: &PendingExtensionRequest{
+				ID:                 "apr-1",
+				RequestedExpiresAt: requested,
+				ExpiresAt:          requestDeadline,
+				Reason:             "customer escalation",
+				AddedAt:            addedAt,
+			},
+		})
+	}))
+	defer ts.Close()
+
+	session, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{
+		ExpiresAt: requested.Format(time.RFC3339),
+		Reason:    "customer escalation",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, session.PendingExtensionRequest)
+	assert.Equal(t, "apr-1", session.PendingExtensionRequest.ID)
+	assert.True(t, requested.Equal(session.PendingExtensionRequest.RequestedExpiresAt))
+	assert.True(t, requestDeadline.Equal(session.PendingExtensionRequest.ExpiresAt))
+	assert.Equal(t, "customer escalation", session.PendingExtensionRequest.Reason)
+	assert.True(t, addedAt.Equal(session.PendingExtensionRequest.AddedAt))
+	// The session's own expiry is unchanged—the extension has not applied yet.
+	assert.True(t, currentExpiry.Equal(session.ExpiresAt))
 }
 
 func TestGetWorkSessionList_RequesterTypeFilter(t *testing.T) {
