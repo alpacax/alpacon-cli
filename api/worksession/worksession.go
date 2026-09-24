@@ -104,9 +104,25 @@ func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
 	return err
 }
 
-func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "extend"), nil), req)
-	return err
+// ExtendWorkSession requests a new expires_at for a running session. The
+// server answers 200 with the session already extended, or—when the
+// workspace gates extension behind approval and this request needs a
+// decision—202 with the session's PendingExtensionRequest populated instead.
+// The returned status is what tells the two apart, not PendingExtensionRequest
+// on its own: a 200 body can still carry a stale one (the gate was turned off
+// after the request was filed, or a lapsed request the periodic sweep has not
+// reached yet), so a caller that branched on the field alone would report an
+// already-applied extension as still pending.
+func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) (*WorkSession, int, error) {
+	body, status, err := ac.SendPostRequestWithStatus(utils.BuildURL(workSessionURL, path.Join(id, "extend"), nil), req)
+	if err != nil {
+		return nil, status, err
+	}
+	var session WorkSession
+	if err = json.Unmarshal(body, &session); err != nil {
+		return nil, status, err
+	}
+	return &session, status, nil
 }
 
 func RevokeWorkSession(ac *client.AlpaconClient, id string) error {

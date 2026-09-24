@@ -26,6 +26,28 @@ type WorkSession struct {
 	SudoPolicies      []SudoPolicyInline    `json:"sudo_policies"`
 	Adjustments       *Adjustments          `json:"adjustments"`
 	Recommendations   []Recommendation      `json:"recommendations"`
+
+	// PendingExtensionRequest is the open extension request for this session, or
+	// nil when there is none. Some workspaces gate 'extend' behind approval; when
+	// this request needs a decision, 'extend' answers 202 with this populated
+	// instead of 200 with the session already extended. It stays populated on
+	// later reads too, until the request is approved, rejected, cancelled, or
+	// lapses.
+	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
+}
+
+// PendingExtensionRequest names the open request an approval-gated 'extend'
+// filed instead of applying immediately. RequestedExpiresAt is the expiry
+// being asked for; ExpiresAt is the request's own deadline—when it lapses
+// undecided, never later than the session's current expiry at request
+// time—not to be confused with WorkSession.ExpiresAt, which stays at its
+// prior value until the request is decided.
+type PendingExtensionRequest struct {
+	ID                 string    `json:"id"`
+	RequestedExpiresAt time.Time `json:"requested_expires_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
+	Reason             string    `json:"reason"`
+	AddedAt            time.Time `json:"added_at"`
 }
 
 // Adjustments is the approver's diff; each dimension is set only when changed, nil when unchanged.
@@ -111,8 +133,14 @@ type WorkSessionUpdateRequest struct {
 	SudoPolicies []SudoPolicyInline `json:"sudo_policies,omitempty"`
 }
 
+// WorkSessionExtendRequest is the payload for the extend action. Reason is
+// only required when the workspace has approval-gated extension turned on
+// (WORK_SESSION_EXTENSION_REASON_REQUIRED otherwise), and is ignored server-side
+// when that gate is off; omitted here when empty so the wire payload matches
+// what a caller who never passed --reason actually asked for.
 type WorkSessionExtendRequest struct {
 	ExpiresAt string `json:"expires_at"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // TimelineItem represents a single event in a work session's activity timeline.

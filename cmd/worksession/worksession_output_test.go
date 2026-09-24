@@ -231,7 +231,7 @@ func TestWorkSessionExtendCommandJSONOutput_NoHumanSuccessText(t *testing.T) {
 			return
 		}
 		sawExtend = true
-		_, _ = w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{"id":"ses-active","status":"active","expires_at":"2026-06-01T12:00:00Z"}`))
 	}))
 	defer ts.Close()
 
