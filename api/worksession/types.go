@@ -29,9 +29,10 @@ type WorkSession struct {
 
 	// PendingExtensionRequest is the open extension request for this session, or
 	// nil when there is none. Some workspaces gate 'extend' behind approval; when
-	// that lane applies, 'extend' answers 202 with this populated instead of 200
-	// with the session already extended. It stays populated on later reads too,
-	// until the request is approved, rejected, cancelled, or lapses.
+	// this request needs a decision, 'extend' answers 202 with this populated
+	// instead of 200 with the session already extended. It stays populated on
+	// later reads too, until the request is approved, rejected, cancelled, or
+	// lapses.
 	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
 }
 

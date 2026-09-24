@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -27,14 +25,14 @@ func TestExtendErrorMessage(t *testing.T) {
 			want: "--reason",
 		},
 		{
-			name: "already pending",
+			name: "already pending names where to find the request id",
 			code: utils.WorkSessionExtensionAlreadyPending,
-			want: "already has an extension request pending approval",
+			want: "pending_extension_request.id",
 		},
 		{
 			name: "admission denied",
 			code: utils.WorkSessionAdmissionDenied,
-			want: "workspace policy denies this extension",
+			want: "refuses this extension outright",
 		},
 		{
 			name: "unknown code falls back to the generic message",
@@ -58,6 +56,9 @@ func TestExtendErrorMessage(t *testing.T) {
 			err := &testCodedError{code: tt.code, msg: body}
 			got := extendErrorMessage("ses-1", err)
 			assert.Contains(t, got, tt.want)
+			// Every mapped message reads as its own sentence, capitalized like
+			// the default fallback, not a lowercase continuation of "Error: ".
+			assert.Regexp(t, `^[A-Z]`, got)
 		})
 	}
 }
@@ -74,99 +75,10 @@ func (e *testCodedError) Error() string       { return e.msg }
 func (e *testCodedError) ErrorCode() string   { return e.code }
 func (e *testCodedError) ErrorSource() string { return "" }
 
-func TestPollForExtensionApproval_Approved(t *testing.T) {
-	t.Parallel()
-	newExpiry := time.Now().UTC().Add(4 * time.Hour).Truncate(time.Second)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/api/approvals/approvals/apr-1/":
-			_, _ = w.Write([]byte(`{"id":"apr-1","status":"approved"}`))
-		case "/api/work-sessions/sessions/ses-1/":
-			_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","expires_at":"` + newExpiry.Format(time.RFC3339) + `"}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	session, err := pollForExtensionApproval(ac, "ses-1", "apr-1", time.Millisecond, time.Second)
-
-	require.NoError(t, err)
-	require.NotNil(t, session)
-	assert.Nil(t, session.PendingExtensionRequest)
-	assert.True(t, newExpiry.Equal(session.ExpiresAt))
-}
-
-func TestPollForExtensionApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		status  string
-		wantMsg string
-	}{
-		{status: "rejected", wantMsg: "extension request was rejected"},
-		{status: "expired", wantMsg: "extension request expired before it was decided"},
-		{status: "cancelled", wantMsg: "extension request was cancelled"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.status, func(t *testing.T) {
-			t.Parallel()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"apr-1","status":"` + tt.status + `"}`))
-			}))
-			defer ts.Close()
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-			_, err := pollForExtensionApproval(ac, "ses-1", "apr-1", time.Millisecond, time.Second)
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.wantMsg)
-			var terminal *terminalWaitError
-			require.ErrorAs(t, err, &terminal, "a settled status must be typed so the caller can exit 6")
-			assert.Equal(t, "ses-1", terminal.sessionID)
-		})
-	}
-}
-
-func TestPollForExtensionApproval_TimeoutIsNotTerminal(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"apr-1","status":"pending"}`))
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	_, err := pollForExtensionApproval(ac, "ses-1", "apr-1", time.Millisecond, 50*time.Millisecond)
-
-	require.Error(t, err)
-	var terminal *terminalWaitError
-	assert.NotErrorAs(t, err, &terminal)
-	var pending *pendingWaitError
-	assert.ErrorAs(t, err, &pending)
-}
-
-func TestPollForExtensionApproval_APIFailureIsNotTerminal(t *testing.T) {
-	t.Parallel()
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	_, err := pollForExtensionApproval(ac, "ses-1", "apr-1", time.Millisecond, time.Second)
-
-	require.Error(t, err)
-	var terminal *terminalWaitError
-	assert.NotErrorAs(t, err, &terminal)
-}
-
 // TestExtendCommand_SendsReason covers the immediate (non-approval-gated) 200
 // path end-to-end through the command's Run func: --reason flows onto the
-// request body, and the printed result reads the server's own expires_at.
+// request body, and the printed JSON result carries the server's own
+// expires_at (not just the value the flag sent).
 func TestExtendCommand_SendsReason(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -195,19 +107,30 @@ func TestExtendCommand_SendsReason(t *testing.T) {
 		extendReason = ""
 	})
 
-	_, stderr := testutil.CaptureOutput(t, func() {
+	stdout, stderr := testutil.CaptureOutput(t, func() {
 		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-1"})
 	})
 	assert.Empty(t, stderr)
+
+	var got struct {
+		OK        bool   `json:"ok"`
+		Operation string `json:"operation"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.True(t, got.OK)
+	assert.Equal(t, "extend", got.Operation)
+	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
 }
 
-// TestExtendCommand_PendingApproval_NoWait covers the 202 shape end-to-end: the
-// server names an extension request instead of applying it, and without --wait
-// the CLI reports it pending and exits ExitCodePendingApproval (4) rather than
-// treating it as a success or a failure. Runs as a subprocess (see
-// worksession_error_test.go's runWorkSessionHelper) because this path calls
-// os.Exit.
-func TestExtendCommand_PendingApproval_NoWait(t *testing.T) {
+// TestExtendCommand_PendingApproval covers the 202 shape end-to-end: the
+// server names an extension request instead of applying it, and the CLI
+// reports it pending and exits ExitCodePendingApproval (4) rather than
+// treating it as a success or a failure. The requested expiry and the
+// request's own deadline land in the envelope's context, not only in the
+// message text. Runs as a subprocess (see worksession_error_test.go's
+// runWorkSessionHelper) because this path calls os.Exit.
+func TestExtendCommand_PendingApproval(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -237,19 +160,95 @@ func TestExtendCommand_PendingApproval_NoWait(t *testing.T) {
 	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
 
 	var env struct {
-		OK        bool   `json:"ok"`
-		Status    string `json:"status"`
-		ExitCode  int    `json:"exit_code"`
-		Message   string `json:"message"`
-		RequestID string `json:"request_id"`
+		OK       bool   `json:"ok"`
+		Status   string `json:"status"`
+		ExitCode int    `json:"exit_code"`
+		Message  string `json:"message"`
+		Context  struct {
+			Operation          string `json:"operation"`
+			WorkSessionID      string `json:"work_session_id"`
+			RequestID          string `json:"request_id"`
+			RequestedExpiresAt string `json:"requested_expires_at"`
+			RequestExpiresAt   string `json:"request_expires_at"`
+		} `json:"context"`
+		NextActions []struct {
+			Command string `json:"command"`
+		} `json:"next_actions"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &env), "stdout: %s", stdout)
 	assert.False(t, env.OK)
 	assert.Equal(t, utils.PendingApprovalStatus, env.Status)
 	assert.Equal(t, utils.ExitCodePendingApproval, env.ExitCode)
-	assert.Equal(t, "apr-99", env.RequestID)
 	assert.Contains(t, env.Message, "ses-1")
 	assert.Contains(t, env.Message, "pending approval")
+
+	assert.Equal(t, "extend", env.Context.Operation)
+	assert.Equal(t, "ses-1", env.Context.WorkSessionID)
+	assert.Equal(t, "apr-99", env.Context.RequestID)
+	assert.Equal(t, "2026-06-01T14:00:00Z", env.Context.RequestedExpiresAt)
+	assert.Equal(t, "2026-06-01T10:10:00Z", env.Context.RequestExpiresAt)
+
+	var sawDescribe bool
+	for _, action := range env.NextActions {
+		assert.NotContains(t, action.Command, "work-session complete", "complete has nothing to do with an extension decision")
+		if action.Command == "alpacon work-session describe ses-1" {
+			sawDescribe = true
+		}
+	}
+	assert.True(t, sawDescribe, "next_actions must point at describe to check status")
+}
+
+// TestExtendCommand_StalePendingOn200_IsSuccess covers the case the status
+// code (not the body field) exists to resolve: a 200 whose body still carries
+// a pending_extension_request left over from before the workspace turned
+// extension approval off, or from a request the periodic sweep has not yet
+// cleared. The extension applied—status says so—so this must report success
+// (exit 0), not pending.
+func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/work-sessions/sessions/ses-1/extend/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"id": "ses-1",
+			"status": "active",
+			"expires_at": "2026-06-01T12:00:00Z",
+			"pending_extension_request": {
+				"id": "apr-stale",
+				"requested_expires_at": "2026-06-01T11:00:00Z",
+				"expires_at": "2026-06-01T10:05:00Z",
+				"reason": "an earlier, unrelated request",
+				"added_at": "2026-06-01T09:00:00Z"
+			}
+		}`))
+	}))
+	defer ts.Close()
+	setupWorkSessionCommandConfig(t, ts.URL)
+	withWorkSessionCommandJSONMode(t)
+
+	extendExpiresIn = ""
+	extendExpiresAt = "2026-06-01T12:00:00Z"
+	extendReason = ""
+	t.Cleanup(func() {
+		extendExpiresIn = ""
+		extendExpiresAt = ""
+	})
+
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		workSessionExtendCmd.Run(workSessionExtendCmd, []string{"ses-1"})
+	})
+	assert.Empty(t, stderr)
+
+	var got struct {
+		OK        bool   `json:"ok"`
+		Operation string `json:"operation"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.True(t, got.OK)
+	assert.Equal(t, "2026-06-01T12:00:00Z", got.ExpiresAt)
 }
 
 // TestExtendCommand_ReasonRequired_MapsToReadableMessage covers the CLI's own
@@ -280,4 +279,33 @@ func TestExtendCommand_ReasonRequired_MapsToReadableMessage(t *testing.T) {
 	assert.False(t, env.OK)
 	assert.Equal(t, "work_session_extension_reason_required", env.ErrorCode)
 	assert.Contains(t, env.Message, "--reason")
+}
+
+// TestExtendCommand_AlreadyPending_MapsToReadableMessage covers the CLI's own
+// message for WORK_SESSION_EXTENSION_ALREADY_PENDING, which likewise carries
+// no human detail from the server.
+func TestExtendCommand_AlreadyPending_MapsToReadableMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/ses-1/extend/" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":"work_session_extension_already_pending"}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL,
+		"extend", "ses-1", "--expires-in", "1h", "--reason", "customer escalation")
+
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
+
+	var env errorEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
+	assert.False(t, env.OK)
+	assert.Equal(t, "work_session_extension_already_pending", env.ErrorCode)
+	assert.Contains(t, env.Message, "pending_extension_request.id")
 }

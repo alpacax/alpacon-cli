@@ -373,6 +373,16 @@ func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	return ac.roundTrip(retry)
 }
 
+// sendRequestWithStatus is sendRequest plus the response's HTTP status code; see roundTripWithStatus.
+func (ac *AlpaconClient) sendRequestWithStatus(req *http.Request) ([]byte, int, error) {
+	body, status, err := ac.roundTripWithStatus(req)
+	retry, ok := ac.renewedRequest(req, err)
+	if !ok {
+		return body, status, err
+	}
+	return ac.roundTripWithStatus(retry)
+}
+
 // renewedRequest reports whether err is a renewable stale-token rejection and,
 // if the renewal succeeds, returns the request to replay.
 func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Request, bool) {
@@ -470,22 +480,33 @@ func replayableClone(req *http.Request) (*http.Request, bool) {
 }
 
 func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
+	body, _, err := ac.roundTripWithStatus(req)
+	return body, err
+}
+
+// roundTripWithStatus is roundTrip plus the response's HTTP status code on
+// success, for the rare endpoint whose body shape is the same on two
+// different success codes and a caller must tell them apart (e.g.
+// work-session extend's 200-vs-202 contract). On failure the status is also
+// returned for convenience, though it is already recoverable from err via
+// utils.HTTPStatusCode.
+func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
+		return nil, resp.StatusCode, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
 	}
 
-	return respBody, nil
+	return respBody, resp.StatusCode, nil
 }
 
 // Get Request to Alpacon Server
@@ -509,6 +530,24 @@ func (ac *AlpaconClient) SendPostRequest(url string, body any) ([]byte, error) {
 		return nil, err
 	}
 	return ac.sendRequest(req)
+}
+
+// SendPostRequestWithStatus is SendPostRequest plus the response's HTTP status
+// code on success. Use it only where the status code itself carries meaning
+// the body cannot be trusted to (e.g. work-session extend's 200-vs-202
+// contract, where the body may still carry a field from before the status
+// existed to disambiguate it)—every other caller wants SendPostRequest.
+func (ac *AlpaconClient) SendPostRequestWithStatus(url string, body any) ([]byte, int, error) {
+	jsonValue, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	req, err := ac.createRequest(http.MethodPost, url, bytes.NewBuffer(jsonValue))
+	if err != nil {
+		return nil, 0, err
+	}
+	return ac.sendRequestWithStatus(req)
 }
 
 func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {

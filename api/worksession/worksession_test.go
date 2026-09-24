@@ -171,8 +171,9 @@ func TestExtendWorkSession(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry})
+	session, status, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry})
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, status)
 	assert.Equal(t, "ses-abc", session.ID)
 	assert.Nil(t, session.PendingExtensionRequest)
 }
@@ -191,16 +192,15 @@ func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry, Reason: "customer escalation"})
+	_, _, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{ExpiresAt: newExpiry, Reason: "customer escalation"})
 	require.NoError(t, err)
 	assert.Equal(t, "customer escalation", gotBody.Reason)
 }
 
 // TestExtendWorkSession_PendingApproval covers the 202 shape: same WorkSession
 // body, with PendingExtensionRequest populated instead of ExpiresAt already
-// advanced. The caller distinguishes 200 from 202 by this field, not the
-// status code, so the test asserts on the parsed struct rather than the
-// response's HTTP status.
+// advanced, and the 202 status returned alongside it—the caller distinguishes
+// 200 from 202 by the status, so it is asserted explicitly here too.
 func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	t.Parallel()
 	addedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
@@ -226,11 +226,12 @@ func TestExtendWorkSession_PendingApproval(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{
+	session, status, err := ExtendWorkSession(newTestClient(ts), "ses-abc", WorkSessionExtendRequest{
 		ExpiresAt: requested.Format(time.RFC3339),
 		Reason:    "customer escalation",
 	})
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusAccepted, status)
 	require.NotNil(t, session.PendingExtensionRequest)
 	assert.Equal(t, "apr-1", session.PendingExtensionRequest.ID)
 	assert.True(t, requested.Equal(session.PendingExtensionRequest.RequestedExpiresAt))
