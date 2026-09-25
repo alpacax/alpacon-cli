@@ -14,7 +14,7 @@ func extendErrorMessage(id string, err error) string {
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case utils.WorkSessionExtensionReasonRequired:
-		return "This workspace requires approval for this request; pass --reason \"...\" describing why you need more time, and retry."
+		return "Pass --reason \"...\" describing why you need more time, and retry."
 	case utils.WorkSessionExtensionAlreadyPending:
 		return fmt.Sprintf("Work session %s already has an extension request pending approval; wait for it to be decided before asking again. Find its id with 'alpacon work-session describe %s --output json' (field pending_extension_request.id).", id, id)
 	case utils.WorkSessionAdmissionDenied:

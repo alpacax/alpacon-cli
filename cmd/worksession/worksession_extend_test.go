@@ -75,10 +75,10 @@ func (e *testCodedError) Error() string       { return e.msg }
 func (e *testCodedError) ErrorCode() string   { return e.code }
 func (e *testCodedError) ErrorSource() string { return "" }
 
-// TestExtendCommand_SendsReason covers the immediate (non-approval-gated) 200
-// path end-to-end through the command's Run func: --reason flows onto the
-// request body, and the printed JSON result carries the server's own
-// expires_at (not just the value the flag sent).
+// TestExtendCommand_SendsReason covers the immediate (auto-approved) 200 path
+// end-to-end through the command's Run func: --reason flows onto the request
+// body, and the printed JSON result carries the server's own expires_at (not
+// just the value the flag sent).
 func TestExtendCommand_SendsReason(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -200,10 +200,10 @@ func TestExtendCommand_PendingApproval(t *testing.T) {
 
 // TestExtendCommand_StalePendingOn200_IsSuccess covers the case the status
 // code (not the body field) exists to resolve: a 200 whose body still carries
-// a pending_extension_request left over from before the workspace turned
-// extension approval off, or from a request the periodic sweep has not yet
-// cleared. The extension applied—status says so—so this must report success
-// (exit 0), not pending.
+// a pending_extension_request left over from before the workspace's approval
+// policy switched to auto-approve, or from a request the periodic sweep has
+// not yet cleared. The extension applied—status says so—so this must report
+// success (exit 0), not pending.
 func TestExtendCommand_StalePendingOn200_IsSuccess(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
