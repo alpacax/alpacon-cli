@@ -28,17 +28,18 @@ type WorkSession struct {
 	Recommendations   []Recommendation      `json:"recommendations"`
 
 	// PendingExtensionRequest is the open extension request for this session, or
-	// nil when there is none. Some workspaces gate 'extend' behind approval; when
-	// this request needs a decision, 'extend' answers 202 with this populated
-	// instead of 200 with the session already extended. It stays populated on
-	// later reads too, until the request is approved, rejected, cancelled, or
-	// lapses.
+	// nil when there is none. Every 'extend' request follows the workspace's
+	// approval policy, the same rule 'work-session create' uses; when it needs a
+	// decision instead of auto-approving, 'extend' answers 202 with this
+	// populated instead of 200 with the session already extended. It stays
+	// populated on later reads too, until the request is approved, rejected,
+	// cancelled, or lapses.
 	PendingExtensionRequest *PendingExtensionRequest `json:"pending_extension_request"`
 }
 
-// PendingExtensionRequest names the open request an approval-gated 'extend'
-// filed instead of applying immediately. RequestedExpiresAt is the expiry
-// being asked for; ExpiresAt is the request's own deadline—when it lapses
+// PendingExtensionRequest names the open request 'extend' filed instead of
+// applying immediately. RequestedExpiresAt is the expiry being asked for;
+// ExpiresAt is the request's own deadline—when it lapses
 // undecided, never later than the session's current expiry at request
 // time—not to be confused with WorkSession.ExpiresAt, which stays at its
 // prior value until the request is decided.
@@ -134,10 +135,9 @@ type WorkSessionUpdateRequest struct {
 }
 
 // WorkSessionExtendRequest is the payload for the extend action. Reason is
-// only required when the workspace has approval-gated extension turned on
-// (WORK_SESSION_EXTENSION_REASON_REQUIRED otherwise), and is ignored server-side
-// when that gate is off; omitted here when empty so the wire payload matches
-// what a caller who never passed --reason actually asked for.
+// always required by the server (WORK_SESSION_EXTENSION_REASON_REQUIRED
+// otherwise); omitted here when empty so a caller who never passed --reason
+// gets the server's own refusal rather than an empty string silently sent.
 type WorkSessionExtendRequest struct {
 	ExpiresAt string `json:"expires_at"`
 	Reason    string `json:"reason,omitempty"`

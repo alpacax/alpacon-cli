@@ -59,15 +59,15 @@ const (
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
 
-	// WorkSession extension approval. Some workspaces require approval for
-	// 'work-session extend': a reason is then required on every request, and a
-	// session may hold only one pending extension request at a time. See
-	// cmd/worksession's extend command.
+	// WorkSession extension approval. Every 'work-session extend' request
+	// requires a reason and follows the workspace's approval policy, the same
+	// rule 'work-session create' uses; a session may hold only one pending
+	// extension request at a time. See cmd/worksession's extend command.
 	WorkSessionExtensionReasonRequired = "work_session_extension_reason_required"
 	WorkSessionExtensionAlreadyPending = "work_session_extension_already_pending"
 	// WorkSessionAdmissionDenied: the workspace refuses this request outright
-	// (session creation, or an approval-gated extension)—not a queued request
-	// waiting on a human, a hard no.
+	// (session creation, or an extension)—not a queued request waiting on a
+	// human, a hard no.
 	WorkSessionAdmissionDenied = "work_session_admission_denied"
 
 	// ExitCodeGeneralError is the process exit code for an ordinary failure—what

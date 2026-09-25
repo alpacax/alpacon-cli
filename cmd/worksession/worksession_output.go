@@ -50,8 +50,8 @@ func newWorkSessionExtendOutput(id, expiresAt string) workSessionMutationOutput 
 	}
 }
 
-// extendPendingMessage describes an extension request an approval-gated
-// workspace filed instead of applying immediately (202), and returns the
+// extendPendingMessage describes an extension request the server queued for
+// review instead of applying immediately (202), and returns the
 // pieces a machine-readable envelope wants split out (request id, the
 // requested expiry, and the request's own deadline) alongside the human
 // message. req is normally non-nil for a 202, but this degrades to a generic

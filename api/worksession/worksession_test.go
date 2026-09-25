@@ -178,9 +178,9 @@ func TestExtendWorkSession(t *testing.T) {
 	assert.Nil(t, session.PendingExtensionRequest)
 }
 
-// TestExtendWorkSession_ReasonSent covers the wire shape a workspace with
-// approval-gated extension expects: the CLI sends --reason as 'reason' on the
-// same request body, not a separate call.
+// TestExtendWorkSession_ReasonSent covers the wire shape the server's
+// approval-gated extend action expects: the CLI sends --reason as 'reason' on
+// the same request body, not a separate call.
 func TestExtendWorkSession_ReasonSent(t *testing.T) {
 	t.Parallel()
 	newExpiry := time.Now().UTC().Add(4 * time.Hour).Format(time.RFC3339)

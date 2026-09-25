@@ -23,17 +23,16 @@ var workSessionExtendCmd = &cobra.Command{
 	Short: "Extend the expiry of an approved or active work session",
 	Long: `Extend the expiry of an approved or active work session.
 
-Some workspaces gate extension behind approval. When that is on, --reason is
-required—a short justification an approver judges the request by—and the
-session may not extend immediately: the server answers with the extension
-queued for review instead of applying it, and the CLI reports that and exits
-(see "Exit codes" in the README) rather than waiting. Check back with
+--reason is required: a short justification an approver judges the request by.
+Whether the extension applies immediately or waits for approval follows the
+workspace's approval policy, the same rule as requesting a new session. When it
+is queued for review the CLI reports that and exits (see "Exit codes" in the
+README) rather than waiting. Check back with
 'alpacon work-session describe SESSION_ID', or run 'extend' again with a new
 reason once the request settles.`,
 	Args: cobra.ExactArgs(1),
-	Example: `  alpacon work-session extend ses-abc123 --expires-in 2h
-  alpacon work-session extend ses-abc123 --expires-at 2026-05-09T10:00:00Z
-  alpacon work-session extend ses-abc123 --expires-in 2h --reason "customer escalation, still triaging"`,
+	Example: `  alpacon work-session extend ses-abc123 --expires-in 2h --reason "customer escalation, still triaging"
+  alpacon work-session extend ses-abc123 --expires-at 2026-05-09T10:00:00Z --reason "customer escalation, still triaging"`,
 	Run: func(cmd *cobra.Command, args []string) {
 		id := args[0]
 		expiresAtVal, err := parseExpiryFlag(extendExpiresIn, extendExpiresAt)
@@ -65,10 +64,10 @@ reason once the request settles.`,
 
 		// The status code is what tells 200 from 202 apart, not
 		// PendingExtensionRequest on its own: a 200 body can still carry a
-		// stale one (the gate was turned off after the request was filed, or
-		// a lapsed request the periodic sweep has not reached yet), and
-		// treating that as still-pending would report an already-applied
-		// extension as unresolved.
+		// stale one (the workspace's approval policy changed to auto-approve
+		// after the request was filed, or a lapsed request the periodic
+		// sweep has not reached yet), and treating that as still-pending
+		// would report an already-applied extension as unresolved.
 		if status == http.StatusAccepted {
 			printExtendPending(id, session.PendingExtensionRequest)
 			os.Exit(utils.ExitCodePendingApproval)
@@ -155,6 +154,6 @@ type extendPendingCtx struct {
 func init() {
 	workSessionExtendCmd.Flags().StringVar(&extendExpiresIn, "expires-in", "", "New expiry set to now + duration (e.g. 2h)")
 	workSessionExtendCmd.Flags().StringVar(&extendExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339)")
-	workSessionExtendCmd.Flags().StringVar(&extendReason, "reason", "", "Why the session needs more time; required when the workspace gates extension behind approval, ignored otherwise")
+	workSessionExtendCmd.Flags().StringVar(&extendReason, "reason", "", "Why the session needs more time (required)")
 	workSessionExtendCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }
