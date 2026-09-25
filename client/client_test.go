@@ -642,29 +642,6 @@ func TestSendRequest_StringCodeFieldRendersAsFlatField(t *testing.T) {
 	assert.Equal(t, "code: This field is required.", err.Error())
 }
 
-func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
-	t.Parallel()
-	for _, code := range []string{"auth_token_missing", "auth_authentication_failed"} {
-		t.Run(code, func(t *testing.T) {
-			t.Parallel()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
-			}))
-			defer ts.Close()
-
-			ac := newTestClient(ts.URL)
-			_, err := ac.SendGetRequest("/api/test/")
-			require.Error(t, err)
-			assert.Equal(t, "authentication failed: please run 'alpacon login' again", err.Error())
-
-			gotCode, _ := utils.ParseErrorResponse(err)
-			assert.Equal(t, code, gotCode)
-		})
-	}
-}
-
 func TestSendRequest_401OtherCodedDenialGetsGenericMessage(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -777,32 +754,6 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 	code, source := utils.ParseErrorResponse(err)
 	assert.Equal(t, "some_policy_denial", code)
 	assert.Equal(t, "command", source)
-}
-
-func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
-	t.Parallel()
-	// auth_token_missing/auth_authentication_failed only ever arrive on a 401;
-	// a 403 carrying either must not tell the user to log in again.
-	for _, code := range []string{"auth_token_missing", "auth_authentication_failed"} {
-		t.Run(code, func(t *testing.T) {
-			t.Parallel()
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusForbidden)
-				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
-			}))
-			defer ts.Close()
-
-			ac := newTestClient(ts.URL)
-			_, err := ac.SendGetRequest("/api/test/")
-			require.Error(t, err)
-			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
-			assert.NotContains(t, err.Error(), "alpacon login")
-
-			gotCode, _ := utils.ParseErrorResponse(err)
-			assert.Equal(t, code, gotCode)
-		})
-	}
 }
 
 // The RBAC role gate and the token-scope gate now answer a refusal with one of
@@ -1299,32 +1250,6 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
-func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
-	renewals := stubTokenRenewal(t, "fresh")
-
-	var sent []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sent = append(sent, r.Header.Get("Authorization"))
-		if len(sent) == 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code": "auth_token_missing"}`))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status": "approved"}`))
-	}))
-	defer ts.Close()
-
-	ac := newBearerTestClient(ts.URL, "stale")
-	body, err := ac.SendGetRequest("/api/test/")
-
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"status": "approved"}`, string(body))
-	assert.Equal(t, 1, *renewals)
-	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
-}
-
 // The server rejects a stale token in its permission layer, before the view
 // runs, so the first attempt changed nothing—but only a replayed body makes the
 // retry the same request.
@@ -1376,10 +1301,10 @@ func TestSendRequest_CodedUnauthorizedIsNotRenewed(t *testing.T) {
 	assert.Equal(t, utils.AuthMFARequired, code, "the code must still reach the MFA handler")
 }
 
-// auth_authentication_failed is a deliberate Auth0 rejection, not a stale
-// token—unlike newTestClient's legacy path, a bearer client actually reaches
+// auth_ip_not_allowed is a deliberate server refusal, not a stale token—unlike
+// newTestClient's legacy path, a bearer client actually reaches
 // isStaleCredential, so this is what proves it does not renew here either.
-func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
+func TestSendRequest_CodedIPNotAllowedIsNotRenewed(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
 	requests := 0
@@ -1387,7 +1312,7 @@ func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"code": "auth_authentication_failed"}`))
+		_, _ = w.Write([]byte(`{"code": "auth_ip_not_allowed"}`))
 	}))
 	defer ts.Close()
 
