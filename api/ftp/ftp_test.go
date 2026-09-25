@@ -1390,20 +1390,21 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
 }
 
-func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
+func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
 	t.Parallel()
-	// Retry keys off the "webftp_transfer_in_progress" payload, not the 422
-	// status: PollTransferStatus must back off and retry, not treat it as fatal.
+	// The server answers a running transfer with HTTP 200 and the literal body
+	// {"success": null, "message": null}; only true/false is terminal. Written
+	// as raw JSON so the test pins the wire shape, not what our own struct
+	// encodes to.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if n < 3 {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "webftp_transfer_in_progress"})
+			_, _ = w.Write([]byte(`{"success": null, "message": null}`))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
+		_, _ = w.Write([]byte(`{"success": false, "message": "Permission denied"}`))
 	}))
 	defer ts.Close()
 
@@ -1412,14 +1413,14 @@ func TestPollTransferStatus_RetriesWhileInProgress(t *testing.T) {
 	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
 
 	require.NoError(t, err)
-	assert.True(t, success)
-	assert.Equal(t, "done", message)
-	assert.Equal(t, int32(3), calls.Load())
+	assert.False(t, success)
+	assert.Equal(t, "Permission denied", message)
+	assert.Equal(t, int32(3), calls.Load(), "a null success must be polled again, not read as a result")
 }
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	t.Parallel()
-	// A non-in-progress error (e.g. 403) is fatal: return immediately without
+	// Any error response (e.g. 403) is fatal: return immediately without
 	// polling again.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
