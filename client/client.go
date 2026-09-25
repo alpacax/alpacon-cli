@@ -45,8 +45,7 @@ const (
 	// message only uses "scope" wording when the gate is this one.
 	serverGateTokenScope = "token_scope"
 
-	// reauthenticateMessage covers a code-less 401 and the two codes whose
-	// remedy is the same: auth_token_missing, auth_authentication_failed.
+	// reauthenticateMessage covers a 401 that carries neither a code nor a detail.
 	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
 )
 
@@ -195,9 +194,9 @@ func isJSONObject(body []byte) bool {
 
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
 // the server's human detail; absent that, a known structured code maps to a
-// clear message. Re-login is suggested only for a code-less 401 or one coded
-// auth_token_missing/auth_authentication_failed—an authenticated user who
-// merely needs MFA, or who hit a policy denial, must not be told to log in again.
+// clear message. Re-login is suggested only for a code-less 401—an
+// authenticated user who merely needs MFA, or who hit a policy denial, must not
+// be told to log in again.
 func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized && code == "" {
@@ -205,7 +204,7 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return detail
 	}
-	if msg, ok := authStatusCodeMessage(statusCode, code); ok {
+	if msg, ok := authStatusCodeMessage(code); ok {
 		return msg
 	}
 	if statusCode == http.StatusUnauthorized {
@@ -237,19 +236,13 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
-// without a human detail to a clear, actionable message. auth_token_missing and
-// auth_authentication_failed are 401-only server codes; on a 403 they fall
-// through to the generic permission-denied floor instead of a login hint.
-func authStatusCodeMessage(statusCode int, code string) (string, bool) {
+// without a human detail to a clear, actionable message.
+func authStatusCodeMessage(code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
 		return "multi-factor authentication required—complete MFA to continue", true
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
-	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
-		if statusCode == http.StatusUnauthorized {
-			return reauthenticateMessage, true
-		}
 	}
 	return "", false
 }
@@ -435,10 +428,9 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // plausibly move. alpacon-server's Auth0 authenticator returns no user on every
 // bearer rejection, whether it absorbs an exception or declines outright
 // (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
-// raises DRF's NotAuthenticated—a 401 older servers leave uncoded and newer ones
-// code auth_token_missing. An expired token lands there, and so does every other
-// Auth0-bearer rejection: a workspace-claim mismatch, the authenticator-level MFA
-// gate, an uninvited user.
+// raises DRF's NotAuthenticated—a 401 with a detail and no code. An expired
+// token lands there, and so does every other Auth0-bearer rejection: a
+// workspace-claim mismatch, the authenticator-level MFA gate, an uninvited user.
 // Those cost one grant and one replay before surfacing the same error, and the
 // MFA case a refresh may genuinely fix. So that 401 is not proof of
 // expiry—it is the only one worth spending one retry on, because a coded refusal
@@ -457,7 +449,7 @@ func isStaleCredential(err error) bool {
 		return false
 	}
 	code, _ := utils.ParseErrorResponse(err)
-	return code == "" || code == utils.AuthTokenMissing
+	return code == ""
 }
 
 // replayableClone clones req with a rewound body, reporting false when the body

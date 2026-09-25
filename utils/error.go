@@ -18,10 +18,6 @@ const (
 	APINotAcceptable        = "api_not_acceptable"
 	APIUnsupportedMediaType = "api_unsupported_media_type"
 
-	// Codes the server sends on DRF's own 401s (NotAuthenticated, AuthenticationFailed).
-	AuthTokenMissing         = "auth_token_missing"
-	AuthAuthenticationFailed = "auth_authentication_failed"
-
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 

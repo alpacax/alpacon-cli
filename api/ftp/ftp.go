@@ -120,23 +120,18 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 		if !time.Now().Before(deadline) {
 			break
 		}
+		// A running transfer answers 200 with "success": null; only true or
+		// false is terminal. Any error response is fatal.
 		respBody, err := ac.SendGetRequest(statusURL)
 		if err != nil {
-			// A "webftp_transfer_in_progress" payload is expected while the
-			// transfer is still running: back off and retry. Any other error
-			// is fatal. SendGetRequest returns the parsed API error message,
-			// not the HTTP status, so we key off the payload text.
-			if !strings.Contains(err.Error(), "webftp_transfer_in_progress") {
-				return false, "", fmt.Errorf("failed to check transfer status: %w", err)
-			}
-		} else {
-			var statusResp TransferStatusResponse
-			if err := json.Unmarshal(respBody, &statusResp); err != nil {
-				return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
-			}
-			if statusResp.Success != nil {
-				return *statusResp.Success, statusResp.Message, nil
-			}
+			return false, "", fmt.Errorf("failed to check transfer status: %w", err)
+		}
+		var statusResp TransferStatusResponse
+		if err := json.Unmarshal(respBody, &statusResp); err != nil {
+			return false, statusResp.Message, fmt.Errorf("failed to parse transfer status response: %w", err)
+		}
+		if statusResp.Success != nil {
+			return *statusResp.Success, statusResp.Message, nil
 		}
 
 		now := time.Now()
