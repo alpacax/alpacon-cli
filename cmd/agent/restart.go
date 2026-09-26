@@ -10,7 +10,7 @@ var restartAgentCmd = &cobra.Command{
 	Use:   "restart SERVER",
 	Short: "Restart server's agent(alpamon)",
 	Long: `
-	This command restarts the agent (alpamon) on a specified server.
+	This command restarts the agent (Alpamon) on a specified server.
 	By default it asks for confirmation; pass -y to skip the prompt.
 	If the server has active user work (an open Websh/WebFTP session or an in-flight command), the restart is refused unless you pass --force.
 	`,

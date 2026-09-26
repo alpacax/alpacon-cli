@@ -7,8 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The command-tree tests share the package-global AgentCmd, which Cobra
+// mutates lazily (sorting children, building flag sets), so they stay serial.
 func TestAgentSubcommands(t *testing.T) {
-	t.Parallel()
 	var names []string
 	for _, c := range AgentCmd.Commands() {
 		names = append(names, c.Name())
@@ -17,7 +18,6 @@ func TestAgentSubcommands(t *testing.T) {
 }
 
 func TestAgentDisruptiveFlags(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{"restart", "upgrade"} {
 		t.Run(name, func(t *testing.T) {
 			cmd, _, err := AgentCmd.Find([]string{name})

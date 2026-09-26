@@ -37,12 +37,10 @@ func TestBusyGuardMessage(t *testing.T) {
 	}
 }
 
+// Serial: Find lazily mutates the package-global ServerCmd.
 func TestHostPowerCommandsRemoved(t *testing.T) {
-	t.Parallel()
 	for _, name := range []string{"reboot", "shutdown", "upgrade"} {
-		cmd, _, err := ServerCmd.Find([]string{name})
-		if err == nil {
-			assert.NotEqual(t, name, cmd.Name(), "server %s should not be registered", name)
-		}
+		_, _, err := ServerCmd.Find([]string{name})
+		assert.Error(t, err, "server %s should not be registered", name)
 	}
 }

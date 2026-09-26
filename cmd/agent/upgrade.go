@@ -10,7 +10,7 @@ var upgradeAgentCmd = &cobra.Command{
 	Use:   "upgrade SERVER",
 	Short: "Upgrade server's agent(alpamon)",
 	Long: `
-	This command upgrades the agent (alpamon) on a specified server to the latest version.
+	This command upgrades the agent (Alpamon) on a specified server to the latest version.
 	By default it asks for confirmation; pass -y to skip the prompt.
 	If the server has active user work (an open Websh/WebFTP session or an in-flight command), the upgrade is refused unless you pass --force.
 	`,
