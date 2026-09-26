@@ -36,3 +36,13 @@ func TestBusyGuardMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestHostPowerCommandsRemoved(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"reboot", "shutdown", "upgrade"} {
+		cmd, _, err := ServerCmd.Find([]string{name})
+		if err == nil {
+			assert.NotEqual(t, name, cmd.Name(), "server %s should not be registered", name)
+		}
+	}
+}
