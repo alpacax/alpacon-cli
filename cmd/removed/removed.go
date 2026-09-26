@@ -26,7 +26,7 @@ const serverPlaceholder = "<server>"
 func Command(name, path, guidance string) *cobra.Command {
 	return &cobra.Command{
 		Use:                name + " [SERVER] [flags]",
-		Short:              fmt.Sprintf("Removed; %q prints what to do instead", path),
+		Short:              "Explain the replacement command",
 		Long:               Message(path, guidance, nil),
 		Hidden:             true,
 		DisableFlagParsing: true,

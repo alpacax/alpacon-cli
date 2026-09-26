@@ -80,6 +80,7 @@ func TestRemovedCommandsPrintGuidanceWithoutCallingTheAPI(t *testing.T) {
 			contains: []string{
 				`"alpacon server upgrade" was removed.`,
 				"alpacon exec my-server -- sudo apt-get upgrade -y",
+				"Mute the server's alerts before a planned upgrade.",
 			},
 		},
 		{

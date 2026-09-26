@@ -17,5 +17,5 @@ var (
 	serverUpgradeRemovedCmd = removed.Command("upgrade", "alpacon server upgrade",
 		"Upgrade the host's packages inside a work session instead, with the distribution's package manager, for example:\n"+
 			"  alpacon exec <server> -- sudo apt-get upgrade -y\n"+
-			"Mute the server's alerts before a planned reboot.")
+			"Mute the server's alerts before a planned upgrade.")
 )
