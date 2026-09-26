@@ -10,14 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// addDisruptiveActionFlags registers the shared -y/--force flags.
-func addDisruptiveActionFlags(cmd *cobra.Command) {
+// AddDisruptiveActionFlags registers the shared -y/--force flags.
+func AddDisruptiveActionFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().Bool("force", false, "Override the busy guard even when the server has active user work")
 }
 
-// runDisruptiveServerAction runs the action with confirmation, MFA retry, and busy-guard handling.
-func runDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) {
+// RunDisruptiveServerAction runs the action with confirmation, MFA retry, and busy-guard handling.
+func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failMsg string, yes, force bool) {
 	if !yes {
 		utils.ConfirmAction(confirmMsg, serverName)
 	}

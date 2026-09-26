@@ -14,12 +14,11 @@ var AgentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon agent upgrade', 'alpacon agent restart', or 'alpacon agent shutdown' to manage the server agent. Run 'alpacon agent --help' for more information")
+		return errors.New("a subcommand is required. Use 'alpacon agent upgrade' or 'alpacon agent restart' to manage the server agent. Run 'alpacon agent --help' for more information")
 	},
 }
 
 func init() {
 	AgentCmd.AddCommand(upgradeAgentCmd)
 	AgentCmd.AddCommand(restartAgentCmd)
-	AgentCmd.AddCommand(shutdownAgentCmd)
 }

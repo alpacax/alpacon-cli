@@ -23,10 +23,9 @@ const (
 
 // Server action identifiers accepted by the actions endpoint.
 const (
-	ActionRebootSystem      = "reboot_system"
-	ActionShutdownSystem    = "shutdown_system"
-	ActionUpgradeSystem     = "upgrade_system"
 	ActionUpdateInformation = "update_information"
+	ActionUpgradeAgent      = "upgrade_agent"
+	ActionRestartAgent      = "restart_agent"
 )
 
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.

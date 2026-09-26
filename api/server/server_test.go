@@ -559,7 +559,8 @@ func TestRequestServerAction(t *testing.T) {
 		action string
 		force  bool
 	}{
-		{"reboot with force", ActionRebootSystem, true},
+		{"restart agent with force", ActionRestartAgent, true},
+		{"upgrade agent without force", ActionUpgradeAgent, false},
 		{"refresh without force", ActionUpdateInformation, false},
 	}
 

@@ -36,3 +36,11 @@ func TestBusyGuardMessage(t *testing.T) {
 		})
 	}
 }
+
+// Serial: Find lazily mutates the package-global ServerCmd.
+func TestHostPowerCommandsRemoved(t *testing.T) {
+	for _, name := range []string{"reboot", "shutdown", "upgrade"} {
+		_, _, err := ServerCmd.Find([]string{name})
+		assert.Error(t, err, "server %s should not be registered", name)
+	}
+}

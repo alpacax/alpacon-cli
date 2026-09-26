@@ -1,30 +1,39 @@
 package agent
 
 import (
-	"github.com/alpacax/alpacon-cli/api/agent"
-	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/alpacax/alpacon-cli/api/server"
+	servercmd "github.com/alpacax/alpacon-cli/cmd/server"
 	"github.com/spf13/cobra"
 )
 
 var upgradeAgentCmd = &cobra.Command{
-	Use:     "upgrade SERVER",
-	Short:   "Upgrade server's agent(alpamon)",
-	Example: `alpacon agent upgrade myserver`,
-	Args:    cobra.ExactArgs(1),
+	Use:   "upgrade SERVER",
+	Short: "Upgrade server's agent(alpamon)",
+	Long: `
+	This command upgrades the agent (Alpamon) on a specified server to the latest version.
+	By default it asks for confirmation; pass -y to skip the prompt.
+	If the server has active user work (an open Websh/WebFTP session or an in-flight command), the upgrade is refused unless you pass --force.
+	`,
+	Example: `
+	alpacon agent upgrade myserver
+	alpacon agent upgrade myserver -y
+	alpacon agent upgrade myserver --force
+	`,
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		serverName := args[0]
-
-		alpaconClient, err := client.NewAlpaconAPIClient()
-		if err != nil {
-			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
-		}
-
-		err = agent.RequestAgentAction(alpaconClient, serverName, "upgrade")
-		if err != nil {
-			utils.CliErrorWithExit("Failed to upgrade the agent: %s.", err)
-		}
-
-		utils.CliSuccess("Agent upgrade requested. Run 'alpacon events' to monitor progress.")
+		yes, _ := cmd.Flags().GetBool("yes")
+		force, _ := cmd.Flags().GetBool("force")
+		servercmd.RunDisruptiveServerAction(
+			args[0],
+			server.ActionUpgradeAgent,
+			"Upgrade the agent on server '%s'?",
+			"Agent upgrade requested. Run 'alpacon events' to monitor progress.",
+			"Failed to upgrade the agent",
+			yes, force,
+		)
 	},
+}
+
+func init() {
+	servercmd.AddDisruptiveActionFlags(upgradeAgentCmd)
 }
