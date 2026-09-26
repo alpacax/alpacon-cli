@@ -27,4 +27,5 @@ func init() {
 	ServerCmd.AddCommand(serverUpdateCmd)
 	ServerCmd.AddCommand(tokenCmd)
 	ServerCmd.AddCommand(serverRefreshCmd)
+	ServerCmd.AddCommand(serverRebootRemovedCmd, serverShutdownRemovedCmd, serverUpgradeRemovedCmd)
 }

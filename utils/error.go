@@ -127,6 +127,13 @@ const (
 	// the check itself failed, 8 means the check succeeded and a newer version
 	// exists. Scripts and CI branch on it to schedule an update.
 	ExitCodeUpdateAvailable = 8
+
+	// ExitCodeCommandRemoved is the process exit code for a removed command whose
+	// hidden stub printed what to run instead. It is distinct from
+	// ExitCodeGeneralError (1) so a script can tell "this command no longer
+	// exists" from a failed run.
+	// TODO(remove): drop with the stubs in the release after v1.14.0 (#477).
+	ExitCodeCommandRemoved = 9
 )
 
 type ErrorResponse struct {

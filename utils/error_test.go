@@ -235,3 +235,13 @@ func TestExitCodeUsageError_IsTwoAndDistinct(t *testing.T) {
 	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeUsageError)
 	assert.NotEqual(t, ExitCodeNotApproved, ExitCodeUsageError)
 }
+
+func TestExitCodeCommandRemoved_IsNineAndDistinct(t *testing.T) {
+	t.Parallel()
+	// 9 is a public contract documented in README; scripts and agents branch on it.
+	assert.Equal(t, 9, ExitCodeCommandRemoved)
+	for _, other := range []int{ExitCodeGeneralError, ExitCodeUsageError, ExitCodeWorkSessionDenied, ExitCodePendingApproval,
+		ExitCodeServerBusy, ExitCodeNotApproved, ExitCodePurposeRequired, ExitCodeUpdateAvailable} {
+		assert.NotEqual(t, ExitCodeCommandRemoved, other)
+	}
+}
