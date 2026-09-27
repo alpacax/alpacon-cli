@@ -47,7 +47,50 @@ const (
 
 	// reauthenticateMessage covers a 401 that carries neither a code nor a detail.
 	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
+
+	// gatePlan is the "gate" value alpacon-server sends on every 402 plan
+	// refusal, limit or feature lock alike (paywall wave wire contract §1.1).
+	gatePlan = "plan"
+
+	// axisServer is the one axis whose remedy carries an extra hint: a host that
+	// hit the server cap may be a re-registration of one deleted-but-not-freed
+	// entry rather than a genuinely new one.
+	axisServer = "server"
+
+	talkToUsURL             = "https://www.alpacax.com/alpacon/pricing"
+	consoleBillingURLFormat = "https://alpacon.io/%s/settings/billing"
+	selfHostedBillingWords  = "Settings → Billing in your Alpacon console"
+
+	countCapRemedy           = "Remove one you no longer use, or upgrade the plan."
+	serverAxisReregisterHint = "If this host was registered before, delete the old server entry first, then retry."
+	featureLockSentence      = "This action needs a higher plan."
 )
+
+// legacyPlanLimitAxis maps a 402's "code" to its axis for a server that
+// predates the "gate"/"axis" envelope (client classification rule 2, ADR 0069
+// D8: the client table shrinks to what the server doesn't say). Deliberately
+// excludes workspace_free_limit_exceeded: that gate-less 402 can also be
+// alpacon-account's own Free-workspace refusal, which this rule must not
+// repaint as a plan limit.
+var legacyPlanLimitAxis = map[string]string{
+	"server_limit_exceeded":      "server",
+	"user_limit_exceeded":        "user",
+	"application_limit_exceeded": "application",
+	"websh_limit_exceeded":       "websh",
+	"webftp_limit_exceeded":      "webftp",
+	"websh_share_limit_exceeded": "websh-share",
+}
+
+// axisDisplayNames renders an axis for a human reader.
+var axisDisplayNames = map[string]string{
+	"server":      "servers",
+	"user":        "users (pending invitations count)",
+	"application": "applications",
+	"websh":       "Websh hours this month",
+	"webftp":      "WebFTP transfer volume this month",
+	"websh-share": "Websh session sharing",
+	"workspace":   "Free workspaces",
+}
 
 // refreshAccessToken is a test seam so a unit test can drive the stale-token
 // retry without real Auth0 I/O.
@@ -63,8 +106,21 @@ type apiError struct {
 	// on these routes, so a caller such as cmd/iam's RBAC guidance table reads
 	// these instead of trying to parse one out of nothing. missing is normalized
 	// to a slice regardless of whether the server sent one scope string or a list.
-	gate       string
-	missing    []string
+	gate    string
+	missing []string
+	// axis and next carry the optional 402 plan-limit fields (paywall wave wire
+	// contract §1.1): axis names which limit refused the request, and next is a
+	// self-relative entitlements-read path a member-scoped caller can read for
+	// the numbers this contract never puts in the body. planLimitMessage reads
+	// axis to build the user-facing text; next is carried for a future
+	// programmatic reader, not this CLI's plain-text rendering.
+	axis string
+	next string
+	// retryAfter is the Retry-After header's parsed delay, set by
+	// withRetryAfter alongside the *retryAfterError wrapper it returns, so
+	// planLimitMessage can build "resets in N days" without re-parsing the
+	// header itself.
+	retryAfter time.Duration
 	statusCode int
 	// apiPayload records that the body was a JSON object—the shape every
 	// alpacon-server error response has. It is a filter, not a provenance flag:
@@ -172,7 +228,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
 		return nil
 	}
-	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body)
+	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body, statusCode)
 	return &apiError{
 		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing),
 		code:       code,
@@ -251,8 +307,12 @@ func authStatusCodeMessage(code string) (string, bool) {
 // rendered field_errors messages; code/source/gate/missing are returned
 // regardless so the WorkSession gate can route to exit 3 and a coded refusal
 // without either still carries what it can.
-func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
-	message, code, source, gate, missing, ok = parseAPIErrorPayload(body)
+func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, missing []string, ok bool) {
+	// axis/next ride only on the 402 plan-limit envelope (client.go's
+	// planLimitMessage), never on a 401/403; this path ignores them, and
+	// isEnvelopeOnly's own statusCode gate keeps a same-named validation field
+	// from being swallowed regardless.
+	message, code, source, gate, _, _, missing, ok = parseAPIErrorPayload(body, statusCode)
 	if !ok || message == "" {
 		return "", code, source, gate, missing, false
 	}
@@ -495,10 +555,139 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, resp.StatusCode, withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
+		apiErr := withRetryAfter(withStatus(parseAPIError(respBody, resp.StatusCode), resp.StatusCode), resp.Header)
+		if resp.StatusCode == http.StatusPaymentRequired {
+			apiErr = ac.rewritePlanLimitMessage(apiErr)
+		}
+		return nil, resp.StatusCode, apiErr
 	}
 
 	return respBody, resp.StatusCode, nil
+}
+
+// rewritePlanLimitMessage replaces err's message with planLimitMessage's
+// §1.6 rendering when the 402 it carries classifies as a plan limit or a
+// feature lock (client classification rules 1–3); rule 4 (any other 402)
+// leaves the generic message parseAPIError already built untouched.
+func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
+	var ae *apiError
+	if !errors.As(err, &ae) {
+		return err
+	}
+	if message, ok := planLimitMessage(ae.axis, ae.code, ae.gate, ae.retryAfter, ac.BaseURL); ok {
+		ae.message = message
+	}
+	return err
+}
+
+// planLimitMessage implements the client classification (§1.3) and the CLI/MCP/
+// alpamon message template (§1.6) for a 402 from alpacon-server:
+//
+//  1. gate=="plan" with axis present: a plan limit on axis.
+//  2. gate absent and code is one of the six legacy *_limit_exceeded codes: a
+//     plan limit, axis from legacyPlanLimitAxis (an older server, or an agent
+//     talking to one, that predates "gate"/"axis").
+//  3. gate=="plan" with no axis: a feature lock, not a limit.
+//  4. Anything else: not a plan-limit response at all; ok is false and the
+//     caller leaves today's message alone.
+func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string) (string, bool) {
+	switch {
+	case gate == gatePlan && axis != "":
+		// rule 1: axis already carried by the modern envelope.
+	case gate == "":
+		mapped, known := legacyPlanLimitAxis[code]
+		if !known {
+			return "", false // rule 4
+		}
+		axis = mapped // rule 2
+	case gate == gatePlan:
+		// rule 3: a feature lock—no axis to name a limit on.
+		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", featureLockSentence, billingLocation(workspaceURL), talkToUsURL), true
+	default:
+		return "", false // rule 4: some other gate, e.g. role or token_scope
+	}
+
+	message := fmt.Sprintf("plan limit reached: %s. %s Upgrade: %s. Talk to us: %s",
+		axisDisplayName(axis), planLimitRemedy(axis, retryAfter), billingLocation(workspaceURL), talkToUsURL)
+	return message, true
+}
+
+// axisDisplayName renders axis for a human reader, falling back to the raw
+// value for an axis this CLI does not yet know (a future server addition).
+func axisDisplayName(axis string) string {
+	if name, ok := axisDisplayNames[axis]; ok {
+		return name
+	}
+	return axis
+}
+
+// planLimitRemedy picks the count-cap or monthly-reset remedy sentence:
+// retryAfter is only ever set on a monthly axis (websh, webftp, websh-share)
+// and only when the limit is above zero (§1.1), so its presence alone decides
+// which sentence applies. axisServer gets an extra hint no other axis needs:
+// a host cap is the one limit a stale, undeleted entry can trip by accident.
+func planLimitRemedy(axis string, retryAfter time.Duration) string {
+	remedy := countCapRemedy
+	if retryAfter > 0 {
+		remedy = monthlyRemedy(retryAfter)
+	}
+	if axis == axisServer {
+		remedy += " " + serverAxisReregisterHint
+	}
+	return remedy
+}
+
+// monthlyRemedy renders "resets in N days" from the Retry-After delay,
+// rounded to the nearest day and floored at one so a delay under twelve hours
+// never reads as "0 days".
+func monthlyRemedy(retryAfter time.Duration) string {
+	days := int(retryAfter.Round(24*time.Hour) / (24 * time.Hour))
+	if days < 1 {
+		days = 1
+	}
+	return fmt.Sprintf("Resets in %d days.", days)
+}
+
+// billingLocation is the console billing page for a workspace whose host is
+// <label>.<region>.alpacon.io, or the words pointing there for any other host
+// (self-hosted): a public repo never prints an internal or unverified URL.
+func billingLocation(workspaceURL string) string {
+	label, ok := consoleLabel(workspaceURL)
+	if !ok {
+		return selfHostedBillingWords
+	}
+	return fmt.Sprintf(consoleBillingURLFormat, label)
+}
+
+// consoleLabel extracts the workspace label from a canonical Alpacon Cloud
+// host. It mirrors cmd/login.go's isCloudWorkspaceURL—the CLI's other
+// definition of "this is Alpacon Cloud"—rather than sharing it: client cannot
+// import cmd. The URL must round-trip, case-insensitively, to exactly
+// https://<label>.<region>.alpacon.io; a different scheme, a port, a path, or
+// a non-4-label host all fail this, so a self-hosted endpoint whose hostname
+// merely resembles the pattern (or a cloud host spelled in another case)
+// never gets an unverified—or missing—cloud billing link.
+func consoleLabel(workspaceURL string) (string, bool) {
+	raw := strings.TrimSpace(workspaceURL)
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(parsed.Hostname(), ".")
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	if !strings.EqualFold(strings.Join(parts[2:], "."), "alpacon.io") {
+		return "", false
+	}
+	canonical := fmt.Sprintf("https://%s.%s.alpacon.io", parts[0], parts[1])
+	if !strings.EqualFold(strings.TrimSuffix(raw, "/"), canonical) {
+		return "", false
+	}
+	return parts[0], true
 }
 
 // Get Request to Alpacon Server
@@ -757,8 +946,8 @@ func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
 
-func newAPIError(message, code, source, gate string, missing []string) error {
-	return &apiError{message: message, code: code, source: source, gate: gate, missing: missing}
+func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
+	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
 }
 
 // withStatus tags err with its HTTP status so callers can tell 404 from 401,
@@ -777,6 +966,10 @@ func withStatus(err error, statusCode int) error {
 
 // withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
 // that is what DRF throttling sends, and misreading an HTTP-date would stall a poll.
+// When err is (or wraps) an *apiError, the delay is also stored there directly so
+// planLimitMessage can read it without re-parsing the header or unwrapping the
+// *retryAfterError this still returns for every other caller (the exec/websh poll
+// loops read RetryAfter() off that wrapper).
 func withRetryAfter(err error, header http.Header) error {
 	if err == nil {
 		return nil
@@ -787,46 +980,55 @@ func withRetryAfter(err error, header http.Header) error {
 	if convErr != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
 		return err
 	}
-	return &retryAfterError{err: err, retryAfter: time.Duration(seconds) * time.Second}
+	retryAfter := time.Duration(seconds) * time.Second
+	var ae *apiError
+	if errors.As(err, &ae) {
+		ae.retryAfter = retryAfter
+	}
+	return &retryAfterError{err: err, retryAfter: retryAfter}
 }
 
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
 // {"field_errors": {"path": [{"code", "message"}, ...]}}
-func parseAPIError(body []byte) error {
-	message, code, source, gate, missing, _ := parseAPIErrorPayload(body)
-	return newAPIError(message, code, source, gate, missing)
+// statusCode gates whether "axis"/"next" are read as the 402 plan-limit
+// envelope (isEnvelopeOnly) rather than as ordinary validation fields.
+func parseAPIError(body []byte, statusCode int) error {
+	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
+	return newAPIError(message, code, source, gate, axis, next, missing)
 }
 
-func parseAPIErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
+func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return "server returned an empty error response", "", "", "", nil, false
+		return "server returned an empty error response", "", "", "", "", "", nil, false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
-		return truncateBody(raw), "", "", "", nil, false
+		return truncateBody(raw), "", "", "", "", "", nil, false
 	}
 
 	code = stringField(parsed, "code")
 	source = stringField(parsed, "source")
 	gate, missing = parseGateAndMissing(parsed)
+	axis = stringField(parsed, "axis")
+	next = stringField(parsed, "next")
 
 	// Case 1: {"detail": "..."}
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
-		return detail, code, source, gate, missing, true
+		return detail, code, source, gate, axis, next, missing, true
 	}
 
-	// A refusal envelope carries no field errors; gate/missing are not validation messages.
-	if code != "" && isEnvelopeOnly(parsed) {
-		return codeOnlyMessage(code), code, source, gate, missing, true
+	// A refusal envelope carries no field errors; gate/axis/next/missing are not validation messages.
+	if code != "" && isEnvelopeOnly(parsed, statusCode) {
+		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
 	}
 
 	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
@@ -866,24 +1068,35 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 	}
 
 	if len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
 	}
 
 	if code != "" {
-		return codeOnlyMessage(code), code, source, gate, missing, true
+		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
 	}
 
 	// Fallback: return truncated raw body
-	return truncateBody(raw), code, source, gate, missing, true
+	return truncateBody(raw), code, source, gate, axis, next, missing, true
 }
 
 // isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
-// string for "code"/"source"/"gate"/"detail", and for "missing" either a
-// single scope string or a list of them.
-func isEnvelopeOnly(parsed map[string]any) bool {
+// string for "code"/"source"/"gate"/"detail", "axis"/"next" the same but only
+// on a 402 (the plan-limit fields, paywall wave wire contract §1.1—on any
+// other status they are not part of the envelope, so a validation response
+// that happens to have a field named "axis" or "next" still renders as a
+// field error rather than being swallowed into a code-only message), and for
+// "missing" either a single scope string or a list of them.
+func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
 		switch key {
 		case "code", "source", "gate", "detail":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "axis", "next":
+			if statusCode != http.StatusPaymentRequired {
+				return false
+			}
 			if _, ok := value.(string); !ok {
 				return false
 			}
