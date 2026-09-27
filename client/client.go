@@ -228,7 +228,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
 		return nil
 	}
-	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body)
+	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body, statusCode)
 	return &apiError{
 		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing),
 		code:       code,
@@ -307,10 +307,12 @@ func authStatusCodeMessage(code string) (string, bool) {
 // rendered field_errors messages; code/source/gate/missing are returned
 // regardless so the WorkSession gate can route to exit 3 and a coded refusal
 // without either still carries what it can.
-func parseAuthStatusErrorPayload(body []byte) (message string, code string, source string, gate string, missing []string, ok bool) {
+func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, missing []string, ok bool) {
 	// axis/next ride only on the 402 plan-limit envelope (client.go's
-	// planLimitMessage), never on a 401/403; this path ignores them.
-	message, code, source, gate, _, _, missing, ok = parseAPIErrorPayload(body)
+	// planLimitMessage), never on a 401/403; this path ignores them, and
+	// isEnvelopeOnly's own statusCode gate keeps a same-named validation field
+	// from being swallowed regardless.
+	message, code, source, gate, _, _, missing, ok = parseAPIErrorPayload(body, statusCode)
 	if !ok || message == "" {
 		return "", code, source, gate, missing, false
 	}
@@ -553,7 +555,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		apiErr := withRetryAfter(withStatus(parseAPIError(respBody), resp.StatusCode), resp.Header)
+		apiErr := withRetryAfter(withStatus(parseAPIError(respBody, resp.StatusCode), resp.StatusCode), resp.Header)
 		if resp.StatusCode == http.StatusPaymentRequired {
 			apiErr = ac.rewritePlanLimitMessage(apiErr)
 		}
@@ -657,16 +659,32 @@ func billingLocation(workspaceURL string) string {
 	return fmt.Sprintf(consoleBillingURLFormat, label)
 }
 
-// consoleLabel extracts the workspace label from a host shaped
-// <label>.<region>.alpacon.io. Any other shape—self-hosted, a bare
-// alpacon.io, or an unparseable URL—reports false.
+// consoleLabel extracts the workspace label from a canonical Alpacon Cloud
+// host. It mirrors cmd/login.go's isCloudWorkspaceURL—the CLI's other
+// definition of "this is Alpacon Cloud"—rather than sharing it: client cannot
+// import cmd. The URL must round-trip, case-insensitively, to exactly
+// https://<label>.<region>.alpacon.io; a different scheme, a port, a path, or
+// a non-4-label host all fail this, so a self-hosted endpoint whose hostname
+// merely resembles the pattern (or a cloud host spelled in another case)
+// never gets an unverified—or missing—cloud billing link.
 func consoleLabel(workspaceURL string) (string, bool) {
-	parsed, err := url.Parse(workspaceURL)
+	raw := strings.TrimSpace(workspaceURL)
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
 	if err != nil {
 		return "", false
 	}
 	parts := strings.Split(parsed.Hostname(), ".")
-	if len(parts) != 4 || parts[2] != "alpacon" || parts[3] != "io" {
+	if len(parts) != 4 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+	if !strings.EqualFold(strings.Join(parts[2:], "."), "alpacon.io") {
+		return "", false
+	}
+	canonical := fmt.Sprintf("https://%s.%s.alpacon.io", parts[0], parts[1])
+	if !strings.EqualFold(strings.TrimSuffix(raw, "/"), canonical) {
 		return "", false
 	}
 	return parts[0], true
@@ -973,12 +991,14 @@ func withRetryAfter(err error, header http.Header) error {
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
 // {"field_errors": {"path": [{"code", "message"}, ...]}}
-func parseAPIError(body []byte) error {
-	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body)
+// statusCode gates whether "axis"/"next" are read as the 402 plan-limit
+// envelope (isEnvelopeOnly) rather than as ordinary validation fields.
+func parseAPIError(body []byte, statusCode int) error {
+	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
 	return newAPIError(message, code, source, gate, axis, next, missing)
 }
 
-func parseAPIErrorPayload(body []byte) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
+func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
@@ -1003,7 +1023,7 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 	}
 
 	// A refusal envelope carries no field errors; gate/axis/next/missing are not validation messages.
-	if code != "" && isEnvelopeOnly(parsed) {
+	if code != "" && isEnvelopeOnly(parsed, statusCode) {
 		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
 	}
 
@@ -1060,13 +1080,23 @@ func parseAPIErrorPayload(body []byte) (message string, code string, source stri
 }
 
 // isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
-// string for "code"/"source"/"gate"/"detail"/"axis"/"next" (axis and next are
-// the 402 plan-limit fields, paywall wave wire contract §1.1), and for
+// string for "code"/"source"/"gate"/"detail", "axis"/"next" the same but only
+// on a 402 (the plan-limit fields, paywall wave wire contract §1.1—on any
+// other status they are not part of the envelope, so a validation response
+// that happens to have a field named "axis" or "next" still renders as a
+// field error rather than being swallowed into a code-only message), and for
 // "missing" either a single scope string or a list of them.
-func isEnvelopeOnly(parsed map[string]any) bool {
+func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
 		switch key {
-		case "code", "source", "gate", "detail", "axis", "next":
+		case "code", "source", "gate", "detail":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "axis", "next":
+			if statusCode != http.StatusPaymentRequired {
+				return false
+			}
 			if _, ok := value.(string); !ok {
 				return false
 			}

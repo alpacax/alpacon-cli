@@ -1839,6 +1839,84 @@ func TestPlanLimitMessage(t *testing.T) {
 	}
 }
 
+// TestConsoleLabel mirrors cmd/login.go's TestIsCloudWorkspaceURL cases:
+// consoleLabel repeats that function's canonical-form definition (client
+// cannot import cmd), so a host it accepts or rejects must match.
+func TestConsoleLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		workspaceURL string
+		wantLabel    string
+		wantOK       bool
+	}{
+		{
+			name:         "canonical cloud URL",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantLabel:    "acme",
+			wantOK:       true,
+		},
+		{
+			name:         "mixed-case base domain is still canonical",
+			workspaceURL: "https://acme.us1.Alpacon.io",
+			wantLabel:    "acme",
+			wantOK:       true,
+		},
+		{
+			name:         "mixed-case scheme is still canonical",
+			workspaceURL: "HTTPS://acme.us1.alpacon.io",
+			wantLabel:    "acme",
+			wantOK:       true,
+		},
+		{
+			name:         "cloud host without a scheme normalizes to canonical",
+			workspaceURL: "acme.us1.alpacon.io",
+			wantLabel:    "acme",
+			wantOK:       true,
+		},
+		{
+			name:         "self-hosted URL is not cloud",
+			workspaceURL: "https://alpacon.example.com",
+			wantOK:       false,
+		},
+		{
+			name:         "http cloud-shaped URL is non-canonical",
+			workspaceURL: "http://acme.us1.alpacon.io",
+			wantOK:       false,
+		},
+		{
+			// A self-hosted endpoint whose hostname merely resembles the cloud
+			// pattern (e.g. a proxy or tunnel on a nonstandard port) must not
+			// receive an unverified cloud billing link.
+			name:         "cloud-shaped URL with a port is non-canonical",
+			workspaceURL: "https://acme.us1.alpacon.io:8443",
+			wantOK:       false,
+		},
+		{
+			name:         "cloud-shaped URL with a path is non-canonical",
+			workspaceURL: "https://acme.us1.alpacon.io/foo",
+			wantOK:       false,
+		},
+		{
+			name:         "bare base domain has no workspace label",
+			workspaceURL: "https://us1.alpacon.io",
+			wantOK:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			label, ok := consoleLabel(tt.workspaceURL)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantLabel, label)
+			}
+		})
+	}
+}
+
 // TestSendRequest_PlanLimitEnvelopeRendersReadableMessage pins the fix for
 // what today's client renders as garbled field errors: before axis/next joined
 // the envelope isEnvelopeOnly rejected this body on sight of "axis", and the
@@ -1937,4 +2015,24 @@ func TestSendRequest_PlanLimitGatelessWorkspaceAxisCodeNotReclassified(t *testin
 	_, err := ac.SendGetRequest("/api/test/")
 	require.Error(t, err)
 	assert.Equal(t, "request failed (code: workspace_free_limit_exceeded)", err.Error())
+}
+
+// TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors guards
+// isEnvelopeOnly's statusCode gate: axis/next are 402 plan-limit fields only
+// (§1.1), so a validation response on any other status that happens to carry
+// same-named fields must still render their messages rather than being
+// swallowed into a bare code-only message.
+func TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "validation_error", "axis": "This field is required.", "next": "Must be a valid choice."}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "axis: This field is required.; next: Must be a valid choice.", err.Error())
 }
