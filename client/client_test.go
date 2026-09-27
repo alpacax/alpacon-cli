@@ -1726,3 +1726,215 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+// TestPlanLimitMessage covers the client classification (§1.3) and the
+// CLI/MCP/alpamon message template (§1.6) of the paywall wave's wire contract.
+// workspaceURL is exercised directly here—an httptest server's URL is always
+// self-hosted-shaped, so the acme.us1.alpacon.io billing-link case can only be
+// reached by calling planLimitMessage itself rather than through a full
+// SendGetRequest round trip.
+func TestPlanLimitMessage(t *testing.T) {
+	t.Parallel()
+
+	const wantServerLimitMessage = "plan limit reached: servers. Remove one you no longer use, or upgrade the plan. " +
+		"If this host was registered before, delete the old server entry first, then retry. " +
+		"Upgrade: https://alpacon.io/acme/settings/billing. Talk to us: https://www.alpacax.com/alpacon/pricing"
+
+	tests := []struct {
+		name         string
+		axis         string
+		code         string
+		gate         string
+		retryAfter   time.Duration
+		workspaceURL string
+		wantOK       bool
+		wantMessage  string
+	}{
+		{
+			name:         "full envelope renders the billing link",
+			axis:         "server",
+			code:         "server_limit_exceeded",
+			gate:         "plan",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       true,
+			wantMessage:  wantServerLimitMessage,
+		},
+		{
+			// rule 2: an older server (or an agent talking to one) sends no
+			// "gate"/"axis" at all—only the legacy code.
+			name:         "gate-less legacy code renders the same message",
+			code:         "server_limit_exceeded",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       true,
+			wantMessage:  wantServerLimitMessage,
+		},
+		{
+			name:         "self-hosted host prints words instead of a URL",
+			axis:         "server",
+			code:         "server_limit_exceeded",
+			gate:         "plan",
+			workspaceURL: "https://alpacon.mycompany.internal",
+			wantOK:       true,
+			wantMessage: "plan limit reached: servers. Remove one you no longer use, or upgrade the plan. " +
+				"If this host was registered before, delete the old server entry first, then retry. " +
+				"Upgrade: Settings → Billing in your Alpacon console. Talk to us: https://www.alpacax.com/alpacon/pricing",
+		},
+		{
+			name:         "monthly axis with Retry-After renders the reset day count",
+			axis:         "websh",
+			code:         "websh_limit_exceeded",
+			gate:         "plan",
+			retryAfter:   864000 * time.Second,
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       true,
+			wantMessage: "plan limit reached: Websh hours this month. Resets in 10 days. " +
+				"Upgrade: https://alpacon.io/acme/settings/billing. Talk to us: https://www.alpacax.com/alpacon/pricing",
+		},
+		{
+			// rule 3: gate "plan" with no axis is a feature lock, not a limit—no
+			// axis name in the opening sentence.
+			name:         "feature lock has no axis to name",
+			code:         "workspace_plan_update_required",
+			gate:         "plan",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       true,
+			wantMessage: "This action needs a higher plan. Upgrade: https://alpacon.io/acme/settings/billing. " +
+				"Talk to us: https://www.alpacax.com/alpacon/pricing",
+		},
+		{
+			// rule 4: some other gate (here, an RBAC role gate) is not a plan
+			// refusal at all—today's generic message stays.
+			name:         "an unrelated gate is rule 4, unmatched",
+			code:         "rbac_permission_required",
+			gate:         "role",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       false,
+		},
+		{
+			name:         "a gate-less unknown code is rule 4, unmatched",
+			code:         "something_else",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       false,
+		},
+		{
+			// workspace_free_limit_exceeded is deliberately absent from
+			// legacyPlanLimitAxis: a gate-less 402 with this code may be
+			// alpacon-account's own Free-workspace refusal, not a plan limit.
+			name:         "workspace axis is excluded from the legacy code map",
+			code:         "workspace_free_limit_exceeded",
+			workspaceURL: "https://acme.us1.alpacon.io",
+			wantOK:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			message, ok := planLimitMessage(tt.axis, tt.code, tt.gate, tt.retryAfter, tt.workspaceURL)
+			assert.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				assert.Equal(t, tt.wantMessage, message)
+			}
+		})
+	}
+}
+
+// TestSendRequest_PlanLimitEnvelopeRendersReadableMessage pins the fix for
+// what today's client renders as garbled field errors: before axis/next joined
+// the envelope isEnvelopeOnly rejected this body on sight of "axis", and the
+// fallback field-validation renderer turned it into
+// "axis: server; gate: plan; next: ...". This is the exact shape release order
+// step 5 in the paywall wave plan calls out as today's (cosmetic) CLI output.
+func TestSendRequest_PlanLimitEnvelopeRendersReadableMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "server_limit_exceeded", "gate": "plan", "axis": "server", "next": "/api/workspaces/workspaces/abc/entitlements/"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "axis:")
+	assert.NotContains(t, err.Error(), "gate:")
+	assert.NotContains(t, err.Error(), "next:")
+	assert.Contains(t, err.Error(), "plan limit reached: servers.")
+	// ts.URL is never <label>.<region>.alpacon.io, so this exercises the
+	// self-hosted words branch through the full round trip.
+	assert.Contains(t, err.Error(), "Settings → Billing in your Alpacon console")
+	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
+
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "server_limit_exceeded", code)
+}
+
+func TestSendRequest_PlanLimitGatelessLegacyCodeSameClassification(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "server_limit_exceeded"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plan limit reached: servers.")
+}
+
+func TestSendRequest_PlanLimitFeatureLockRendersNeedsHigherPlan(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "workspace_plan_update_required", "gate": "plan"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t,
+		"This action needs a higher plan. Upgrade: Settings → Billing in your Alpacon console. "+
+			"Talk to us: https://www.alpacax.com/alpacon/pricing",
+		err.Error())
+}
+
+func TestSendRequest_PlanLimitMonthlyAxisRendersResetDays(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "864000")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "websh_limit_exceeded", "gate": "plan", "axis": "websh"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Resets in 10 days.")
+	// The rewrite must not disturb the Retry-After hint the poll loops read.
+	assert.Equal(t, 864000*time.Second, utils.RetryAfter(err))
+}
+
+func TestSendRequest_PlanLimitGatelessWorkspaceAxisCodeNotReclassified(t *testing.T) {
+	t.Parallel()
+	// workspace_free_limit_exceeded is deliberately excluded from the legacy
+	// axis map (see TestPlanLimitMessage); a gate-less 402 with this code keeps
+	// today's generic rendering rather than being repainted as a plan limit.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "workspace_free_limit_exceeded"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "request failed (code: workspace_free_limit_exceeded)", err.Error())
+}
