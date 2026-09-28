@@ -38,20 +38,14 @@ type options struct {
 	Verbose   bool
 }
 
-type httpStatusError struct{ status int }
-
-func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
+type httpStatusError struct {
+	status   int
+	location string
+}
 
 type fieldFlag struct {
 	fields *[]fieldInput
 	typed  bool
-}
-
-func (f *fieldFlag) String() string { return "" }
-func (f *fieldFlag) Type() string   { return "field" }
-func (f *fieldFlag) Set(value string) error {
-	*f.fields = append(*f.fields, fieldInput{Raw: value, Typed: f.typed})
-	return nil
 }
 
 // preparedRequest is everything runAPI needs to send: request preparation and
@@ -62,6 +56,15 @@ type preparedRequest struct {
 	Path    string
 	Body    []byte
 	Headers http.Header
+}
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
+
+func (f *fieldFlag) String() string { return "" }
+func (f *fieldFlag) Type() string   { return "field" }
+func (f *fieldFlag) Set(value string) error {
+	*f.fields = append(*f.fields, fieldInput{Raw: value, Typed: f.typed})
+	return nil
 }
 
 func newCommand() *cobra.Command {
@@ -92,6 +95,11 @@ func newCommand() *cobra.Command {
 				if statusErr, ok := err.(*httpStatusError); ok {
 					if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "HTTP %d\n", statusErr.status); writeErr != nil {
 						utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
+					}
+					if statusErr.location != "" {
+						if _, writeErr := fmt.Fprintf(cmd.ErrOrStderr(), "redirect to %s not followed\n", safeTerminal(statusErr.location)); writeErr != nil {
+							utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
+						}
 					}
 					exitAPI(utils.ExitCodeGeneralError)
 					return
@@ -242,7 +250,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode}
+		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode, location: response.Header.Get("Location")}
 	}
 	return 0, nil
 }
@@ -343,7 +351,7 @@ func printRequest(w io.Writer, ac *client.AlpaconClient, method, path string, he
 	if _, err := fmt.Fprintf(w, "%s %s HTTP/1.1\n", safeTerminal(method), safeTerminal(path)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Host: %s\n", safeTerminal(strings.TrimPrefix(strings.TrimPrefix(ac.BaseURL, "https://"), "http://"))); err != nil {
+	if _, err := fmt.Fprintf(w, "Host: %s\n", safeTerminal(baseURLHost(ac.BaseURL))); err != nil {
 		return err
 	}
 	if ac.AccessToken() != "" || ac.Token != "" || header.Get("Authorization") != "" {
@@ -373,6 +381,14 @@ func printRequest(w io.Writer, ac *client.AlpaconClient, method, path string, he
 	}
 	_, err := io.WriteString(w, "\n")
 	return err
+}
+
+func baseURLHost(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Host == "" {
+		return baseURL
+	}
+	return parsed.Host
 }
 
 func printResponseHeaders(w io.Writer, response *client.RawResponse) error {

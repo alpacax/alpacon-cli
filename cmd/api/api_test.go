@@ -194,6 +194,21 @@ func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
 	assert.NotContains(t, stdout.String(), "response-cookie-secret")
 }
 
+func TestRunAPI_VerboseHostLineUsesParsedHostOnly(t *testing.T) {
+	t.Parallel()
+	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
+		return apiTestResponse(204, "", ""), nil
+	})
+	ac.BaseURL = "https://workspace.example/api/v1"
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x", Verbose: true}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stderr.String(), "Host: workspace.example\n")
+}
+
 func TestRunAPI_VerboseShowsDefaultRequestContentType(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
@@ -533,6 +548,50 @@ func TestAPICommand_HTTPErrorPrintsExactLineAndExitsOne(t *testing.T) {
 	assert.Equal(t, 1, exitCode)
 	assert.JSONEq(t, `{"detail":"missing"}`, stdout)
 	assert.Equal(t, "HTTP 404\n", stderr)
+}
+
+func TestAPICommand_RedirectPrintsLocationNotFollowed(t *testing.T) {
+	previousClient, previousExit := newAPIClient, exitAPI
+	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
+	newAPIClient = func() (*client.AlpaconClient, error) {
+		return apiTestClient(func(r *http.Request) (*http.Response, error) {
+			response := apiTestResponse(302, "text/plain", "")
+			response.Header.Set("Location", "https://evil.example/x")
+			return response, nil
+		}), nil
+	}
+	exitCode := 0
+	exitAPI = func(code int) { exitCode = code }
+	command := newCommand()
+	command.SetArgs([]string{"/x"})
+	var executeErr error
+
+	_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+
+	require.NoError(t, executeErr)
+	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, "HTTP 302\nredirect to https://evil.example/x not followed\n", stderr)
+}
+
+func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
+	previousClient, previousExit := newAPIClient, exitAPI
+	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
+	newAPIClient = func() (*client.AlpaconClient, error) {
+		return apiTestClient(func(r *http.Request) (*http.Response, error) {
+			return apiTestResponse(304, "", ""), nil
+		}), nil
+	}
+	exitCode := 0
+	exitAPI = func(code int) { exitCode = code }
+	command := newCommand()
+	command.SetArgs([]string{"/x"})
+	var executeErr error
+
+	_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+
+	require.NoError(t, executeErr)
+	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, "HTTP 304\n", stderr)
 }
 
 func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
