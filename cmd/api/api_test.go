@@ -121,6 +121,23 @@ func TestRunAPI_HeaderOverridesDefaultContentType(t *testing.T) {
 	}
 }
 
+func TestRunAPI_HeaderOverridesDefaultContentTypeWithInputBody(t *testing.T) {
+	t.Parallel()
+	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
+		assert.Equal(t, "text/csv", r.Header.Get("Content-Type"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "a,b\n1,2\n", string(body))
+		return apiTestResponse(204, "", ""), nil
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x", Input: "-", Headers: []string{"Content-Type: text/csv"}}, &stdout, &stderr, strings.NewReader("a,b\n1,2\n"))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+}
+
 func TestRunAPI_HeaderOutputStripsTerminalControls(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
