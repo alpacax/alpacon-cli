@@ -797,15 +797,35 @@ func NormalizeRawEndpoint(path string) (string, error) {
 		return "", fmt.Errorf("endpoint must be a path on the current workspace")
 	}
 	parsed, err := url.Parse(path)
-	// IsAbs/Host/leading "//" catch a scheme or a network-path reference; a scheme
-	// inside a query value (e.g. a callback URL) never sets these on the outer URL.
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(path, "//") || parsed.Fragment != "" {
+	// url.Parse accepts a raw '#' (even an empty fragment) and a raw space or bad
+	// %-escape in the query, all of which reach http.NewRequest unencoded and malform the wire.
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(path, "//") || strings.Contains(path, "#") || hasRawSpaceOrBadEscape(parsed.RawQuery) {
 		return "", fmt.Errorf("endpoint must be a path on the current workspace")
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
 	return path, nil
+}
+
+// hasRawSpaceOrBadEscape rejects what would reach the wire unencoded: a literal
+// space, or a '%' not followed by two hex digits. '+', ';', and '&' are untouched.
+func hasRawSpaceOrBadEscape(query string) bool {
+	isHex := func(c byte) bool {
+		return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+	}
+	for i := 0; i < len(query); i++ {
+		switch query[i] {
+		case ' ':
+			return true
+		case '%':
+			if i+2 >= len(query) || !isHex(query[i+1]) || !isHex(query[i+2]) {
+				return true
+			}
+			i += 2
+		}
+	}
+	return false
 }
 
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {

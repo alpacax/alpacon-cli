@@ -143,6 +143,8 @@ func TestRunAPI_VerboseRedactsSensitiveRequestAndResponseHeaders(t *testing.T) {
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 		response := apiTestResponse(200, "text/plain", "body")
 		response.Header.Set("Set-Cookie", "session=response-secret")
+		response.Header.Set("Proxy-Authorization", "Basic response-proxy-secret")
+		response.Header.Set("Cookie", "session=response-cookie-secret")
 		return response, nil
 	})
 	var stdout, stderr bytes.Buffer
@@ -150,6 +152,7 @@ func TestRunAPI_VerboseRedactsSensitiveRequestAndResponseHeaders(t *testing.T) {
 	code, err := runAPITest(ac, options{Endpoint: "/x", Verbose: true, Headers: []string{
 		"Proxy-Authorization: Basic proxy-secret",
 		"Cookie: session=request-secret",
+		"Set-Cookie: session=request-cookie-secret",
 	}}, &stdout, &stderr, strings.NewReader(""))
 
 	require.NoError(t, err)
@@ -159,7 +162,10 @@ func TestRunAPI_VerboseRedactsSensitiveRequestAndResponseHeaders(t *testing.T) {
 	assert.Contains(t, stderr.String(), "Set-Cookie: [REDACTED]\n")
 	assert.NotContains(t, stderr.String(), "proxy-secret")
 	assert.NotContains(t, stderr.String(), "request-secret")
+	assert.NotContains(t, stderr.String(), "request-cookie-secret")
 	assert.NotContains(t, stderr.String(), "response-secret")
+	assert.NotContains(t, stderr.String(), "response-proxy-secret")
+	assert.NotContains(t, stderr.String(), "response-cookie-secret")
 }
 
 func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
@@ -167,6 +173,9 @@ func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 		response := apiTestResponse(200, "text/plain", "body")
 		response.Header.Set("Set-Cookie", "session=response-secret")
+		response.Header.Set("Authorization", "Bearer response-auth-secret")
+		response.Header.Set("Proxy-Authorization", "Basic response-proxy-secret")
+		response.Header.Set("Cookie", "session=response-cookie-secret")
 		return response, nil
 	})
 	var stdout, stderr bytes.Buffer
@@ -176,7 +185,13 @@ func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
 	assert.Contains(t, stdout.String(), "Set-Cookie: [REDACTED]\n")
+	assert.Contains(t, stdout.String(), "Authorization: [REDACTED]\n")
+	assert.Contains(t, stdout.String(), "Proxy-Authorization: [REDACTED]\n")
+	assert.Contains(t, stdout.String(), "Cookie: [REDACTED]\n")
 	assert.NotContains(t, stdout.String(), "response-secret")
+	assert.NotContains(t, stdout.String(), "response-auth-secret")
+	assert.NotContains(t, stdout.String(), "response-proxy-secret")
+	assert.NotContains(t, stdout.String(), "response-cookie-secret")
 }
 
 func TestRunAPI_VerboseShowsDefaultRequestContentType(t *testing.T) {
@@ -249,6 +264,27 @@ func TestRunAPI_SanitizesResponseBodyOnlyWhenStdoutIsTerminal(t *testing.T) {
 	}
 }
 
+func TestRunAPI_FormatsJSONOnlyOnTerminalAndLeavesPipedOutputByteForByte(t *testing.T) {
+	previous := isStdoutTerminal
+	t.Cleanup(func() { isStdoutTerminal = previous })
+	body := `{"a":1,"b":2}`
+	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
+		return apiTestResponse(200, "application/json", body), nil
+	})
+
+	isStdoutTerminal = func() bool { return true }
+	var ttyOut bytes.Buffer
+	_, err := runAPITest(ac, options{Endpoint: "/x"}, &ttyOut, &bytes.Buffer{}, strings.NewReader(""))
+	require.NoError(t, err)
+	assert.Equal(t, "{\n  \"a\": 1,\n  \"b\": 2\n}\n", ttyOut.String())
+
+	isStdoutTerminal = func() bool { return false }
+	var pipeOut bytes.Buffer
+	_, err = runAPITest(ac, options{Endpoint: "/x"}, &pipeOut, &bytes.Buffer{}, strings.NewReader(""))
+	require.NoError(t, err)
+	assert.Equal(t, body, pipeOut.String())
+}
+
 func TestAPICommand_SilentPrintsNoBodyButStillReportsStatusOnError(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -290,6 +326,19 @@ func TestAddFieldsToQuery_EmptyArrayKeepsQueryMarker(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "/x?", path)
+}
+
+func TestAddFieldsToQuery_SpaceValueIsEncodedNotRaw(t *testing.T) {
+	t.Parallel()
+	path, err := addFieldsToQuery("/x", map[string]any{"search": "admin user"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "/x?search=admin+user", path)
+	assert.NotContains(t, path, " ")
+
+	normalized, err := client.NormalizeRawEndpoint(path)
+	require.NoError(t, err)
+	assert.Equal(t, path, normalized)
 }
 
 func TestRunAPI_RejectsMalformedHeader(t *testing.T) {
@@ -441,7 +490,7 @@ func TestRunAPI_ResponseOutput(t *testing.T) {
 		wantStderr string
 		wantCode   int
 	}{
-		{"json error", options{Endpoint: "/x"}, 404, "application/json", `{"detail":"missing"}`, "{\n  \"detail\": \"missing\"\n}\n", "", 1},
+		{"json error", options{Endpoint: "/x"}, 404, "application/json", `{"detail":"missing"}`, `{"detail":"missing"}`, "", 1},
 		{"include", options{Endpoint: "/x", Include: true}, 200, "text/csv", "a,b\n", "HTTP/1.1 200 OK\nContent-Type: text/csv\nX-Trace: trace-1\n\na,b\n", "", 0},
 		{"silent", options{Endpoint: "/x", Silent: true}, 404, "text/plain", "hidden", "", "", 1},
 		{"verbose", options{Endpoint: "/x", Verbose: true}, 200, "text/plain", "raw", "raw", "GET /x HTTP/1.1", 0},
@@ -515,6 +564,32 @@ func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 2, exitErr.ExitCode())
 	assert.Contains(t, string(output), "invalid header")
+	assert.NotContains(t, string(output), "REQUEST_SENT")
+}
+
+func TestAPICommand_InvalidMethodExitsTwoWithoutBuildingClient(t *testing.T) {
+	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
+		newAPIClient = func() (*client.AlpaconClient, error) {
+			return apiTestClient(func(r *http.Request) (*http.Response, error) {
+				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
+				return apiTestResponse(200, "application/json", `{}`), nil
+			}), nil
+		}
+		command := newCommand()
+		command.SetArgs([]string{"-X", "GET /x", "/x"})
+		if err := command.Execute(); err != nil {
+			_, _ = io.WriteString(os.Stderr, err.Error())
+			os.Exit(5)
+		}
+		os.Exit(0)
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestAPICommand_InvalidMethodExitsTwoWithoutBuildingClient$")
+	child.Env = append(os.Environ(), "ALPACON_API_USAGE_CHILD=1")
+	output, err := child.CombinedOutput()
+	var exitErr *exec.ExitError
+
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 2, exitErr.ExitCode())
 	assert.NotContains(t, string(output), "REQUEST_SENT")
 }
 

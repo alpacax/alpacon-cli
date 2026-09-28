@@ -160,6 +160,9 @@ func prepareRequest(opts options, stdin io.Reader) (preparedRequest, int, error)
 	if !opts.MethodSet && (len(opts.Fields) > 0 || opts.Input != "") {
 		method = http.MethodPost
 	}
+	if !isToken(method) {
+		return preparedRequest{}, utils.ExitCodeUsageError, fmt.Errorf("invalid method")
+	}
 	var body []byte // read whole so a stale-401 renewal can replay it
 	if opts.Input != "" {
 		if opts.Input == "-" {
@@ -223,15 +226,15 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 	}
 	if !opts.Silent && len(response.Body) > 0 {
 		output := response.Body
-		contentType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
-		if contentType == "application/json" || strings.HasSuffix(contentType, "+json") {
-			var formatted bytes.Buffer
-			if json.Indent(&formatted, output, "", "  ") == nil {
-				formatted.WriteByte('\n')
-				output = formatted.Bytes()
-			}
-		}
 		if isStdoutTerminal() {
+			contentType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
+			if contentType == "application/json" || strings.HasSuffix(contentType, "+json") {
+				var formatted bytes.Buffer
+				if json.Indent(&formatted, output, "", "  ") == nil {
+					formatted.WriteByte('\n')
+					output = formatted.Bytes()
+				}
+			}
 			clean, _ := utils.SanitizeTerminalBlock(string(output))
 			output = []byte(clean)
 		}
@@ -249,7 +252,7 @@ func parseHeaders(raw []string) (http.Header, error) {
 	result := make(http.Header)
 	for _, entry := range raw {
 		name, value, ok := strings.Cut(entry, ":")
-		if !ok || !validHeaderName(name) || !validHeaderValue(value) {
+		if !ok || !isToken(name) || !validHeaderValue(value) {
 			return nil, fmt.Errorf("invalid header")
 		}
 		result.Add(name, strings.TrimSpace(value))
@@ -257,7 +260,9 @@ func parseHeaders(raw []string) (http.Header, error) {
 	return result, nil
 }
 
-func validHeaderName(name string) bool {
+// isToken checks the RFC 7230 token grammar shared by a header name and an
+// HTTP method: net/http applies the same rule to both.
+func isToken(name string) bool {
 	if name == "" {
 		return false
 	}
@@ -349,7 +354,7 @@ func printRequest(w io.Writer, ac *client.AlpaconClient, method, path string, he
 			continue
 		}
 		values := header.Values(name)
-		if isRedactedRequestHeader(name) {
+		if isSensitiveHeader(name) {
 			values = []string{"[REDACTED]"}
 		}
 		for _, value := range values {
@@ -372,7 +377,7 @@ func printResponseHeaders(w io.Writer, response *client.RawResponse) error {
 	}
 	for _, name := range sortedHeaderNames(response.Header) {
 		values := response.Header.Values(name)
-		if strings.EqualFold(name, "Set-Cookie") {
+		if isSensitiveHeader(name) {
 			values = []string{"[REDACTED]"}
 		}
 		for _, value := range values {
@@ -385,10 +390,10 @@ func printResponseHeaders(w io.Writer, response *client.RawResponse) error {
 	return err
 }
 
-// isRedactedRequestHeader names request headers redacted beside Authorization,
-// which printRequest already handles through its own presence check.
-func isRedactedRequestHeader(name string) bool {
-	return strings.EqualFold(name, "Proxy-Authorization") || strings.EqualFold(name, "Cookie")
+// isSensitiveHeader is the redaction list for both request and response
+// headers, under both --verbose and -i/--include.
+func isSensitiveHeader(name string) bool {
+	return strings.EqualFold(name, "Authorization") || strings.EqualFold(name, "Proxy-Authorization") || strings.EqualFold(name, "Cookie") || strings.EqualFold(name, "Set-Cookie")
 }
 
 func safeTerminal(value string) string {
