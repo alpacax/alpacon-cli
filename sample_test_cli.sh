@@ -102,6 +102,7 @@ run_test() {
     fi
 }
 
+# run_test calls these inside `if`, where set -e is off, so each must stay a single && chain or a failed step passes silently.
 verify_downloaded_file() {
     local path="$1" pattern="$2"
     test -f "$path" && grep -q "$pattern" "$path"
