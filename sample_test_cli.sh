@@ -416,7 +416,7 @@ run_test "System information gathering" \
 #
 ## Test 26: Permission denied test (should provide helpful error)
 #log_info "Testing permission denied scenario..."
-#if alpacon exec $SERVER_NAME 'cat /etc/shadow' 2>/dev/null; then
+#if alpacon exec "$SERVER_NAME" 'cat /etc/shadow' 2>/dev/null; then
 #    log_warning "Unexpected success reading /etc/shadow (server might have unusual permissions)"
 #else
 #    log_success "Correctly handled permission denied error"
