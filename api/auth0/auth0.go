@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +18,9 @@ import (
 
 // RFC 8628 §3.5 uses 5 seconds as both the default interval and the slow_down increment.
 const rfc8628PollIntervalSeconds = 5
+
+// Keeps interval+slow_down and the seconds-to-Duration conversion from overflowing, including on 32-bit int.
+const maxDeviceCodeLifetimeSeconds = math.MaxInt32 / 2
 
 var path = struct {
 	env        string
@@ -196,7 +200,8 @@ func devicePollInterval(interval int) int {
 
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
 	startTime := time.Now()
-	interval := min(devicePollInterval(deviceCodeRes.Interval), max(deviceCodeRes.ExpiresIn, 0)+1)
+	lifetime := min(max(deviceCodeRes.ExpiresIn, 0), maxDeviceCodeLifetimeSeconds)
+	interval := min(devicePollInterval(deviceCodeRes.Interval), lifetime+1)
 	timeoutErr := fmt.Errorf("authentication timed out. Please restart the login process")
 
 	spinner := utils.NewSpinner("Waiting for authentication...")
@@ -204,7 +209,7 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 	defer spinner.Stop()
 
 	for {
-		if time.Since(startTime).Seconds() > float64(deviceCodeRes.ExpiresIn) {
+		if time.Since(startTime).Seconds() > float64(lifetime) {
 			return nil, timeoutErr
 		}
 
@@ -212,7 +217,7 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 		if err != nil {
 			if next, retry := evaluatePollResponse(err, interval); retry {
 				interval = next
-				if time.Since(startTime).Seconds()+float64(interval) > float64(deviceCodeRes.ExpiresIn) {
+				if time.Since(startTime).Seconds()+float64(interval) > float64(lifetime) {
 					return nil, timeoutErr
 				}
 				time.Sleep(time.Duration(interval) * time.Second)

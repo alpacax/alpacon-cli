@@ -761,4 +761,25 @@ func TestPollForToken_CarriesWidenedIntervalIntoNextPoll(t *testing.T) {
 		assert.Contains(t, err.Error(), "timed out")
 		assert.Len(t, times, 1)
 	})
+
+	t.Run("a huge expires_in bounds the lifetime and times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: math.MaxInt, Interval: math.MaxInt},
+			[]error{&oauthError{Code: "slow_down"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
+	})
+
+	t.Run("a huge expires_in does not break normal polling", func(t *testing.T) {
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: math.MaxInt, Interval: 5},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Len(t, times, 2)
+		assert.Equal(t, []time.Duration{5 * time.Second}, gaps(times))
+	})
 }
