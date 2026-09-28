@@ -2,6 +2,7 @@ package apicmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -83,7 +84,7 @@ func TestRunAPI_MethodAndFieldRouting(t *testing.T) {
 				} else {
 					assert.Equal(t, tc.wantBody, string(body))
 				}
-				return apiTestResponse(204, "", ""), nil
+				return apiTestResponse(http.StatusNoContent, "", ""), nil
 			})
 			var stdout, stderr bytes.Buffer
 
@@ -109,7 +110,7 @@ func TestRunAPI_HeaderOverridesDefaultContentType(t *testing.T) {
 			t.Parallel()
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 				assert.Equal(t, tc.want, r.Header.Get("Content-Type"))
-				return apiTestResponse(204, "", ""), nil
+				return apiTestResponse(http.StatusNoContent, "", ""), nil
 			})
 			var stdout, stderr bytes.Buffer
 
@@ -128,7 +129,7 @@ func TestRunAPI_HeaderOverridesDefaultContentTypeWithInputBody(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "a,b\n1,2\n", string(body))
-		return apiTestResponse(204, "", ""), nil
+		return apiTestResponse(http.StatusNoContent, "", ""), nil
 	})
 	var stdout, stderr bytes.Buffer
 
@@ -141,7 +142,7 @@ func TestRunAPI_HeaderOverridesDefaultContentTypeWithInputBody(t *testing.T) {
 func TestRunAPI_HeaderOutputStripsTerminalControls(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		response := apiTestResponse(200, "text/plain", "body")
+		response := apiTestResponse(http.StatusOK, "text/plain", "body")
 		response.Header.Set("X-Trace", "\x1b[31mtrace\x1b[0m")
 		return response, nil
 	})
@@ -158,7 +159,7 @@ func TestRunAPI_HeaderOutputStripsTerminalControls(t *testing.T) {
 func TestRunAPI_VerboseRedactsSensitiveRequestAndResponseHeaders(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		response := apiTestResponse(200, "text/plain", "body")
+		response := apiTestResponse(http.StatusOK, "text/plain", "body")
 		response.Header.Set("Set-Cookie", "session=response-secret")
 		response.Header.Set("Proxy-Authorization", "Basic response-proxy-secret")
 		response.Header.Set("Cookie", "session=response-cookie-secret")
@@ -188,7 +189,7 @@ func TestRunAPI_VerboseRedactsSensitiveRequestAndResponseHeaders(t *testing.T) {
 func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		response := apiTestResponse(200, "text/plain", "body")
+		response := apiTestResponse(http.StatusOK, "text/plain", "body")
 		response.Header.Set("Set-Cookie", "session=response-secret")
 		response.Header.Set("Authorization", "Bearer response-auth-secret")
 		response.Header.Set("Proxy-Authorization", "Basic response-proxy-secret")
@@ -214,7 +215,7 @@ func TestRunAPI_IncludeRedactsSensitiveResponseHeader(t *testing.T) {
 func TestRunAPI_VerboseHostLineUsesParsedHostOnly(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		return apiTestResponse(204, "", ""), nil
+		return apiTestResponse(http.StatusNoContent, "", ""), nil
 	})
 	ac.BaseURL = "https://workspace.example/api/v1"
 	var stdout, stderr bytes.Buffer
@@ -230,7 +231,7 @@ func TestRunAPI_VerboseShowsDefaultRequestContentType(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		return apiTestResponse(204, "", ""), nil
+		return apiTestResponse(http.StatusNoContent, "", ""), nil
 	})
 	var stdout, stderr bytes.Buffer
 
@@ -245,7 +246,7 @@ func TestRunAPI_VerboseShowsFinalUserAgentOnce(t *testing.T) {
 	t.Parallel()
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 		assert.Equal(t, "custom-agent", r.Header.Get("User-Agent"))
-		return apiTestResponse(204, "", ""), nil
+		return apiTestResponse(http.StatusNoContent, "", ""), nil
 	})
 	var stdout, stderr bytes.Buffer
 
@@ -274,7 +275,7 @@ func TestRunAPI_SanitizesResponseBodyOnlyWhenStdoutIsTerminal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, tc.ct, tc.body), nil
+				return apiTestResponse(http.StatusOK, tc.ct, tc.body), nil
 			})
 
 			isStdoutTerminal = func() bool { return true }
@@ -318,7 +319,7 @@ func TestRunAPI_TerminalBodyKeepsTabsWhileStrippingControls(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "text/plain", tc.body), nil
+				return apiTestResponse(http.StatusOK, "text/plain", tc.body), nil
 			})
 			var out bytes.Buffer
 			_, err := runAPITest(ac, options{Endpoint: "/x"}, &out, &bytes.Buffer{}, strings.NewReader(""))
@@ -333,7 +334,7 @@ func TestRunAPI_FormatsJSONOnlyOnTerminalAndLeavesPipedOutputByteForByte(t *test
 	t.Cleanup(func() { isStdoutTerminal = previous })
 	body := `{"a":1,"b":2}`
 	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		return apiTestResponse(200, "application/json", body), nil
+		return apiTestResponse(http.StatusOK, "application/json", body), nil
 	})
 
 	isStdoutTerminal = func() bool { return true }
@@ -356,8 +357,8 @@ func TestAPICommand_SilentPrintsNoBodyButStillReportsStatusOnError(t *testing.T)
 		wantCode   int
 		wantStderr string
 	}{
-		{"404 exits one with status line, no body", 404, 1, "HTTP 404\n"},
-		{"200 prints nothing", 200, 0, ""},
+		{"not found exits one with status line, no body", http.StatusNotFound, 1, fmt.Sprintf("HTTP %d\n", http.StatusNotFound)},
+		{"ok prints nothing", http.StatusOK, 0, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -413,7 +414,7 @@ func TestRunAPI_RejectsMalformedHeader(t *testing.T) {
 			requests := 0
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 				requests++
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			})
 			var stdout, stderr bytes.Buffer
 
@@ -434,7 +435,7 @@ func TestRunAPI_RejectsUnsupportedSpecialHeaders(t *testing.T) {
 			requests := 0
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 				requests++
-				return apiTestResponse(204, "", ""), nil
+				return apiTestResponse(http.StatusNoContent, "", ""), nil
 			})
 			var stdout, stderr bytes.Buffer
 
@@ -466,7 +467,7 @@ func TestRunAPI_RejectsContentLengthOverrideBeforeRequest(t *testing.T) {
 			requests := 0
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 				requests++
-				return apiTestResponse(204, "", ""), nil
+				return apiTestResponse(http.StatusNoContent, "", ""), nil
 			})
 			var stdout, stderr bytes.Buffer
 			opts := options{Endpoint: "/x", Headers: tc.headers, Verbose: true}
@@ -492,7 +493,7 @@ func TestRunAPI_RejectsExternalEndpoints(t *testing.T) {
 			requests := 0
 			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
 				requests++
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			})
 			var stdout, stderr bytes.Buffer
 
@@ -517,10 +518,10 @@ func TestRunAPI_ResponseOutput(t *testing.T) {
 		wantStderr string
 		wantCode   int
 	}{
-		{"json error", options{Endpoint: "/x"}, 404, "application/json", `{"detail":"missing"}`, `{"detail":"missing"}`, "", 1},
-		{"include", options{Endpoint: "/x", Include: true}, 200, "text/csv", "a,b\n", "HTTP/1.1 200 OK\nContent-Type: text/csv\nX-Trace: trace-1\n\na,b\n", "", 0},
-		{"silent", options{Endpoint: "/x", Silent: true}, 404, "text/plain", "hidden", "", "", 1},
-		{"verbose", options{Endpoint: "/x", Verbose: true}, 200, "text/plain", "raw", "raw", "GET /x HTTP/1.1", 0},
+		{"json error", options{Endpoint: "/x"}, http.StatusNotFound, "application/json", `{"detail":"missing"}`, `{"detail":"missing"}`, "", 1},
+		{"include", options{Endpoint: "/x", Include: true}, http.StatusOK, "text/csv", "a,b\n", "HTTP/1.1 200 OK\nContent-Type: text/csv\nX-Trace: trace-1\n\na,b\n", "", 0},
+		{"silent", options{Endpoint: "/x", Silent: true}, http.StatusNotFound, "text/plain", "hidden", "", "", 1},
+		{"verbose", options{Endpoint: "/x", Verbose: true}, http.StatusOK, "text/plain", "raw", "raw", "GET /x HTTP/1.1", 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -550,7 +551,7 @@ func TestAPICommand_HTTPErrorPrintsExactLineAndExitsOne(t *testing.T) {
 	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
 	newAPIClient = func() (*client.AlpaconClient, error) {
 		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			return apiTestResponse(404, "application/json", `{"detail":"missing"}`), nil
+			return apiTestResponse(http.StatusNotFound, "application/json", `{"detail":"missing"}`), nil
 		}), nil
 	}
 	exitCode := 0
@@ -564,7 +565,7 @@ func TestAPICommand_HTTPErrorPrintsExactLineAndExitsOne(t *testing.T) {
 	require.NoError(t, executeErr)
 	assert.Equal(t, 1, exitCode)
 	assert.JSONEq(t, `{"detail":"missing"}`, stdout)
-	assert.Equal(t, "HTTP 404\n", stderr)
+	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotFound), stderr)
 }
 
 func TestAPICommand_RedirectPrintsLocationNotFollowed(t *testing.T) {
@@ -572,7 +573,7 @@ func TestAPICommand_RedirectPrintsLocationNotFollowed(t *testing.T) {
 	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
 	newAPIClient = func() (*client.AlpaconClient, error) {
 		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			response := apiTestResponse(302, "text/plain", "")
+			response := apiTestResponse(http.StatusFound, "text/plain", "")
 			response.Header.Set("Location", "https://evil.example/x")
 			return response, nil
 		}), nil
@@ -587,7 +588,7 @@ func TestAPICommand_RedirectPrintsLocationNotFollowed(t *testing.T) {
 
 	require.NoError(t, executeErr)
 	assert.Equal(t, 1, exitCode)
-	assert.Equal(t, "HTTP 302\nredirect to https://evil.example/x not followed\n", stderr)
+	assert.Equal(t, fmt.Sprintf("HTTP %d\nredirect to https://evil.example/x not followed\n", http.StatusFound), stderr)
 }
 
 func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
@@ -595,7 +596,7 @@ func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
 	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
 	newAPIClient = func() (*client.AlpaconClient, error) {
 		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			return apiTestResponse(304, "", ""), nil
+			return apiTestResponse(http.StatusNotModified, "", ""), nil
 		}), nil
 	}
 	exitCode := 0
@@ -608,7 +609,7 @@ func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
 
 	require.NoError(t, executeErr)
 	assert.Equal(t, 1, exitCode)
-	assert.Equal(t, "HTTP 304\n", stderr)
+	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotModified), stderr)
 }
 
 func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
@@ -616,7 +617,7 @@ func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
 				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -643,7 +644,7 @@ func TestAPICommand_InvalidMethodExitsTwoWithoutBuildingClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
 				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -681,7 +682,7 @@ func TestAPICommand_MalformedHeaderDoesNotLeakValue(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
 				_, _ = io.WriteString(os.Stderr, "REQUEST_SENT\n")
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -713,7 +714,7 @@ func TestAPICommand_MalformedEndpointExitsTwoWithoutClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -739,7 +740,7 @@ func TestAPICommand_MalformedFieldExitsTwoWithoutClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -765,7 +766,7 @@ func TestAPICommand_MissingFieldFileExitsTwoWithoutClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -791,7 +792,7 @@ func TestAPICommand_MissingInputFileExitsTwoWithoutClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -817,7 +818,7 @@ func TestAPICommand_BadContentLengthExitsTwoWithoutClient(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -844,7 +845,7 @@ func TestAPICommand_RejectsTwoStdinFields(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
@@ -871,7 +872,7 @@ func TestAPICommand_RejectsStdinFieldWithStdinInput(t *testing.T) {
 		newAPIClient = func() (*client.AlpaconClient, error) {
 			_, _ = io.WriteString(os.Stderr, "CLIENT_CONSTRUCTED\n")
 			return apiTestClient(func(r *http.Request) (*http.Response, error) {
-				return apiTestResponse(200, "application/json", `{}`), nil
+				return apiTestResponse(http.StatusOK, "application/json", `{}`), nil
 			}), nil
 		}
 		command := newCommand()
