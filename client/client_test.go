@@ -1371,8 +1371,9 @@ func TestSendRequest_CodedIPNotAllowedIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
-// alpacon-server maps DRF's NotAuthenticated onto auth_token_missing, so a fresh
-// token may clear it just as it may the code-less 401.
+// TestSendGetRequest_RenewsACodedStaleTokenAndRetries covers auth_token_missing,
+// which alpacon-server maps DRF's NotAuthenticated onto. A fresh token may clear
+// it just as it may the code-less 401.
 func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
@@ -1399,8 +1400,8 @@ func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
-// A deliberate Auth0 rejection a new token will not move, yet re-login is the
-// user's only remedy.
+// TestSendRequest_CodedAuthenticationFailedIsNotRenewed covers a deliberate Auth0
+// rejection. A new token will not move it, yet re-login is the user's only remedy.
 func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
@@ -1422,7 +1423,8 @@ func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
-// renewedRequest's bearer-only check stops this, not isStaleCredential.
+// TestSendRequest_AuthTokenMissingOnLegacyTokenIsNotRenewed pins the renewal to
+// renewedRequest's bearer-only check, since isStaleCredential accepts the code.
 func TestSendRequest_AuthTokenMissingOnLegacyTokenIsNotRenewed(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
