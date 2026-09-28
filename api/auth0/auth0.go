@@ -41,6 +41,12 @@ type oauthError struct {
 	Desc string
 }
 
+// pollDecision is what one token-endpoint poll resolves to when the loop keeps
+// waiting: the interval to sleep before the next attempt.
+type pollDecision struct {
+	interval int
+}
+
 func (e *oauthError) Error() string {
 	return fmt.Sprintf("error response from authentication server: %s - %s", e.Code, e.Desc)
 }
@@ -174,8 +180,34 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
+// evaluatePollResponse decides whether PollForToken's loop keeps polling after
+// a token-endpoint error, and at what interval, per RFC 8628 §3.5.
+// authorization_pending keeps the current interval; slow_down keeps polling
+// too but widens it by the RFC's mandated 5 seconds. Any other error is not a
+// polling condition and the caller should stop.
+func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
+	switch {
+	case strings.Contains(err.Error(), "authorization_pending"):
+		return pollDecision{interval: interval}, true
+	case strings.Contains(err.Error(), "slow_down"):
+		return pollDecision{interval: interval + 5}, true
+	default:
+		return pollDecision{}, false
+	}
+}
+
+// devicePollInterval defaults a missing or non-positive interval to the RFC
+// 8628 minimum of 5 seconds, so the loop never busy-polls.
+func devicePollInterval(interval int) int {
+	if interval <= 0 {
+		return 5
+	}
+	return interval
+}
+
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
 	startTime := time.Now()
+	interval := devicePollInterval(deviceCodeRes.Interval)
 
 	spinner := utils.NewSpinner("Waiting for authentication...")
 	spinner.Start()
@@ -188,8 +220,9 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 
 		tokenResponse, err := requestAccessToken(deviceCodeRes.DeviceCode, envInfo)
 		if err != nil {
-			if strings.Contains(err.Error(), "authorization_pending") {
-				time.Sleep(time.Duration(deviceCodeRes.Interval) * time.Second)
+			if decision, retry := evaluatePollResponse(err, interval); retry {
+				interval = decision.interval
+				time.Sleep(time.Duration(interval) * time.Second)
 				continue
 			}
 			return nil, mapAuth0Error(err)
