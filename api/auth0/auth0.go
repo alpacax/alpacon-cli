@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,12 +15,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// maxPollSeconds is the largest interval time.Duration can hold in seconds;
-// pollSleepDuration saturates there instead of overflowing.
-const maxPollSeconds = math.MaxInt64 / int64(time.Second)
-
-// rfc8628PollIntervalSeconds is the RFC 8628 §3.5 default interval, also used
-// as the slow_down increment.
+// RFC 8628 §3.5 uses 5 seconds as both the default interval and the slow_down increment.
 const rfc8628PollIntervalSeconds = 5
 
 var path = struct {
@@ -36,23 +30,13 @@ var path = struct {
 	revoke:     "/oauth/revoke",
 }
 
-// requestAccessTokenFunc is PollForToken's seam onto requestAccessToken,
-// overridden in tests to observe the loop without a network round trip.
 var requestAccessTokenFunc = requestAccessToken
 
-// sleepFunc is PollForToken's seam onto time.Sleep, overridden in tests to
-// record the interval sequence without waiting.
-var sleepFunc = time.Sleep
-
-// oauthError is a response-body error from the token endpoint; only this
-// kind is safe to retry with a different scope on the refresh exchange.
+// Retry a refresh with another scope only on this; any other failure may have
+// consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
 type oauthError struct {
 	Code string
 	Desc string
-}
-
-type pollDecision struct {
-	interval int
 }
 
 func (e *oauthError) Error() string {
@@ -188,28 +172,19 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
-// evaluatePollResponse decides, per RFC 8628 §3.5, whether the polling loop
-// continues after a token-endpoint error and the next interval to use.
-func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
+func evaluatePollResponse(err error, interval int) (int, bool) {
 	var oauthErr *oauthError
 	if !errors.As(err, &oauthErr) {
-		return pollDecision{}, false
+		return 0, false
 	}
 	switch oauthErr.Code {
 	case "authorization_pending":
-		return pollDecision{interval: interval}, true
+		return interval, true
 	case "slow_down":
-		return pollDecision{interval: addSaturatingInt(interval, rfc8628PollIntervalSeconds)}, true
+		return interval + rfc8628PollIntervalSeconds, true
 	default:
-		return pollDecision{}, false
+		return 0, false
 	}
-}
-
-func addSaturatingInt(a, b int) int {
-	if a > math.MaxInt-b {
-		return math.MaxInt
-	}
-	return a + b
 }
 
 func devicePollInterval(interval int) int {
@@ -219,16 +194,10 @@ func devicePollInterval(interval int) int {
 	return interval
 }
 
-func pollSleepDuration(intervalSeconds int) time.Duration {
-	if int64(intervalSeconds) > maxPollSeconds {
-		return time.Duration(maxPollSeconds) * time.Second
-	}
-	return time.Duration(intervalSeconds) * time.Second
-}
-
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
 	startTime := time.Now()
-	interval := devicePollInterval(deviceCodeRes.Interval)
+	interval := min(devicePollInterval(deviceCodeRes.Interval), max(deviceCodeRes.ExpiresIn, 0)+1)
+	timeoutErr := fmt.Errorf("authentication timed out. Please restart the login process")
 
 	spinner := utils.NewSpinner("Waiting for authentication...")
 	spinner.Start()
@@ -236,14 +205,17 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 
 	for {
 		if time.Since(startTime).Seconds() > float64(deviceCodeRes.ExpiresIn) {
-			return nil, fmt.Errorf("authentication timed out. Please restart the login process")
+			return nil, timeoutErr
 		}
 
 		tokenResponse, err := requestAccessTokenFunc(deviceCodeRes.DeviceCode, envInfo)
 		if err != nil {
-			if decision, retry := evaluatePollResponse(err, interval); retry {
-				interval = decision.interval
-				sleepFunc(pollSleepDuration(interval))
+			if next, retry := evaluatePollResponse(err, interval); retry {
+				interval = next
+				if time.Since(startTime).Seconds()+float64(interval) > float64(deviceCodeRes.ExpiresIn) {
+					return nil, timeoutErr
+				}
+				time.Sleep(time.Duration(interval) * time.Second)
 				continue
 			}
 			return nil, mapAuth0Error(err)
