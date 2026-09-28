@@ -10,10 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
@@ -626,22 +626,13 @@ func TestEvaluatePollResponse_DecidesRetryAndNextInterval(t *testing.T) {
 			wantRetry:    true,
 			wantInterval: 304,
 		},
-		{
-			name:         "slow_down at the int limit saturates instead of overflowing negative",
-			err:          &oauthError{Code: "slow_down"},
-			interval:     math.MaxInt,
-			wantRetry:    true,
-			wantInterval: math.MaxInt,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			decision, retry := evaluatePollResponse(tt.err, tt.interval)
+			interval, retry := evaluatePollResponse(tt.err, tt.interval)
 			assert.Equal(t, tt.wantRetry, retry)
-			if tt.wantRetry {
-				assert.Equal(t, tt.wantInterval, decision.interval)
-			}
+			assert.Equal(t, tt.wantInterval, interval)
 		})
 	}
 }
@@ -667,112 +658,107 @@ func TestDevicePollInterval_DefaultsNonPositiveToRFCMinimum(t *testing.T) {
 	}
 }
 
-func TestPollSleepDuration_SaturatesInsteadOfOverflowing(t *testing.T) {
-	t.Parallel()
+func pollForTokenWithScript(t *testing.T, deviceCodeRes *DeviceCodeResponse, scripted []error) ([]time.Time, *TokenResponse, error) {
+	t.Helper()
+	orig := requestAccessTokenFunc
+	t.Cleanup(func() { requestAccessTokenFunc = orig })
 
-	type testCase struct {
-		name     string
-		interval int
-		want     time.Duration
+	var times []time.Time
+	call := 0
+	requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+		times = append(times, time.Now())
+		if call < len(scripted) {
+			err := scripted[call]
+			call++
+			return nil, err
+		}
+		return &TokenResponse{AccessToken: "final-token"}, nil
 	}
 
-	tests := []testCase{
-		{name: "a realistic interval converts directly", interval: 30, want: 30 * time.Second},
-	}
+	var tokenRes *TokenResponse
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		tokenRes, err = PollForToken(deviceCodeRes, &AuthEnvResponse{})
+	})
+	return times, tokenRes, err
+}
 
-	// int(maxPollSeconds) must stay a runtime conversion, not a constant one,
-	// or 386/arm builds fail; on a 32-bit int it never reaches maxPollSeconds.
-	maxPollSecondsInt64 := int64(maxPollSeconds)
-	if strconv.IntSize == 64 {
-		tests = append(tests,
-			testCase{
-				name:     "the largest representable interval converts directly",
-				interval: int(maxPollSecondsInt64),
-				want:     time.Duration(maxPollSeconds) * time.Second,
-			},
-			testCase{
-				name:     "an interval past the representable range saturates instead of overflowing",
-				interval: math.MaxInt,
-				want:     time.Duration(maxPollSeconds) * time.Second,
-			},
-		)
-	} else {
-		maxInt := math.MaxInt
-		tests = append(tests, testCase{
-			name:     "on a 32-bit int, the maximum interval never exceeds the representable range",
-			interval: maxInt,
-			want:     time.Duration(maxInt) * time.Second,
-		})
+func gaps(times []time.Time) []time.Duration {
+	if len(times) < 2 {
+		return nil
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, pollSleepDuration(tt.interval))
-		})
+	result := make([]time.Duration, len(times)-1)
+	for i := 1; i < len(times); i++ {
+		result[i-1] = times[i].Sub(times[i-1])
 	}
+	return result
 }
 
 func TestPollForToken_CarriesWidenedIntervalIntoNextPoll(t *testing.T) {
-	origRequest := requestAccessTokenFunc
-	origSleep := sleepFunc
-	t.Cleanup(func() {
-		requestAccessTokenFunc = origRequest
-		sleepFunc = origSleep
-	})
-
 	t.Run("slow_down and authorization_pending thread the widened interval", func(t *testing.T) {
-		var sleeps []time.Duration
-		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
-
-		responses := []error{
-			&oauthError{Code: "slow_down"},
-			&oauthError{Code: "authorization_pending"},
-			&oauthError{Code: "slow_down"},
-		}
-		call := 0
-		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
-			if call < len(responses) {
-				err := responses[call]
-				call++
-				return nil, err
-			}
-			return &TokenResponse{AccessToken: "final-token"}, nil
-		}
-
-		tokenRes, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5}, &AuthEnvResponse{})
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5},
+			[]error{
+				&oauthError{Code: "slow_down"},
+				&oauthError{Code: "authorization_pending"},
+				&oauthError{Code: "slow_down"},
+			},
+		)
 		require.NoError(t, err)
 		assert.Equal(t, "final-token", tokenRes.AccessToken)
-		assert.Equal(t, []time.Duration{10 * time.Second, 10 * time.Second, 15 * time.Second}, sleeps)
+		assert.Equal(t, []time.Duration{10 * time.Second, 10 * time.Second, 15 * time.Second}, gaps(times))
 	})
 
 	t.Run("a zero device-code interval waits the RFC minimum on the first poll", func(t *testing.T) {
-		var sleeps []time.Duration
-		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
-
-		call := 0
-		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
-			call++
-			if call == 1 {
-				return nil, &oauthError{Code: "authorization_pending"}
-			}
-			return &TokenResponse{AccessToken: "final-token"}, nil
-		}
-
-		_, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 0}, &AuthEnvResponse{})
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 0},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
 		require.NoError(t, err)
-		assert.Equal(t, []time.Duration{5 * time.Second}, sleeps)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Equal(t, []time.Duration{5 * time.Second}, gaps(times))
 	})
 
 	t.Run("a fatal oauth error stops immediately without sleeping", func(t *testing.T) {
-		var sleeps []time.Duration
-		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
-
-		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
-			return nil, &oauthError{Code: "access_denied"}
-		}
-
-		_, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5}, &AuthEnvResponse{})
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5},
+			[]error{&oauthError{Code: "access_denied"}},
+		)
 		require.Error(t, err)
-		assert.Empty(t, sleeps)
+		assert.Len(t, times, 1, "a fatal error must not be retried")
+	})
+
+	t.Run("a retry whose next poll would pass expiry returns the timeout without sleeping", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 12, Interval: 5},
+			[]error{
+				&oauthError{Code: "slow_down"},
+				&oauthError{Code: "slow_down"},
+			},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 2, "the poll whose retry would pass expiry must not be attempted again")
+		assert.Equal(t, []time.Duration{10 * time.Second}, gaps(times))
+	})
+
+	t.Run("an interval longer than the code lifetime times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 20, Interval: 30},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
+	})
+
+	t.Run("a huge interval does not overflow and times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: math.MaxInt},
+			[]error{&oauthError{Code: "slow_down"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
 	})
 }
