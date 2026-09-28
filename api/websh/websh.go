@@ -62,6 +62,22 @@ var (
 	// ErrSessionGone ends a session the server refused a new channel on: it was
 	// closed while the connection was down, so retrying only asks again.
 	ErrSessionGone = errors.New("the session is no longer open")
+
+	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
+	// silent, since shell_exited means the user ended the shell and closed says nothing.
+	closeReasonMessages = map[string]string{
+		"user_request":           "closed by the session owner",
+		"force_close":            "closed by an administrator",
+		"idle_timeout":           "idle timeout",
+		"agent_disconnected":     "Alpamon on the server disconnected",
+		"server_shutdown":        "the service shut down",
+		"work_session_expired":   "the work session expired",
+		"work_session_completed": "the work session was completed",
+		"work_session_revoked":   "the work session was revoked",
+		"user_deactivated":       "your account was deactivated",
+		"shell_exited":           "",
+		"closed":                 "",
+	}
 )
 
 // GetSessionList returns the newest tail connectable sessions. The endpoint sorts
@@ -357,7 +373,14 @@ func printCloseReason(err error) {
 		if reason == "" {
 			return
 		}
-		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", reason)
+		message, known := closeReasonMessages[reason]
+		if !known {
+			message = strings.ReplaceAll(reason, "_", " ")
+		}
+		if message == "" {
+			return
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", message)
 	}
 }
 

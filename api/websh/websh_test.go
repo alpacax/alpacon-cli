@@ -562,7 +562,7 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 	}{
 		{
 			name:       "session end with a reason",
-			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
 			wantStderr: "\r\nsession closed: idle timeout\r\n",
 		},
 		{
@@ -598,6 +598,64 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		{
 			name:      "transport failure",
 			reported:  errors.New("connection reset by peer"),
+			keepAsErr: true,
+		},
+		{
+			name:       "user request",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "user_request"},
+			wantStderr: "\r\nsession closed: closed by the session owner\r\n",
+		},
+		{
+			name:       "force close",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "force_close"},
+			wantStderr: "\r\nsession closed: closed by an administrator\r\n",
+		},
+		{
+			name:       "agent disconnected",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "agent_disconnected"},
+			wantStderr: "\r\nsession closed: Alpamon on the server disconnected\r\n",
+		},
+		{
+			name:       "server shutdown",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "server_shutdown"},
+			wantStderr: "\r\nsession closed: the service shut down\r\n",
+		},
+		{
+			name:       "work session expired",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_expired"},
+			wantStderr: "\r\nsession closed: the work session expired\r\n",
+		},
+		{
+			name:       "work session completed",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_completed"},
+			wantStderr: "\r\nsession closed: the work session was completed\r\n",
+		},
+		{
+			name:       "work session revoked",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_revoked"},
+			wantStderr: "\r\nsession closed: the work session was revoked\r\n",
+		},
+		{
+			name:       "user deactivated",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "user_deactivated"},
+			wantStderr: "\r\nsession closed: your account was deactivated\r\n",
+		},
+		{
+			name:     "proxy fallback is silent",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "closed"},
+		},
+		{
+			name:     "shell exited is silent",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "shell_exited"},
+		},
+		{
+			name:       "unknown reason falls back to spaced text",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "new_reason"},
+			wantStderr: "\r\nsession closed: new reason\r\n",
+		},
+		{
+			name:      "service restart is not a session end",
+			reported:  &websocket.CloseError{Code: websocket.CloseServiceRestart, Text: "service_restart"},
 			keepAsErr: true,
 		},
 	}
@@ -639,13 +697,13 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 		{
 			name:    "earlier failure over a later session end",
 			first:   errors.New("write failed on the closed connection"),
-			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
 			wantErr: errors.New("write failed on the closed connection"),
 		},
 		{
 			name:       "duplicate session end prints once",
-			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
-			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
 			wantStderr: "\r\nsession closed: idle timeout\r\n",
 		},
 	}
