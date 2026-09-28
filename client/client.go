@@ -713,7 +713,14 @@ func (ac *AlpaconClient) SendRawRequest(method, path string, body io.Reader, hea
 	if !strings.EqualFold(req.URL.Host, base.Host) || !strings.EqualFold(req.URL.Scheme, base.Scheme) {
 		return nil, fmt.Errorf("endpoint must be a path on the current workspace")
 	}
-	if err := ValidateRawRequestHeaders(req.Method, header, req.ContentLength, req.GetBody != nil); err != nil {
+	hasBody := req.Body != nil
+	bodyLength := req.ContentLength
+	if hasBody && req.GetBody == nil {
+		// A body of unrecognized type carries no verifiable length, so any
+		// explicit Content-Length claim about it is untrustworthy.
+		bodyLength = -1
+	}
+	if err := ValidateRawRequestHeaders(req.Method, header, bodyLength, hasBody); err != nil {
 		return nil, err
 	}
 	for name, values := range header {
@@ -779,12 +786,23 @@ func ValidateRawRequestHeaders(method string, header http.Header, bodyLength int
 		case strings.EqualFold(name, "Host"), strings.EqualFold(name, "Transfer-Encoding"), strings.EqualFold(name, "Trailer"):
 			return fmt.Errorf("unsupported request header: %s", name)
 		case strings.EqualFold(name, "Content-Length"):
-			if contentLengthSeen || len(values) != 1 || !hasBody || bodyLength < 0 {
+			if contentLengthSeen || len(values) != 1 {
 				return fmt.Errorf("invalid Content-Length header")
 			}
 			contentLengthSeen = true
 			length, err := strconv.ParseInt(values[0], 10, 64)
-			if err != nil || length < 0 || length != bodyLength || strconv.FormatInt(length, 10) != values[0] || (length == 0 && (method == http.MethodGet || method == http.MethodHead)) {
+			if err != nil || length < 0 || strconv.FormatInt(length, 10) != values[0] {
+				return fmt.Errorf("invalid Content-Length header")
+			}
+			// bodyLength < 0 means an unmeasured body—no claim about it is trustworthy.
+			if hasBody {
+				if bodyLength < 0 || length != bodyLength {
+					return fmt.Errorf("invalid Content-Length header")
+				}
+			} else if length != 0 {
+				return fmt.Errorf("invalid Content-Length header")
+			}
+			if length == 0 && (method == http.MethodGet || method == http.MethodHead) {
 				return fmt.Errorf("invalid Content-Length header")
 			}
 		}
@@ -829,14 +847,22 @@ func hasRawSpaceOrBadEscape(query string) bool {
 }
 
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
+	originHost, originScheme := req.URL.Host, req.URL.Scheme
 	httpClient := *ac.HTTPClient
 	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 		// A redirect must not carry workspace credentials to another host.
-		if next.URL.Host != req.URL.Host || next.URL.Scheme != req.URL.Scheme {
+		if next.URL.Host != originHost || next.URL.Scheme != originScheme {
 			return http.ErrUseLastResponse
 		}
 		if ac.HTTPClient.CheckRedirect != nil {
-			return ac.HTTPClient.CheckRedirect(next, via)
+			if err := ac.HTTPClient.CheckRedirect(next, via); err != nil {
+				return err
+			}
+			// The delegated callback may have rewritten next.URL—re-check it.
+			if next.URL.Host != originHost || next.URL.Scheme != originScheme {
+				return http.ErrUseLastResponse
+			}
+			return nil
 		}
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after 10 redirects")

@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -2242,6 +2243,39 @@ func TestSendRawRequest_RenewsAndReplaysBody(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, tokens)
 }
 
+func TestValidateRawRequestHeaders_ContentLengthWithoutBody(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		method string
+		value  string
+		bad    bool
+	}{
+		{"post zero accepted", http.MethodPost, "0", false},
+		{"put zero accepted", http.MethodPut, "0", false},
+		{"patch zero accepted", http.MethodPatch, "0", false},
+		{"delete zero accepted", http.MethodDelete, "0", false},
+		{"get zero still rejected", http.MethodGet, "0", true},
+		{"head zero still rejected", http.MethodHead, "0", true},
+		{"post nonzero rejected", http.MethodPost, "5", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			header := make(http.Header)
+			header.Set("Content-Length", tc.value)
+
+			err := ValidateRawRequestHeaders(tc.method, header, 0, false)
+
+			if tc.bad {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestSendRawRequest_RejectsContentLengthForUnknownBodySize(t *testing.T) {
 	t.Parallel()
 	requests := 0
@@ -2279,23 +2313,44 @@ func TestSendRawRequest_CodedUnauthorizedDoesNotRenew(t *testing.T) {
 
 func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 	t.Parallel()
-	externalRequests := 0
-	ac := newBearerTestClient("https://workspace.example", "secret")
-	ac.HTTPClient.Transport = rawRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host == "evil.example" {
-			externalRequests++
-			return rawTestResponse(http.StatusOK, "text/plain", "external"), nil
-		}
-		response := rawTestResponse(http.StatusFound, "text/plain", "redirect")
-		response.Header.Set("Location", "https://evil.example/x")
-		return response, nil
-	})
+	cases := []struct {
+		name          string
+		location      string
+		rewriteToEvil bool // delegated CheckRedirect approves, then mutates next.URL to evil.example
+	}{
+		{name: "redirects straight off-host", location: "https://evil.example/x"},
+		{name: "delegated check rewrites off-host after approving", location: "https://workspace.example/y", rewriteToEvil: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			externalRequests := 0
+			ac := newBearerTestClient("https://workspace.example", "secret")
+			if tc.rewriteToEvil {
+				ac.HTTPClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+					rewritten, err := url.Parse("https://evil.example/x")
+					require.NoError(t, err)
+					*next.URL = *rewritten
+					return nil
+				}
+			}
+			ac.HTTPClient.Transport = rawRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.URL.Host == "evil.example" {
+					externalRequests++
+					return rawTestResponse(http.StatusOK, "text/plain", "external"), nil
+				}
+				response := rawTestResponse(http.StatusFound, "text/plain", "redirect")
+				response.Header.Set("Location", tc.location)
+				return response, nil
+			})
 
-	response, err := ac.SendRawRequest(http.MethodGet, "/x", nil, nil)
+			response, err := ac.SendRawRequest(http.MethodGet, "/x", nil, nil)
 
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusFound, response.StatusCode)
-	assert.Equal(t, 0, externalRequests)
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusFound, response.StatusCode)
+			assert.Equal(t, 0, externalRequests)
+		})
+	}
 }
 
 func TestNormalizeRawEndpoint_RestrictsToWorkspacePath(t *testing.T) {
