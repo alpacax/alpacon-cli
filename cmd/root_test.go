@@ -91,3 +91,10 @@ func TestHostFromURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRootRegistersAPICommand(t *testing.T) {
+	command, _, err := RootCmd.Find([]string{"api"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "api", command.Name())
+}
