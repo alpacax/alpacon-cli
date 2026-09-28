@@ -29,10 +29,9 @@ on:
   workflow_call:
 
 # Not github.workflow: under release.yaml it is "Release", shared with the other call.
-# No cancel on a tag: a re-pushed tag would kill the run goreleaser is waiting on.
 concurrency:
   group: install-script-tests-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -189,7 +188,6 @@ jobs:
         env:
           PINNED_VERSION: ${{ steps.pinned-version.outputs.version }}
         run: |
-          Write-Host "pinned install target: $env:PINNED_VERSION"
           ./install.ps1 -Version $env:PINNED_VERSION
           $marker = Join-Path $env:INSTALL_DIR 'installed-version.txt'
           $got = (Get-Content $marker -Raw).Trim()
