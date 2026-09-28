@@ -191,6 +191,11 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
+// rfc8628PollIntervalSeconds is the RFC 8628 §3.5 default polling interval,
+// reused as the slow_down increment since this client uses the same value
+// for both.
+const rfc8628PollIntervalSeconds = 5
+
 // evaluatePollResponse decides, per RFC 8628 §3.5, whether the polling loop
 // continues after a token-endpoint error and the next interval to use.
 func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
@@ -202,17 +207,26 @@ func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
 	case "authorization_pending":
 		return pollDecision{interval: interval}, true
 	case "slow_down":
-		return pollDecision{interval: interval + 5}, true
+		return pollDecision{interval: addSaturatingInt(interval, rfc8628PollIntervalSeconds)}, true
 	default:
 		return pollDecision{}, false
 	}
 }
 
+// addSaturatingInt adds b to a, saturating at math.MaxInt instead of
+// wrapping to a negative value.
+func addSaturatingInt(a, b int) int {
+	if a > math.MaxInt-b {
+		return math.MaxInt
+	}
+	return a + b
+}
+
 // devicePollInterval defaults a missing or non-positive interval to the RFC
-// 8628 minimum of 5 seconds, so the loop never busy-polls.
+// 8628 minimum polling interval, so the loop never busy-polls.
 func devicePollInterval(interval int) int {
 	if interval <= 0 {
-		return 5
+		return rfc8628PollIntervalSeconds
 	}
 	return interval
 }
