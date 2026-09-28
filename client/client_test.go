@@ -660,6 +660,53 @@ func TestSendRequest_401OtherCodedDenialGetsGenericMessage(t *testing.T) {
 	assert.Equal(t, "some_other_denial", code)
 }
 
+func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, "authentication failed: please run 'alpacon login' again", err.Error())
+
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
+func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "` + code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+			require.Error(t, err)
+			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
+			assert.NotContains(t, err.Error(), "alpacon login")
+
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
 func TestSendRequest_EmptyBodyUnaffectedByCodeMapping(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1322,6 +1369,99 @@ func TestSendRequest_CodedIPNotAllowedIsNotRenewed(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 0, *renewals, "a coded 401 is the server's decision, not a stale credential")
 	assert.Equal(t, 1, requests)
+}
+
+// alpacon-server maps DRF's NotAuthenticated onto auth_token_missing, so a fresh
+// token may clear it just as it may the code-less 401.
+func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code": "auth_token_missing"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status": "approved"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	body, err := ac.SendGetRequest("/api/test/")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status": "approved"}`, string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
+}
+
+// A deliberate Auth0 rejection a new token will not move, yet re-login is the
+// user's only remedy.
+func TestSendRequest_CodedAuthenticationFailedIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_authentication_failed"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, "authentication failed: please run 'alpacon login' again", err.Error())
+	assert.Equal(t, 0, *renewals, "an explicit refusal is not a stale credential a new token would move")
+	assert.Equal(t, 1, requests)
+}
+
+// renewedRequest's bearer-only check stops this, not isStaleCredential.
+func TestSendRequest_AuthTokenMissingOnLegacyTokenIsNotRenewed(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_token_missing"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+}
+
+func TestSendGetRequest_StillCodedAfterRenewalDoesNotLoop(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_token_missing"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, "authentication failed: please run 'alpacon login' again", err.Error())
+	assert.Equal(t, 1, *renewals, "one replay only, even though the replay is coded stale too")
+	assert.Equal(t, 2, requests)
 }
 
 // A service token or a legacy API key has no refresh token behind it, so a
