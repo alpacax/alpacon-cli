@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -43,6 +44,8 @@ type httpStatusError struct {
 	location string
 }
 
+type mfaRequiredError struct{}
+
 type fieldFlag struct {
 	fields *[]fieldInput
 	typed  bool
@@ -60,6 +63,10 @@ type preparedRequest struct {
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
 
+func (mfaRequiredError) Error() string       { return "MFA required" }
+func (mfaRequiredError) ErrorCode() string   { return utils.AuthMFARequired }
+func (mfaRequiredError) ErrorSource() string { return "" }
+
 func (f *fieldFlag) String() string { return "" }
 func (f *fieldFlag) Type() string   { return "field" }
 func (f *fieldFlag) Set(value string) error {
@@ -74,7 +81,8 @@ func newCommand() *cobra.Command {
 		Short: "Send a request to the Alpacon API",
 		Long: "Send a request to the Alpacon API. ENDPOINT is a path on the current workspace—an absolute URL is refused.\n" +
 			"Fields (-f/-F) go to the query string for GET, and to a JSON body otherwise. A non-2xx response's body is still printed\n" +
-			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1.",
+			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1. An MFA-required response opens the workspace\n" +
+			"MFA link and retries once MFA completes, like other commands—unless the request carries its own -H Authorization header.",
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
@@ -209,9 +217,48 @@ func prepareRequest(opts options, stdin io.Reader) (preparedRequest, int, error)
 }
 
 func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, stdout, stderr io.Writer) (int, error) {
+	response, err := sendAPIRequest(ac, opts, request, stderr)
+	if err != nil {
+		return utils.ExitCodeGeneralError, err
+	}
+
+	if isMFARequiredResponse(response) && request.Headers.Get("Authorization") == "" {
+		retry := func() error {
+			retried, sendErr := sendAPIRequest(ac, opts, request, stderr)
+			if sendErr != nil {
+				return sendErr
+			}
+			response = retried
+			if isMFARequiredResponse(response) {
+				return mfaRequiredError{}
+			}
+			return nil
+		}
+		if handleErr := utils.HandleCommonErrors(mfaRequiredError{}, "", mfa.WorkspaceErrorCallbacks(ac, retry)); handleErr != nil {
+			if writeErr := writeAPIResponse(opts, response, stdout); writeErr != nil {
+				return utils.ExitCodeGeneralError, writeErr
+			}
+			if _, statusErr := fmt.Fprintf(stderr, "HTTP %d\n", response.StatusCode); statusErr != nil {
+				return utils.ExitCodeGeneralError, statusErr
+			}
+			return utils.ExitCodeGeneralError, handleErr
+		}
+	}
+
+	if err := writeAPIResponse(opts, response, stdout); err != nil {
+		return utils.ExitCodeGeneralError, err
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode, location: response.Header.Get("Location")}
+	}
+	return 0, nil
+}
+
+// sendAPIRequest writes nothing to stdout, so an MFA retry never prints two bodies.
+func sendAPIRequest(ac *client.AlpaconClient, opts options, request preparedRequest, stderr io.Writer) (*client.RawResponse, error) {
 	if opts.Verbose {
 		if err := printRequest(stderr, ac, request.Method, request.Path, request.Headers); err != nil {
-			return utils.ExitCodeGeneralError, err
+			return nil, err
 		}
 	}
 	var reader io.Reader
@@ -220,16 +267,32 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 	}
 	response, err := ac.SendRawRequest(request.Method, request.Path, reader, request.Headers)
 	if err != nil {
-		return utils.ExitCodeGeneralError, err
+		return nil, err
 	}
 	if opts.Verbose {
 		if err := printResponseHeaders(stderr, response); err != nil {
-			return utils.ExitCodeGeneralError, err
+			return nil, err
 		}
 	}
+	return response, nil
+}
+
+func isMFARequiredResponse(response *client.RawResponse) bool {
+	if response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusMultipleChoices {
+		return false
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(response.Body, &parsed); err != nil || parsed == nil {
+		return false
+	}
+	code, _ := parsed["code"].(string)
+	return code == utils.AuthMFARequired
+}
+
+func writeAPIResponse(opts options, response *client.RawResponse, stdout io.Writer) error {
 	if opts.Include {
 		if err := printResponseHeaders(stdout, response); err != nil {
-			return utils.ExitCodeGeneralError, err
+			return err
 		}
 	}
 	if !opts.Silent && len(response.Body) > 0 {
@@ -246,13 +309,10 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			output = []byte(sanitizeTerminalBodyKeepingTabs(string(output)))
 		}
 		if _, err := stdout.Write(output); err != nil {
-			return utils.ExitCodeGeneralError, err
+			return err
 		}
 	}
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode, location: response.Header.Get("Location")}
-	}
-	return 0, nil
+	return nil
 }
 
 // SanitizeTerminalBlock strips tabs, so each tab-separated segment is sanitized on its own.

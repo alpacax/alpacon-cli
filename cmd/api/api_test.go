@@ -9,9 +9,11 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -892,4 +894,92 @@ func TestAPICommand_RejectsStdinFieldWithStdinInput(t *testing.T) {
 	assert.Equal(t, 2, exitErr.ExitCode())
 	assert.Contains(t, string(output), "only one field can be read from standard input")
 	assert.NotContains(t, string(output), "CLIENT_CONSTRUCTED")
+}
+
+// mfaTestServer points HOME at a temp dir holding a refresh token, so its caller must stay serial.
+func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, string, string)) (*client.AlpaconClient, *int32) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+
+	require.NoError(t, config.CreateConfig(
+		"https://workspace.example", "my-workspace",
+		"", "", "old-token", "refresh-token", "", 0, false,
+	))
+
+	var endpointCalls int32
+	ac := &client.AlpaconClient{
+		BaseURL:       "https://workspace.example",
+		WorkspaceName: "my-workspace",
+		HTTPClient: &http.Client{Transport: apiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/x":
+				n := int(atomic.AddInt32(&endpointCalls, 1))
+				status, ct, body := endpointResponses(n)
+				return apiTestResponse(status, ct, body), nil
+			case "/api/auth0/mfa/":
+				return apiTestResponse(http.StatusOK, "application/json", `{"mfa_url": "https://example.com/mfa"}`), nil
+			case "/api/auth0/mfa/completion/":
+				return apiTestResponse(http.StatusOK, "application/json", `{"completed": true}`), nil
+			case "/api/auth/env/":
+				return apiTestResponse(http.StatusOK, "application/json", `{"auth0": {"domain": "auth0.example", "client_id": "cid", "audience": "aud", "schema_name": "acme"}}`), nil
+			case "/oauth/token/":
+				return apiTestResponse(http.StatusOK, "application/json", `{"access_token": "new-token", "expires_in": 3600, "token_type": "Bearer"}`), nil
+			default:
+				t.Fatalf("unexpected request to %s", r.URL.Path)
+				return nil, nil
+			}
+		})},
+	}
+	ac.SetAccessToken("old-token")
+	return ac, &endpointCalls
+}
+
+func TestRunAPI_MFARequiredOpensLinkAndRetriesOnce(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n == 1 {
+			return http.StatusUnauthorized, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusOK, "application/json", `{"ok":true}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.JSONEq(t, `{"ok":true}`, stdout.String())
+	assert.Equal(t, int32(2), atomic.LoadInt32(calls), "the endpoint must be hit exactly twice")
+}
+
+func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(int) (int, string, string) {
+		return http.StatusUnauthorized, "application/json", `{"code":"auth_mfa_required"}`
+	})
+	var stdout, stderr bytes.Buffer
+	opts := options{Endpoint: "/x", Headers: []string{"Authorization: Bearer caller-token"}}
+	request, code, err := prepareRequest(opts, strings.NewReader(""))
+	require.NoError(t, err)
+	require.Zero(t, code)
+
+	code, err = runAPI(ac, opts, request, &stdout, &stderr)
+
+	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusUnauthorized))
+	assert.Equal(t, 1, code)
+	assert.JSONEq(t, `{"code":"auth_mfa_required"}`, stdout.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "the endpoint must be hit exactly once")
+}
+
+func TestRunAPI_DifferentCodeSkipsMFA(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(int) (int, string, string) {
+		return http.StatusUnauthorized, "application/json", `{"code":"auth_authentication_failed"}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusUnauthorized))
+	assert.Equal(t, 1, code)
+	assert.JSONEq(t, `{"code":"auth_authentication_failed"}`, stdout.String())
+	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "the endpoint must be hit exactly once")
 }
