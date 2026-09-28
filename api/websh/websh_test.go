@@ -614,6 +614,30 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	}
 }
 
+func TestFinish_PrintsTheCloseReasonOnASessionEnd(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
+	})
+
+	assertReported(t, wsClient)
+	assert.Contains(t, stderr, "session closed: idle timeout")
+	assert.NoError(t, wsClient.err)
+}
+
+func TestFinish_StaysSilentOnASessionEndWithNoReason(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode})
+	})
+
+	assertReported(t, wsClient)
+	assert.Empty(t, stderr)
+	assert.NoError(t, wsClient.err)
+}
+
 // The dial succeeds and raw mode then fails, and nothing on that return calls
 // finish. Today every go statement sits below enterRawMode, so none has started
 // and the count holds; this fails if one is ever moved back above it.
