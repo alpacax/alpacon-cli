@@ -338,28 +338,23 @@ func (wsClient *WebsocketClient) closeConn() {
 // saw done can read it. A deliberate close ends the session rather than failing it;
 // every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
-	if endsSession(err) {
-		reported := err
-		err = nil
-		wsClient.finishOnce.Do(func() {
-			printCloseReason(reported)
-			wsClient.err = err
-			close(wsClient.done)
-		})
-		return
-	}
 	wsClient.finishOnce.Do(func() {
+		if endsSession(err) {
+			printCloseReason(err)
+			err = nil
+		}
 		wsClient.err = err
 		close(wsClient.done)
 	})
 }
 
-// printCloseReason surfaces the sanitized text of a session-end close frame.
 func printCloseReason(err error) {
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode && closeErr.Text != "" {
 		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
-		fmt.Fprintf(os.Stderr, "session closed: %s\n", reason)
+		// The terminal is still in raw mode, where a bare newline leaves the cursor
+		// where it stood, so the message carries its own carriage returns.
+		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", reason)
 	}
 }
 

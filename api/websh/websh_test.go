@@ -622,7 +622,7 @@ func TestFinish_PrintsTheCloseReasonOnASessionEnd(t *testing.T) {
 	})
 
 	assertReported(t, wsClient)
-	assert.Equal(t, "session closed: idle timeout\n", stderr)
+	assert.Equal(t, "\r\nsession closed: idle timeout\r\n", stderr)
 	assert.NoError(t, wsClient.err)
 }
 
@@ -638,8 +638,6 @@ func TestFinish_StaysSilentOnASessionEndWithNoReason(t *testing.T) {
 	assert.NoError(t, wsClient.err)
 }
 
-// A close reason is terminal text from the server, so it goes through the same
-// sanitizer as any other server-supplied text before it reaches the terminal.
 func TestFinish_SanitizesTheCloseReason(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
@@ -648,12 +646,10 @@ func TestFinish_SanitizesTheCloseReason(t *testing.T) {
 	})
 
 	assertReported(t, wsClient)
-	assert.Equal(t, "session closed: idletimeout\n", stderr)
+	assert.Equal(t, "\r\nsession closed: idletimeout\r\n", stderr)
 	assert.NoError(t, wsClient.err)
 }
 
-// finish keeps only the first outcome, so a session-end that loses the race
-// prints nothing and does not overwrite the error already recorded.
 func TestFinish_KeepsAnEarlierFailureOverALaterSessionEnd(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 	first := errors.New("write failed on the closed connection")
@@ -668,8 +664,6 @@ func TestFinish_KeepsAnEarlierFailureOverALaterSessionEnd(t *testing.T) {
 	assert.Equal(t, first, wsClient.err)
 }
 
-// A session-end reported twice—e.g. the reader and the writer both surfacing
-// the same close—prints the reason once, for the outcome that actually wins.
 func TestFinish_PrintsTheReasonOnceOnADuplicateSessionEnd(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 
@@ -679,7 +673,7 @@ func TestFinish_PrintsTheReasonOnceOnADuplicateSessionEnd(t *testing.T) {
 	})
 
 	assertReported(t, wsClient)
-	assert.Equal(t, "session closed: idle timeout\n", stderr)
+	assert.Equal(t, "\r\nsession closed: idle timeout\r\n", stderr)
 	assert.NoError(t, wsClient.err)
 }
 
