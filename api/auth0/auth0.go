@@ -16,10 +16,12 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// RFC 8628 §3.5 uses 5 seconds as both the default interval and the slow_down increment.
+// rfc8628PollIntervalSeconds is both the default interval and the slow_down
+// increment of RFC 8628 §3.5.
 const rfc8628PollIntervalSeconds = 5
 
-// Keeps interval+slow_down and the seconds-to-Duration conversion from overflowing, including on 32-bit int.
+// maxDeviceCodeLifetimeSeconds keeps interval+slow_down and the seconds-to-Duration
+// conversion from overflowing, including on 32-bit int.
 const maxDeviceCodeLifetimeSeconds = math.MaxInt32 / 2
 
 var path = struct {
@@ -36,8 +38,8 @@ var path = struct {
 
 var requestAccessTokenFunc = requestAccessToken
 
-// Retry a refresh with another scope only on this; any other failure may have
-// consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
+// oauthError is the only refresh failure safe to retry with another scope; any other
+// may have consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
 type oauthError struct {
 	Code string
 	Desc string
