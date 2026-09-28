@@ -553,30 +553,34 @@ func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
 	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
 }
 
-func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
-	t.Parallel()
-	wsClient := newWebsocketClient(nil)
-
-	first := errors.New("remote closed the session")
-	wsClient.finish(first)
-	wsClient.finish(errors.New("write failed on the closed connection"))
-
-	assertReported(t, wsClient)
-	assert.Equal(t, first, wsClient.err)
-}
-
-func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
-	// Not parallel: subtests swap os.Stderr via testutil.CaptureOutput.
+func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 	tests := []struct {
-		name      string
-		reported  error
-		keepAsErr bool
+		name       string
+		reported   error
+		wantStderr string
+		keepAsErr  bool
 	}{
 		{
-			// What the proxy actually sends: every other case here is a contract
-			// the CLI honors but never meets in production.
-			name:     "session end",
-			reported: &websocket.CloseError{Code: sessionEndCloseCode},
+			name:       "session end with a reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			wantStderr: "\r\nsession closed: idle timeout\r\n",
+		},
+		{
+			name:     "session end with no reason",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: ""},
+		},
+		{
+			name:       "session end sanitizes the reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle\ntimeout\x1b[2K"},
+			wantStderr: "\r\nsession closed: idletimeout\r\n",
+		},
+		{
+			name:     "session end sanitizes to empty",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"},
+		},
+		{
+			name:     "session end with whitespace only",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "   "},
 		},
 		{
 			name:     "normal closure",
@@ -607,9 +611,7 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 			})
 
 			assertReported(t, wsClient)
-			// Only the proxy's session-end code carries a reason worth printing;
-			// every other close stays silent even when it carries text.
-			assert.Empty(t, stderr)
+			assert.Equal(t, tt.wantStderr, stderr)
 			if tt.keepAsErr {
 				assert.Equal(t, tt.reported, wsClient.err)
 				return
@@ -620,91 +622,52 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	}
 }
 
-func TestFinish_PrintsTheCloseReasonOnASessionEnd(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
+func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      error
+		second     error
+		wantErr    error
+		wantStderr string
+	}{
+		{
+			name:    "earlier failure over a later failure",
+			first:   errors.New("remote closed the session"),
+			second:  errors.New("write failed on the closed connection"),
+			wantErr: errors.New("remote closed the session"),
+		},
+		{
+			name:    "earlier failure over a later session end",
+			first:   errors.New("write failed on the closed connection"),
+			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			wantErr: errors.New("write failed on the closed connection"),
+		},
+		{
+			name:       "duplicate session end prints once",
+			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"},
+			wantStderr: "\r\nsession closed: idle timeout\r\n",
+		},
+	}
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsClient := newWebsocketClient(nil)
 
-	assertReported(t, wsClient)
-	assert.Equal(t, "\r\nsession closed: idle timeout\r\n", stderr)
-	assert.NoError(t, wsClient.err)
-}
+			_, stderr := testutil.CaptureOutput(t, func() {
+				wsClient.finish(tt.first)
+				wsClient.finish(tt.second)
+			})
 
-func TestFinish_StaysSilentOnASessionEndWithNoReason(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode})
-	})
-
-	assertReported(t, wsClient)
-	assert.Empty(t, stderr)
-	assert.NoError(t, wsClient.err)
-}
-
-func TestFinish_SanitizesTheCloseReason(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle\ntimeout\x1b[2K"})
-	})
-
-	assertReported(t, wsClient)
-	assert.Equal(t, "\r\nsession closed: idletimeout\r\n", stderr)
-	assert.NoError(t, wsClient.err)
-}
-
-func TestFinish_StaysSilentWhenTheCloseReasonSanitizesToEmpty(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"})
-	})
-
-	assertReported(t, wsClient)
-	assert.Empty(t, stderr)
-	assert.NoError(t, wsClient.err)
-}
-
-func TestFinish_StaysSilentWhenTheCloseReasonIsOnlyWhitespace(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "   "})
-	})
-
-	assertReported(t, wsClient)
-	assert.Empty(t, stderr)
-	assert.NoError(t, wsClient.err)
-}
-
-func TestFinish_KeepsAnEarlierFailureOverALaterSessionEnd(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-	first := errors.New("write failed on the closed connection")
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(first)
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
-	})
-
-	assertReported(t, wsClient)
-	assert.Empty(t, stderr)
-	assert.Equal(t, first, wsClient.err)
-}
-
-func TestFinish_PrintsTheReasonOnceOnADuplicateSessionEnd(t *testing.T) {
-	wsClient := newWebsocketClient(nil)
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
-		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "idle timeout"})
-	})
-
-	assertReported(t, wsClient)
-	assert.Equal(t, "\r\nsession closed: idle timeout\r\n", stderr)
-	assert.NoError(t, wsClient.err)
+			assertReported(t, wsClient)
+			assert.Equal(t, tt.wantStderr, stderr)
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, wsClient.err)
+				return
+			}
+			assert.NoError(t, wsClient.err)
+		})
+	}
 }
 
 // The dial succeeds and raw mode then fails, and nothing on that return calls

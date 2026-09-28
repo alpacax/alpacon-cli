@@ -357,8 +357,6 @@ func printCloseReason(err error) {
 		if reason == "" {
 			return
 		}
-		// The terminal is still in raw mode, where a bare newline leaves the cursor
-		// where it stood, so the message carries its own carriage returns.
 		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", reason)
 	}
 }
