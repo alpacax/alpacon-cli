@@ -139,7 +139,7 @@ jobs:
           subject-digest: ${{ steps.image-digest.outputs.digest }}
 
       - name: Strip "v" prefix from tag
-        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
@@ -174,7 +174,7 @@ jobs:
       contents: read
     steps:
       - name: Strip "v" prefix from tag
-        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        run: echo "TAG_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
