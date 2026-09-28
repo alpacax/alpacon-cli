@@ -105,16 +105,19 @@ run_test() {
 # run_test calls these inside `if`, where set -e is off, so each must stay a single && chain or a failed step passes silently.
 verify_downloaded_file() {
     local path="$1" pattern="$2"
+    echo "Check: test -f $(q "$path") && grep -q $(q "$pattern") $(q "$path")"
     test -f "$path" && grep -q "$pattern" "$path"
 }
 
 verify_downloaded_folder() {
     local folder="$1" file="$2" pattern="$3"
+    echo "Check: test -d $(q "$folder")"
     test -d "$folder" && verify_downloaded_file "$folder/$file" "$pattern"
 }
 
 create_dir_and_upload() {
     local remote_dir="$1"
+    echo "Check: alpacon exec $(q "$SERVER_NAME") $(q "mkdir -p $(q "$remote_dir")") && alpacon cp $(q "$LOCAL_PATH/$TEST_FILE") $(q "$SERVER_NAME:$remote_dir/")"
     alpacon exec "$SERVER_NAME" "mkdir -p $(q "$remote_dir")" &&
         alpacon cp "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$remote_dir/"
 }
