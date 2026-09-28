@@ -27,6 +27,14 @@ type AlpaconClient struct {
 	loadErr   error
 }
 
+type RawResponse struct {
+	Status     string
+	StatusCode int
+	Proto      string
+	Header     http.Header
+	Body       []byte
+}
+
 type CurrentUserResponse struct {
 	Username    string `json:"username"`
 	IsStaff     bool   `json:"is_staff"`

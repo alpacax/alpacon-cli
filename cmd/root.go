@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/alpacax/alpacon-cli/cmd/agent"
+	apicmd "github.com/alpacax/alpacon-cli/cmd/api"
 	"github.com/alpacax/alpacon-cli/cmd/approval"
 	"github.com/alpacax/alpacon-cli/cmd/audit"
 	"github.com/alpacax/alpacon-cli/cmd/authority"
@@ -103,6 +104,9 @@ func init() {
 
 	// agent
 	RootCmd.AddCommand(agent.AgentCmd)
+
+	// api
+	RootCmd.AddCommand(apicmd.ApiCmd)
 
 	// websh
 	RootCmd.AddCommand(websh.WebshCmd)

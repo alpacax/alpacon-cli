@@ -697,6 +697,144 @@ func consoleLabel(workspaceURL string) (string, bool) {
 	return parts[0], true
 }
 
+func (ac *AlpaconClient) SendRawRequest(method, path string, body io.Reader, header http.Header) (*RawResponse, error) {
+	base, err := url.Parse(ac.BaseURL)
+	if err != nil || base.Host == "" {
+		return nil, fmt.Errorf("invalid workspace URL")
+	}
+	path, err = NormalizeRawEndpoint(path)
+	if err != nil {
+		return nil, err
+	}
+	req, err := ac.createRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(req.URL.Host, base.Host) || !strings.EqualFold(req.URL.Scheme, base.Scheme) {
+		return nil, fmt.Errorf("endpoint must be a path on the current workspace")
+	}
+	if err := ValidateRawRequestHeaders(req.Method, header, req.ContentLength, req.GetBody != nil); err != nil {
+		return nil, err
+	}
+	for name, values := range header {
+		if strings.EqualFold(name, "Content-Length") {
+			continue
+		}
+		setHeaderValues(req.Header, name, values)
+	}
+	return ac.sendRawRequest(req, header)
+}
+
+// sendRawRequest sends req and, when the server reports the access token stale,
+// renews it and sends the request once more, mirroring sendRequest for the raw path.
+func (ac *AlpaconClient) sendRawRequest(req *http.Request, header http.Header) (*RawResponse, error) {
+	response, err := ac.rawRoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	// A caller-supplied Authorization is never renewed: replaying would swap in the CLI's own token.
+	if hasHeader(header, "Authorization") {
+		return response, nil
+	}
+	var authErr error
+	if response.StatusCode == http.StatusUnauthorized {
+		authErr = withStatus(checkAuthStatus(response.StatusCode, response.Body), response.StatusCode)
+	}
+	retry, ok := ac.renewedRequest(req, authErr)
+	if !ok {
+		return response, nil
+	}
+	for name, values := range header {
+		if !strings.EqualFold(name, "User-Agent") {
+			continue
+		}
+		setHeaderValues(retry.Header, name, values)
+	}
+	return ac.rawRoundTrip(retry)
+}
+
+// hasHeader reports whether header carries name, case-insensitively.
+func hasHeader(header http.Header, name string) bool {
+	for candidate := range header {
+		if strings.EqualFold(candidate, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// setHeaderValues replaces name's values in h with values.
+func setHeaderValues(h http.Header, name string, values []string) {
+	h.Del(name)
+	for _, value := range values {
+		h.Add(name, value)
+	}
+}
+
+// ValidateRawRequestHeaders checks special headers that net/http does not send from Request.Header.
+func ValidateRawRequestHeaders(method string, header http.Header, bodyLength int64, hasBody bool) error {
+	contentLengthSeen := false
+	for name, values := range header {
+		switch {
+		case strings.EqualFold(name, "Host"), strings.EqualFold(name, "Transfer-Encoding"), strings.EqualFold(name, "Trailer"):
+			return fmt.Errorf("unsupported request header: %s", name)
+		case strings.EqualFold(name, "Content-Length"):
+			if contentLengthSeen || len(values) != 1 || !hasBody || bodyLength < 0 {
+				return fmt.Errorf("invalid Content-Length header")
+			}
+			contentLengthSeen = true
+			length, err := strconv.ParseInt(values[0], 10, 64)
+			if err != nil || length < 0 || length != bodyLength || strconv.FormatInt(length, 10) != values[0] || (length == 0 && (method == http.MethodGet || method == http.MethodHead)) {
+				return fmt.Errorf("invalid Content-Length header")
+			}
+		}
+	}
+	return nil
+}
+
+func NormalizeRawEndpoint(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("endpoint must be a path on the current workspace")
+	}
+	parsed, err := url.Parse(path)
+	// IsAbs/Host/leading "//" catch a scheme or a network-path reference; a scheme
+	// inside a query value (e.g. a callback URL) never sets these on the outer URL.
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(path, "//") || parsed.Fragment != "" {
+		return "", fmt.Errorf("endpoint must be a path on the current workspace")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return path, nil
+}
+
+func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
+	httpClient := *ac.HTTPClient
+	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		// A redirect must not carry workspace credentials to another host.
+		if next.URL.Host != req.URL.Host || next.URL.Scheme != req.URL.Scheme {
+			return http.ErrUseLastResponse
+		}
+		if ac.HTTPClient.CheckRedirect != nil {
+			return ac.HTTPClient.CheckRedirect(next, via)
+		}
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return nil
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return &RawResponse{Status: resp.Status, StatusCode: resp.StatusCode, Proto: resp.Proto, Header: resp.Header.Clone(), Body: respBody}, nil
+}
+
 // Get Request to Alpacon Server
 func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
