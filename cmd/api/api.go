@@ -235,8 +235,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 					output = formatted.Bytes()
 				}
 			}
-			clean, _ := utils.SanitizeTerminalBlock(string(output))
-			output = []byte(clean)
+			output = []byte(sanitizeTerminalBodyKeepingTabs(string(output)))
 		}
 		if _, err := stdout.Write(output); err != nil {
 			return utils.ExitCodeGeneralError, err
@@ -246,6 +245,15 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode}
 	}
 	return 0, nil
+}
+
+// SanitizeTerminalBlock strips tabs, so each tab-separated segment is sanitized on its own.
+func sanitizeTerminalBodyKeepingTabs(body string) string {
+	segments := strings.Split(body, "\t")
+	for i, segment := range segments {
+		segments[i], _ = utils.SanitizeTerminalBlock(segment)
+	}
+	return strings.Join(segments, "\t")
 }
 
 func parseHeaders(raw []string) (http.Header, error) {

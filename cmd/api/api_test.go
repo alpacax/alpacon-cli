@@ -264,6 +264,38 @@ func TestRunAPI_SanitizesResponseBodyOnlyWhenStdoutIsTerminal(t *testing.T) {
 	}
 }
 
+func TestRunAPI_TerminalBodyKeepsTabsWhileStrippingControls(t *testing.T) {
+	previous := isStdoutTerminal
+	t.Cleanup(func() { isStdoutTerminal = previous })
+	isStdoutTerminal = func() bool { return true }
+
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"tsv body keeps tabs", "id\tname\n1\tweb\n", "id\tname\n1\tweb\n"},
+		{"ansi escape inside tab segment", "a\x1b[31mb\tc", "ab\tc"},
+		{"leading tab", "\tafter", "\tafter"},
+		{"trailing tab", "before\t", "before\t"},
+		{"consecutive tabs", "a\t\tb", "a\t\tb"},
+		{"tab directly after escape", "\x1b\tx", "\tx"},
+		{"other c0 controls stripped", "a\rb\x07c\x00d", "abcd"},
+		{"newlines preserved", "line1\nline2\n", "line1\nline2\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
+				return apiTestResponse(200, "text/plain", tc.body), nil
+			})
+			var out bytes.Buffer
+			_, err := runAPITest(ac, options{Endpoint: "/x"}, &out, &bytes.Buffer{}, strings.NewReader(""))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, out.String())
+		})
+	}
+}
+
 func TestRunAPI_FormatsJSONOnlyOnTerminalAndLeavesPipedOutputByteForByte(t *testing.T) {
 	previous := isStdoutTerminal
 	t.Cleanup(func() { isStdoutTerminal = previous })
