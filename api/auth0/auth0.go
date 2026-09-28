@@ -44,9 +44,8 @@ var requestAccessTokenFunc = requestAccessToken
 // record the interval sequence without waiting.
 var sleepFunc = time.Sleep
 
-// oauthError is an error the token endpoint returned in its response body, as
-// opposed to a transport, decoding or request-construction failure—only the
-// former is safe to retry with a different scope on the refresh exchange.
+// oauthError is a response-body error from the token endpoint; only this
+// kind is safe to retry with a different scope on the refresh exchange.
 type oauthError struct {
 	Code string
 	Desc string
