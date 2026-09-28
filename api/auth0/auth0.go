@@ -27,6 +27,14 @@ var path = struct {
 	revoke:     "/oauth/revoke",
 }
 
+// requestAccessTokenFunc is PollForToken's seam onto requestAccessToken,
+// overridden in tests to observe the loop without a network round trip.
+var requestAccessTokenFunc = requestAccessToken
+
+// sleepFunc is PollForToken's seam onto time.Sleep, overridden in tests to
+// record the interval sequence without waiting.
+var sleepFunc = time.Sleep
+
 // oauthError is an error the token endpoint returned in its response body, as
 // opposed to a transport, decoding or request-construction failure.
 //
@@ -41,8 +49,7 @@ type oauthError struct {
 	Desc string
 }
 
-// pollDecision is what one token-endpoint poll resolves to when the loop keeps
-// waiting: the interval to sleep before the next attempt.
+// pollDecision is the next poll interval when the loop keeps waiting.
 type pollDecision struct {
 	interval int
 }
@@ -180,20 +187,34 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
-// evaluatePollResponse decides whether PollForToken's loop keeps polling after
-// a token-endpoint error, and at what interval, per RFC 8628 §3.5.
-// authorization_pending keeps the current interval; slow_down keeps polling
-// too but widens it by the RFC's mandated 5 seconds. Any other error is not a
-// polling condition and the caller should stop.
+// maxPollIntervalSeconds caps the widened poll interval so a run of slow_down
+// responses cannot grow it past what the device code's own expiry allows, and
+// cannot overflow when added to or multiplied into a time.Duration.
+const maxPollIntervalSeconds = 300
+
+// evaluatePollResponse decides, per RFC 8628 §3.5, whether the polling loop
+// continues after a token-endpoint error and the next interval to use.
 func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
-	switch {
-	case strings.Contains(err.Error(), "authorization_pending"):
+	var oauthErr *oauthError
+	if !errors.As(err, &oauthErr) {
+		return pollDecision{}, false
+	}
+	switch oauthErr.Code {
+	case "authorization_pending":
 		return pollDecision{interval: interval}, true
-	case strings.Contains(err.Error(), "slow_down"):
-		return pollDecision{interval: interval + 5}, true
+	case "slow_down":
+		return pollDecision{interval: capPollInterval(interval + 5)}, true
 	default:
 		return pollDecision{}, false
 	}
+}
+
+// capPollInterval bounds interval at maxPollIntervalSeconds.
+func capPollInterval(interval int) int {
+	if interval > maxPollIntervalSeconds {
+		return maxPollIntervalSeconds
+	}
+	return interval
 }
 
 // devicePollInterval defaults a missing or non-positive interval to the RFC
@@ -202,7 +223,7 @@ func devicePollInterval(interval int) int {
 	if interval <= 0 {
 		return 5
 	}
-	return interval
+	return capPollInterval(interval)
 }
 
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
@@ -218,11 +239,11 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 			return nil, fmt.Errorf("authentication timed out. Please restart the login process")
 		}
 
-		tokenResponse, err := requestAccessToken(deviceCodeRes.DeviceCode, envInfo)
+		tokenResponse, err := requestAccessTokenFunc(deviceCodeRes.DeviceCode, envInfo)
 		if err != nil {
 			if decision, retry := evaluatePollResponse(err, interval); retry {
 				interval = decision.interval
-				time.Sleep(time.Duration(interval) * time.Second)
+				sleepFunc(time.Duration(interval) * time.Second)
 				continue
 			}
 			return nil, mapAuth0Error(err)

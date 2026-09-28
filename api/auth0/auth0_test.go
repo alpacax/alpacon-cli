@@ -2,6 +2,7 @@ package auth0
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -598,6 +600,32 @@ func TestEvaluatePollResponse(t *testing.T) {
 			interval:  5,
 			wantRetry: false,
 		},
+		{
+			name:      "access_denied whose description mentions slow_down still stops",
+			err:       &oauthError{Code: "access_denied", Desc: "slow_down your requests"},
+			interval:  5,
+			wantRetry: false,
+		},
+		{
+			name:      "a non-oauth transport error stops polling",
+			err:       fmt.Errorf("dial tcp: connection refused"),
+			interval:  5,
+			wantRetry: false,
+		},
+		{
+			name:         "slow_down whose description mentions authorization_pending still widens",
+			err:          &oauthError{Code: "slow_down", Desc: "see authorization_pending"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 10,
+		},
+		{
+			name:         "slow_down caps the interval instead of overflowing",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     maxPollIntervalSeconds - 1,
+			wantRetry:    true,
+			wantInterval: maxPollIntervalSeconds,
+		},
 	}
 
 	for _, tt := range tests {
@@ -622,6 +650,7 @@ func TestDevicePollInterval(t *testing.T) {
 		{name: "positive interval is kept", interval: 8, want: 8},
 		{name: "zero interval defaults to the RFC minimum", interval: 0, want: 5},
 		{name: "negative interval defaults to the RFC minimum", interval: -1, want: 5},
+		{name: "a server-sent interval past the cap is bounded", interval: maxPollIntervalSeconds + 1, want: maxPollIntervalSeconds},
 	}
 
 	for _, tt := range tests {
@@ -629,4 +658,73 @@ func TestDevicePollInterval(t *testing.T) {
 			assert.Equal(t, tt.want, devicePollInterval(tt.interval))
 		})
 	}
+}
+
+// TestPollForToken_LoopBehavior threads requestAccessTokenFunc and sleepFunc
+// through PollForToken itself, so the sequence asserted is the loop's real
+// state carry-over across iterations, not just what evaluatePollResponse
+// returns in isolation.
+func TestPollForToken_LoopBehavior(t *testing.T) {
+	origRequest := requestAccessTokenFunc
+	origSleep := sleepFunc
+	t.Cleanup(func() {
+		requestAccessTokenFunc = origRequest
+		sleepFunc = origSleep
+	})
+
+	t.Run("slow_down and authorization_pending thread the widened interval", func(t *testing.T) {
+		var sleeps []time.Duration
+		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
+
+		responses := []error{
+			&oauthError{Code: "slow_down"},
+			&oauthError{Code: "authorization_pending"},
+			&oauthError{Code: "slow_down"},
+		}
+		call := 0
+		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+			if call < len(responses) {
+				err := responses[call]
+				call++
+				return nil, err
+			}
+			return &TokenResponse{AccessToken: "final-token"}, nil
+		}
+
+		tokenRes, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5}, &AuthEnvResponse{})
+		require.NoError(t, err)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Equal(t, []time.Duration{10 * time.Second, 10 * time.Second, 15 * time.Second}, sleeps)
+	})
+
+	t.Run("a zero device-code interval waits the RFC minimum on the first poll", func(t *testing.T) {
+		var sleeps []time.Duration
+		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
+
+		call := 0
+		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+			call++
+			if call == 1 {
+				return nil, &oauthError{Code: "authorization_pending"}
+			}
+			return &TokenResponse{AccessToken: "final-token"}, nil
+		}
+
+		_, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 0}, &AuthEnvResponse{})
+		require.NoError(t, err)
+		assert.Equal(t, []time.Duration{5 * time.Second}, sleeps)
+	})
+
+	t.Run("a fatal oauth error stops immediately without sleeping", func(t *testing.T) {
+		var sleeps []time.Duration
+		sleepFunc = func(d time.Duration) { sleeps = append(sleeps, d) }
+
+		requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+			return nil, &oauthError{Code: "access_denied"}
+		}
+
+		_, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5}, &AuthEnvResponse{})
+		require.Error(t, err)
+		assert.Empty(t, sleeps)
+	})
 }
