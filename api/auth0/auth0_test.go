@@ -558,3 +558,75 @@ func TestRefreshAccessToken_DoesNotRetryWhenNoDeviceScopeWasSent(t *testing.T) {
 	require.Error(t, err)
 	assert.Len(t, server.exchanges(), 1, "there was no device scope to drop, so the retry would be identical")
 }
+
+// --- Device-flow polling: slow_down handling (RFC 8628 §3.5) ---------------
+
+func TestEvaluatePollResponse(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		err          error
+		interval     int
+		wantRetry    bool
+		wantInterval int
+	}{
+		{
+			name:         "authorization_pending keeps polling at the same interval",
+			err:          &oauthError{Code: "authorization_pending"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 5,
+		},
+		{
+			name:         "slow_down keeps polling and widens the interval by 5 seconds",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 10,
+		},
+		{
+			name:         "slow_down widens again on a repeated occurrence",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     10,
+			wantRetry:    true,
+			wantInterval: 15,
+		},
+		{
+			name:      "access_denied stops polling",
+			err:       &oauthError{Code: "access_denied"},
+			interval:  5,
+			wantRetry: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decision, retry := evaluatePollResponse(tt.err, tt.interval)
+			assert.Equal(t, tt.wantRetry, retry)
+			if tt.wantRetry {
+				assert.Equal(t, tt.wantInterval, decision.interval)
+			}
+		})
+	}
+}
+
+func TestDevicePollInterval(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		interval int
+		want     int
+	}{
+		{name: "positive interval is kept", interval: 8, want: 8},
+		{name: "zero interval defaults to the RFC minimum", interval: 0, want: 5},
+		{name: "negative interval defaults to the RFC minimum", interval: -1, want: 5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, devicePollInterval(tt.interval))
+		})
+	}
+}
