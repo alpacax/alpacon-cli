@@ -339,8 +339,14 @@ func (wsClient *WebsocketClient) closeConn() {
 // every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
 	if endsSession(err) {
-		printCloseReason(err)
+		reported := err
 		err = nil
+		wsClient.finishOnce.Do(func() {
+			printCloseReason(reported)
+			wsClient.err = err
+			close(wsClient.done)
+		})
+		return
 	}
 	wsClient.finishOnce.Do(func() {
 		wsClient.err = err
@@ -348,13 +354,12 @@ func (wsClient *WebsocketClient) finish(err error) {
 	})
 }
 
-// printCloseReason surfaces the text the server put on a session-end close frame,
-// e.g. an idle timeout or a revoked sign-in. Every other ending—a normal closure,
-// a going-away, or no close frame at all—carries nothing worth printing.
+// printCloseReason surfaces the sanitized text of a session-end close frame.
 func printCloseReason(err error) {
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode && closeErr.Text != "" {
-		fmt.Fprintf(os.Stderr, "session closed: %s\n", closeErr.Text)
+		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
+		fmt.Fprintf(os.Stderr, "session closed: %s\n", reason)
 	}
 }
 
