@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,12 +140,15 @@ func TestLoginAndSaveCredentialsRefusesRedirectToHTTP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 
-			var reached atomic.Int32
-			var leaked atomic.Value
+			var (
+				mu       sync.Mutex
+				received []string
+			)
 			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				reached.Add(1)
 				body, _ := io.ReadAll(r.Body)
-				leaked.Store(r.Header.Get("Authorization") + " " + string(body))
+				mu.Lock()
+				received = append(received, r.Header.Get("Authorization")+" "+string(body))
+				mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`{}`))
 			}))
@@ -160,7 +164,9 @@ func TestLoginAndSaveCredentialsRefusesRedirectToHTTP(t *testing.T) {
 				Password:     "password-value",
 			}, tt.token, true)
 
-			assert.Zero(t, reached.Load(), "the http listener received %v", leaked.Load())
+			mu.Lock()
+			assert.Empty(t, received, "the http listener must not be contacted")
+			mu.Unlock()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "refusing redirect from "+workspace.URL+tt.path+" to "+target.URL+tt.path)
 		})
