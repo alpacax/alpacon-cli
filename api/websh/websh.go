@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -352,6 +353,7 @@ func printCloseReason(err error) {
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode {
 		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
+		reason = strings.TrimSpace(reason)
 		if reason == "" {
 			return
 		}
