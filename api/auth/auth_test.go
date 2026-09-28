@@ -3,10 +3,12 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -120,6 +122,55 @@ func assertSavedTarget(t *testing.T, wantURL, wantName, wantBaseDomain, wantToke
 		t.Errorf("Token = %q, want %q", cfg.Token, wantToken)
 	}
 	return cfg
+}
+
+// The workspace is reached over TLS; a redirect to plain http on the same
+// hostname must carry neither the API token nor the password.
+func TestLoginAndSaveCredentialsRefusesRedirectToHTTP(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		path  string
+	}{
+		{name: "token login", token: "token-value", path: statusURL},
+		{name: "password login", path: loginURL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+
+			var (
+				mu       sync.Mutex
+				received []string
+			)
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				mu.Lock()
+				received = append(received, r.Header.Get("Authorization")+" "+string(body))
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer target.Close()
+			workspace := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			defer workspace.Close()
+
+			err := LoginAndSaveCredentials(&LoginRequest{
+				WorkspaceURL: workspace.URL,
+				Username:     "alice",
+				Password:     "password-value",
+			}, tt.token, true)
+
+			mu.Lock()
+			assert.Empty(t, received, "the http listener must not be contacted")
+			mu.Unlock()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "refusing redirect from "+workspace.URL+tt.path+" to "+target.URL+tt.path)
+		})
+	}
 }
 
 func TestGetAPITokenList_Pagination(t *testing.T) {

@@ -145,7 +145,7 @@ func (w *wsListener) connectAndListen() (connected bool) {
 		return false
 	}
 
-	dialer := websocket.Dialer{HandshakeTimeout: w.handshakeTimeout}
+	dialer := newListenerDialer(w.handshakeTimeout)
 	conn, _, dialErr := dialer.Dial(wsURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
@@ -197,4 +197,10 @@ func (w *wsListener) connectAndListen() (connected bool) {
 // than asks to be retried is a bad request or an expired login, unchanged by a retry.
 func isFatalRequestError(cause error) bool {
 	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
+}
+
+// newListenerDialer follows the system proxy settings, as websocket.DefaultDialer
+// does for websh and tunnel.
+func newListenerDialer(handshakeTimeout time.Duration) *websocket.Dialer {
+	return &websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: handshakeTimeout}
 }
