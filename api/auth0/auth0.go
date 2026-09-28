@@ -45,14 +45,8 @@ var requestAccessTokenFunc = requestAccessToken
 var sleepFunc = time.Sleep
 
 // oauthError is an error the token endpoint returned in its response body, as
-// opposed to a transport, decoding or request-construction failure.
-//
-// The distinction matters on the refresh exchange: only a decision the server
-// actually made is worth retrying with a different scope, and a request that
-// may never have been answered must not be replayed against a refresh token the
-// server may already have consumed. Its message is unchanged from the string
-// this package produced before the type existed: mapAuth0Error still matches
-// it by message, and evaluatePollResponse matches it by Code instead.
+// opposed to a transport, decoding or request-construction failure—only the
+// former is safe to retry with a different scope on the refresh exchange.
 type oauthError struct {
 	Code string
 	Desc string
