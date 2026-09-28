@@ -680,11 +680,8 @@ func TestPollSleepDuration_SaturatesInsteadOfOverflowing(t *testing.T) {
 		{name: "a realistic interval converts directly", interval: 30, want: 30 * time.Second},
 	}
 
-	// maxPollSeconds (~9.2e9 on a 64-bit int64) does not fit a 32-bit int, so
-	// int(maxPollSeconds) below must stay a runtime conversion, never a
-	// constant one, or the 386/arm builds in .goreleaser.yaml fail with
-	// "constant 9223372036 overflows int". On a 32-bit int, math.MaxInt itself
-	// never reaches maxPollSeconds, so saturation cannot be exercised there.
+	// int(maxPollSeconds) must stay a runtime conversion, not a constant one,
+	// or 386/arm builds fail; on a 32-bit int it never reaches maxPollSeconds.
 	maxPollSecondsInt64 := int64(maxPollSeconds)
 	if strconv.IntSize == 64 {
 		tests = append(tests,
@@ -715,9 +712,7 @@ func TestPollSleepDuration_SaturatesInsteadOfOverflowing(t *testing.T) {
 	}
 }
 
-// TestPollForToken_LoopBehavior proves the loop's real interval carry-over
-// across iterations, not just evaluatePollResponse in isolation.
-func TestPollForToken_LoopBehavior(t *testing.T) {
+func TestPollForToken_CarriesWidenedIntervalIntoNextPoll(t *testing.T) {
 	origRequest := requestAccessTokenFunc
 	origSleep := sleepFunc
 	t.Cleanup(func() {

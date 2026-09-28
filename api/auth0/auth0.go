@@ -20,6 +20,10 @@ import (
 // pollSleepDuration saturates there instead of overflowing.
 const maxPollSeconds = math.MaxInt64 / int64(time.Second)
 
+// rfc8628PollIntervalSeconds is the RFC 8628 §3.5 default interval, also used
+// as the slow_down increment.
+const rfc8628PollIntervalSeconds = 5
+
 var path = struct {
 	env        string
 	deviceCode string
@@ -191,11 +195,6 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
-// rfc8628PollIntervalSeconds is the RFC 8628 §3.5 default polling interval,
-// reused as the slow_down increment since this client uses the same value
-// for both.
-const rfc8628PollIntervalSeconds = 5
-
 // evaluatePollResponse decides, per RFC 8628 §3.5, whether the polling loop
 // continues after a token-endpoint error and the next interval to use.
 func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
@@ -213,8 +212,6 @@ func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
 	}
 }
 
-// addSaturatingInt adds b to a, saturating at math.MaxInt instead of
-// wrapping to a negative value.
 func addSaturatingInt(a, b int) int {
 	if a > math.MaxInt-b {
 		return math.MaxInt
@@ -222,8 +219,6 @@ func addSaturatingInt(a, b int) int {
 	return a + b
 }
 
-// devicePollInterval defaults a missing or non-positive interval to the RFC
-// 8628 minimum polling interval, so the loop never busy-polls.
 func devicePollInterval(interval int) int {
 	if interval <= 0 {
 		return rfc8628PollIntervalSeconds
@@ -231,8 +226,6 @@ func devicePollInterval(interval int) int {
 	return interval
 }
 
-// pollSleepDuration converts a poll interval in seconds to a time.Duration,
-// saturating at maxPollSeconds instead of overflowing.
 func pollSleepDuration(intervalSeconds int) time.Duration {
 	if int64(intervalSeconds) > maxPollSeconds {
 		return time.Duration(maxPollSeconds) * time.Second
