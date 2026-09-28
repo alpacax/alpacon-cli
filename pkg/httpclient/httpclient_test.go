@@ -3,8 +3,10 @@ package httpclient
 import (
 	"crypto/tls"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -129,4 +131,111 @@ func TestNew(t *testing.T) {
 			assert.NotNil(t, c.CheckRedirect)
 		})
 	}
+}
+
+func TestStopAtCrossOrigin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		run          func(t *testing.T) (resp *http.Response, otherHits int32, err error)
+		wantStatus   int
+		wantLocation bool
+		wantErr      string
+	}{
+		{
+			name: "same origin redirect is followed",
+			run: func(t *testing.T) (*http.Response, int32, error) {
+				t.Helper()
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/a" {
+						http.Redirect(w, r, "/b", http.StatusFound)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}))
+				t.Cleanup(ts.Close)
+				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
+				return resp, 0, err
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "cross host redirect returns the 3xx and never reaches the other host",
+			run: func(t *testing.T) (*http.Response, int32, error) {
+				t.Helper()
+				var hits atomic.Int32
+				other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					hits.Add(1)
+				}))
+				t.Cleanup(other.Close)
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, other.URL+"/x", http.StatusFound)
+				}))
+				t.Cleanup(ts.Close)
+				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
+				return resp, hits.Load(), err
+			},
+			wantStatus:   http.StatusFound,
+			wantLocation: true,
+		},
+		{
+			name: "https to http downgrade on the same host is not followed",
+			run: func(t *testing.T) (*http.Response, int32, error) {
+				t.Helper()
+				var hits atomic.Int32
+				plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					hits.Add(1)
+				}))
+				t.Cleanup(plain.Close)
+				secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, plain.URL+"/x", http.StatusFound)
+				}))
+				t.Cleanup(secure.Close)
+				resp, err := StopAtCrossOrigin(secure.Client()).Get(secure.URL + "/a")
+				return resp, hits.Load(), err
+			},
+			wantStatus:   http.StatusFound,
+			wantLocation: true,
+		},
+		{
+			name: "a chain past the redirect cap is an error",
+			run: func(t *testing.T) (*http.Response, int32, error) {
+				t.Helper()
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					http.Redirect(w, r, r.URL.Path, http.StatusFound)
+				}))
+				t.Cleanup(ts.Close)
+				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/loop")
+				return resp, 0, err
+			},
+			wantErr: "stopped after 10 redirects",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			resp, otherHits, err := tt.run(t)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			defer func() { _ = resp.Body.Close() }()
+			assert.Equal(t, tt.wantStatus, resp.StatusCode)
+			assert.Equal(t, tt.wantLocation, resp.Header.Get("Location") != "")
+			assert.Zero(t, otherHits)
+		})
+	}
+}
+
+func TestStopAtCrossOrigin_ReturnsACopy(t *testing.T) {
+	t.Parallel()
+	original := New(false)
+
+	got := StopAtCrossOrigin(original)
+
+	assert.NotSame(t, original, got)
+	assert.Equal(t, reflect.ValueOf(sameOriginRedirect).Pointer(), reflect.ValueOf(original.CheckRedirect).Pointer())
+	assert.Same(t, original.Transport, got.Transport)
 }
