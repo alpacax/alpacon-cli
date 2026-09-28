@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,6 +122,10 @@ func TestNew(t *testing.T) {
 			require.True(t, ok, "transport is %T", c.Transport)
 			assert.Equal(t, uint16(tls.VersionTLS12), transport.TLSClientConfig.MinVersion)
 			assert.Equal(t, tt.insecure, transport.TLSClientConfig.InsecureSkipVerify)
+			// Compared by pointer: ProxyFromEnvironment reads the environment
+			// once per process and never proxies a loopback host.
+			require.NotNil(t, transport.Proxy)
+			assert.Equal(t, reflect.ValueOf(http.ProxyFromEnvironment).Pointer(), reflect.ValueOf(transport.Proxy).Pointer())
 			assert.NotNil(t, c.CheckRedirect)
 		})
 	}

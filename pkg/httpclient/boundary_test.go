@@ -14,8 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// repoRoot is where the walk starts, relative to this package.
-const repoRoot = "../.."
+const (
+	// repoRoot is where the walk starts, relative to this package.
+	repoRoot = "../.."
+
+	gorillaWebsocket = "github.com/gorilla/websocket"
+)
 
 var (
 	// ownClients are the directories allowed to build an http.Client: this
@@ -40,7 +44,8 @@ var (
 
 // TestNoOtherHTTPClient keeps every request on New's redirect policy: a client
 // built anywhere else follows Go's default one, and so does one whose
-// CheckRedirect is overwritten. It walks the AST, so an alias of net/http is
+// CheckRedirect is overwritten. It also keeps every transport and WebSocket
+// dialer on the system proxy settings. It walks the AST, so an import alias is
 // caught and a comment is not.
 func TestNoOtherHTTPClient(t *testing.T) {
 	t.Parallel()
@@ -73,7 +78,11 @@ func TestNoOtherHTTPClient(t *testing.T) {
 		if rel == "client/client.go" {
 			sawClientPackage = true
 		}
+		wsLocal, wsImported := importName(file, gorillaWebsocket, "websocket")
 		ast.Inspect(file, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.CompositeLit); ok && wsImported && isHTTPSelector(lit.Type, wsLocal, "Dialer") && !setsField(lit, "Proxy") {
+				offenders = append(offenders, rel+" builds a websocket.Dialer without Proxy")
+			}
 			if assign, ok := n.(*ast.AssignStmt); ok {
 				for _, lhs := range assign.Lhs {
 					if sel, ok := lhs.(*ast.SelectorExpr); ok && sel.Sel.Name == "CheckRedirect" {
@@ -83,7 +92,7 @@ func TestNoOtherHTTPClient(t *testing.T) {
 			}
 			return true
 		})
-		local, imported := netHTTPImportName(file)
+		local, imported := importName(file, "net/http", "http")
 		if !imported {
 			return nil
 		}
@@ -98,6 +107,9 @@ func TestNoOtherHTTPClient(t *testing.T) {
 			case *ast.CompositeLit:
 				if isHTTPSelector(node.Type, local, "Client") {
 					offenders = append(offenders, rel+" builds an http.Client")
+				}
+				if isHTTPSelector(node.Type, local, "Transport") && !setsField(node, "Proxy") {
+					offenders = append(offenders, rel+" builds an http.Transport without Proxy")
 				}
 			case *ast.CallExpr:
 				if fn, ok := node.Fun.(*ast.Ident); ok && fn.Name == "new" && len(node.Args) == 1 && isHTTPSelector(node.Args[0], local, "Client") {
@@ -123,18 +135,30 @@ func TestNoOtherHTTPClient(t *testing.T) {
 	assert.Empty(t, offenders, "build the client with httpclient.New")
 }
 
-func netHTTPImportName(file *ast.File) (string, bool) {
+func importName(file *ast.File, importPath, defaultName string) (string, bool) {
 	for _, spec := range file.Imports {
 		path, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || path != "net/http" {
+		if err != nil || path != importPath {
 			continue
 		}
 		if spec.Name != nil {
 			return spec.Name.Name, true
 		}
-		return "http", true
+		return defaultName, true
 	}
 	return "", false
+}
+
+// setsField reports whether a keyed composite literal names field.
+func setsField(lit *ast.CompositeLit, field string) bool {
+	for _, elt := range lit.Elts {
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			if key, ok := kv.Key.(*ast.Ident); ok && key.Name == field {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isHTTPSelector(expr ast.Expr, local, name string) bool {

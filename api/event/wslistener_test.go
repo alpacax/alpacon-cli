@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -274,4 +275,15 @@ func TestWSListener_OnConnectedErrorIsAFailedAttempt(t *testing.T) {
 
 	assert.False(t, w.connectAndListen(), "an onConnected error must not count as connected")
 	assert.False(t, w.WaitConnected(0), "connected must stay open when onConnected fails")
+}
+
+// Comparing function pointers, since ProxyFromEnvironment reads the environment
+// once per process and never proxies a loopback host.
+func TestNewListenerDialer_FollowsTheSystemProxy(t *testing.T) {
+	t.Parallel()
+	dialer := newListenerDialer(3 * time.Second)
+
+	require.NotNil(t, dialer.Proxy)
+	assert.Equal(t, reflect.ValueOf(http.ProxyFromEnvironment).Pointer(), reflect.ValueOf(dialer.Proxy).Pointer())
+	assert.Equal(t, 3*time.Second, dialer.HandshakeTimeout)
 }
