@@ -12,6 +12,10 @@ const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
 
+	// Codes the server sends on DRF's own 401s (NotAuthenticated, AuthenticationFailed).
+	AuthTokenMissing         = "auth_token_missing"
+	AuthAuthenticationFailed = "auth_authentication_failed"
+
 	// Codes the server sends on DRF's own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"
