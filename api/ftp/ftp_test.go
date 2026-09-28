@@ -1438,6 +1438,26 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
 }
 
+func TestPollTransferStatus_ParseFailureReturnsEmptyMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// message decodes before success hits the *bool type error, so a
+		// partially filled struct would still carry "stale".
+		_, _ = w.Write([]byte(`{"message": "stale", "success": {}}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse transfer status response")
+	assert.False(t, success)
+	assert.Empty(t, message)
+}
+
 func TestPollTransferStatus_TimesOut(t *testing.T) {
 	t.Parallel()
 	// Server never completes (success=null). With a timeout below the initial
