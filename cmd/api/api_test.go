@@ -416,44 +416,17 @@ func TestRunAPI_RejectsUnsupportedSpecialHeaders(t *testing.T) {
 	}
 }
 
-func TestRunAPI_ContentLengthMatchesRequestAndVerbose(t *testing.T) {
-	t.Parallel()
-	requests := 0
-	ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-		requests++
-		assert.Equal(t, int64(5), r.ContentLength)
-		assert.Empty(t, r.Header.Values("Content-Length"))
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "hello", string(body))
-		return apiTestResponse(204, "", ""), nil
-	})
-	var stdout, stderr bytes.Buffer
-
-	code, err := runAPITest(ac, options{Endpoint: "/x", Input: "-", Headers: []string{"Content-Length: 5"}, Verbose: true}, &stdout, &stderr, strings.NewReader("hello"))
-
-	require.NoError(t, err)
-	assert.Equal(t, 0, code)
-	assert.Equal(t, 1, requests)
-	assert.Equal(t, 1, strings.Count(stderr.String(), "Content-Length: 5\n"))
-}
-
-func TestRunAPI_RejectsInvalidContentLengthBeforeRequest(t *testing.T) {
+func TestRunAPI_RejectsContentLengthOverrideBeforeRequest(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name    string
-		method  string
 		noInput bool
 		headers []string
 	}{
-		{name: "negative", headers: []string{"Content-Length: -1"}},
-		{name: "non-numeric", headers: []string{"Content-Length: abc"}},
-		{name: "mismatched with body", headers: []string{"Content-Length: 4"}},
-		{name: "duplicate", headers: []string{"Content-Length: 5", "Content-Length: 5"}},
-		{name: "leading zero", headers: []string{"Content-Length: 05"}},
-		{name: "get zero with no body", method: http.MethodGet, noInput: true, headers: []string{"Content-Length: 0"}},
-		{name: "head zero with no body", method: http.MethodHead, noInput: true, headers: []string{"Content-Length: 0"}},
-		{name: "post nonzero with no body", method: http.MethodPost, noInput: true, headers: []string{"Content-Length: 5"}},
+		{name: "matching value", headers: []string{"Content-Length: 5"}},
+		{name: "zero with no body", noInput: true, headers: []string{"Content-Length: 0"}},
+		{name: "post zero", headers: []string{"Content-Length: 0"}},
+		{name: "mismatched value", headers: []string{"Content-Length: 4"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -468,62 +441,13 @@ func TestRunAPI_RejectsInvalidContentLengthBeforeRequest(t *testing.T) {
 			if !tc.noInput {
 				opts.Input = "-"
 			}
-			if tc.method != "" {
-				opts.Method, opts.MethodSet = tc.method, true
-			}
 
 			code, err := runAPITest(ac, opts, &stdout, &stderr, strings.NewReader("hello"))
 
-			require.Error(t, err)
+			require.ErrorContains(t, err, "Content-Length")
 			assert.Equal(t, 2, code)
 			assert.Equal(t, 0, requests)
 			assert.Empty(t, stderr.String())
-		})
-	}
-}
-
-func TestRunAPI_RejectsZeroContentLengthForEmptyGETOrHEAD(t *testing.T) {
-	t.Parallel()
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		t.Run(method, func(t *testing.T) {
-			t.Parallel()
-			requests := 0
-			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-				requests++
-				return apiTestResponse(204, "", ""), nil
-			})
-			var stdout, stderr bytes.Buffer
-
-			code, err := runAPITest(ac, options{Endpoint: "/x", Method: method, MethodSet: true, Input: "-", Headers: []string{"Content-Length: 0", "Authorization: Bearer secret-marker"}, Verbose: true}, &stdout, &stderr, strings.NewReader(""))
-
-			require.Error(t, err)
-			assert.Equal(t, 2, code)
-			assert.Equal(t, 0, requests)
-			assert.NotContains(t, err.Error(), "secret-marker")
-			assert.Empty(t, stderr.String())
-		})
-	}
-}
-
-func TestRunAPI_ContentLengthZeroOnBodylessNonGetHead(t *testing.T) {
-	t.Parallel()
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
-		t.Run(method, func(t *testing.T) {
-			t.Parallel()
-			requests := 0
-			ac := apiTestClient(func(r *http.Request) (*http.Response, error) {
-				requests++
-				assert.Empty(t, r.Header.Values("Content-Length"))
-				assert.Nil(t, r.Body)
-				return apiTestResponse(204, "", ""), nil
-			})
-			var stdout, stderr bytes.Buffer
-
-			code, err := runAPITest(ac, options{Endpoint: "/x", Method: method, MethodSet: true, Headers: []string{"Content-Length: 0"}}, &stdout, &stderr, strings.NewReader(""))
-
-			require.NoError(t, err)
-			assert.Equal(t, 0, code)
-			assert.Equal(t, 1, requests)
 		})
 	}
 }

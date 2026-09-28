@@ -106,7 +106,7 @@ func newCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.Method, "method", "X", "GET", "HTTP method")
 	cmd.Flags().VarP(&fieldFlag{fields: &opts.Fields}, "raw-field", "f", "String field (key=value)")
 	cmd.Flags().VarP(&fieldFlag{fields: &opts.Fields, typed: true}, "field", "F", "Typed field (key=value)")
-	cmd.Flags().StringArrayVarP(&opts.Headers, "header", "H", nil, "Request header (key:value; Host, Transfer-Encoding, Trailer unsupported)")
+	cmd.Flags().StringArrayVarP(&opts.Headers, "header", "H", nil, "Request header (key:value; Host, Transfer-Encoding, Trailer, Content-Length unsupported)")
 	cmd.Flags().StringVar(&opts.Input, "input", "", "Request body file (- for stdin)")
 	cmd.Flags().BoolVarP(&opts.Include, "include", "i", false, "Include response headers")
 	cmd.Flags().BoolVar(&opts.Silent, "silent", false, "Suppress response body")
@@ -190,7 +190,7 @@ func prepareRequest(opts options, stdin io.Reader) (preparedRequest, int, error)
 	if err != nil {
 		return preparedRequest{}, utils.ExitCodeUsageError, err
 	}
-	if err := client.ValidateRawRequestHeaders(method, requestHeaders, int64(len(body)), body != nil); err != nil {
+	if err := client.ValidateRawRequestHeaders(method, requestHeaders); err != nil {
 		return preparedRequest{}, utils.ExitCodeUsageError, err
 	}
 	_, contentTypeSet := requestHeaders["Content-Type"]
