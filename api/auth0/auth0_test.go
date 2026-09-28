@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -562,9 +563,7 @@ func TestRefreshAccessToken_DoesNotRetryWhenNoDeviceScopeWasSent(t *testing.T) {
 	assert.Len(t, server.exchanges(), 1, "there was no device scope to drop, so the retry would be identical")
 }
 
-// --- Device-flow polling: slow_down handling (RFC 8628 §3.5) ---------------
-
-func TestEvaluatePollResponse(t *testing.T) {
+func TestEvaluatePollResponse_DecidesRetryAndNextInterval(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -627,6 +626,13 @@ func TestEvaluatePollResponse(t *testing.T) {
 			wantRetry:    true,
 			wantInterval: 304,
 		},
+		{
+			name:         "slow_down at the int limit saturates instead of overflowing negative",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     math.MaxInt,
+			wantRetry:    true,
+			wantInterval: math.MaxInt,
+		},
 	}
 
 	for _, tt := range tests {
@@ -640,7 +646,7 @@ func TestEvaluatePollResponse(t *testing.T) {
 	}
 }
 
-func TestDevicePollInterval(t *testing.T) {
+func TestDevicePollInterval_DefaultsNonPositiveToRFCMinimum(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -661,25 +667,45 @@ func TestDevicePollInterval(t *testing.T) {
 	}
 }
 
-func TestPollSleepDuration(t *testing.T) {
+func TestPollSleepDuration_SaturatesInsteadOfOverflowing(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	type testCase struct {
 		name     string
 		interval int
 		want     time.Duration
-	}{
+	}
+
+	tests := []testCase{
 		{name: "a realistic interval converts directly", interval: 30, want: 30 * time.Second},
-		{
-			name:     "the largest representable interval converts directly",
-			interval: int(maxPollSeconds),
-			want:     time.Duration(maxPollSeconds) * time.Second,
-		},
-		{
-			name:     "an interval past the representable range saturates instead of overflowing",
-			interval: math.MaxInt,
-			want:     time.Duration(maxPollSeconds) * time.Second,
-		},
+	}
+
+	// maxPollSeconds (~9.2e9 on a 64-bit int64) does not fit a 32-bit int, so
+	// int(maxPollSeconds) below must stay a runtime conversion, never a
+	// constant one, or the 386/arm builds in .goreleaser.yaml fail with
+	// "constant 9223372036 overflows int". On a 32-bit int, math.MaxInt itself
+	// never reaches maxPollSeconds, so saturation cannot be exercised there.
+	maxPollSecondsInt64 := int64(maxPollSeconds)
+	if strconv.IntSize == 64 {
+		tests = append(tests,
+			testCase{
+				name:     "the largest representable interval converts directly",
+				interval: int(maxPollSecondsInt64),
+				want:     time.Duration(maxPollSeconds) * time.Second,
+			},
+			testCase{
+				name:     "an interval past the representable range saturates instead of overflowing",
+				interval: math.MaxInt,
+				want:     time.Duration(maxPollSeconds) * time.Second,
+			},
+		)
+	} else {
+		maxInt := math.MaxInt
+		tests = append(tests, testCase{
+			name:     "on a 32-bit int, the maximum interval never exceeds the representable range",
+			interval: maxInt,
+			want:     time.Duration(maxInt) * time.Second,
+		})
 	}
 
 	for _, tt := range tests {
