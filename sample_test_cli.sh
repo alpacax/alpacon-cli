@@ -13,7 +13,8 @@ REMOTE_USER_PATH="/your/remote/path"
 TEST_FILE="test.txt"
 TEST_FOLDER="test_folder"
 WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
-TEST_CONTENT="Hello from Alpacon CLI test! $(date)"
+TEST_CONTENT_PREFIX="Hello from Alpacon CLI test"
+TEST_CONTENT="$TEST_CONTENT_PREFIX! $(date)"
 
 # Paths this run created; cleanup removes only these
 CREATED_LOCAL=()
@@ -28,6 +29,13 @@ track_local() {
     done
 }
 
+# Shell-quotes every argument for embedding in a remote command string, space-joined.
+q() {
+    local s
+    printf -v s '%q ' "$@"
+    printf '%s' "${s% }"
+}
+
 # Appends to array $1 the candidates ($3..) absent on the server as $2 (user|root).
 # Only exact candidate matches count, so stray exec output never becomes an rm target.
 check_remote_absent() {
@@ -37,7 +45,7 @@ check_remote_absent() {
     local -a exec_opts=()
     [ "$ctx" = "root" ] && exec_opts=(-u root)
     local quoted
-    quoted=$(printf '%q ' "${candidates[@]}")
+    quoted=$(q "${candidates[@]}")
     local output
     output=$(alpacon exec "${exec_opts[@]}" "$SERVER_NAME" \
         "for p in $quoted; do [ -e \"\$p\" ] || printf '%s\n' \"\$p\"; done" 2>/dev/null) || return 1
@@ -79,19 +87,40 @@ log_error() {
 
 run_test() {
     local test_name="$1"
-    local command="$2"
+    shift
 
     echo
     log_info "Running test: $test_name"
-    echo "Command: $command"
+    echo "Command: $(q "$@")"
     echo "----------------------------------------"
 
-    if bash -c "$command"; then
+    if "$@"; then
         log_success "Test passed: $test_name"
     else
         log_error "Test failed: $test_name"
         return 1
     fi
+}
+
+# run_test calls these inside `if`, where set -e is off, so each must stay a single && chain or a failed step passes silently.
+verify_downloaded_file() {
+    local path="$1" pattern="$2"
+    echo "Check: test -f $(q "$path") && grep -qF -- $(q "$pattern") $(q "$path")"
+    test -f "$path" && grep -qF -- "$pattern" "$path"
+}
+
+verify_downloaded_folder() {
+    local folder="$1" file="$2" pattern="$3"
+    echo "Check: test -d $(q "$folder")"
+    test -d "$folder" && verify_downloaded_file "$folder/$file" "$pattern"
+}
+
+create_dir_and_upload() {
+    local remote_dir="$1"
+    local -a mk=(alpacon exec "$SERVER_NAME" "mkdir -p $(q "$remote_dir")")
+    local -a up=(alpacon cp "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$remote_dir/")
+    echo "Check: $(q "${mk[@]}") && $(q "${up[@]}")"
+    "${mk[@]}" && "${up[@]}"
 }
 
 cleanup() {
@@ -102,13 +131,18 @@ cleanup() {
 
     if [ ${#CREATED_REMOTE_USER[@]} -gt 0 ]; then
         log_info "Cleaning up remote test files..."
-        alpacon exec "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
+        alpacon exec "$SERVER_NAME" "rm -rf -- $(q "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
     fi
 
     if [ ${#CREATED_REMOTE_ROOT[@]} -gt 0 ]; then
-        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
+        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(q "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
     fi
 }
+
+case "$REMOTE_USER_PATH" in
+    /*) ;;
+    *) log_error "REMOTE_USER_PATH must be an absolute path: $REMOTE_USER_PATH"; exit 1 ;;
+esac
 
 # Trap to cleanup on exit
 trap cleanup EXIT
@@ -175,15 +209,15 @@ echo "=========================================="
 
 # Test 1: Basic server connectivity
 run_test "Server connectivity" \
-    "alpacon exec $SERVER_NAME 'echo \"Connection successful\"'"
+    alpacon exec "$SERVER_NAME" 'echo "Connection successful"'
 
 # Test 2: Check server information
 run_test "Server information" \
-    "alpacon exec $SERVER_NAME 'uname -a'"
+    alpacon exec "$SERVER_NAME" 'uname -a'
 
 # Test 3: List servers
 run_test "List servers" \
-    "alpacon server ls"
+    alpacon server ls
 
 echo
 echo "=========================================="
@@ -192,23 +226,23 @@ echo "=========================================="
 
 # Test 4: Basic command execution
 run_test "Basic command execution" \
-    "alpacon exec $SERVER_NAME 'pwd && whoami'"
+    alpacon exec "$SERVER_NAME" 'pwd && whoami'
 
 # Test 5: Root user command execution
 run_test "Root user command execution" \
-    "alpacon exec -u root $SERVER_NAME 'whoami && id'"
+    alpacon exec -u root "$SERVER_NAME" 'whoami && id'
 
 # Test 6: SSH-style user specification
 run_test "SSH-style root execution" \
-    "alpacon exec root@$SERVER_NAME 'whoami'"
+    alpacon exec "root@$SERVER_NAME" 'whoami'
 
 # Test 7: Directory listing
 run_test "Directory listing" \
-    "alpacon exec $SERVER_NAME 'ls -la /home'"
+    alpacon exec "$SERVER_NAME" 'ls -la /home'
 
 # Test 8: Environment check
 run_test "Environment check" \
-    "alpacon exec $SERVER_NAME 'env | grep -E \"(USER|HOME|PATH)\" | head -5'"
+    alpacon exec "$SERVER_NAME" 'env | grep -E "(USER|HOME|PATH)" | head -5'
 
 # Check, in one call per user context, which remote paths this run is about
 # to create already exist, so cleanup never deletes something it did not create.
@@ -238,19 +272,19 @@ echo "=========================================="
 
 # Test 9: Upload to user home directory
 run_test "Upload to user home directory" \
-    "alpacon cp '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_USER_PATH/'"
+    alpacon cp "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$REMOTE_USER_PATH/"
 
 # Test 10: Verify uploaded file
 run_test "Verify uploaded file in user home" \
-    "alpacon exec $SERVER_NAME 'cat $REMOTE_USER_PATH/$TEST_FILE'"
+    alpacon exec "$SERVER_NAME" "cat $(q "$REMOTE_USER_PATH/$TEST_FILE")"
 
 # Test 11: Upload to root directory (as root)
 run_test "Upload to root directory as root" \
-    "alpacon cp -u root '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_ROOT_PATH/'"
+    alpacon cp -u root "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$REMOTE_ROOT_PATH/"
 
 # Test 12: Verify root upload
 run_test "Verify uploaded file in root directory" \
-    "alpacon exec -u root $SERVER_NAME 'cat $REMOTE_ROOT_PATH/$TEST_FILE'"
+    alpacon exec -u root "$SERVER_NAME" "cat $(q "$REMOTE_ROOT_PATH/$TEST_FILE")"
 
 echo
 echo "=========================================="
@@ -259,11 +293,11 @@ echo "=========================================="
 
 # Test 13: Download from user directory
 run_test "Download from user directory" \
-    "alpacon cp '$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FILE' '$LOCAL_PATH/'"
+    alpacon cp "$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FILE" "$LOCAL_PATH/"
 
 # Test 14: Verify downloaded file
 run_test "Verify downloaded file content" \
-    "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
+    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE" "$TEST_CONTENT_PREFIX"
 
 # Preserve a copy of the downloaded file before it is overwritten by the root download test
 track_local "$LOCAL_PATH/downloaded_user_$TEST_FILE"
@@ -271,11 +305,11 @@ cp "$LOCAL_PATH/$TEST_FILE" "$LOCAL_PATH/downloaded_user_$TEST_FILE" 2>/dev/null
 
 # Test 15: Download from root directory (as root)
 run_test "Download from root directory as root" \
-    "alpacon cp -u root '$SERVER_NAME:$REMOTE_ROOT_PATH/$TEST_FILE' '$LOCAL_PATH/'"
+    alpacon cp -u root "$SERVER_NAME:$REMOTE_ROOT_PATH/$TEST_FILE" "$LOCAL_PATH/"
 
 # Test 16: Verify root downloaded file
 run_test "Verify root downloaded file content" \
-    "test -f '$LOCAL_PATH/$TEST_FILE' && cat '$LOCAL_PATH/$TEST_FILE' | grep -q 'Hello from Alpacon CLI test'"
+    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE" "$TEST_CONTENT_PREFIX"
 
 # Preserve a copy of the root-downloaded file to avoid conflicts with later tests
 track_local "$LOCAL_PATH/downloaded_root_$TEST_FILE"
@@ -288,27 +322,27 @@ echo "=========================================="
 
 # Test 17: Upload folder to user directory
 run_test "Upload folder to user directory" \
-    "alpacon cp -r '$LOCAL_PATH/$TEST_FOLDER' '$SERVER_NAME:$REMOTE_USER_PATH/'"
+    alpacon cp -r "$LOCAL_PATH/$TEST_FOLDER" "$SERVER_NAME:$REMOTE_USER_PATH/"
 
 # Test 18: Verify uploaded folder contents
 run_test "Verify uploaded folder contents" \
-    "alpacon exec $SERVER_NAME 'ls -la $REMOTE_USER_PATH/$TEST_FOLDER/ && cat $REMOTE_USER_PATH/$TEST_FOLDER/test1.txt'"
+    alpacon exec "$SERVER_NAME" "ls -la $(q "$REMOTE_USER_PATH/$TEST_FOLDER/") && cat $(q "$REMOTE_USER_PATH/$TEST_FOLDER/test1.txt")"
 
 # Test 19: Upload folder to root directory (as root)
 run_test "Upload folder to root directory as root" \
-    "alpacon cp -r -u root '$LOCAL_PATH/$TEST_FOLDER' '$SERVER_NAME:$REMOTE_ROOT_PATH/'"
+    alpacon cp -r -u root "$LOCAL_PATH/$TEST_FOLDER" "$SERVER_NAME:$REMOTE_ROOT_PATH/"
 
 # Test 20: Verify root uploaded folder
 run_test "Verify root uploaded folder contents" \
-    "alpacon exec -u root $SERVER_NAME 'ls -la $REMOTE_ROOT_PATH/$TEST_FOLDER/ && cat $REMOTE_ROOT_PATH/$TEST_FOLDER/test2.txt'"
+    alpacon exec -u root "$SERVER_NAME" "ls -la $(q "$REMOTE_ROOT_PATH/$TEST_FOLDER/") && cat $(q "$REMOTE_ROOT_PATH/$TEST_FOLDER/test2.txt")"
 
 # Test 21: Download folder from user directory
 run_test "Download folder from user directory" \
-    "alpacon cp -r '$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FOLDER' '$LOCAL_PATH/'"
+    alpacon cp -r "$SERVER_NAME:$REMOTE_USER_PATH/$TEST_FOLDER" "$LOCAL_PATH/"
 
 # Test 22: Verify downloaded folder contents
 run_test "Verify downloaded folder contents" \
-    "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/test1.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/test1.txt' | grep -q 'Content of test1.txt in folder'"
+    verify_downloaded_folder "$LOCAL_PATH/$TEST_FOLDER" "test1.txt" "Content of test1.txt in folder"
 
 # Rename downloaded folder to avoid conflicts
 track_local "$LOCAL_PATH/downloaded_user_$TEST_FOLDER"
@@ -316,11 +350,11 @@ mv "$LOCAL_PATH/$TEST_FOLDER" "$LOCAL_PATH/downloaded_user_$TEST_FOLDER" 2>/dev/
 
 # Test 23: Download folder from root directory (as root)
 run_test "Download folder from root directory as root" \
-    "alpacon cp -r -u root '$SERVER_NAME:$REMOTE_ROOT_PATH/$TEST_FOLDER' '$LOCAL_PATH/'"
+    alpacon cp -r -u root "$SERVER_NAME:$REMOTE_ROOT_PATH/$TEST_FOLDER" "$LOCAL_PATH/"
 
 # Test 24: Verify root downloaded folder
 run_test "Verify root downloaded folder contents" \
-    "test -d '$LOCAL_PATH/$TEST_FOLDER' && test -f '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' && cat '$LOCAL_PATH/$TEST_FOLDER/nested_file.txt' | grep -q 'Nested folder content'"
+    verify_downloaded_folder "$LOCAL_PATH/$TEST_FOLDER" "nested_file.txt" "Nested folder content"
 
 # Rename root downloaded folder to avoid conflicts
 track_local "$LOCAL_PATH/downloaded_root_$TEST_FOLDER"
@@ -333,15 +367,15 @@ echo "=========================================="
 
 # Test 25: Websh command execution
 run_test "Websh command execution" \
-    "alpacon websh $SERVER_NAME 'echo \"Websh test successful\" && date'"
+    alpacon websh "$SERVER_NAME" 'echo "Websh test successful" && date'
 
 # Test 26: Websh as root user
 run_test "Websh as root user" \
-    "alpacon websh -u root $SERVER_NAME 'whoami && pwd'"
+    alpacon websh -u root "$SERVER_NAME" 'whoami && pwd'
 
 # Test 27: Websh with SSH-style syntax
 run_test "Websh with SSH-style syntax" \
-    "alpacon websh root@$SERVER_NAME 'id'"
+    alpacon websh "root@$SERVER_NAME" 'id'
 
 echo
 echo "=========================================="
@@ -355,23 +389,23 @@ echo "File 1 content" > "$LOCAL_PATH/test1.txt"
 echo "File 2 content" > "$LOCAL_PATH/test2.txt"
 
 run_test "Multiple file upload" \
-    "alpacon cp '$LOCAL_PATH/test1.txt' '$LOCAL_PATH/test2.txt' '$SERVER_NAME:$REMOTE_USER_PATH/'"
+    alpacon cp "$LOCAL_PATH/test1.txt" "$LOCAL_PATH/test2.txt" "$SERVER_NAME:$REMOTE_USER_PATH/"
 
 # Test 29: Verify multiple files
 run_test "Verify multiple uploaded files" \
-    "alpacon exec $SERVER_NAME 'ls -la $REMOTE_USER_PATH/test*.txt'"
+    alpacon exec "$SERVER_NAME" "ls -la $(q "$REMOTE_USER_PATH")/test*.txt"
 
 # Test 30: Directory creation and file operations
 run_test "Create directory and upload" \
-    "alpacon exec $SERVER_NAME 'mkdir -p $REMOTE_USER_PATH/test_dir' && alpacon cp '$LOCAL_PATH/$TEST_FILE' '$SERVER_NAME:$REMOTE_USER_PATH/test_dir/'"
+    create_dir_and_upload "$REMOTE_USER_PATH/test_dir"
 
 # Test 31: Complex command with pipes
 run_test "Complex command with pipes" \
-    "alpacon exec $SERVER_NAME 'ps aux | grep -v grep | head -5'"
+    alpacon exec "$SERVER_NAME" 'ps aux | grep -v grep | head -5'
 
 # Test 32: System information gathering
 run_test "System information gathering" \
-    "alpacon exec $SERVER_NAME 'df -h | head -5 && free -h'"
+    alpacon exec "$SERVER_NAME" 'df -h | head -5 && free -h'
 
 #echo
 #echo "=========================================="
@@ -388,7 +422,7 @@ run_test "System information gathering" \
 #
 ## Test 26: Permission denied test (should provide helpful error)
 #log_info "Testing permission denied scenario..."
-#if alpacon exec $SERVER_NAME 'cat /etc/shadow' 2>/dev/null; then
+#if alpacon exec "$SERVER_NAME" 'cat /etc/shadow' 2>/dev/null; then
 #    log_warning "Unexpected success reading /etc/shadow (server might have unusual permissions)"
 #else
 #    log_success "Correctly handled permission denied error"
