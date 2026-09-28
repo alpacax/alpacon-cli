@@ -2315,17 +2315,26 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name          string
+		baseURL       string
 		location      string
 		rewriteToEvil bool // delegated CheckRedirect approves, then mutates next.URL to evil.example
 	}{
 		{name: "redirects straight off-host", location: "https://evil.example/x"},
 		{name: "delegated check rewrites off-host after approving", location: "https://workspace.example/y", rewriteToEvil: true},
+		{name: "same host scheme downgrade", location: "http://workspace.example/y"},
+		{name: "same host port change", baseURL: "https://workspace.example:8443", location: "https://workspace.example:9443/y"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			externalRequests := 0
-			ac := newBearerTestClient("https://workspace.example", "secret")
+			baseURL := tc.baseURL
+			if baseURL == "" {
+				baseURL = "https://workspace.example"
+			}
+			base, err := url.Parse(baseURL)
+			require.NoError(t, err)
+			otherRequests := 0
+			ac := newBearerTestClient(baseURL, "secret")
 			if tc.rewriteToEvil {
 				ac.HTTPClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
 					rewritten, err := url.Parse("https://evil.example/x")
@@ -2335,8 +2344,8 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 				}
 			}
 			ac.HTTPClient.Transport = rawRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.URL.Host == "evil.example" {
-					externalRequests++
+				if r.URL.Host != base.Host || r.URL.Scheme != base.Scheme {
+					otherRequests++
 					return rawTestResponse(http.StatusOK, "text/plain", "external"), nil
 				}
 				response := rawTestResponse(http.StatusFound, "text/plain", "redirect")
@@ -2348,7 +2357,7 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, http.StatusFound, response.StatusCode)
-			assert.Equal(t, 0, externalRequests)
+			assert.Equal(t, 0, otherRequests)
 		})
 	}
 }
