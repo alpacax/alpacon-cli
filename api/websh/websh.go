@@ -350,8 +350,11 @@ func (wsClient *WebsocketClient) finish(err error) {
 
 func printCloseReason(err error) {
 	var closeErr *websocket.CloseError
-	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode && closeErr.Text != "" {
+	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode {
 		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
+		if reason == "" {
+			return
+		}
 		// The terminal is still in raw mode, where a bare newline leaves the cursor
 		// where it stood, so the message carries its own carriage returns.
 		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", reason)

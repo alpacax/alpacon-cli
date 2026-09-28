@@ -650,6 +650,18 @@ func TestFinish_SanitizesTheCloseReason(t *testing.T) {
 	assert.NoError(t, wsClient.err)
 }
 
+func TestFinish_StaysSilentWhenTheCloseReasonSanitizesToEmpty(t *testing.T) {
+	wsClient := newWebsocketClient(nil)
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		wsClient.finish(&websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"})
+	})
+
+	assertReported(t, wsClient)
+	assert.Empty(t, stderr)
+	assert.NoError(t, wsClient.err)
+}
+
 func TestFinish_KeepsAnEarlierFailureOverALaterSessionEnd(t *testing.T) {
 	wsClient := newWebsocketClient(nil)
 	first := errors.New("write failed on the closed connection")
