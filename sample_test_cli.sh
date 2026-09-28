@@ -28,9 +28,11 @@ track_local() {
     done
 }
 
-# Shell-quotes a single path for embedding in a remote command string.
+# Shell-quotes every argument for embedding in a remote command string, space-joined.
 q() {
-    printf '%q' "$1"
+    local s
+    printf -v s '%q ' "$@"
+    printf '%s' "${s% }"
 }
 
 # Appends to array $1 the candidates ($3..) absent on the server as $2 (user|root).
@@ -42,7 +44,7 @@ check_remote_absent() {
     local -a exec_opts=()
     [ "$ctx" = "root" ] && exec_opts=(-u root)
     local quoted
-    quoted=$(printf '%q ' "${candidates[@]}")
+    quoted=$(q "${candidates[@]}")
     local output
     output=$(alpacon exec "${exec_opts[@]}" "$SERVER_NAME" \
         "for p in $quoted; do [ -e \"\$p\" ] || printf '%s\n' \"\$p\"; done" 2>/dev/null) || return 1
@@ -88,7 +90,7 @@ run_test() {
 
     echo
     log_info "Running test: $test_name"
-    echo "Command: $(printf '%q ' "$@")"
+    echo "Command: $(q "$@")"
     echo "----------------------------------------"
 
     if "$@"; then
@@ -123,11 +125,11 @@ cleanup() {
 
     if [ ${#CREATED_REMOTE_USER[@]} -gt 0 ]; then
         log_info "Cleaning up remote test files..."
-        alpacon exec "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
+        alpacon exec "$SERVER_NAME" "rm -rf -- $(q "${CREATED_REMOTE_USER[@]}")" 2>/dev/null || true
     fi
 
     if [ ${#CREATED_REMOTE_ROOT[@]} -gt 0 ]; then
-        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(printf '%q ' "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
+        alpacon exec -u root "$SERVER_NAME" "rm -rf -- $(q "${CREATED_REMOTE_ROOT[@]}")" 2>/dev/null || true
     fi
 }
 
