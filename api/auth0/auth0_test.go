@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -620,11 +621,11 @@ func TestEvaluatePollResponse(t *testing.T) {
 			wantInterval: 10,
 		},
 		{
-			name:         "slow_down caps the interval instead of overflowing",
+			name:         "slow_down widens past what an arbitrary cap would allow",
 			err:          &oauthError{Code: "slow_down"},
-			interval:     maxPollIntervalSeconds - 1,
+			interval:     299,
 			wantRetry:    true,
-			wantInterval: maxPollIntervalSeconds,
+			wantInterval: 304,
 		},
 	}
 
@@ -650,7 +651,7 @@ func TestDevicePollInterval(t *testing.T) {
 		{name: "positive interval is kept", interval: 8, want: 8},
 		{name: "zero interval defaults to the RFC minimum", interval: 0, want: 5},
 		{name: "negative interval defaults to the RFC minimum", interval: -1, want: 5},
-		{name: "a server-sent interval past the cap is bounded", interval: maxPollIntervalSeconds + 1, want: maxPollIntervalSeconds},
+		{name: "an interval well past any RFC-typical value is preserved", interval: 301, want: 301},
 	}
 
 	for _, tt := range tests {
@@ -660,10 +661,36 @@ func TestDevicePollInterval(t *testing.T) {
 	}
 }
 
-// TestPollForToken_LoopBehavior threads requestAccessTokenFunc and sleepFunc
-// through PollForToken itself, so the sequence asserted is the loop's real
-// state carry-over across iterations, not just what evaluatePollResponse
-// returns in isolation.
+func TestPollSleepDuration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		interval int
+		want     time.Duration
+	}{
+		{name: "a realistic interval converts directly", interval: 30, want: 30 * time.Second},
+		{
+			name:     "the largest representable interval converts directly",
+			interval: int(maxPollSeconds),
+			want:     time.Duration(maxPollSeconds) * time.Second,
+		},
+		{
+			name:     "an interval past the representable range saturates instead of overflowing",
+			interval: math.MaxInt,
+			want:     time.Duration(maxPollSeconds) * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, pollSleepDuration(tt.interval))
+		})
+	}
+}
+
+// TestPollForToken_LoopBehavior proves the loop's real interval carry-over
+// across iterations, not just evaluatePollResponse in isolation.
 func TestPollForToken_LoopBehavior(t *testing.T) {
 	origRequest := requestAccessTokenFunc
 	origSleep := sleepFunc

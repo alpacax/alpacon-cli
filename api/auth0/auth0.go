@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +15,10 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// maxPollSeconds is the largest interval time.Duration can hold in seconds;
+// pollSleepDuration saturates there instead of overflowing.
+const maxPollSeconds = math.MaxInt64 / int64(time.Second)
 
 var path = struct {
 	env        string
@@ -42,14 +47,13 @@ var sleepFunc = time.Sleep
 // actually made is worth retrying with a different scope, and a request that
 // may never have been answered must not be replayed against a refresh token the
 // server may already have consumed. Its message is unchanged from the string
-// this package produced before the type existed, because mapAuth0Error and
-// PollForToken both match on it.
+// this package produced before the type existed: mapAuth0Error still matches
+// it by message, and evaluatePollResponse matches it by Code instead.
 type oauthError struct {
 	Code string
 	Desc string
 }
 
-// pollDecision is the next poll interval when the loop keeps waiting.
 type pollDecision struct {
 	interval int
 }
@@ -187,11 +191,6 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
-// maxPollIntervalSeconds caps the widened poll interval so a run of slow_down
-// responses cannot grow it past what the device code's own expiry allows, and
-// cannot overflow when added to or multiplied into a time.Duration.
-const maxPollIntervalSeconds = 300
-
 // evaluatePollResponse decides, per RFC 8628 §3.5, whether the polling loop
 // continues after a token-endpoint error and the next interval to use.
 func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
@@ -203,18 +202,10 @@ func evaluatePollResponse(err error, interval int) (pollDecision, bool) {
 	case "authorization_pending":
 		return pollDecision{interval: interval}, true
 	case "slow_down":
-		return pollDecision{interval: capPollInterval(interval + 5)}, true
+		return pollDecision{interval: interval + 5}, true
 	default:
 		return pollDecision{}, false
 	}
-}
-
-// capPollInterval bounds interval at maxPollIntervalSeconds.
-func capPollInterval(interval int) int {
-	if interval > maxPollIntervalSeconds {
-		return maxPollIntervalSeconds
-	}
-	return interval
 }
 
 // devicePollInterval defaults a missing or non-positive interval to the RFC
@@ -223,7 +214,16 @@ func devicePollInterval(interval int) int {
 	if interval <= 0 {
 		return 5
 	}
-	return capPollInterval(interval)
+	return interval
+}
+
+// pollSleepDuration converts a poll interval in seconds to a time.Duration,
+// saturating at maxPollSeconds instead of overflowing.
+func pollSleepDuration(intervalSeconds int) time.Duration {
+	if int64(intervalSeconds) > maxPollSeconds {
+		return time.Duration(maxPollSeconds) * time.Second
+	}
+	return time.Duration(intervalSeconds) * time.Second
 }
 
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
@@ -243,7 +243,7 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 		if err != nil {
 			if decision, retry := evaluatePollResponse(err, interval); retry {
 				interval = decision.interval
-				sleepFunc(time.Duration(interval) * time.Second)
+				sleepFunc(pollSleepDuration(interval))
 				continue
 			}
 			return nil, mapAuth0Error(err)
