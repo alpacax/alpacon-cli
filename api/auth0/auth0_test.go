@@ -2,7 +2,9 @@ package auth0
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -557,4 +561,225 @@ func TestRefreshAccessToken_DoesNotRetryWhenNoDeviceScopeWasSent(t *testing.T) {
 	_, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
 	require.Error(t, err)
 	assert.Len(t, server.exchanges(), 1, "there was no device scope to drop, so the retry would be identical")
+}
+
+func TestEvaluatePollResponse_DecidesRetryAndNextInterval(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		err          error
+		interval     int
+		wantRetry    bool
+		wantInterval int
+	}{
+		{
+			name:         "authorization_pending keeps polling at the same interval",
+			err:          &oauthError{Code: "authorization_pending"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 5,
+		},
+		{
+			name:         "slow_down keeps polling and widens the interval by 5 seconds",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 10,
+		},
+		{
+			name:         "slow_down widens again on a repeated occurrence",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     10,
+			wantRetry:    true,
+			wantInterval: 15,
+		},
+		{
+			name:      "access_denied stops polling",
+			err:       &oauthError{Code: "access_denied"},
+			interval:  5,
+			wantRetry: false,
+		},
+		{
+			name:      "access_denied whose description mentions slow_down still stops",
+			err:       &oauthError{Code: "access_denied", Desc: "slow_down your requests"},
+			interval:  5,
+			wantRetry: false,
+		},
+		{
+			name:      "a non-oauth transport error stops polling",
+			err:       fmt.Errorf("dial tcp: connection refused"),
+			interval:  5,
+			wantRetry: false,
+		},
+		{
+			name:         "slow_down whose description mentions authorization_pending still widens",
+			err:          &oauthError{Code: "slow_down", Desc: "see authorization_pending"},
+			interval:     5,
+			wantRetry:    true,
+			wantInterval: 10,
+		},
+		{
+			name:         "slow_down widens past what an arbitrary cap would allow",
+			err:          &oauthError{Code: "slow_down"},
+			interval:     299,
+			wantRetry:    true,
+			wantInterval: 304,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			interval, retry := evaluatePollResponse(tt.err, tt.interval)
+			assert.Equal(t, tt.wantRetry, retry)
+			assert.Equal(t, tt.wantInterval, interval)
+		})
+	}
+}
+
+func TestDevicePollInterval_DefaultsNonPositiveToRFCMinimum(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		interval int
+		want     int
+	}{
+		{name: "positive interval is kept", interval: 8, want: 8},
+		{name: "zero interval defaults to the RFC minimum", interval: 0, want: 5},
+		{name: "negative interval defaults to the RFC minimum", interval: -1, want: 5},
+		{name: "an interval well past any RFC-typical value is preserved", interval: 301, want: 301},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, devicePollInterval(tt.interval))
+		})
+	}
+}
+
+func pollForTokenWithScript(t *testing.T, deviceCodeRes *DeviceCodeResponse, scripted []error) ([]time.Time, *TokenResponse, error) {
+	t.Helper()
+	orig := requestAccessTokenFunc
+	t.Cleanup(func() { requestAccessTokenFunc = orig })
+
+	var times []time.Time
+	call := 0
+	requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+		times = append(times, time.Now())
+		if call < len(scripted) {
+			err := scripted[call]
+			call++
+			return nil, err
+		}
+		return &TokenResponse{AccessToken: "final-token"}, nil
+	}
+
+	var tokenRes *TokenResponse
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		tokenRes, err = PollForToken(deviceCodeRes, &AuthEnvResponse{})
+	})
+	return times, tokenRes, err
+}
+
+func gaps(times []time.Time) []time.Duration {
+	if len(times) < 2 {
+		return nil
+	}
+	result := make([]time.Duration, len(times)-1)
+	for i := 1; i < len(times); i++ {
+		result[i-1] = times[i].Sub(times[i-1])
+	}
+	return result
+}
+
+func TestPollForToken_CarriesWidenedIntervalIntoNextPoll(t *testing.T) {
+	t.Run("slow_down and authorization_pending thread the widened interval", func(t *testing.T) {
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5},
+			[]error{
+				&oauthError{Code: "slow_down"},
+				&oauthError{Code: "authorization_pending"},
+				&oauthError{Code: "slow_down"},
+			},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Equal(t, []time.Duration{10 * time.Second, 10 * time.Second, 15 * time.Second}, gaps(times))
+	})
+
+	t.Run("a zero device-code interval waits the RFC minimum on the first poll", func(t *testing.T) {
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 0},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Equal(t, []time.Duration{5 * time.Second}, gaps(times))
+	})
+
+	t.Run("a fatal oauth error stops immediately without sleeping", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: 5},
+			[]error{&oauthError{Code: "access_denied"}},
+		)
+		require.Error(t, err)
+		assert.Len(t, times, 1, "a fatal error must not be retried")
+	})
+
+	t.Run("a retry whose next poll would pass expiry returns the timeout without sleeping", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 12, Interval: 5},
+			[]error{
+				&oauthError{Code: "slow_down"},
+				&oauthError{Code: "slow_down"},
+			},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 2, "the poll whose retry would pass expiry must not be attempted again")
+		assert.Equal(t, []time.Duration{10 * time.Second}, gaps(times))
+	})
+
+	t.Run("an interval longer than the code lifetime times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 20, Interval: 30},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
+	})
+
+	t.Run("a huge interval does not overflow and times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 60, Interval: math.MaxInt},
+			[]error{&oauthError{Code: "slow_down"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
+	})
+
+	t.Run("a huge expires_in bounds the lifetime and times out after exactly one poll", func(t *testing.T) {
+		times, _, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: math.MaxInt, Interval: math.MaxInt},
+			[]error{&oauthError{Code: "slow_down"}},
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "timed out")
+		assert.Len(t, times, 1)
+	})
+
+	t.Run("a huge expires_in does not break normal polling", func(t *testing.T) {
+		times, tokenRes, err := pollForTokenWithScript(t,
+			&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: math.MaxInt, Interval: 5},
+			[]error{&oauthError{Code: "authorization_pending"}},
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "final-token", tokenRes.AccessToken)
+		assert.Len(t, times, 2)
+		assert.Equal(t, []time.Duration{5 * time.Second}, gaps(times))
+	})
 }

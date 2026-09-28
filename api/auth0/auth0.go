@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,6 +15,14 @@ import (
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 )
+
+// rfc8628PollIntervalSeconds is both the default interval and the slow_down
+// increment of RFC 8628 §3.5.
+const rfc8628PollIntervalSeconds = 5
+
+// maxDeviceCodeLifetimeSeconds keeps interval+slow_down and the seconds-to-Duration
+// conversion from overflowing, including on 32-bit int.
+const maxDeviceCodeLifetimeSeconds = math.MaxInt32 / 2
 
 var path = struct {
 	env        string
@@ -27,15 +36,10 @@ var path = struct {
 	revoke:     "/oauth/revoke",
 }
 
-// oauthError is an error the token endpoint returned in its response body, as
-// opposed to a transport, decoding or request-construction failure.
-//
-// The distinction matters on the refresh exchange: only a decision the server
-// actually made is worth retrying with a different scope, and a request that
-// may never have been answered must not be replayed against a refresh token the
-// server may already have consumed. Its message is unchanged from the string
-// this package produced before the type existed, because mapAuth0Error and
-// PollForToken both match on it.
+var requestAccessTokenFunc = requestAccessToken
+
+// oauthError is the only refresh failure safe to retry with another scope; any other
+// may have consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
 type oauthError struct {
 	Code string
 	Desc string
@@ -174,22 +178,51 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return &deviceCode, nil
 }
 
+func evaluatePollResponse(err error, interval int) (int, bool) {
+	var oauthErr *oauthError
+	if !errors.As(err, &oauthErr) {
+		return 0, false
+	}
+	switch oauthErr.Code {
+	case "authorization_pending":
+		return interval, true
+	case "slow_down":
+		return interval + rfc8628PollIntervalSeconds, true
+	default:
+		return 0, false
+	}
+}
+
+func devicePollInterval(interval int) int {
+	if interval <= 0 {
+		return rfc8628PollIntervalSeconds
+	}
+	return interval
+}
+
 func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (*TokenResponse, error) {
 	startTime := time.Now()
+	lifetime := min(max(deviceCodeRes.ExpiresIn, 0), maxDeviceCodeLifetimeSeconds)
+	interval := min(devicePollInterval(deviceCodeRes.Interval), lifetime+1)
+	timeoutErr := fmt.Errorf("authentication timed out. Please restart the login process")
 
 	spinner := utils.NewSpinner("Waiting for authentication...")
 	spinner.Start()
 	defer spinner.Stop()
 
 	for {
-		if time.Since(startTime).Seconds() > float64(deviceCodeRes.ExpiresIn) {
-			return nil, fmt.Errorf("authentication timed out. Please restart the login process")
+		if time.Since(startTime).Seconds() > float64(lifetime) {
+			return nil, timeoutErr
 		}
 
-		tokenResponse, err := requestAccessToken(deviceCodeRes.DeviceCode, envInfo)
+		tokenResponse, err := requestAccessTokenFunc(deviceCodeRes.DeviceCode, envInfo)
 		if err != nil {
-			if strings.Contains(err.Error(), "authorization_pending") {
-				time.Sleep(time.Duration(deviceCodeRes.Interval) * time.Second)
+			if next, retry := evaluatePollResponse(err, interval); retry {
+				interval = next
+				if time.Since(startTime).Seconds()+float64(interval) > float64(lifetime) {
+					return nil, timeoutErr
+				}
+				time.Sleep(time.Duration(interval) * time.Second)
 				continue
 			}
 			return nil, mapAuth0Error(err)
