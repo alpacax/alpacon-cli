@@ -105,8 +105,8 @@ run_test() {
 # run_test calls these inside `if`, where set -e is off, so each must stay a single && chain or a failed step passes silently.
 verify_downloaded_file() {
     local path="$1" pattern="$2"
-    echo "Check: test -f $(q "$path") && grep -q $(q "$pattern") $(q "$path")"
-    test -f "$path" && grep -q "$pattern" "$path"
+    echo "Check: test -f $(q "$path") && grep -qF -- $(q "$pattern") $(q "$path")"
+    test -f "$path" && grep -qF -- "$pattern" "$path"
 }
 
 verify_downloaded_folder() {
