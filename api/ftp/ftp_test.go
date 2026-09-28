@@ -791,7 +791,7 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 	}
 
 	// Use a very short timeout to make the test fast
-	success, _, err := PollTransferStatus(ac, "upload", "test-id", 3*time.Second)
+	success, _, err := PollTransferStatus(ac, "upload", "test-id", 1*time.Second)
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
@@ -1420,8 +1420,6 @@ func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
 
 func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	t.Parallel()
-	// Any error response (e.g. 403) is fatal: return immediately without
-	// polling again.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -1438,6 +1436,26 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
+}
+
+func TestPollTransferStatus_ParseFailureReturnsEmptyMessage(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// message decodes before success hits the *bool type error, so a
+		// partially filled struct would still carry "stale".
+		_, _ = w.Write([]byte(`{"message": "stale", "success": {}}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse transfer status response")
+	assert.False(t, success)
+	assert.Empty(t, message)
 }
 
 func TestPollTransferStatus_TimesOut(t *testing.T) {
