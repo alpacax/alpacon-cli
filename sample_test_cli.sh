@@ -13,7 +13,8 @@ REMOTE_USER_PATH="/your/remote/path"
 TEST_FILE="test.txt"
 TEST_FOLDER="test_folder"
 WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
-TEST_CONTENT="Hello from Alpacon CLI test! $(date)"
+TEST_CONTENT_PREFIX="Hello from Alpacon CLI test"
+TEST_CONTENT="$TEST_CONTENT_PREFIX! $(date)"
 
 # Paths this run created; cleanup removes only these
 CREATED_LOCAL=()
@@ -102,13 +103,13 @@ run_test() {
 }
 
 verify_downloaded_file() {
-    local path="$1"
-    test -f "$path" && grep -q 'Hello from Alpacon CLI test' "$path"
+    local path="$1" pattern="$2"
+    test -f "$path" && grep -q "$pattern" "$path"
 }
 
 verify_downloaded_folder() {
     local folder="$1" file="$2" pattern="$3"
-    test -d "$folder" && test -f "$folder/$file" && grep -q "$pattern" "$folder/$file"
+    test -d "$folder" && verify_downloaded_file "$folder/$file" "$pattern"
 }
 
 create_dir_and_upload() {
@@ -286,7 +287,7 @@ run_test "Download from user directory" \
 
 # Test 14: Verify downloaded file
 run_test "Verify downloaded file content" \
-    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE"
+    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE" "$TEST_CONTENT_PREFIX"
 
 # Preserve a copy of the downloaded file before it is overwritten by the root download test
 track_local "$LOCAL_PATH/downloaded_user_$TEST_FILE"
@@ -298,7 +299,7 @@ run_test "Download from root directory as root" \
 
 # Test 16: Verify root downloaded file
 run_test "Verify root downloaded file content" \
-    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE"
+    verify_downloaded_file "$LOCAL_PATH/$TEST_FILE" "$TEST_CONTENT_PREFIX"
 
 # Preserve a copy of the root-downloaded file to avoid conflicts with later tests
 track_local "$LOCAL_PATH/downloaded_root_$TEST_FILE"
