@@ -566,7 +566,7 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 }
 
 func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
-	t.Parallel()
+	// Not parallel: subtests swap os.Stderr via testutil.CaptureOutput.
 	tests := []struct {
 		name      string
 		reported  error
@@ -584,7 +584,7 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 		},
 		{
 			name:     "going away",
-			reported: &websocket.CloseError{Code: websocket.CloseGoingAway},
+			reported: &websocket.CloseError{Code: websocket.CloseGoingAway, Text: "server going away"},
 		},
 		{
 			name:      "abnormal closure",
@@ -601,9 +601,15 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wsClient := newWebsocketClient(nil)
-			wsClient.finish(tt.reported)
+
+			_, stderr := testutil.CaptureOutput(t, func() {
+				wsClient.finish(tt.reported)
+			})
 
 			assertReported(t, wsClient)
+			// Only the proxy's session-end code carries a reason worth printing;
+			// every other close stays silent even when it carries text.
+			assert.Empty(t, stderr)
 			if tt.keepAsErr {
 				assert.Equal(t, tt.reported, wsClient.err)
 				return
