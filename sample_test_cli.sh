@@ -117,9 +117,10 @@ verify_downloaded_folder() {
 
 create_dir_and_upload() {
     local remote_dir="$1"
-    echo "Check: alpacon exec $(q "$SERVER_NAME") $(q "mkdir -p $(q "$remote_dir")") && alpacon cp $(q "$LOCAL_PATH/$TEST_FILE") $(q "$SERVER_NAME:$remote_dir/")"
-    alpacon exec "$SERVER_NAME" "mkdir -p $(q "$remote_dir")" &&
-        alpacon cp "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$remote_dir/"
+    local -a mk=(alpacon exec "$SERVER_NAME" "mkdir -p $(q "$remote_dir")")
+    local -a up=(alpacon cp "$LOCAL_PATH/$TEST_FILE" "$SERVER_NAME:$remote_dir/")
+    echo "Check: $(q "${mk[@]}") && $(q "${up[@]}")"
+    "${mk[@]}" && "${up[@]}"
 }
 
 cleanup() {
