@@ -138,6 +138,11 @@ cleanup() {
     fi
 }
 
+case "$REMOTE_USER_PATH" in
+    /*) ;;
+    *) log_error "REMOTE_USER_PATH must be an absolute path: $REMOTE_USER_PATH"; exit 1 ;;
+esac
+
 # Trap to cleanup on exit
 trap cleanup EXIT
 
