@@ -2,7 +2,6 @@ package auth
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -45,14 +45,7 @@ func GetWhoami(ac *client.AlpaconClient) (*WhoamiResponse, error) {
 }
 
 func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool) error {
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: insecure, //nolint:gosec
-				MinVersion:         tls.VersionTLS12,
-			},
-		},
-	}
+	httpClient := httpclient.New(insecure)
 
 	workspaceName, baseDomain := loginTargetMetadata(loginReq)
 

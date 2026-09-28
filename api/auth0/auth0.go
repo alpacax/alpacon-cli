@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -36,7 +37,13 @@ var path = struct {
 	revoke:     "/oauth/revoke",
 }
 
-var requestAccessTokenFunc = requestAccessToken
+var (
+	requestAccessTokenFunc = requestAccessToken
+
+	// deviceTokenClient carries every device-code poll of one login; it
+	// verifies TLS as the default client did.
+	deviceTokenClient = httpclient.New(false)
+)
 
 // oauthError is the only refresh failure safe to retry with another scope; any other
 // may have consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
@@ -477,8 +484,7 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := deviceTokenClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

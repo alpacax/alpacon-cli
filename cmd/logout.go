@@ -1,13 +1,11 @@
 package cmd
 
 import (
-	"crypto/tls"
-	"net/http"
-
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -33,13 +31,7 @@ var logoutCmd = &cobra.Command{
 			utils.CliWarning("This will log you out from all workspaces associated with this account.")
 		}
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: validConfig.Insecure,
-				},
-			},
-		}
+		httpClient := httpclient.New(validConfig.Insecure)
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Failed to create Alpacon API client: %s.", err)

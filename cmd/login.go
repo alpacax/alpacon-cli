@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -103,14 +103,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			}
 		}
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					MinVersion:         tls.VersionTLS12,
-					InsecureSkipVerify: insecure,
-				},
-			},
-		}
+		httpClient := httpclient.New(insecure)
 
 		envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpClient)
 		if err != nil {
