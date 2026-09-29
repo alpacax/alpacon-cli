@@ -43,6 +43,14 @@ func New(insecure bool) *http.Client {
 	}
 }
 
+// StopAtCrossOrigin returns a copy of c that hands back a redirect leaving the
+// origin as the 3xx response instead of failing, so the caller can show it.
+func StopAtCrossOrigin(c *http.Client) *http.Client {
+	stopped := *c
+	stopped.CheckRedirect = stopAtCrossOrigin
+	return &stopped
+}
+
 // sameOriginRedirect is an http.Client CheckRedirect policy. It compares each
 // hop with via[0], the request that started the chain, so a chain cannot walk
 // off the origin one allowed step at a time.
@@ -53,6 +61,17 @@ func sameOriginRedirect(req *http.Request, via []*http.Request) error {
 	from, to := via[0].URL, req.URL
 	if !redirectAllowed(from, to) {
 		return fmt.Errorf("refusing redirect from %s to %s", displayURL(from), displayURL(to))
+	}
+	return nil
+}
+
+// stopAtCrossOrigin is sameOriginRedirect, but returns the 3xx instead of an error.
+func stopAtCrossOrigin(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	if !redirectAllowed(via[0].URL, req.URL) {
+		return http.ErrUseLastResponse
 	}
 	return nil
 }

@@ -2315,6 +2315,8 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 		{name: "same host scheme downgrade", location: "http://workspace.example/y"},
 		{name: "same host port change", baseURL: "https://workspace.example:8443", location: "https://workspace.example:9443/y"},
 		{name: "same host uppercase is followed", location: "https://WORKSPACE.example/y", wantFollowed: true},
+		{name: "explicit default port is followed", location: "https://workspace.example:443/y", wantFollowed: true},
+		{name: "http to https on the same host is followed", baseURL: "http://workspace.example", location: "https://workspace.example/y", wantFollowed: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2329,7 +2331,11 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 			redirected := false
 			ac := newBearerTestClient(baseURL, "secret")
 			ac.HTTPClient.Transport = rawRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if !strings.EqualFold(r.URL.Host, base.Host) || !strings.EqualFold(r.URL.Scheme, base.Scheme) {
+				offOrigin := !strings.EqualFold(r.URL.Hostname(), base.Hostname())
+				if !tc.wantFollowed {
+					offOrigin = offOrigin || !strings.EqualFold(r.URL.Host, base.Host) || !strings.EqualFold(r.URL.Scheme, base.Scheme)
+				}
+				if offOrigin {
 					otherRequests++
 					return rawTestResponse(http.StatusOK, "text/plain", "external"), nil
 				}

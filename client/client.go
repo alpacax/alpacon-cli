@@ -808,19 +808,7 @@ func hasRawSpaceOrBadEscape(query string) bool {
 }
 
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
-	originHost, originScheme := req.URL.Host, req.URL.Scheme
-	httpClient := *ac.HTTPClient
-	httpClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
-		// A redirect must not carry workspace credentials to another host.
-		if !strings.EqualFold(next.URL.Host, originHost) || !strings.EqualFold(next.URL.Scheme, originScheme) {
-			return http.ErrUseLastResponse
-		}
-		if len(via) >= 10 {
-			return fmt.Errorf("stopped after 10 redirects")
-		}
-		return nil
-	}
-	resp, err := httpClient.Do(req)
+	resp, err := httpclient.StopAtCrossOrigin(ac.HTTPClient).Do(req)
 	if err != nil {
 		return nil, err
 	}
