@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -133,100 +134,98 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestStopAtCrossOrigin(t *testing.T) {
+func TestStopAtCrossOrigin_FollowsSameOriginRedirect(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name         string
-		run          func(t *testing.T) (resp *http.Response, otherHits int32, err error)
-		wantStatus   int
-		wantLocation bool
-		wantErr      string
-	}{
-		{
-			name: "same origin redirect is followed",
-			run: func(t *testing.T) (*http.Response, int32, error) {
-				t.Helper()
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/a" {
-						http.Redirect(w, r, "/b", http.StatusFound)
-						return
-					}
-					w.WriteHeader(http.StatusOK)
-				}))
-				t.Cleanup(ts.Close)
-				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
-				return resp, 0, err
-			},
-			wantStatus: http.StatusOK,
-		},
-		{
-			name: "cross host redirect returns the 3xx and never reaches the other host",
-			run: func(t *testing.T) (*http.Response, int32, error) {
-				t.Helper()
-				var hits atomic.Int32
-				other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					hits.Add(1)
-				}))
-				t.Cleanup(other.Close)
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					http.Redirect(w, r, other.URL+"/x", http.StatusFound)
-				}))
-				t.Cleanup(ts.Close)
-				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
-				return resp, hits.Load(), err
-			},
-			wantStatus:   http.StatusFound,
-			wantLocation: true,
-		},
-		{
-			name: "https to http downgrade on the same host is not followed",
-			run: func(t *testing.T) (*http.Response, int32, error) {
-				t.Helper()
-				var hits atomic.Int32
-				plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					hits.Add(1)
-				}))
-				t.Cleanup(plain.Close)
-				secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					http.Redirect(w, r, plain.URL+"/x", http.StatusFound)
-				}))
-				t.Cleanup(secure.Close)
-				resp, err := StopAtCrossOrigin(secure.Client()).Get(secure.URL + "/a")
-				return resp, hits.Load(), err
-			},
-			wantStatus:   http.StatusFound,
-			wantLocation: true,
-		},
-		{
-			name: "a chain past the redirect cap is an error",
-			run: func(t *testing.T) (*http.Response, int32, error) {
-				t.Helper()
-				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					http.Redirect(w, r, r.URL.Path, http.StatusFound)
-				}))
-				t.Cleanup(ts.Close)
-				resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/loop")
-				return resp, 0, err
-			},
-			wantErr: "stopped after 10 redirects",
-		},
-	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/a" {
+			http.Redirect(w, r, "/b", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			resp, otherHits, err := tt.run(t)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			defer func() { _ = resp.Body.Close() }()
-			assert.Equal(t, tt.wantStatus, resp.StatusCode)
-			assert.Equal(t, tt.wantLocation, resp.Header.Get("Location") != "")
-			assert.Zero(t, otherHits)
-		})
+	resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
+
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Empty(t, resp.Header.Get("Location"))
+}
+
+// The redirect names the same server under another hostname, so the port and
+// the scheme match and only the hostname rule can stop it.
+func TestStopAtCrossOrigin_ReturnsTheRedirectWhenOnlyTheHostnameDiffers(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/x" {
+			hits.Add(1)
+			return
+		}
+		http.Redirect(w, r, strings.Replace(ts.URL, "127.0.0.1", "localhost", 1)+"/x", http.StatusFound)
+	}))
+	t.Cleanup(ts.Close)
+	want := strings.Replace(ts.URL, "127.0.0.1", "localhost", 1) + "/x"
+
+	resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
+
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.Equal(t, want, resp.Header.Get("Location"))
+	assert.Zero(t, hits.Load())
+}
+
+func TestStopAtCrossOrigin_ReturnsTheRedirectOnAnotherPort(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	t.Cleanup(other.Close)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/x", http.StatusFound)
+	}))
+	t.Cleanup(ts.Close)
+
+	resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/a")
+
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	assert.Equal(t, other.URL+"/x", resp.Header.Get("Location"))
+	assert.Zero(t, hits.Load())
+}
+
+func TestStopAtCrossOrigin_ReturnsTheRedirectOnAnHTTPSDowngrade(t *testing.T) {
+	t.Parallel()
+	err := stopAtCrossOrigin(request(t, "http://ws.example.com/a"), []*http.Request{request(t, "https://ws.example.com/a")})
+
+	assert.ErrorIs(t, err, http.ErrUseLastResponse)
+}
+
+func TestStopAtCrossOrigin_ReturnsTheRedirectOnAnHTTPSDowngradeOnTheSamePort(t *testing.T) {
+	t.Parallel()
+	err := stopAtCrossOrigin(request(t, "http://ws.example.com:8443/a"), []*http.Request{request(t, "https://ws.example.com:8443/a")})
+
+	assert.ErrorIs(t, err, http.ErrUseLastResponse)
+}
+
+func TestStopAtCrossOrigin_ErrorsPastTheRedirectCap(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(ts.Close)
+
+	resp, err := StopAtCrossOrigin(ts.Client()).Get(ts.URL + "/loop")
+
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
+	require.ErrorContains(t, err, "stopped after 10 redirects")
 }
 
 func TestStopAtCrossOrigin_ReturnsACopy(t *testing.T) {
@@ -237,5 +236,6 @@ func TestStopAtCrossOrigin_ReturnsACopy(t *testing.T) {
 
 	assert.NotSame(t, original, got)
 	assert.Equal(t, reflect.ValueOf(sameOriginRedirect).Pointer(), reflect.ValueOf(original.CheckRedirect).Pointer())
+	assert.Equal(t, reflect.ValueOf(stopAtCrossOrigin).Pointer(), reflect.ValueOf(got.CheckRedirect).Pointer())
 	assert.Same(t, original.Transport, got.Transport)
 }
