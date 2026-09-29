@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPromptForBoolReadsAnswer(t *testing.T) {
@@ -74,6 +75,69 @@ func TestPromptForBoolDeclinesWhenInputEnds(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("promptForBool kept looping after its input ended")
 			}
+		})
+	}
+}
+
+func TestPromptForInputReadsLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "line", input: "my-server\n", want: "my-server"},
+		{name: "surrounding spaces", input: "  my-server  \n", want: "my-server"},
+		{name: "empty line", input: "\n", want: ""},
+		{name: "partial final line", input: "my-server", want: "my-server"},
+		{name: "partial final line with spaces", input: "  my-server  ", want: "my-server"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Given
+			reader := strings.NewReader(tt.input)
+
+			// When
+			got, err := promptForInput(reader, "Name: ")
+
+			// Then
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPromptForInputFailsWhenInputEnds(t *testing.T) {
+	t.Parallel()
+
+	readErr := errors.New("stdin closed")
+	tests := []struct {
+		name    string
+		reader  io.Reader
+		wantErr error
+	}{
+		{name: "empty stdin", reader: strings.NewReader(""), wantErr: io.EOF},
+		{name: "spaces then EOF", reader: strings.NewReader("   "), wantErr: io.EOF},
+		{name: "read error", reader: iotest.ErrReader(readErr), wantErr: readErr},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Given
+			reader := tt.reader
+
+			// When
+			got, err := promptForInput(reader, "Name: ")
+
+			// Then
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.Empty(t, got)
 		})
 	}
 }

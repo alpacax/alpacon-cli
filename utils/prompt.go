@@ -59,13 +59,22 @@ func PromptForPassword(promptText string) string {
 }
 
 func PromptForInput(promptText string) string {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprint(os.Stderr, promptText)
-	input, err := reader.ReadString('\n')
+	input, err := promptForInput(os.Stdin, promptText)
 	if err != nil {
 		CliErrorWithExit("Invalid input. Please try again.")
 	}
-	return strings.TrimSpace(input)
+	return input
+}
+
+func promptForInput(r io.Reader, promptText string) (string, error) {
+	reader := bufio.NewReader(r)
+	fmt.Fprint(os.Stderr, promptText)
+	line, err := reader.ReadString('\n')
+	input := strings.TrimSpace(line)
+	if err != nil && input == "" {
+		return "", err
+	}
+	return input, nil
 }
 
 func PromptForRequiredInput(promptText string) string {
