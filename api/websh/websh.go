@@ -66,14 +66,14 @@ var (
 	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
 	// silent, since shell_exited means the user ended the shell and closed says nothing.
 	closeReasonMessages = map[string]string{
-		"user_request":           "the session was closed on request",
+		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_timeout":           "idle timeout",
+		"idle_timeout":           "the session reached its time limit",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
 		"work_session_completed": "the work session was completed",
-		"work_session_revoked":   "the work session was revoked",
+		"work_session_revoked":   "an administrator revoked your work session",
 		"user_deactivated":       "your account was deactivated",
 		"shell_exited":           "",
 		"closed":                 "",
