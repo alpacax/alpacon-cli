@@ -570,58 +570,19 @@ func TestAPICommand_HTTPErrorPrintsExactLineAndExitsOne(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotFound), stderr)
 }
 
-func TestAPICommand_RedirectPrintsLocationNotFollowed(t *testing.T) {
-	previousClient, previousExit := newAPIClient, exitAPI
-	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
-	newAPIClient = func() (*client.AlpaconClient, error) {
-		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			response := apiTestResponse(http.StatusFound, "text/plain", "")
-			response.Header.Set("Location", "https://evil.example/x")
-			return response, nil
-		}), nil
-	}
-	exitCode := 0
-	exitAPI = func(code int) { exitCode = code }
-	command := newCommand()
-	command.SetArgs([]string{"/x"})
-	var executeErr error
-
-	_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
-
-	require.NoError(t, executeErr)
-	assert.Equal(t, 1, exitCode)
-	assert.Equal(t, fmt.Sprintf("HTTP %d\nredirect to https://evil.example/x not followed\n", http.StatusFound), stderr)
-}
-
-func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
-	previousClient, previousExit := newAPIClient, exitAPI
-	t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
-	newAPIClient = func() (*client.AlpaconClient, error) {
-		return apiTestClient(func(r *http.Request) (*http.Response, error) {
-			return apiTestResponse(http.StatusNotModified, "", ""), nil
-		}), nil
-	}
-	exitCode := 0
-	exitAPI = func(code int) { exitCode = code }
-	command := newCommand()
-	command.SetArgs([]string{"/x"})
-	var executeErr error
-
-	_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
-
-	require.NoError(t, executeErr)
-	assert.Equal(t, 1, exitCode)
-	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotModified), stderr)
-}
-
-func TestAPICommand_NonRedirectWithLocationPrintsNoRedirectLine(t *testing.T) {
+func TestAPICommand_RedirectLinePrintsOnlyForRedirectWithLocation(t *testing.T) {
 	cases := []struct {
-		name   string
-		status int
+		name     string
+		status   int
+		location string
+		want     string
 	}{
-		{name: "unauthorized", status: http.StatusUnauthorized},
-		{name: "not found", status: http.StatusNotFound},
-		{name: "server error", status: http.StatusInternalServerError},
+		{name: "found with location", status: http.StatusFound, location: "https://evil.example/x", want: "HTTP 302\nredirect to https://evil.example/x not followed\n"},
+		{name: "not modified without location", status: http.StatusNotModified, want: "HTTP 304\n"},
+		{name: "bad request with location", status: http.StatusBadRequest, location: "https://evil.example/x", want: "HTTP 400\n"},
+		{name: "unauthorized with location", status: http.StatusUnauthorized, location: "https://evil.example/x", want: "HTTP 401\n"},
+		{name: "not found with location", status: http.StatusNotFound, location: "https://evil.example/x", want: "HTTP 404\n"},
+		{name: "server error with location", status: http.StatusInternalServerError, location: "https://evil.example/x", want: "HTTP 500\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -630,7 +591,9 @@ func TestAPICommand_NonRedirectWithLocationPrintsNoRedirectLine(t *testing.T) {
 			newAPIClient = func() (*client.AlpaconClient, error) {
 				return apiTestClient(func(r *http.Request) (*http.Response, error) {
 					response := apiTestResponse(tc.status, "text/plain", "")
-					response.Header.Set("Location", "https://evil.example/x")
+					if tc.location != "" {
+						response.Header.Set("Location", tc.location)
+					}
 					return response, nil
 				}), nil
 			}
@@ -644,7 +607,7 @@ func TestAPICommand_NonRedirectWithLocationPrintsNoRedirectLine(t *testing.T) {
 
 			require.NoError(t, executeErr)
 			assert.Equal(t, 1, exitCode)
-			assert.Equal(t, fmt.Sprintf("HTTP %d\n", tc.status), stderr)
+			assert.Equal(t, tc.want, stderr)
 		})
 	}
 }
