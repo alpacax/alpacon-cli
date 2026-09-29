@@ -65,8 +65,7 @@ func sameOriginRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// stopAtCrossOrigin is sameOriginRedirect, but ends the chain with the 3xx
-// instead of an error.
+// stopAtCrossOrigin is sameOriginRedirect, but returns the 3xx instead of an error.
 func stopAtCrossOrigin(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
