@@ -614,6 +614,41 @@ func TestAPICommand_RedirectWithoutLocationPrintsNoRedirectLine(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("HTTP %d\n", http.StatusNotModified), stderr)
 }
 
+func TestAPICommand_NonRedirectWithLocationPrintsNoRedirectLine(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+	}{
+		{name: "unauthorized", status: http.StatusUnauthorized},
+		{name: "not found", status: http.StatusNotFound},
+		{name: "server error", status: http.StatusInternalServerError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			previousClient, previousExit := newAPIClient, exitAPI
+			t.Cleanup(func() { newAPIClient, exitAPI = previousClient, previousExit })
+			newAPIClient = func() (*client.AlpaconClient, error) {
+				return apiTestClient(func(r *http.Request) (*http.Response, error) {
+					response := apiTestResponse(tc.status, "text/plain", "")
+					response.Header.Set("Location", "https://evil.example/x")
+					return response, nil
+				}), nil
+			}
+			exitCode := 0
+			exitAPI = func(code int) { exitCode = code }
+			command := newCommand()
+			command.SetArgs([]string{"/x"})
+			var executeErr error
+
+			_, stderr := testutil.CaptureOutput(t, func() { executeErr = command.Execute() })
+
+			require.NoError(t, executeErr)
+			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, fmt.Sprintf("HTTP %d\n", tc.status), stderr)
+		})
+	}
+}
+
 func TestAPICommand_MalformedHeaderExitsTwo(t *testing.T) {
 	if os.Getenv("ALPACON_API_USAGE_CHILD") == "1" {
 		newAPIClient = func() (*client.AlpaconClient, error) {

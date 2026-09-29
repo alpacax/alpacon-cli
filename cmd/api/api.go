@@ -249,7 +249,11 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		return utils.ExitCodeGeneralError, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return utils.ExitCodeGeneralError, &httpStatusError{status: response.StatusCode, location: response.Header.Get("Location")}
+		statusErr := &httpStatusError{status: response.StatusCode}
+		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
+			statusErr.location = response.Header.Get("Location")
+		}
+		return utils.ExitCodeGeneralError, statusErr
 	}
 	return 0, nil
 }
