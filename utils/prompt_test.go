@@ -33,13 +33,10 @@ func TestPromptForBoolReadsAnswer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Given
 			reader := strings.NewReader(tt.input)
 
-			// When
 			got := promptForBool(reader, "Proceed?")
 
-			// Then
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -62,13 +59,10 @@ func TestPromptForBoolDeclinesWhenInputEnds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Given
 			done := make(chan bool, 1)
 
-			// When
 			go func() { done <- promptForBool(tt.reader, "Proceed?") }()
 
-			// Then
 			select {
 			case got := <-done:
 				assert.False(t, got)
@@ -98,13 +92,10 @@ func TestPromptForInputReadsLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Given
 			reader := strings.NewReader(tt.input)
 
-			// When
 			got, err := promptForInput(reader, "Name: ")
 
-			// Then
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
@@ -129,13 +120,8 @@ func TestPromptForInputFailsWhenInputEnds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Given
-			reader := tt.reader
+			got, err := promptForInput(tt.reader, "Name: ")
 
-			// When
-			got, err := promptForInput(reader, "Name: ")
-
-			// Then
 			require.ErrorIs(t, err, tt.wantErr)
 			assert.Empty(t, got)
 		})
