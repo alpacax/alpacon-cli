@@ -3,6 +3,7 @@ package utils
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -130,20 +131,27 @@ func ConfirmAction(msg string, args ...any) {
 }
 
 func PromptForBool(prompt string) bool {
-	reader := bufio.NewReader(os.Stdin)
+	return promptForBool(os.Stdin, prompt)
+}
+
+func promptForBool(r io.Reader, prompt string) bool {
+	reader := bufio.NewReader(r)
 
 	for {
 		fmt.Fprintf(os.Stderr, "%s [y/n]: ", prompt)
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.ToLower(input))
+		line, err := reader.ReadString('\n')
+		input := strings.TrimSpace(strings.ToLower(line))
 
 		switch input {
 		case "y", "yes":
 			return true
 		case "n", "no":
 			return false
-		default:
-			CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr)
+			return false
+		}
+		CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 	}
 }
