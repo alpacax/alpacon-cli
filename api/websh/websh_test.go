@@ -566,8 +566,9 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 			wantStderr: "\r\nsession closed: idle timeout\r\n",
 		},
 		{
-			name:     "session end with no reason",
-			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: ""},
+			name:       "session end with no reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: ""},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
 		},
 		{
 			name:       "session end sanitizes the reason",
@@ -575,12 +576,14 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 			wantStderr: "\r\nsession closed: idletimeout\r\n",
 		},
 		{
-			name:     "session end sanitizes to empty",
-			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"},
+			name:       "session end sanitizes to empty",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
 		},
 		{
-			name:     "session end with whitespace only",
-			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "   "},
+			name:       "session end with whitespace only",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "   "},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
 		},
 		{
 			name:     "normal closure",
@@ -603,7 +606,7 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		{
 			name:       "user request",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "user_request"},
-			wantStderr: "\r\nsession closed: closed by the session owner\r\n",
+			wantStderr: "\r\nsession closed: the session was closed on request\r\n",
 		},
 		{
 			name:       "force close",
@@ -618,7 +621,7 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		{
 			name:       "server shutdown",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "server_shutdown"},
-			wantStderr: "\r\nsession closed: the service shut down\r\n",
+			wantStderr: "\r\nsession closed: the service restarted\r\n",
 		},
 		{
 			name:       "work session expired",

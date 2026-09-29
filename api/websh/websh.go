@@ -66,11 +66,11 @@ var (
 	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
 	// silent, since shell_exited means the user ended the shell and closed says nothing.
 	closeReasonMessages = map[string]string{
-		"user_request":           "closed by the session owner",
+		"user_request":           "the session was closed on request",
 		"force_close":            "closed by an administrator",
 		"idle_timeout":           "idle timeout",
 		"agent_disconnected":     "Alpamon on the server disconnected",
-		"server_shutdown":        "the service shut down",
+		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
 		"work_session_completed": "the work session was completed",
 		"work_session_revoked":   "the work session was revoked",
@@ -370,12 +370,13 @@ func printCloseReason(err error) {
 	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode {
 		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
 		reason = strings.TrimSpace(reason)
-		if reason == "" {
-			return
-		}
-		message, known := closeReasonMessages[reason]
-		if !known {
-			message = strings.ReplaceAll(reason, "_", " ")
+		message := "you were disconnected from this session"
+		if reason != "" {
+			var known bool
+			message, known = closeReasonMessages[reason]
+			if !known {
+				message = strings.ReplaceAll(reason, "_", " ")
+			}
 		}
 		if message == "" {
 			return
