@@ -9,6 +9,9 @@ import (
 var AgentCmd = &cobra.Command{
 	Use:   "agent",
 	Short: "Manage the Alpamon agent on a server",
+	// NoArgs makes an unrecognized subcommand (a removed one included) fail as
+	// "unknown command" instead of falling through to the help below.
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {

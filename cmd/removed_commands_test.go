@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The four paths below were removed from the CLI. They have no command of
-// their own, so the parent group takes the arguments, prints its help and fails
-// with the general error code; an old flag such as -y fails as an unknown flag.
+// The four paths below were removed from the CLI. The parent groups take no
+// arguments, so each fails as an unknown command with the general error code;
+// an old flag such as -y fails first, as an unknown flag.
 func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 	t.Parallel()
 	paths := [][]string{
@@ -31,8 +31,9 @@ func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "%v", args)
 				assert.NotContains(t, stdout+stderr, "was removed", "%v", args)
 				if len(extra) == 1 {
-					assert.Contains(t, stdout, "Available Commands:", "%v", args)
-					assert.Contains(t, stderr, "a subcommand is required", "%v", args)
+					want := `unknown command "` + path[1] + `" for "alpacon ` + path[0] + `"`
+					assert.Contains(t, stderr, want, "%v", args)
+					assert.NotContains(t, stderr, "a subcommand is required", "%v", args)
 				} else {
 					assert.Contains(t, stderr, "unknown shorthand flag: 'y'", "%v", args)
 				}
