@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,6 +62,22 @@ var (
 	// ErrSessionGone ends a session the server refused a new channel on: it was
 	// closed while the connection was down, so retrying only asks again.
 	ErrSessionGone = errors.New("the session is no longer open")
+
+	// closeReasonMessages maps the proxy's session-end reason tokens; an empty message stays
+	// silent, since shell_exited means the user ended the shell and closed says nothing.
+	closeReasonMessages = map[string]string{
+		"user_request":           "the session was closed",
+		"force_close":            "closed by an administrator",
+		"idle_timeout":           "the session reached its time limit",
+		"agent_disconnected":     "Alpamon on the server disconnected",
+		"server_shutdown":        "the service restarted",
+		"work_session_expired":   "the work session expired",
+		"work_session_completed": "the work session was completed",
+		"work_session_revoked":   "an administrator revoked your work session",
+		"user_deactivated":       "your account was deactivated",
+		"shell_exited":           "",
+		"closed":                 "",
+	}
 )
 
 // GetSessionList returns the newest tail connectable sessions. The endpoint sorts
@@ -338,13 +355,34 @@ func (wsClient *WebsocketClient) closeConn() {
 // saw done can read it. A deliberate close ends the session rather than failing it;
 // every other close code stays an error.
 func (wsClient *WebsocketClient) finish(err error) {
-	if endsSession(err) {
-		err = nil
-	}
 	wsClient.finishOnce.Do(func() {
+		if endsSession(err) {
+			printCloseReason(err)
+			err = nil
+		}
 		wsClient.err = err
 		close(wsClient.done)
 	})
+}
+
+func printCloseReason(err error) {
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) && closeErr.Code == sessionEndCloseCode {
+		reason, _ := utils.SanitizeTerminalLine(closeErr.Text)
+		reason = strings.TrimSpace(reason)
+		message := "you were disconnected from this session"
+		if reason != "" {
+			var known bool
+			message, known = closeReasonMessages[reason]
+			if !known {
+				message = strings.ReplaceAll(reason, "_", " ")
+			}
+		}
+		if message == "" {
+			return
+		}
+		_, _ = fmt.Fprintf(os.Stderr, "\r\nsession closed: %s\r\n", message)
+	}
 }
 
 // endsSession reports whether a connection error means the session itself ended:

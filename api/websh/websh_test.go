@@ -553,30 +553,37 @@ func TestWatchInterrupt_EndsTheSessionOnSignal(t *testing.T) {
 	assert.NoError(t, wsClient.err) // Ctrl+C is how a session is meant to end
 }
 
-func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
-	t.Parallel()
-	wsClient := newWebsocketClient(nil)
-
-	first := errors.New("remote closed the session")
-	wsClient.finish(first)
-	wsClient.finish(errors.New("write failed on the closed connection"))
-
-	assertReported(t, wsClient)
-	assert.Equal(t, first, wsClient.err)
-}
-
-func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
-	t.Parallel()
+func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 	tests := []struct {
-		name      string
-		reported  error
-		keepAsErr bool
+		name       string
+		reported   error
+		wantStderr string
+		keepAsErr  bool
 	}{
 		{
-			// What the proxy actually sends: every other case here is a contract
-			// the CLI honors but never meets in production.
-			name:     "session end",
-			reported: &websocket.CloseError{Code: sessionEndCloseCode},
+			name:       "session end with a reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+		},
+		{
+			name:       "session end with no reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: ""},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
+		},
+		{
+			name:       "session end sanitizes the reason",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle\ntimeout\x1b[2K"},
+			wantStderr: "\r\nsession closed: idletimeout\r\n",
+		},
+		{
+			name:       "session end sanitizes to empty",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "\x1b[2K"},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
+		},
+		{
+			name:       "session end with whitespace only",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "   "},
+			wantStderr: "\r\nsession closed: you were disconnected from this session\r\n",
 		},
 		{
 			name:     "normal closure",
@@ -584,7 +591,7 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 		},
 		{
 			name:     "going away",
-			reported: &websocket.CloseError{Code: websocket.CloseGoingAway},
+			reported: &websocket.CloseError{Code: websocket.CloseGoingAway, Text: "server going away"},
 		},
 		{
 			name:      "abnormal closure",
@@ -596,19 +603,129 @@ func TestFinish_NormalizesARemoteCloseToASuccess(t *testing.T) {
 			reported:  errors.New("connection reset by peer"),
 			keepAsErr: true,
 		},
+		{
+			name:       "user request",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "user_request"},
+			wantStderr: "\r\nsession closed: the session was closed\r\n",
+		},
+		{
+			name:       "force close",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "force_close"},
+			wantStderr: "\r\nsession closed: closed by an administrator\r\n",
+		},
+		{
+			name:       "agent disconnected",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "agent_disconnected"},
+			wantStderr: "\r\nsession closed: Alpamon on the server disconnected\r\n",
+		},
+		{
+			name:       "server shutdown",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "server_shutdown"},
+			wantStderr: "\r\nsession closed: the service restarted\r\n",
+		},
+		{
+			name:       "work session expired",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_expired"},
+			wantStderr: "\r\nsession closed: the work session expired\r\n",
+		},
+		{
+			name:       "work session completed",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_completed"},
+			wantStderr: "\r\nsession closed: the work session was completed\r\n",
+		},
+		{
+			name:       "work session revoked",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "work_session_revoked"},
+			wantStderr: "\r\nsession closed: an administrator revoked your work session\r\n",
+		},
+		{
+			name:       "user deactivated",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "user_deactivated"},
+			wantStderr: "\r\nsession closed: your account was deactivated\r\n",
+		},
+		{
+			name:     "proxy fallback is silent",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "closed"},
+		},
+		{
+			name:     "shell exited is silent",
+			reported: &websocket.CloseError{Code: sessionEndCloseCode, Text: "shell_exited"},
+		},
+		{
+			name:       "unknown reason falls back to spaced text",
+			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "new_reason"},
+			wantStderr: "\r\nsession closed: new reason\r\n",
+		},
+		{
+			name:      "service restart is not a session end",
+			reported:  &websocket.CloseError{Code: websocket.CloseServiceRestart, Text: "service_restart"},
+			keepAsErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wsClient := newWebsocketClient(nil)
-			wsClient.finish(tt.reported)
+
+			_, stderr := testutil.CaptureOutput(t, func() {
+				wsClient.finish(tt.reported)
+			})
 
 			assertReported(t, wsClient)
+			assert.Equal(t, tt.wantStderr, stderr)
 			if tt.keepAsErr {
 				assert.Equal(t, tt.reported, wsClient.err)
 				return
 			}
 			// Typing exit is not a failure, and every caller exits non-zero on one.
+			assert.NoError(t, wsClient.err)
+		})
+	}
+}
+
+func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      error
+		second     error
+		wantErr    error
+		wantStderr string
+	}{
+		{
+			name:    "earlier failure over a later failure",
+			first:   errors.New("remote closed the session"),
+			second:  errors.New("write failed on the closed connection"),
+			wantErr: errors.New("remote closed the session"),
+		},
+		{
+			name:    "earlier failure over a later session end",
+			first:   errors.New("write failed on the closed connection"),
+			second:  &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			wantErr: errors.New("write failed on the closed connection"),
+		},
+		{
+			name:       "duplicate session end prints once",
+			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
+			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wsClient := newWebsocketClient(nil)
+
+			_, stderr := testutil.CaptureOutput(t, func() {
+				wsClient.finish(tt.first)
+				wsClient.finish(tt.second)
+			})
+
+			assertReported(t, wsClient)
+			assert.Equal(t, tt.wantStderr, stderr)
+			if tt.wantErr != nil {
+				assert.Equal(t, tt.wantErr, wsClient.err)
+				return
+			}
 			assert.NoError(t, wsClient.err)
 		})
 	}
