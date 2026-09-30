@@ -31,7 +31,10 @@ func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 				assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "%v", args)
 				assert.NotContains(t, stdout+stderr, "was removed", "%v", args)
 				if len(extra) == 1 {
+					assert.Contains(t, stdout, "Available Commands:", "%v", args)
 					assert.Contains(t, stderr, "a subcommand is required", "%v", args)
+				} else {
+					assert.Contains(t, stderr, "unknown shorthand flag: 'y'", "%v", args)
 				}
 			}
 		})
