@@ -21,5 +21,4 @@ var AgentCmd = &cobra.Command{
 func init() {
 	AgentCmd.AddCommand(upgradeAgentCmd)
 	AgentCmd.AddCommand(restartAgentCmd)
-	AgentCmd.AddCommand(shutdownAgentRemovedCmd)
 }

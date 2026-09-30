@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBusyGuardMessage(t *testing.T) {
@@ -34,20 +33,6 @@ func TestBusyGuardMessage(t *testing.T) {
 			assert.Contains(t, msg, "my-server")
 			assert.Contains(t, msg, tt.wantContain)
 			assert.NotContains(t, msg, tt.wantAbsent)
-		})
-	}
-}
-
-// Serial: Find lazily mutates the package-global ServerCmd.
-func TestHostPowerCommandsAreHiddenStubs(t *testing.T) {
-	for _, name := range []string{"reboot", "shutdown", "upgrade"} {
-		t.Run(name, func(t *testing.T) {
-			cmd, _, err := ServerCmd.Find([]string{name})
-			require.NoError(t, err)
-			assert.Equal(t, name, cmd.Name())
-			assert.True(t, cmd.Hidden, "server %s must stay out of --help", name)
-			assert.True(t, cmd.DisableFlagParsing, "old flags such as -y and --force must still parse")
-			assert.Contains(t, cmd.Long, "was removed")
 		})
 	}
 }

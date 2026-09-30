@@ -20,14 +20,6 @@ func TestAgentSubcommands(t *testing.T) {
 	assert.ElementsMatch(t, []string{"restart", "upgrade"}, names)
 }
 
-func TestAgentShutdownIsAHiddenStub(t *testing.T) {
-	cmd, _, err := AgentCmd.Find([]string{"shutdown"})
-	require.NoError(t, err)
-	assert.Equal(t, "shutdown", cmd.Name())
-	assert.True(t, cmd.Hidden, "agent shutdown must stay out of --help")
-	assert.Contains(t, cmd.Long, "was removed")
-}
-
 func TestAgentDisruptiveFlags(t *testing.T) {
 	for _, name := range []string{"restart", "upgrade"} {
 		t.Run(name, func(t *testing.T) {
