@@ -114,6 +114,7 @@ func TestPromptForInputFailsWhenInputEnds(t *testing.T) {
 		{name: "empty stdin", reader: strings.NewReader(""), wantErr: io.EOF},
 		{name: "spaces then EOF", reader: strings.NewReader("   "), wantErr: io.EOF},
 		{name: "read error", reader: iotest.ErrReader(readErr), wantErr: readErr},
+		{name: "partial line then read error", reader: io.MultiReader(strings.NewReader("my-ser"), iotest.ErrReader(readErr)), wantErr: readErr},
 	}
 
 	for _, tt := range tests {
