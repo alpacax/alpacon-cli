@@ -2,7 +2,9 @@ package utils
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -58,13 +60,22 @@ func PromptForPassword(promptText string) string {
 }
 
 func PromptForInput(promptText string) string {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Fprint(os.Stderr, promptText)
-	input, err := reader.ReadString('\n')
+	input, err := promptForInput(os.Stdin, promptText)
 	if err != nil {
-		CliErrorWithExit("Invalid input. Please try again.")
+		CliErrorWithExit("No input received.")
 	}
-	return strings.TrimSpace(input)
+	return input
+}
+
+func promptForInput(r io.Reader, promptText string) (string, error) {
+	reader := bufio.NewReader(r)
+	fmt.Fprint(os.Stderr, promptText)
+	line, err := reader.ReadString('\n')
+	input := strings.TrimSpace(line)
+	if err != nil && (input == "" || !errors.Is(err, io.EOF)) {
+		return "", err
+	}
+	return input, nil
 }
 
 func PromptForRequiredInput(promptText string) string {
@@ -130,20 +141,27 @@ func ConfirmAction(msg string, args ...any) {
 }
 
 func PromptForBool(prompt string) bool {
-	reader := bufio.NewReader(os.Stdin)
+	return promptForBool(os.Stdin, prompt)
+}
+
+func promptForBool(r io.Reader, prompt string) bool {
+	reader := bufio.NewReader(r)
 
 	for {
 		fmt.Fprintf(os.Stderr, "%s [y/n]: ", prompt)
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.ToLower(input))
+		line, err := reader.ReadString('\n')
+		input := strings.TrimSpace(strings.ToLower(line))
 
 		switch input {
 		case "y", "yes":
 			return true
 		case "n", "no":
 			return false
-		default:
-			CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr)
+			return false
+		}
+		CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 	}
 }
