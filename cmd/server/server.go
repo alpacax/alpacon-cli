@@ -10,6 +10,9 @@ var ServerCmd = &cobra.Command{
 	Use:     "server",
 	Aliases: []string{"servers"},
 	Short:   "Manage registered servers",
+	// NoArgs makes an unrecognized subcommand (a removed one included) fail as
+	// "unknown command" instead of falling through to the help below.
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := cmd.Help()
 		if err != nil {
@@ -27,5 +30,4 @@ func init() {
 	ServerCmd.AddCommand(serverUpdateCmd)
 	ServerCmd.AddCommand(tokenCmd)
 	ServerCmd.AddCommand(serverRefreshCmd)
-	ServerCmd.AddCommand(serverRebootRemovedCmd, serverShutdownRemovedCmd, serverUpgradeRemovedCmd)
 }
