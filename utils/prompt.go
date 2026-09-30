@@ -62,7 +62,7 @@ func PromptForPassword(promptText string) string {
 func PromptForInput(promptText string) string {
 	input, err := promptForInput(os.Stdin, promptText)
 	if err != nil {
-		CliErrorWithExit("Invalid input. Please try again.")
+		CliErrorWithExit("No input received.")
 	}
 	return input
 }
