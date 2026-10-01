@@ -28,29 +28,33 @@ func init() {
 	aclServerCmd.AddCommand(aclServerDeleteCmd)
 }
 
+// maxConcurrentServerLookups caps the fan-out: service tokens carry an hourly request quota.
+const maxConcurrentServerLookups = 8
+
 func resolveServerIDs(ac *client.AlpaconClient, names []string) ([]string, error) {
 	serverIDs := make([]string, len(names))
-	var mu sync.Mutex
+	errs := make([]error, len(names))
+	sem := make(chan struct{}, maxConcurrentServerLookups)
 	var wg sync.WaitGroup
-	var firstErr error
 
 	for i, name := range names {
-		wg.Add(1)
-		go func(idx int, n string) {
-			defer wg.Done()
-			id, err := serverapi.GetServerIDByName(ac, n)
-			mu.Lock()
-			defer mu.Unlock()
+		sem <- struct{}{}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			id, err := serverapi.GetServerIDByName(ac, name)
 			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
-				}
+				errs[i] = fmt.Errorf("failed to resolve server '%s': %w", name, err)
 				return
 			}
-			serverIDs[idx] = id
-		}(i, name)
+			serverIDs[i] = id
+		})
 	}
 	wg.Wait()
 
-	return serverIDs, firstErr
+	for _, err := range errs {
+		if err != nil {
+			return serverIDs, err
+		}
+	}
+	return serverIDs, nil
 }
