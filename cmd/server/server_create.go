@@ -64,14 +64,17 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
-		method := resolveMethod(cmd)
-		platform := resolvePlatform(cmd, method)
+		if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
+		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		method := resolveMethod(cmd)
+		platform := resolvePlatform(cmd, method)
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
@@ -144,6 +147,25 @@ func resolvePlatform(cmd *cobra.Command, method string) string {
 		return createPlatform
 	}
 	return selectPlatform(method)
+}
+
+// flagRefusal checks --method and --platform without prompting, so a bad value is refused
+// before NewAlpaconAPIClient, which may refresh an expired token over the network.
+func flagRefusal(cmd *cobra.Command, interactive bool) string {
+	method := ""
+	if cmd.Flags().Changed("method") {
+		method, _ = cmd.Flags().GetString("method")
+		if refusal := methodRefusal(method); refusal != "" {
+			return refusal
+		}
+	} else if !interactive {
+		method = "token-install"
+	}
+	if !cmd.Flags().Changed("platform") {
+		return ""
+	}
+	platform, _ := cmd.Flags().GetString("platform")
+	return platformRefusal(method, platform)
 }
 
 func methodRefusal(method string) string {

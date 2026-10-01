@@ -212,6 +212,36 @@ func TestPlatformRefusal(t *testing.T) {
 	}
 }
 
+func TestFlagRefusal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		args        []string
+		interactive bool
+		want        string
+	}{
+		{name: "interactive with no flags leaves both choices to the prompts", interactive: true},
+		{name: "interactive suse waits for the method prompt", args: []string{"-p", "suse"}, interactive: true},
+		{name: "interactive unknown platform is refused", args: []string{"-p", "arch"}, interactive: true, want: `Invalid platform "arch". Valid values: debian, rhel, suse, darwin, windows.`},
+		{name: "ansible with suse is refused", args: []string{"-m", "ansible", "-p", "suse"}, interactive: true, want: `Platform "suse" is not supported with the ansible method. Valid values: debian, rhel, darwin, windows.`},
+		{name: "non-interactive suse defaults to token-install", args: []string{"-p", "suse"}},
+		{name: "unknown method is refused", args: []string{"-m", "puppet"}, want: `Invalid method "puppet". Valid values: token-install, ansible.`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := &cobra.Command{Use: "create"}
+			cmd.Flags().StringP("method", "m", "token-install", "")
+			cmd.Flags().StringP("platform", "p", "", "")
+			require.NoError(t, cmd.Flags().Parse(tt.args))
+
+			got := flagRefusal(cmd, tt.interactive)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestPromptPlatform(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
