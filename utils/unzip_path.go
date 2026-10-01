@@ -40,6 +40,9 @@ func newZipRoots(names ...string) []zipRoot {
 // the user chose and may already have populated, and because an archive naming
 // "link" asks for what "link" points at.
 func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error) {
+	if filepath.IsAbs(name) || filepath.VolumeName(name) != "" || name != "" && os.IsPathSeparator(name[0]) {
+		return "", fmt.Errorf("zip path is not relative: %s", name)
+	}
 	pending := strings.Split(name, string(os.PathSeparator))
 	var resolved []string
 	missing := false
