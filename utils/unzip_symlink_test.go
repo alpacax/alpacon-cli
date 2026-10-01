@@ -205,7 +205,7 @@ func TestUnzip_RejectsParentAfterNonDirectory(t *testing.T) {
 	}
 }
 
-func TestResolveZipPath_RejectsNameOutsideDestination(t *testing.T) {
+func TestResolveZipPath_RejectsNonRelativeName(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	root, err := os.OpenRoot(dest)
