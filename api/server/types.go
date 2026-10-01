@@ -15,7 +15,7 @@ type ServerAttributes struct {
 }
 
 // RegistrationTokenRequest is used to create a new server registration token.
-// ExpiresAt is an RFC3339 timestamp; omit to create a non-expiring token.
+// ExpiresAt is an RFC3339 timestamp; omitted, the server assigns the workspace maximum.
 type RegistrationTokenRequest struct {
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups,omitempty"`

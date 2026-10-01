@@ -27,7 +27,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
 
 		if expiresInDays < 0 {
-			utils.CliErrorWithExit("--expires-in-days must be 0 (no expiry) or a positive number, got %d.", expiresInDays)
+			utils.CliErrorWithExit("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
 		}
 
 		interactive := name == ""
@@ -82,7 +82,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 func init() {
 	tokenCreateCmd.Flags().StringP("name", "n", "", "A name to identify the token.")
 	tokenCreateCmd.Flags().StringSliceP("groups", "g", []string{}, "Group names or UUIDs to assign on registration (comma-separated).")
-	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = no expiry).")
+	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime).")
 }
 
 // resolveGroupIDs converts a list of group names or UUIDs to UUIDs.
