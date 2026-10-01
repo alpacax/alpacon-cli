@@ -2,8 +2,17 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -244,4 +253,59 @@ func TestPromptPlatform(t *testing.T) {
 			assert.Len(t, prompts, len(tt.inputs))
 		})
 	}
+}
+
+const serverCreateHelperMarker = "--server-create-helper--"
+
+func TestServerCreateHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_SERVER_CREATE_HELPER") != "1" {
+		return
+	}
+	i := slices.Index(os.Args, serverCreateHelperMarker)
+	if i < 0 {
+		t.Fatal("missing " + serverCreateHelperMarker + " marker")
+	}
+	if err := serverCreateCmd.ParseFlags(os.Args[i+1:]); err != nil {
+		t.Fatal(err)
+	}
+	serverCreateCmd.Run(serverCreateCmd, nil)
+}
+
+// An expired access token makes NewAlpaconAPIClient refresh over the network,
+// so a pair the CLI can reject on its own must be rejected before that.
+func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".alpacon")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	cfg, err := json.Marshal(map[string]any{
+		"workspace_url":           ts.URL,
+		"workspace_name":          "test",
+		"access_token":            "access-token",
+		"refresh_token":           "refresh-token",
+		"access_token_expires_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), cfg, 0600))
+
+	helper := osexec.Command(os.Args[0], "-test.run=^TestServerCreateHelperProcess$", "--",
+		serverCreateHelperMarker, "-m", "ansible", "-p", "suse", "-t", "prod-token")
+	helper.Env = append(os.Environ(), "GO_WANT_SERVER_CREATE_HELPER=1", "HOME="+home, "USERPROFILE="+home)
+	var stderr bytes.Buffer
+	helper.Stderr = &stderr
+
+	err = helper.Run()
+
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
+	assert.Equal(t, int32(0), requests.Load())
 }

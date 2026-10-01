@@ -61,13 +61,14 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
+		method := resolveMethod(cmd)
+		platform := resolvePlatform(cmd, method)
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		method := resolveMethod(cmd)
-		platform := resolvePlatform(cmd, method)
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
