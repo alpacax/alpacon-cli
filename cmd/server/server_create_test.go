@@ -189,40 +189,27 @@ func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
 	assert.Equal(t, "suse", got)
 }
 
-func TestCheckPlatform(t *testing.T) {
+func TestPlatformRefusal(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
 		method   string
 		platform string
-		wantErr  string
+		want     string
 	}{
 		{name: "token-install accepts suse", method: "token-install", platform: "suse"},
 		{name: "token-install accepts debian", method: "token-install", platform: "debian"},
 		{name: "ansible accepts rhel", method: "ansible", platform: "rhel"},
-		{name: "ansible rejects suse", method: "ansible", platform: "suse", wantErr: `"suse" is not supported with the ansible method (valid values: debian, rhel, darwin, windows)`},
-		{name: "token-install rejects an unknown platform", method: "token-install", platform: "arch", wantErr: `"arch" is not a platform (valid values: debian, rhel, suse, darwin, windows)`},
-		{name: "ansible rejects an empty platform", method: "ansible", platform: "", wantErr: `"" is not a platform (valid values: debian, rhel, darwin, windows)`},
+		{name: "ansible rejects suse", method: "ansible", platform: "suse", want: `Platform "suse" is not supported with the ansible method. Valid values: debian, rhel, darwin, windows.`},
+		{name: "token-install rejects an unknown platform", method: "token-install", platform: "arch", want: `Invalid platform "arch". Valid values: debian, rhel, suse, darwin, windows.`},
+		{name: "ansible rejects an empty platform", method: "ansible", platform: "", want: `Invalid platform "". Valid values: debian, rhel, darwin, windows.`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := checkPlatform(tt.method, tt.platform)
-			if tt.wantErr == "" {
-				assert.NoError(t, err)
-				return
-			}
-			assert.EqualError(t, err, tt.wantErr)
+			assert.Equal(t, tt.want, platformRefusal(tt.method, tt.platform))
 		})
 	}
-}
-
-func TestPlatformsForMethod_DoesNotMutateValidPlatforms(t *testing.T) {
-	t.Parallel()
-	_ = platformsForMethod("ansible")
-
-	assert.Contains(t, platformsForMethod("token-install"), "suse")
-	assert.Contains(t, validPlatforms, "suse")
 }
 
 func TestPromptPlatform(t *testing.T) {
@@ -233,16 +220,16 @@ func TestPromptPlatform(t *testing.T) {
 		inputs  []string
 		want    string
 	}{
-		{name: "accepts suse for token-install", allowed: platformsForMethod("token-install"), inputs: []string{"suse"}, want: "suse"},
-		{name: "normalizes case and spaces", allowed: platformsForMethod("token-install"), inputs: []string{"  SUSE "}, want: "suse"},
-		{name: "asks again after suse is refused for ansible", allowed: platformsForMethod("ansible"), inputs: []string{"suse", "rhel"}, want: "rhel"},
+		{name: "accepts suse for token-install", allowed: validPlatforms, inputs: []string{"suse"}, want: "suse"},
+		{name: "normalizes case and spaces", allowed: validPlatforms, inputs: []string{"  SUSE "}, want: "suse"},
+		{name: "asks again after suse is refused for ansible", allowed: ansiblePlatforms, inputs: []string{"suse", "rhel"}, want: "rhel"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var prompts []string
 			i := 0
-			got := promptPlatform(tt.allowed, func(p string) string {
+			got := promptPlatform(tt.allowed, strings.Join(tt.allowed, ", "), func(p string) string {
 				prompts = append(prompts, p)
 				in := tt.inputs[i]
 				i++
@@ -307,5 +294,5 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 	require.ErrorAs(t, err, &exitErr)
 	assert.Equal(t, 1, exitErr.ExitCode())
 	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
-	assert.Equal(t, int32(0), requests.Load())
+	assert.Zero(t, requests.Load())
 }

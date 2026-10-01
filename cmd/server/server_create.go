@@ -28,8 +28,11 @@ var (
 var (
 	validPlatforms     = []string{"debian", "rhel", "suse", "darwin", "windows"}
 	validPlatformsList = strings.Join(validPlatforms, ", ")
-	validMethods       = []string{"token-install", "ansible"}
-	validMethodsList   = strings.Join(validMethods, ", ")
+	// The server's ansible method does not support suse.
+	ansiblePlatforms     = slices.DeleteFunc(slices.Clone(validPlatforms), func(p string) bool { return p == "suse" })
+	ansiblePlatformsList = strings.Join(ansiblePlatforms, ", ")
+	validMethods         = []string{"token-install", "ansible"}
+	validMethodsList     = strings.Join(validMethods, ", ")
 )
 
 var serverCreateCmd = &cobra.Command{
@@ -120,8 +123,8 @@ func init() {
 // resolveMethod returns the registration method from --method flag or interactively.
 func resolveMethod(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("method") {
-		if !slices.Contains(validMethods, createMethod) {
-			utils.CliErrorWithExit("Invalid method %q. Valid values: %s.", createMethod, validMethodsList)
+		if refusal := methodRefusal(createMethod); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
 		}
 		return createMethod
 	}
@@ -135,31 +138,38 @@ func resolveMethod(cmd *cobra.Command) string {
 // resolvePlatform returns the platform value from --platform flag or interactively.
 func resolvePlatform(cmd *cobra.Command, method string) string {
 	if cmd.Flags().Changed("platform") {
-		if err := checkPlatform(method, createPlatform); err != nil {
-			utils.CliErrorWithExit("Invalid --platform value: %s.", err)
+		if refusal := platformRefusal(method, createPlatform); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
 		}
 		return createPlatform
 	}
 	return selectPlatform(method)
 }
 
-func checkPlatform(method, platform string) error {
-	allowed := platformsForMethod(method)
-	if slices.Contains(allowed, platform) {
-		return nil
+func methodRefusal(method string) string {
+	if slices.Contains(validMethods, method) {
+		return ""
 	}
-	if slices.Contains(validPlatforms, platform) {
-		return fmt.Errorf("%q is not supported with the %s method (valid values: %s)", platform, method, strings.Join(allowed, ", "))
-	}
-	return fmt.Errorf("%q is not a platform (valid values: %s)", platform, strings.Join(allowed, ", "))
+	return fmt.Sprintf("Invalid method %q. Valid values: %s.", method, validMethodsList)
 }
 
-// platformsForMethod leaves suse out for ansible, which the server does not support.
-func platformsForMethod(method string) []string {
-	if method != "ansible" {
-		return validPlatforms
+func platformRefusal(method, platform string) string {
+	allowed, list := platformsForMethod(method)
+	switch {
+	case slices.Contains(allowed, platform):
+		return ""
+	case slices.Contains(validPlatforms, platform):
+		return fmt.Sprintf("Platform %q is not supported with the %s method. Valid values: %s.", platform, method, list)
+	default:
+		return fmt.Sprintf("Invalid platform %q. Valid values: %s.", platform, list)
 	}
-	return slices.DeleteFunc(slices.Clone(validPlatforms), func(p string) bool { return p == "suse" })
+}
+
+func platformsForMethod(method string) ([]string, string) {
+	if method == "ansible" {
+		return ansiblePlatforms, ansiblePlatformsList
+	}
+	return validPlatforms, validPlatformsList
 }
 
 // resolveName returns the server name from --name flag or interactively.
@@ -215,16 +225,14 @@ func selectMethod() string {
 }
 
 func selectPlatform(method string) string {
-	allowed := platformsForMethod(method)
-	list := strings.Join(allowed, ", ")
+	allowed, list := platformsForMethod(method)
 	if !utils.IsInteractiveShell() {
 		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
-	return promptPlatform(allowed, utils.PromptForInput)
+	return promptPlatform(allowed, list, utils.PromptForInput)
 }
 
-func promptPlatform(allowed []string, prompt func(string) string) string {
-	list := strings.Join(allowed, ", ")
+func promptPlatform(allowed []string, list string, prompt func(string) string) string {
 	for {
 		platform := strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("Platform (%s): ", list))))
 		if slices.Contains(allowed, platform) {
