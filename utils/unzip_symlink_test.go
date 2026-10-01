@@ -212,14 +212,18 @@ func TestResolveZipPath_RejectsNameOutsideDestination(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = root.Close() })
 	sep := string(os.PathSeparator)
-	for _, tc := range []struct{ name, entry, wantErr string }{
+	cases := []struct{ name, entry, wantErr string }{
 		{"absolute", filepath.Join(dest, "file"), "zip path is not relative"},
 		{"leading separator", sep + "file", "zip path is not relative"},
 		{"leading slash", "/file", "zip path is not relative"},
 		{"parent only", "..", "zip path escapes destination"},
 		{"parent prefix", ".." + sep + "file", "zip path escapes destination"},
 		{"parent after component", "a" + sep + ".." + sep + ".." + sep + "file", "zip path traverses a missing directory"},
-	} {
+	}
+	if vol := filepath.VolumeName(dest); vol != "" {
+		cases = append(cases, struct{ name, entry, wantErr string }{"volume relative", vol + "file", "zip path is not relative"})
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got, err := resolveZipPath(root, newZipRoots(dest), tc.entry)
