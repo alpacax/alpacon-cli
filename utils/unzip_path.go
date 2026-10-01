@@ -112,6 +112,7 @@ func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error)
 	return filepath.Join(resolved...), nil
 }
 
+// zipPathRooted also counts C:file, which is not absolute but resolves against drive C's current directory.
 func zipPathRooted(p string) bool {
 	return filepath.VolumeName(p) != "" || p != "" && os.IsPathSeparator(p[0])
 }
