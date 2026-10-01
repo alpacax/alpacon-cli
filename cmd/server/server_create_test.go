@@ -7,7 +7,9 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrintTokenChoices_StripsControlSequences(t *testing.T) {
@@ -164,4 +166,82 @@ func TestDisplayGuideFromJSON_StaysQuietOnACleanGuide(t *testing.T) {
 	assert.NotContains(t, got, "Warning")
 	assert.Contains(t, got, "curl -fsSL https://demo.alpacon.io/i.sh | sudo bash\n")
 	assert.Contains(t, got, "alpamon register --token abc\n")
+}
+
+func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
+	prev := createPlatform
+	t.Cleanup(func() { createPlatform = prev })
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
+	require.NoError(t, cmd.Flags().Parse([]string{"--platform", "suse"}))
+
+	got := resolvePlatform(cmd, "token-install")
+
+	assert.Equal(t, "suse", got)
+}
+
+func TestCheckPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		method   string
+		platform string
+		wantErr  string
+	}{
+		{name: "token-install accepts suse", method: "token-install", platform: "suse"},
+		{name: "token-install accepts debian", method: "token-install", platform: "debian"},
+		{name: "ansible accepts rhel", method: "ansible", platform: "rhel"},
+		{name: "ansible rejects suse", method: "ansible", platform: "suse", wantErr: `"suse" is not supported with the ansible method (valid values: debian, rhel, darwin, windows)`},
+		{name: "token-install rejects an unknown platform", method: "token-install", platform: "arch", wantErr: `"arch" is not a platform (valid values: debian, rhel, suse, darwin, windows)`},
+		{name: "ansible rejects an empty platform", method: "ansible", platform: "", wantErr: `"" is not a platform (valid values: debian, rhel, darwin, windows)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkPlatform(tt.method, tt.platform)
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestPlatformsForMethod_DoesNotMutateValidPlatforms(t *testing.T) {
+	t.Parallel()
+	_ = platformsForMethod("ansible")
+
+	assert.Contains(t, platformsForMethod("token-install"), "suse")
+	assert.Contains(t, validPlatforms, "suse")
+}
+
+func TestPromptPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		allowed []string
+		inputs  []string
+		want    string
+	}{
+		{name: "accepts suse for token-install", allowed: platformsForMethod("token-install"), inputs: []string{"suse"}, want: "suse"},
+		{name: "normalizes case and spaces", allowed: platformsForMethod("token-install"), inputs: []string{"  SUSE "}, want: "suse"},
+		{name: "asks again after suse is refused for ansible", allowed: platformsForMethod("ansible"), inputs: []string{"suse", "rhel"}, want: "rhel"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var prompts []string
+			i := 0
+			got := promptPlatform(tt.allowed, func(p string) string {
+				prompts = append(prompts, p)
+				in := tt.inputs[i]
+				i++
+				return in
+			})
+
+			assert.Equal(t, tt.want, got)
+			assert.Len(t, prompts, len(tt.inputs))
+		})
+	}
 }

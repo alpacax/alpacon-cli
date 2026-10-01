@@ -26,7 +26,7 @@ var (
 )
 
 var (
-	validPlatforms     = []string{"debian", "rhel", "darwin", "windows"}
+	validPlatforms     = []string{"debian", "rhel", "suse", "darwin", "windows"}
 	validPlatformsList = strings.Join(validPlatforms, ", ")
 	validMethods       = []string{"token-install", "ansible"}
 	validMethodsList   = strings.Join(validMethods, ", ")
@@ -46,7 +46,8 @@ var serverCreateCmd = &cobra.Command{
 	ansible: the guide produces an ansible-playbook command using the alpacax.alpacon
 	collection so you can register one or many servers from a control node.
 
-	Supported platforms: debian, rhel, darwin, windows.
+	Supported platforms: debian, rhel, suse (openSUSE/SLES), darwin, windows.
+	The ansible method does not support suse.
 
 	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
@@ -54,6 +55,7 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
+	alpacon server create --platform suse --token prod-token
 	alpacon server create --platform darwin --token prod-token
 	alpacon server create --method ansible --platform debian --token prod-token
 	alpacon server create -m ansible -p windows -t prod-token --json
@@ -65,7 +67,7 @@ var serverCreateCmd = &cobra.Command{
 		}
 
 		method := resolveMethod(cmd)
-		platform := resolvePlatform(cmd)
+		platform := resolvePlatform(cmd, method)
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
@@ -106,7 +108,7 @@ func writeJSONGuide(v any) {
 
 func init() {
 	serverCreateCmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
-	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s", validPlatformsList))
+	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
 	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
@@ -130,14 +132,33 @@ func resolveMethod(cmd *cobra.Command) string {
 }
 
 // resolvePlatform returns the platform value from --platform flag or interactively.
-func resolvePlatform(cmd *cobra.Command) string {
+func resolvePlatform(cmd *cobra.Command, method string) string {
 	if cmd.Flags().Changed("platform") {
-		if !slices.Contains(validPlatforms, createPlatform) {
-			utils.CliErrorWithExit("Invalid platform %q. Valid values: %s.", createPlatform, validPlatformsList)
+		if err := checkPlatform(method, createPlatform); err != nil {
+			utils.CliErrorWithExit("Invalid --platform value: %s.", err)
 		}
 		return createPlatform
 	}
-	return selectPlatform()
+	return selectPlatform(method)
+}
+
+func checkPlatform(method, platform string) error {
+	allowed := platformsForMethod(method)
+	if slices.Contains(allowed, platform) {
+		return nil
+	}
+	if slices.Contains(validPlatforms, platform) {
+		return fmt.Errorf("%q is not supported with the %s method (valid values: %s)", platform, method, strings.Join(allowed, ", "))
+	}
+	return fmt.Errorf("%q is not a platform (valid values: %s)", platform, strings.Join(allowed, ", "))
+}
+
+// platformsForMethod leaves suse out for ansible, which the server does not support.
+func platformsForMethod(method string) []string {
+	if method != "ansible" {
+		return validPlatforms
+	}
+	return slices.DeleteFunc(slices.Clone(validPlatforms), func(p string) bool { return p == "suse" })
 }
 
 // resolveName returns the server name from --name flag or interactively.
@@ -192,16 +213,23 @@ func selectMethod() string {
 	}
 }
 
-func selectPlatform() string {
+func selectPlatform(method string) string {
+	allowed := platformsForMethod(method)
+	list := strings.Join(allowed, ", ")
 	if !utils.IsInteractiveShell() {
-		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", validPlatformsList)
+		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
+	return promptPlatform(allowed, utils.PromptForInput)
+}
+
+func promptPlatform(allowed []string, prompt func(string) string) string {
+	list := strings.Join(allowed, ", ")
 	for {
-		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput(fmt.Sprintf("Platform (%s): ", validPlatformsList))))
-		if slices.Contains(validPlatforms, platform) {
+		platform := strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("Platform (%s): ", list))))
+		if slices.Contains(allowed, platform) {
 			return platform
 		}
-		utils.CliWarning("Invalid platform. Valid values: %s.", validPlatformsList)
+		utils.CliWarning("Invalid platform. Valid values: %s.", list)
 	}
 }
 

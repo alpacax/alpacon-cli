@@ -210,7 +210,7 @@ Use `-f key=value` for strings, `-F key=value` for booleans, 64-bit integers, `n
 $ alpacon server ls
 $ alpacon server describe <server>
 $ alpacon server create                          # interactive: prompts for name,
-                                                 # platform (debian/rhel/darwin/windows),
+                                                 # platform (debian/rhel/suse (openSUSE/SLES)/darwin/windows),
                                                  # and authorized groups
 $ alpacon server rm <server>
 ```
