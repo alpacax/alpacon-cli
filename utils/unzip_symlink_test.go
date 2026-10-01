@@ -205,6 +205,34 @@ func TestUnzip_RejectsParentAfterNonDirectory(t *testing.T) {
 	}
 }
 
+func TestResolveZipPath_RejectsNonRelativeName(t *testing.T) {
+	t.Parallel()
+	dest := t.TempDir()
+	root, err := os.OpenRoot(dest)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = root.Close() })
+	sep := string(os.PathSeparator)
+	cases := []struct{ name, entry, wantErr string }{
+		{"absolute", filepath.Join(dest, "file"), "zip path is not relative"},
+		{"leading separator", sep + "file", "zip path is not relative"},
+		{"leading slash", "/file", "zip path is not relative"},
+		{"parent only", "..", "zip path escapes destination"},
+		{"parent prefix", ".." + sep + "file", "zip path escapes destination"},
+		{"parent after component", "a" + sep + ".." + sep + ".." + sep + "file", "zip path traverses a missing directory"},
+	}
+	if vol := filepath.VolumeName(dest); vol != "" {
+		cases = append(cases, struct{ name, entry, wantErr string }{"volume relative", vol + "file", "zip path is not relative"})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveZipPath(root, newZipRoots(dest), tc.entry)
+			require.ErrorContains(t, err, tc.wantErr)
+			assert.Empty(t, got)
+		})
+	}
+}
+
 func makeUnzipSymlink(t *testing.T, target, link string) {
 	t.Helper()
 	err := os.Symlink(target, link)

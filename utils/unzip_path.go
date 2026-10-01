@@ -40,6 +40,9 @@ func newZipRoots(names ...string) []zipRoot {
 // the user chose and may already have populated, and because an archive naming
 // "link" asks for what "link" points at.
 func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error) {
+	if zipPathRooted(name) {
+		return "", fmt.Errorf("zip path is not relative: %s", name)
+	}
 	pending := strings.Split(name, string(os.PathSeparator))
 	var resolved []string
 	missing := false
@@ -97,7 +100,7 @@ func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error)
 			}
 			resolved = nil
 			missing = false
-		} else if filepath.VolumeName(target) != "" || strings.HasPrefix(target, string(os.PathSeparator)) {
+		} else if zipPathRooted(target) {
 			return "", fmt.Errorf("zip symlink escapes destination: %s", candidate)
 		}
 		// Expand links before consuming '..'; cleaning first can select a different file.
@@ -107,6 +110,11 @@ func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error)
 		return ".", nil
 	}
 	return filepath.Join(resolved...), nil
+}
+
+// zipPathRooted also counts C:file, which is not absolute but resolves against drive C's current directory.
+func zipPathRooted(p string) bool {
+	return filepath.VolumeName(p) != "" || p != "" && os.IsPathSeparator(p[0])
 }
 
 func zipRelativeTarget(roots []zipRoot, target string) (string, error) {
