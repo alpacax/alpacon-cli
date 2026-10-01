@@ -2,12 +2,23 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPrintTokenChoices_StripsControlSequences(t *testing.T) {
@@ -164,4 +175,154 @@ func TestDisplayGuideFromJSON_StaysQuietOnACleanGuide(t *testing.T) {
 	assert.NotContains(t, got, "Warning")
 	assert.Contains(t, got, "curl -fsSL https://demo.alpacon.io/i.sh | sudo bash\n")
 	assert.Contains(t, got, "alpamon register --token abc\n")
+}
+
+func TestResolvePlatform_AcceptsSuseFromFlag(t *testing.T) {
+	prev := createPlatform
+	t.Cleanup(func() { createPlatform = prev })
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().StringVarP(&createPlatform, "platform", "p", "", "")
+	require.NoError(t, cmd.Flags().Parse([]string{"--platform", "suse"}))
+
+	got := resolvePlatform(cmd, "token-install")
+
+	assert.Equal(t, "suse", got)
+}
+
+func TestPlatformRefusal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		method   string
+		platform string
+		want     string
+	}{
+		{name: "token-install accepts suse", method: "token-install", platform: "suse"},
+		{name: "token-install accepts debian", method: "token-install", platform: "debian"},
+		{name: "ansible accepts rhel", method: "ansible", platform: "rhel"},
+		{name: "ansible rejects suse", method: "ansible", platform: "suse", want: `Platform "suse" is not supported with the ansible method. Valid values: debian, rhel, darwin, windows.`},
+		{name: "token-install rejects an unknown platform", method: "token-install", platform: "arch", want: `Invalid platform "arch". Valid values: debian, rhel, suse, darwin, windows.`},
+		{name: "ansible rejects an empty platform", method: "ansible", platform: "", want: `Invalid platform "". Valid values: debian, rhel, darwin, windows.`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, platformRefusal(tt.method, tt.platform))
+		})
+	}
+}
+
+func TestFlagRefusal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		args        []string
+		interactive bool
+		want        string
+	}{
+		{name: "interactive with no flags leaves both choices to the prompts", interactive: true},
+		{name: "interactive suse waits for the method prompt", args: []string{"-p", "suse"}, interactive: true},
+		{name: "interactive unknown platform is refused", args: []string{"-p", "arch"}, interactive: true, want: `Invalid platform "arch". Valid values: debian, rhel, suse, darwin, windows.`},
+		{name: "ansible with suse is refused", args: []string{"-m", "ansible", "-p", "suse"}, interactive: true, want: `Platform "suse" is not supported with the ansible method. Valid values: debian, rhel, darwin, windows.`},
+		{name: "non-interactive suse defaults to token-install", args: []string{"-p", "suse"}},
+		{name: "unknown method is refused", args: []string{"-m", "puppet"}, want: `Invalid method "puppet". Valid values: token-install, ansible.`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := &cobra.Command{Use: "create"}
+			cmd.Flags().StringP("method", "m", "token-install", "")
+			cmd.Flags().StringP("platform", "p", "", "")
+			require.NoError(t, cmd.Flags().Parse(tt.args))
+
+			got := flagRefusal(cmd, tt.interactive)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPromptPlatform(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		allowed []string
+		inputs  []string
+		want    string
+	}{
+		{name: "accepts suse for token-install", allowed: validPlatforms, inputs: []string{"suse"}, want: "suse"},
+		{name: "normalizes case and spaces", allowed: validPlatforms, inputs: []string{"  SUSE "}, want: "suse"},
+		{name: "asks again after suse is refused for ansible", allowed: ansiblePlatforms, inputs: []string{"suse", "rhel"}, want: "rhel"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var prompts []string
+			i := 0
+			got := promptPlatform(tt.allowed, strings.Join(tt.allowed, ", "), func(p string) string {
+				prompts = append(prompts, p)
+				in := tt.inputs[i]
+				i++
+				return in
+			})
+
+			assert.Equal(t, tt.want, got)
+			assert.Len(t, prompts, len(tt.inputs))
+		})
+	}
+}
+
+const serverCreateHelperMarker = "--server-create-helper--"
+
+func TestServerCreateHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_SERVER_CREATE_HELPER") != "1" {
+		return
+	}
+	i := slices.Index(os.Args, serverCreateHelperMarker)
+	if i < 0 {
+		t.Fatal("missing " + serverCreateHelperMarker + " marker")
+	}
+	if err := serverCreateCmd.ParseFlags(os.Args[i+1:]); err != nil {
+		t.Fatal(err)
+	}
+	serverCreateCmd.Run(serverCreateCmd, nil)
+}
+
+// An expired access token makes NewAlpaconAPIClient refresh over the network,
+// so a pair the CLI can reject on its own must be rejected before that.
+func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	home := t.TempDir()
+	cfgDir := filepath.Join(home, ".alpacon")
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	cfg, err := json.Marshal(map[string]any{
+		"workspace_url":           ts.URL,
+		"workspace_name":          "test",
+		"access_token":            "access-token",
+		"refresh_token":           "refresh-token",
+		"access_token_expires_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.json"), cfg, 0600))
+
+	helper := osexec.Command(os.Args[0], "-test.run=^TestServerCreateHelperProcess$", "--",
+		serverCreateHelperMarker, "-m", "ansible", "-p", "suse", "-t", "prod-token")
+	helper.Env = append(os.Environ(), "GO_WANT_SERVER_CREATE_HELPER=1", "HOME="+home, "USERPROFILE="+home)
+	var stderr bytes.Buffer
+	helper.Stderr = &stderr
+
+	err = helper.Run()
+
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, 1, exitErr.ExitCode())
+	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
+	assert.Zero(t, requests.Load())
 }

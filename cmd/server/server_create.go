@@ -26,10 +26,13 @@ var (
 )
 
 var (
-	validPlatforms     = []string{"debian", "rhel", "darwin", "windows"}
+	validPlatforms     = []string{"debian", "rhel", "suse", "darwin", "windows"}
 	validPlatformsList = strings.Join(validPlatforms, ", ")
-	validMethods       = []string{"token-install", "ansible"}
-	validMethodsList   = strings.Join(validMethods, ", ")
+	// The server's ansible method does not support suse.
+	ansiblePlatforms     = slices.DeleteFunc(slices.Clone(validPlatforms), func(p string) bool { return p == "suse" })
+	ansiblePlatformsList = strings.Join(ansiblePlatforms, ", ")
+	validMethods         = []string{"token-install", "ansible"}
+	validMethodsList     = strings.Join(validMethods, ", ")
 )
 
 var serverCreateCmd = &cobra.Command{
@@ -46,7 +49,8 @@ var serverCreateCmd = &cobra.Command{
 	ansible: the guide produces an ansible-playbook command using the alpacax.alpacon
 	collection so you can register one or many servers from a control node.
 
-	Supported platforms: debian, rhel, darwin, windows.
+	Supported platforms: debian, rhel, suse (openSUSE/SLES), darwin, windows.
+	The ansible method does not support suse.
 
 	When --platform and either --token or --new-token are provided, the command runs non-interactively.
 	`,
@@ -54,18 +58,23 @@ var serverCreateCmd = &cobra.Command{
 	alpacon server create
 	alpacon server create --platform debian --token prod-token
 	alpacon server create --platform rhel --token prod-token --name my-server
+	alpacon server create --platform suse --token prod-token
 	alpacon server create --platform darwin --token prod-token
 	alpacon server create --method ansible --platform debian --token prod-token
 	alpacon server create -m ansible -p windows -t prod-token --json
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
+		}
+
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
 		method := resolveMethod(cmd)
-		platform := resolvePlatform(cmd)
+		platform := resolvePlatform(cmd, method)
 		serverName := resolveName(cmd)
 		tokenID := resolveTokenID(cmd, alpaconClient)
 
@@ -106,7 +115,7 @@ func writeJSONGuide(v any) {
 
 func init() {
 	serverCreateCmd.Flags().StringVarP(&createMethod, "method", "m", "token-install", fmt.Sprintf("registration method: %s", validMethodsList))
-	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s", validPlatformsList))
+	serverCreateCmd.Flags().StringVarP(&createPlatform, "platform", "p", "", fmt.Sprintf("target OS platform: %s (suse is not supported with --method ansible)", validPlatformsList))
 	serverCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "server name (optional; hostname used if not set)")
 	serverCreateCmd.Flags().StringVarP(&createTokenName, "token", "t", "", "existing registration token name")
 	serverCreateCmd.Flags().StringVar(&createNewTokenName, "new-token", "", "create a new registration token with this name")
@@ -117,8 +126,8 @@ func init() {
 // resolveMethod returns the registration method from --method flag or interactively.
 func resolveMethod(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("method") {
-		if !slices.Contains(validMethods, createMethod) {
-			utils.CliErrorWithExit("Invalid method %q. Valid values: %s.", createMethod, validMethodsList)
+		if refusal := methodRefusal(createMethod); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
 		}
 		return createMethod
 	}
@@ -130,14 +139,59 @@ func resolveMethod(cmd *cobra.Command) string {
 }
 
 // resolvePlatform returns the platform value from --platform flag or interactively.
-func resolvePlatform(cmd *cobra.Command) string {
+func resolvePlatform(cmd *cobra.Command, method string) string {
 	if cmd.Flags().Changed("platform") {
-		if !slices.Contains(validPlatforms, createPlatform) {
-			utils.CliErrorWithExit("Invalid platform %q. Valid values: %s.", createPlatform, validPlatformsList)
+		if refusal := platformRefusal(method, createPlatform); refusal != "" {
+			utils.CliErrorWithExit("%s", refusal)
 		}
 		return createPlatform
 	}
-	return selectPlatform()
+	return selectPlatform(method)
+}
+
+// flagRefusal checks --method and --platform without prompting, so a bad value is refused
+// before NewAlpaconAPIClient, which may refresh an expired token over the network.
+func flagRefusal(cmd *cobra.Command, interactive bool) string {
+	method := ""
+	if cmd.Flags().Changed("method") {
+		method, _ = cmd.Flags().GetString("method")
+		if refusal := methodRefusal(method); refusal != "" {
+			return refusal
+		}
+	} else if !interactive {
+		method = "token-install"
+	}
+	if !cmd.Flags().Changed("platform") {
+		return ""
+	}
+	platform, _ := cmd.Flags().GetString("platform")
+	return platformRefusal(method, platform)
+}
+
+func methodRefusal(method string) string {
+	if slices.Contains(validMethods, method) {
+		return ""
+	}
+	return fmt.Sprintf("Invalid method %q. Valid values: %s.", method, validMethodsList)
+}
+
+func platformRefusal(method, platform string) string {
+	allowed, list := platformsForMethod(method)
+	switch {
+	case slices.Contains(allowed, platform):
+		return ""
+	case slices.Contains(validPlatforms, platform):
+		return fmt.Sprintf("Platform %q is not supported with the %s method. Valid values: %s.", platform, method, list)
+	default:
+		return fmt.Sprintf("Invalid platform %q. Valid values: %s.", platform, list)
+	}
+}
+
+func platformsForMethod(method string) ([]string, string) {
+	if method == "ansible" {
+		return ansiblePlatforms, ansiblePlatformsList
+	}
+	return validPlatforms, validPlatformsList
 }
 
 // resolveName returns the server name from --name flag or interactively.
@@ -192,16 +246,21 @@ func selectMethod() string {
 	}
 }
 
-func selectPlatform() string {
+func selectPlatform(method string) string {
+	allowed, list := platformsForMethod(method)
 	if !utils.IsInteractiveShell() {
-		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", validPlatformsList)
+		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
+	return promptPlatform(allowed, list, utils.PromptForInput)
+}
+
+func promptPlatform(allowed []string, list string, prompt func(string) string) string {
 	for {
-		platform := strings.ToLower(strings.TrimSpace(utils.PromptForInput(fmt.Sprintf("Platform (%s): ", validPlatformsList))))
-		if slices.Contains(validPlatforms, platform) {
+		platform := strings.ToLower(strings.TrimSpace(prompt(fmt.Sprintf("Platform (%s): ", list))))
+		if slices.Contains(allowed, platform) {
 			return platform
 		}
-		utils.CliWarning("Invalid platform. Valid values: %s.", validPlatformsList)
+		utils.CliWarning("Invalid platform. Valid values: %s.", list)
 	}
 }
 
