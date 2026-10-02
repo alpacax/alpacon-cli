@@ -1489,9 +1489,8 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
-// A 503 auth_verification_unavailable means the server could not check the
-// credential, not that it refused it: renewing a token the server never judged
-// would only add an Auth0 round trip to an outage.
+// The server could not check the credential, so renewing a token it never
+// judged would only add an Auth0 round trip to an outage.
 func TestSendRequest_AuthVerificationUnavailableExplainsRetryWithoutRenewal(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
