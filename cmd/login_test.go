@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -895,4 +897,31 @@ func TestPrintDeviceCodePrompt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPersistKubernetesSurface(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
+
+	persistKubernetesSurface(&auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.KubernetesSurface)
+	assert.Equal(t, "token", cfg.Token)
+
+	// A server that stops reporting the surface turns it back off.
+	persistKubernetesSurface(&auth0.AuthEnvResponse{})
+	cfg, err = config.LoadConfig()
+	require.NoError(t, err)
+	assert.False(t, cfg.KubernetesSurface)
+}
+
+func TestPersistKubernetesSurface_WarnsWithoutConfig(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		persistKubernetesSurface(&auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	})
+
+	assert.Contains(t, stderr, "Could not save whether this workspace supports Kubernetes")
 }

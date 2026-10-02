@@ -1,5 +1,7 @@
 package auth0
 
+import "encoding/json"
+
 type DeviceCodeResponse struct {
 	DeviceCode              string `json:"device_code"`
 	UserCode                string `json:"user_code"`
@@ -35,4 +37,24 @@ type Auth0Config struct {
 type AuthEnvResponse struct {
 	Auth0    Auth0Config `json:"auth0"`
 	Language string      `json:"language"`
+	Surfaces Surfaces    `json:"surfaces"`
+}
+
+// Surfaces lists the optional product surfaces the server says this workspace
+// exposes. A server that predates the key leaves every surface false.
+type Surfaces struct {
+	Kubernetes bool
+}
+
+// UnmarshalJSON never fails. The same response feeds login, token refresh,
+// revoke and logout, so a malformed surfaces value must not take those down;
+// anything that is not a JSON object carrying a boolean reads as false.
+func (s *Surfaces) UnmarshalJSON(data []byte) error {
+	*s = Surfaces{}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	s.Kubernetes, _ = raw["kubernetes"].(bool)
+	return nil
 }
