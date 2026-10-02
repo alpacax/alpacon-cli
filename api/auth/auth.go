@@ -25,7 +25,7 @@ const (
 	statusURL      = "/api/status/"
 	whoamiURL      = "/api/auth/whoami/"
 
-	// Only the error code is read, so a stalled or oversized body cannot hang the login.
+	// Only the error code is read, so an oversized error body is cut off here.
 	maxErrorBody = 64 << 10
 )
 
