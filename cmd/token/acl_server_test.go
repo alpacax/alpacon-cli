@@ -119,7 +119,7 @@ func TestResolveServerIDsStopsLaunchingLookupsAfterAFailure(t *testing.T) {
 	assert.Equal(t, int32(maxConcurrentServerLookups), requested.Load())
 }
 
-// Serial for the same reason: concurrency is measured by overlapping handler windows.
+// Serial: concurrency is measured by overlapping handler windows.
 func TestResolveServerIDsBoundsConcurrentRequests(t *testing.T) {
 	var inFlight, maxInFlight atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
