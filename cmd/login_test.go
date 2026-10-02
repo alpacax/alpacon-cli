@@ -731,34 +731,29 @@ func TestValidateCloudFlags(t *testing.T) {
 	}
 }
 
-type stubStatusErr struct{ code int }
+type stubStatusErr struct {
+	status int
+	code   string
+}
 
 func (e stubStatusErr) Error() string       { return "stub" }
-func (e stubStatusErr) HTTPStatusCode() int { return e.code }
+func (e stubStatusErr) HTTPStatusCode() int { return e.status }
+func (e stubStatusErr) ErrorCode() string   { return e.code }
+func (e stubStatusErr) ErrorSource() string { return "" }
 
 func TestClassifyWhoamiVerification(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, whoamiVerified, classifyWhoamiVerification(nil))
-	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{code: http.StatusNotFound}))
+	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{status: http.StatusNotFound}))
 	// 401 must fail, never fall back, so an invalid token cannot slip through.
-	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{code: http.StatusUnauthorized}))
+	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{status: http.StatusUnauthorized}))
 	assert.Equal(t, whoamiFail, classifyWhoamiVerification(errors.New("network down")))
 }
 
-type stubCodedStatusErr struct {
-	code int
-	api  string
-}
-
-func (e stubCodedStatusErr) Error() string       { return "stub" }
-func (e stubCodedStatusErr) HTTPStatusCode() int { return e.code }
-func (e stubCodedStatusErr) ErrorCode() string   { return e.api }
-func (e stubCodedStatusErr) ErrorSource() string { return "" }
-
 func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 	t.Parallel()
-	outage := stubCodedStatusErr{code: http.StatusServiceUnavailable, api: utils.AuthVerificationUnavailable}
-	rejected := stubCodedStatusErr{code: http.StatusUnauthorized, api: utils.AuthAuthenticationFailed}
+	outage := stubStatusErr{status: http.StatusServiceUnavailable, code: utils.AuthVerificationUnavailable}
+	rejected := stubStatusErr{status: http.StatusUnauthorized, code: utils.AuthAuthenticationFailed}
 
 	tests := []struct {
 		name        string

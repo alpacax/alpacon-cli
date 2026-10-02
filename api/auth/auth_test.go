@@ -651,6 +651,7 @@ func TestLoginAndSaveCredentialsPasswordKeepsCodeOfRefusedLogin(t *testing.T) {
 		{"verification outage keeps its code", http.StatusServiceUnavailable, `{"code":"auth_verification_unavailable"}`, utils.AuthVerificationUnavailable},
 		{"non-JSON body leaves no code", http.StatusBadGateway, `<html>bad gateway</html>`, ""},
 		{"empty body leaves no code", http.StatusServiceUnavailable, ``, ""},
+		{"missing login endpoint keeps its status", http.StatusNotFound, `{"detail":"Not found."}`, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -671,7 +672,7 @@ func TestLoginAndSaveCredentialsPasswordKeepsCodeOfRefusedLogin(t *testing.T) {
 			code, _ := utils.ParseErrorResponse(err)
 			assert.Equal(t, tt.wantCode, code)
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
-			assert.Contains(t, err.Error(), fmt.Sprintf("response status: %d", tt.status))
+			assert.Equal(t, fmt.Sprintf("response status: %d %s", tt.status, http.StatusText(tt.status)), err.Error())
 		})
 	}
 }

@@ -155,7 +155,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
-				if strings.Contains(err.Error(), "404") {
+				if token == "" && utils.HTTPStatusCode(err) == http.StatusNotFound {
 					utils.CliErrorWithExit("Login endpoint not found. This workspace may not support username/password login")
 				}
 				utils.CliErrorWithExit("%s", loginFailureMessage(err))
@@ -483,8 +483,8 @@ func formatHostURL(host string) string {
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
 
-// The outage messages built on this omit any log-in-again hint: the server did
-// not reject the credential, so a fresh login would not change the answer.
+// isVerificationUnavailable reports whether the server could not check the
+// credential (503 auth_verification_unavailable) rather than refusing it.
 func isVerificationUnavailable(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.AuthVerificationUnavailable
