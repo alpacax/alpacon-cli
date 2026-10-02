@@ -324,6 +324,32 @@ func TestGetSessionRecords_FollowsCursor(t *testing.T) {
 	assert.Equal(t, "ls -la", records[1].Record)
 }
 
+func TestGetSessionRecords_KeepsRecordsReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
+				Next:    "TOKEN2",
+				Results: []SessionRecord{{AddedAt: "t1", Record: "docker ps"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	records, err := GetSessionRecords(ac, "sess-1", "", 50)
+
+	// The records the walk did read come back with the error, so the command can show
+	// a short list instead of nothing.
+	require.Error(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "docker ps", records[0].Record)
+}
+
 func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	t.Parallel()
 	var gotQuery string

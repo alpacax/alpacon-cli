@@ -3,6 +3,8 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	osexec "os/exec"
 	"strings"
 	"testing"
 
@@ -306,4 +308,35 @@ func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 			assert.Equal(t, tt.want, tt.action.PlainText())
 		})
 	}
+}
+
+func TestPartialTableWithExit(t *testing.T) {
+	t.Parallel()
+	var stdout, stderr bytes.Buffer
+	helper := osexec.Command(os.Args[0], "-test.run=^TestPartialTableWithExitHelperProcess$")
+	helper.Env = append(os.Environ(), "GO_WANT_PARTIAL_TABLE_HELPER=1")
+	helper.Stdout = &stdout
+	helper.Stderr = &stderr
+
+	err := helper.Run()
+
+	var exitErr *osexec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	// Non-zero is the only thing marking the list short under --output json, so it is
+	// what a script branches on.
+	assert.Equal(t, ExitCodeGeneralError, exitErr.ExitCode())
+	// The rows go to stdout and the reason to stderr, so a pipe still carries data only.
+	assert.Contains(t, stdout.String(), "alpha")
+	assert.Contains(t, stderr.String(), "read before the request failed")
+	assert.NotContains(t, stdout.String(), "read before the request failed")
+}
+
+// Serial: the child reaches an os.Exit, and the parent's own run of this function is
+// a two-line guard that parallelism buys nothing for.
+func TestPartialTableWithExitHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_PARTIAL_TABLE_HELPER") != "1" {
+		return
+	}
+	PartialTableWithExit([]outputTestItem{{Name: "alpha", ID: 1}},
+		"Showing only the %d entries read before the request failed: %s.", 1, "boom")
 }

@@ -2,14 +2,17 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -143,9 +146,197 @@ func TestFetchCursorPages_NonPositiveLimit(t *testing.T) {
 	}
 }
 
-func TestFetchCursorPages_SecondPageErrorDiscardsPartial(t *testing.T) {
-	t.Parallel()
+// servedNames is what a cursor walk yielded, in order, for comparing against the
+// pages a server handed out.
+func servedNames(items []cursorItem) []string {
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+// noRestartDelay drops the pause FetchCursorPages takes before a restart, so a test
+// of the restart itself does not pay for it. The caller must be serial—
+// cursorRestartTick is package state, and restoring it under a parallel neighbour
+// that reads it would race.
+func noRestartDelay(t *testing.T) {
+	t.Helper()
+	previous := cursorRestartTick
+	cursorRestartTick = 0
+	t.Cleanup(func() { cursorRestartTick = previous })
+}
+
+// newRestartingCursorServer serves two-page cursor walks and fails exactly one
+// request: the failPage-th request it sees, with status and code. Everything after
+// that is served normally, so a walk started again gets through.
+func newRestartingCursorServer(t *testing.T, rec *requestRecorder, failPage, status int, code string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		if rec.count() == failPage {
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"code":%q}`, code)
+			return
+		}
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN2",
+				Results: []cursorItem{{Name: "a"}},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Results: []cursorItem{{Name: "b"}}})
+	}))
+}
+
+// Serial: noRestartDelay writes package state.
+func TestFetchCursorPages_RestartsABrokenWalk(t *testing.T) {
+	noRestartDelay(t)
+	tests := []struct {
+		name        string
+		failPage    int
+		status      int
+		code        string
+		wantCursors []string
+	}{
+		{
+			name:     "an expired snapshot mid walk",
+			failPage: 2,
+			status:   http.StatusBadRequest,
+			code:     utils.APICursorExpired,
+			// The restarted walk sends no cursor on its own first request.
+			wantCursors: []string{"", "TOKEN2", "", "TOKEN2"},
+		},
+		{
+			name:        "a cursor the server will not take",
+			failPage:    2,
+			status:      http.StatusBadRequest,
+			code:        utils.APIInvalidCursor,
+			wantCursors: []string{"", "TOKEN2", "", "TOKEN2"},
+		},
+		{
+			// A refused point-in-time open can only land on a cursor-less request,
+			// which is the one page a restart repeats rather than resumes.
+			name:        "a search the cluster would not start",
+			failPage:    1,
+			status:      http.StatusServiceUnavailable,
+			code:        utils.APISearchUnavailable,
+			wantCursors: []string{"", "", "TOKEN2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &requestRecorder{}
+			ts := newRestartingCursorServer(t, rec, tt.failPage, tt.status, tt.code)
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+
+			require.NoError(t, err)
+			assert.Equal(t, []string{"a", "b"}, servedNames(items))
+			assert.Equal(t, tt.wantCursors, rec.queried("cursor"))
+		})
+	}
+}
+
+// Serial: noRestartDelay writes package state.
+func TestFetchCursorPages_BoundsRestarts(t *testing.T) {
+	noRestartDelay(t)
+	rec := &requestRecorder{}
+	// Every cursor-borne page loses its snapshot, so no walk ever finishes.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN2",
+				Results: []cursorItem{{Name: "a"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, `{"code":%q}`, utils.APICursorExpired)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+
+	require.Error(t, err)
+	// One walk plus cursorRestartLimit restarts, two requests each.
+	assert.Equal(t, 2*(cursorRestartLimit+1), rec.count())
+	assert.Equal(t, []string{"a"}, servedNames(items))
+}
+
+// Serial: noRestartDelay writes package state.
+func TestFetchCursorPages_KeepsTheLongestWalkAcrossRestarts(t *testing.T) {
+	noRestartDelay(t)
+	rec := &requestRecorder{}
+	// The first walk reads two pages before losing its snapshot; every walk after it
+	// loses one on its own first page, so the most any restart can offer is nothing.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		switch rec.count() {
+		case 1:
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN2",
+				Results: []cursorItem{{Name: "a"}},
+			})
+		case 2:
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
+				Next:    "TOKEN3",
+				Results: []cursorItem{{Name: "b"}},
+			})
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, `{"code":%q}`, utils.APICursorExpired)
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+
+	require.Error(t, err)
+	// The pages the first walk read, not the empty result the last restart ended on.
+	assert.Equal(t, []string{"a", "b"}, servedNames(items))
+	// Three requests for the first walk, then one dead first page per restart.
+	assert.Equal(t, 3+cursorRestartLimit, rec.count())
+}
+
+// Serial: the subject is a timing window, and noRestartDelay's seam is what it writes.
+func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
+	noRestartDelay(t)
+	const tick = 50 * time.Millisecond
+	cursorRestartTick = tick
+
+	rec := &requestRecorder{}
+	ts := newRestartingCursorServer(t, rec, 1, http.StatusServiceUnavailable, utils.APISearchUnavailable)
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	started := time.Now()
+	_, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+	elapsed := time.Since(started)
+
+	require.NoError(t, err)
+	// A cluster that just declined a reader must not be asked again in the same
+	// millisecond, so the restart waits at least one tick.
+	assert.GreaterOrEqual(t, elapsed, tick)
+}
+
+func TestFetchCursorPages_KeepsPagesReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	rec := &requestRecorder{}
+	// A 500 is not the server refusing a cursor, so the walk ends rather than restarts—
+	// and what it had already read comes back with the error instead of being dropped.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("cursor") == "" {
 			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
@@ -161,8 +352,11 @@ func TestFetchCursorPages_SecondPageErrorDiscardsPartial(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+
 	require.Error(t, err)
-	assert.Nil(t, items)
+	require.ErrorContains(t, err, "fetching cursor page from /api/history/logs/")
+	assert.Equal(t, []string{"a"}, servedNames(items))
+	assert.Equal(t, 2, rec.count())
 }
 
 func TestFetchCursorPages_MalformedJSON(t *testing.T) {

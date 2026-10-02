@@ -175,6 +175,20 @@ func PrintTable(slice any) {
 	_ = tw.Flush()
 }
 
+// PartialTableWithExit prints the rows a list walk collected before it failed and
+// exits with ExitCodeGeneralError: stderr says why the list is short, stdout carries
+// the rows, and the non-zero exit is what keeps a script from reading a truncated
+// list as the whole answer. Nothing in the body marks it—under --output json the rows
+// are a plain array like any other—so the data never goes out without the exit code.
+//
+// Reserve it for a walk that genuinely has rows; one that collected none is an
+// ordinary failure and belongs to CliErrorWithExit.
+func PartialTableWithExit(rows any, msg string, args ...any) {
+	CliWarning(msg, args...)
+	PrintTable(rows)
+	os.Exit(ExitCodeGeneralError)
+}
+
 func PrintJson(body []byte) {
 	if OutputFormat == OutputFormatJSON {
 		var buf bytes.Buffer
