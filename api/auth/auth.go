@@ -24,6 +24,9 @@ const (
 	tokenScopesURL = "/api/auth/tokens/scopes/"
 	statusURL      = "/api/status/"
 	whoamiURL      = "/api/auth/whoami/"
+
+	// Only the error code is read, so a stalled or oversized body cannot hang the login.
+	maxErrorBody = 64 << 10
 )
 
 // GetWhoami fetches the caller's identity; a 404 means the endpoint is absent (old server).
@@ -130,7 +133,7 @@ func (e *loginStatusError) ErrorSource() string { return "" }
 
 func newLoginStatusError(resp *http.Response) error {
 	e := &loginStatusError{status: resp.Status, statusCode: resp.StatusCode}
-	if body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10)); err == nil {
+	if body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody)); err == nil {
 		var parsed utils.ErrorResponse
 		if json.Unmarshal(body, &parsed) == nil {
 			e.code = parsed.Code

@@ -1492,11 +1492,11 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 // A 503 auth_verification_unavailable means the server could not check the
 // credential, not that it refused it: renewing a token the server never judged
 // would only add an Auth0 round trip to an outage.
-func TestSendRequest_AuthVerificationUnavailableIsRetryableAndNotRenewed(t *testing.T) {
+func TestSendRequest_AuthVerificationUnavailableExplainsRetryWithoutRenewal(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)

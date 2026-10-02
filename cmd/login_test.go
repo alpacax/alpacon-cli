@@ -769,7 +769,7 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 		{
 			name:        "login outage keeps the user from re-checking a credential that was not refused",
 			message:     loginFailureMessage(outage),
-			contains:    []string{"could not verify", "not rejected", "try again later"},
+			contains:    []string{"could not verify", "not rejected", "try again in a moment"},
 			notContains: []string{"verify your username", "log in again", "logging in again"},
 		},
 		{
@@ -780,7 +780,7 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 		{
 			name:        "whoami outage says the login is saved and to retry whoami",
 			message:     whoamiFailureMessage(outage),
-			contains:    []string{"saved", "alpacon whoami", "try again later"},
+			contains:    []string{"saved", "alpacon whoami", "try again in a moment"},
 			notContains: []string{"log in again", "logging in again"},
 		},
 		{
@@ -791,12 +791,12 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 		{
 			name:        "profile outage says the login is saved and to retry",
 			message:     profileFailureMessage(outage),
-			contains:    []string{"saved", "alpacon whoami", "try again later"},
+			contains:    []string{"saved", "alpacon whoami", "try again in a moment"},
 			notContains: []string{"log in again", "logging in again"},
 		},
 		{
 			name:     "profile refusal keeps the log-in-again hint",
-			message:  profileFailureMessage(errors.New("boom")),
+			message:  profileFailureMessage(rejected),
 			contains: []string{"Please try logging in again."},
 		},
 	}

@@ -483,30 +483,30 @@ func formatHostURL(host string) string {
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
 
+// The outage messages built on this omit any log-in-again hint: the server did
+// not reject the credential, so a fresh login would not change the answer.
 func isVerificationUnavailable(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.AuthVerificationUnavailable
 }
 
-// The outage messages below omit any log-in-again hint: the server did not
-// reject the credential, so a fresh login would not change the answer.
 func loginFailureMessage(err error) string {
 	if isVerificationUnavailable(err) {
-		return "Login failed: the server could not verify your credential right now. It was not rejected and nothing was saved, so try again later"
+		return "Login failed: the server could not verify your credential right now. It was not rejected and nothing was saved, so try again in a moment"
 	}
 	return fmt.Sprintf("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
 }
 
 func whoamiFailureMessage(err error) string {
 	if isVerificationUnavailable(err) {
-		return "Login succeeded and your credential is saved, but the server could not verify it right now. It was not rejected, so try again later with 'alpacon whoami'"
+		return "Login succeeded and your credential is saved, but the server could not verify it right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
 	}
 	return fmt.Sprintf("Login succeeded but failed to verify your credential: %s. Please try logging in again.", err)
 }
 
 func profileFailureMessage(err error) string {
 	if isVerificationUnavailable(err) {
-		return "Login succeeded and your credential is saved, but the server could not verify your user profile right now. It was not rejected, so try again later with 'alpacon whoami'"
+		return "Login succeeded and your credential is saved, but the server could not verify your user profile right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
 	}
 	return fmt.Sprintf("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
 }
