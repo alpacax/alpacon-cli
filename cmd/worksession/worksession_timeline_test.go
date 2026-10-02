@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -320,4 +324,82 @@ func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	_, hasRecordings := keys["recordings"]
 	assert.True(t, hasTimeline, "timeline key must be present in JSON output")
 	assert.True(t, hasRecordings, "recordings key must be present in JSON output")
+}
+
+// --no-records has to reach the request, not only the renderer: the flag exists
+// so the recording bytes are never downloaded, and include_records is the only
+// thing that stops the server sending them. The helper runs the real command in
+// a subprocess, so what is asserted is what the flag puts on the wire.
+//
+// The fake honors include_records the way the server does, so reverting the fix
+// moves both assertions: the parameter arrives as "true" and the records come
+// back with it.
+func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		args           []string
+		wantParam      string
+		wantRecordings bool
+	}{
+		{"default asks for the records", []string{"timeline", "ses-1"}, "true", true},
+		{"no-records does not", []string{"timeline", "ses-1", "--no-records"}, "false", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var (
+				mu       sync.Mutex
+				gotParam string
+			)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/api/work-sessions/sessions/ses-1/timeline/" {
+					_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","servers":[{"id":"srv-1","name":"web-01"}]}`))
+					return
+				}
+				param := r.URL.Query().Get("include_records")
+				mu.Lock()
+				gotParam = param
+				mu.Unlock()
+				// The client sends strconv.FormatBool output, so "false" is the
+				// only falsy spelling that can arrive here.
+				results := `{"type":"websh_session","id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:00Z"}`
+				if param != "false" {
+					results += `,{"type":"websh_record","session_id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:01Z","masked_record":"ls -la"}`
+				}
+				_, _ = w.Write([]byte(`{"count":2,"results":[` + results + `]}`))
+			}))
+			defer ts.Close()
+
+			stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, tc.args...)
+			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Equal(t, tc.wantParam, gotParam)
+
+			if tc.wantRecordings {
+				assert.Contains(t, stdout, "• 1 recording")
+				assert.Contains(t, stdout, "Recordings (1)")
+			} else {
+				// The badge goes with the bytes: its count rides on the recording
+				// items, so an unrequested recording cannot be counted either.
+				assert.NotContains(t, stdout, "recording")
+				assert.NotContains(t, stdout, "Recordings")
+			}
+		})
+	}
+}
+
+// The help text has to describe what the flag really does. Dropping the request
+// also drops the per-row recording count, and a help text that promised only to
+// hide the section below the timeline would overstate what survives.
+func TestNoRecordsFlagHelpDescribesTheCount(t *testing.T) {
+	// Reads a package-level Cobra command, so it stays serial.
+	flag := workSessionTimelineCmd.Flags().Lookup("no-records")
+	require.NotNil(t, flag)
+	assert.Contains(t, flag.Usage, "recording count")
 }
