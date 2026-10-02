@@ -82,7 +82,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 func init() {
 	tokenCreateCmd.Flags().StringP("name", "n", "", "A name to identify the token.")
 	tokenCreateCmd.Flags().StringSliceP("groups", "g", []string{}, "Group names or UUIDs to assign on registration (comma-separated).")
-	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime).")
+	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime; a longer one is refused).")
 }
 
 // resolveGroupIDs converts a list of group names or UUIDs to UUIDs.

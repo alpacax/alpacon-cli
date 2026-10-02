@@ -624,12 +624,12 @@ func TestResolveServerNames(t *testing.T) {
 		wantBlank     bool
 		wantRequested []string
 	}{
-		{"positions preserved", []string{"db-01", "web-01"}, []string{"id-db", "id-web"}, "", false, []string{"db-01", "web-01"}},
-		{"duplicates resolved each time", []string{"web-01", "db-01", "web-01"}, []string{"id-web", "id-db", "id-web"}, "", false, []string{"web-01", "db-01", "web-01"}},
-		{"padded name resolves", []string{"  web-01  "}, []string{"id-web"}, "", false, []string{"web-01"}},
-		{"blank entry refused before any request", []string{"   "}, nil, `server "   " not found`, true, nil},
-		{"first failure stops the rest", []string{"web-01", "ghost", "db-01"}, nil, `server "ghost" not found`, false, []string{"web-01", "ghost"}},
-		{"empty input", nil, []string{}, "", false, nil},
+		{name: "positions preserved", names: []string{"db-01", "web-01"}, wantIDs: []string{"id-db", "id-web"}, wantRequested: []string{"db-01", "web-01"}},
+		{name: "duplicates resolved each time", names: []string{"web-01", "db-01", "web-01"}, wantIDs: []string{"id-web", "id-db", "id-web"}, wantRequested: []string{"web-01", "db-01", "web-01"}},
+		{name: "padded name resolves", names: []string{"  web-01  "}, wantIDs: []string{"id-web"}, wantRequested: []string{"web-01"}},
+		{name: "blank entry refused before any request", names: []string{"   "}, wantErr: `failed to resolve server "   ": server name is required`, wantBlank: true},
+		{name: "first failure stops the rest", names: []string{"web-01", "ghost", "db-01"}, wantErr: `failed to resolve server "ghost": no server found with the given name`, wantRequested: []string{"web-01", "ghost"}},
+		{name: "empty input", wantIDs: []string{}},
 	}
 
 	for _, tt := range tests {
@@ -652,8 +652,7 @@ func TestResolveServerNames(t *testing.T) {
 			ids, err := ResolveServerNames(ac, tt.names)
 
 			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
+				require.EqualError(t, err, tt.wantErr)
 				assert.Equal(t, tt.wantBlank, errors.Is(err, api.ErrBlankName))
 				assert.Nil(t, ids)
 			} else {

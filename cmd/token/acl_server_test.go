@@ -2,6 +2,7 @@ package token
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -53,7 +54,8 @@ func TestResolveServerIDs(t *testing.T) {
 			ids, err := resolveServerIDs(ac, tt.names)
 
 			if tt.wantErr != "" {
-				assert.EqualError(t, err, tt.wantErr)
+				require.EqualError(t, err, tt.wantErr)
+				assert.Nil(t, ids)
 				return
 			}
 			require.NoError(t, err)
@@ -87,8 +89,34 @@ func TestResolveServerIDsReportsEarliestFailureInInputOrder(t *testing.T) {
 
 	_, err := resolveServerIDs(ac, []string{"missing-early", "web-01", "missing-late"})
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "'missing-early'")
+	assert.EqualError(t, err, "failed to resolve server 'missing-early': no server found with the given name")
+}
+
+// Serial: the test relies on the failing lookup answering well before the slow ones.
+func TestResolveServerIDsStopsLaunchingLookupsAfterAFailure(t *testing.T) {
+	var requested atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested.Add(1)
+		name := r.URL.Query().Get("name")
+		if name == "ghost" {
+			writeServerResults(w, nil)
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+		writeServerResults(w, []serverapi.ServerDetails{{ID: "id-" + name, Name: name}})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	names := []string{"ghost"}
+	for i := range 19 {
+		names = append(names, fmt.Sprintf("srv-%02d", i))
+	}
+
+	ids, err := resolveServerIDs(ac, names)
+
+	require.EqualError(t, err, "failed to resolve server 'ghost': no server found with the given name")
+	assert.Nil(t, ids)
+	assert.Equal(t, int32(maxConcurrentServerLookups), requested.Load())
 }
 
 // Serial for the same reason: concurrency is measured by overlapping handler windows.
@@ -110,14 +138,16 @@ func TestResolveServerIDsBoundsConcurrentRequests(t *testing.T) {
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	names := make([]string, 20)
+	wantIDs := make([]string, 20)
 	for i := range names {
-		names[i] = "srv-" + string(rune('a'+i))
+		names[i] = fmt.Sprintf("srv-%02d", i)
+		wantIDs[i] = "id-" + names[i]
 	}
 
 	ids, err := resolveServerIDs(ac, names)
 
 	require.NoError(t, err)
-	assert.Equal(t, "id-srv-a", ids[0])
-	assert.Equal(t, "id-srv-t", ids[19])
+	assert.Equal(t, wantIDs, ids)
 	assert.LessOrEqual(t, maxInFlight.Load(), int32(maxConcurrentServerLookups))
+	assert.Greater(t, maxInFlight.Load(), int32(1))
 }

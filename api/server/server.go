@@ -118,7 +118,7 @@ func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, err
 	for _, name := range names {
 		id, err := GetServerIDByName(ac, name)
 		if err != nil {
-			return nil, fmt.Errorf("server %q not found: %w", name, err)
+			return nil, fmt.Errorf("failed to resolve server %q: %w", name, err)
 		}
 		ids = append(ids, id)
 	}
