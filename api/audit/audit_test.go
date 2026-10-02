@@ -65,3 +65,29 @@ func TestGetAuditLogList_Filters(t *testing.T) {
 	assert.Equal(t, "cert", gotQuery.Get("app"))
 	assert.Equal(t, "certificate", gotQuery.Get("model"))
 }
+
+func TestGetAuditLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[AuditLogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
+				Results: []AuditLogEntry{{Username: "alice", App: "cert"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetAuditLogList(ac, 50, "", "", "")
+
+	// The projection runs over what the walk did read, so the caller can show a short
+	// trail instead of nothing; the error is what says it is short.
+	require.Error(t, err)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "alice", logs[0].Username)
+}

@@ -32,25 +32,29 @@ Use --query to search records by command text (fuzzy match).`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		// A cursor walk that failed part-way still returns the records it read, so the
+		// error is only fatal when it came back with nothing.
 		records, err := websh.GetSessionRecords(alpaconClient, sessionID, query, limit)
-		if err != nil {
+		if err != nil && len(records) == 0 {
 			utils.CliErrorWithExit("Failed to retrieve Websh session records: %s.", err)
 		}
 
 		// JSON keeps records verbatim; table sanitizes so terminal control chars don't break the layout.
-		if utils.OutputFormat == utils.OutputFormatJSON {
-			utils.PrintTable(records)
-			return
-		}
-
-		display := make([]websh.SessionRecord, len(records))
-		for i, r := range records {
-			display[i] = websh.SessionRecord{
-				AddedAt: r.AddedAt,
-				Record:  sanitizeRecord(r.Record, 80),
+		rows := records
+		if utils.OutputFormat != utils.OutputFormatJSON {
+			rows = make([]websh.SessionRecord, len(records))
+			for i, r := range records {
+				rows[i] = websh.SessionRecord{
+					AddedAt: r.AddedAt,
+					Record:  sanitizeRecord(r.Record, 80),
+				}
 			}
 		}
-		utils.PrintTable(display)
+
+		if err != nil {
+			utils.PartialTableWithExit(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
+		}
+		utils.PrintTable(rows)
 	},
 }
 
