@@ -1,15 +1,22 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/gorilla/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xtaci/smux"
 )
 
@@ -407,4 +414,60 @@ func TestBuildTunnelMetadata(t *testing.T) {
 	if !strings.Contains(metadata, "\"remote_port\":\"5432\"") {
 		t.Fatalf("unexpected metadata payload: %q", metadata)
 	}
+}
+
+type writeCountingConn struct {
+	net.Conn
+	writes *atomic.Int32
+}
+
+func (c *writeCountingConn) Write(b []byte) (int, error) {
+	c.writes.Add(1)
+	return c.Conn.Write(b)
+}
+
+func TestTunnelDialerSendsAWholeSmuxFrameInOneWrite(t *testing.T) {
+	t.Parallel()
+	upgrader := websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(ts.Close)
+	var writes atomic.Int32
+	dialer := *newTunnelDialer()
+	dialer.NetDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return &writeCountingConn{Conn: conn, writes: &writes}, nil
+	}
+	conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	writes.Store(0)
+	frame := make([]byte, smuxHeaderSize+config.GetSmuxConfig().MaxFrameSize)
+
+	err = conn.WriteMessage(websocket.BinaryMessage, frame)
+
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), writes.Load())
+}
+
+func TestTunnelDialerKeepsTheDefaultHandshakeTimeout(t *testing.T) {
+	t.Parallel()
+
+	dialer := newTunnelDialer()
+
+	assert.Equal(t, websocket.DefaultDialer.HandshakeTimeout, dialer.HandshakeTimeout)
 }

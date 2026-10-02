@@ -199,8 +199,6 @@ func isFatalRequestError(cause error) bool {
 	return utils.IsFatalClientError(utils.HTTPStatusCode(cause))
 }
 
-// newListenerDialer follows the system proxy settings, as websocket.DefaultDialer
-// does for websh and tunnel.
 func newListenerDialer(handshakeTimeout time.Duration) *websocket.Dialer {
 	return &websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: handshakeTimeout}
 }
