@@ -1489,6 +1489,32 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
+// The server could not check the credential, so renewing a token it never
+// judged would only add an Auth0 round trip to an outage.
+func TestSendRequest_AuthVerificationUnavailableExplainsRetryWithoutRenewal(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code": "auth_verification_unavailable"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "valid")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, "the server could not verify your credential right now—it was not rejected, so try again in a moment", err.Error())
+	assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthVerificationUnavailable, code)
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+}
+
 // A proxy, a WAF or an mTLS gate can answer 401 before the request ever reaches
 // alpacon-server, and what it writes is not the JSON every server error carries.
 // No token this process can obtain moves that answer, so renewing on it would

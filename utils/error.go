@@ -16,6 +16,10 @@ const (
 	AuthTokenMissing         = "auth_token_missing"
 	AuthAuthenticationFailed = "auth_authentication_failed"
 
+	// AuthVerificationUnavailable rides a 503: the server could not check the
+	// credential, did not reject it, and a retry can succeed.
+	AuthVerificationUnavailable = "auth_verification_unavailable"
+
 	// Codes the server sends on DRF's own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"

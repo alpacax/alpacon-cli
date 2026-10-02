@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	configpkg "github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -635,5 +636,43 @@ func TestGetWhoamiEmptyPrincipalTypeFailsClosed(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "t"}
 	if _, err := GetWhoami(ac); err == nil {
 		t.Fatal("GetWhoami returned nil error for a response missing principal_type; want fail-closed error")
+	}
+}
+
+func TestLoginAndSaveCredentialsPasswordKeepsCodeOfRefusedLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantCode string
+	}{
+		{"verification outage keeps its code", http.StatusServiceUnavailable, `{"code":"auth_verification_unavailable"}`, utils.AuthVerificationUnavailable},
+		{"non-JSON body leaves no code", http.StatusBadGateway, `<html>bad gateway</html>`, ""},
+		{"empty body leaves no code", http.StatusServiceUnavailable, ``, ""},
+		{"missing login endpoint keeps its status", http.StatusNotFound, `{"detail":"Not found."}`, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer ts.Close()
+
+			err := LoginAndSaveCredentials(&LoginRequest{
+				WorkspaceURL: ts.URL,
+				Username:     "admin",
+				Password:     "password",
+			}, "", false)
+
+			require.Error(t, err)
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.wantCode, code)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, fmt.Sprintf("response status: %d %s", tt.status, http.StatusText(tt.status)), err.Error())
+		})
 	}
 }

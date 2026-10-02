@@ -1311,6 +1311,8 @@ func codeOnlyMessage(code string) string {
 		return "the server cannot produce a response in the format requested"
 	case utils.APIUnsupportedMediaType:
 		return "the server does not support the request's content type"
+	case utils.AuthVerificationUnavailable:
+		return "the server could not verify your credential right now—it was not rejected, so try again in a moment"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}

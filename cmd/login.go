@@ -155,10 +155,10 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 			err = auth.LoginAndSaveCredentials(loginRequest, token, insecure)
 			if err != nil {
-				if strings.Contains(err.Error(), "404") {
+				if token == "" && utils.HTTPStatusCode(err) == http.StatusNotFound {
 					utils.CliErrorWithExit("Login endpoint not found. This workspace may not support username/password login")
 				}
-				utils.CliErrorWithExit("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
+				utils.CliErrorWithExit("%s", loginFailureMessage(err))
 			}
 
 		}
@@ -176,7 +176,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			// Old server without whoami: fall back to legacy prefix-based verification.
 			verifyLoginLegacy(ac, token)
 		default:
-			utils.CliErrorWithExit("Login succeeded but failed to verify your credential: %s. Please try logging in again.", whoErr)
+			utils.CliErrorWithExit("%s", whoamiFailureMessage(whoErr))
 		}
 
 		utils.CliSuccess("Login succeeded!")
@@ -483,6 +483,34 @@ func formatHostURL(host string) string {
 	return fmt.Sprintf("%s://%s", scheme, strings.TrimSuffix(host, "/"))
 }
 
+// isVerificationUnavailable reports whether the server could not check the
+// credential (503 auth_verification_unavailable) rather than refusing it.
+func isVerificationUnavailable(err error) bool {
+	code, _ := utils.ParseErrorResponse(err)
+	return code == utils.AuthVerificationUnavailable
+}
+
+func loginFailureMessage(err error) string {
+	if isVerificationUnavailable(err) {
+		return "Login failed: the server could not verify your credential right now. It was not rejected and nothing was saved, so try again in a moment"
+	}
+	return fmt.Sprintf("Login failed: %v. Please verify your username, password, and workspace URL are correct. If using a token, ensure it's valid and has not expired", err)
+}
+
+func whoamiFailureMessage(err error) string {
+	if isVerificationUnavailable(err) {
+		return "Login succeeded and your credential is saved, but the server could not verify it right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
+	}
+	return fmt.Sprintf("Login succeeded but failed to verify your credential: %s. Please try logging in again.", err)
+}
+
+func profileFailureMessage(err error) string {
+	if isVerificationUnavailable(err) {
+		return "Login succeeded and your credential is saved, but the server could not verify your user profile right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
+	}
+	return fmt.Sprintf("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+}
+
 // classifyWhoamiVerification maps a whoami error to verified / fallback (404) /
 // fail (401 or any other error—never swallowed as a fallback).
 func classifyWhoamiVerification(whoErr error) string {
@@ -504,7 +532,7 @@ func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
 	}
 	if err := ac.LoadCurrentUser(); err != nil {
 		if shouldFailOnProfileError(token) {
-			utils.CliErrorWithExit("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
+			utils.CliErrorWithExit("%s", profileFailureMessage(err))
 		}
 		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
 	}
