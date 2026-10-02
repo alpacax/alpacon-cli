@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -18,6 +19,16 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/xtaci/smux"
 )
+
+const smuxHeaderSize = 8 // version, command, length, stream id
+
+func newTunnelDialer() *websocket.Dialer {
+	return &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+		WriteBufferSize:  smuxHeaderSize + config.GetSmuxConfig().MaxFrameSize,
+	}
+}
 
 // StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
@@ -95,7 +106,7 @@ func Start(opts StartOptions) (*Runtime, error) {
 	}
 
 	headers := alpaconClient.SetWebsocketHeader()
-	wsConn, _, err := websocket.DefaultDialer.Dial(tunnelSession.WebsocketURL, headers)
+	wsConn, _, err := newTunnelDialer().Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("failed to connect to proxy server: %w", err)
