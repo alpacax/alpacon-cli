@@ -90,6 +90,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		username, groupname, workSessionID, outputFormat, server string
 		purpose                                                  string
 		filePath, fileFrom, interpreter                          string
+		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
@@ -204,6 +205,16 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if !strings.HasPrefix(interpreter, "/") {
 				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
 			}
+		case arg == "--reuse-days" || strings.HasPrefix(arg, "--reuse-days="):
+			var raw, errMsg string
+			raw, i, errMsg = extractFlagValue(args, i, "--reuse-days")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			var msg string
+			if reuseDays, msg = checkReuseDays(raw); msg != "" {
+				return RemoteExecArgs{Err: msg}
+			}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -247,6 +258,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if interpreter != "" {
 			return RemoteExecArgs{Err: "--interpreter requires --file"}
 		}
+		if reuseDays > 0 {
+			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+		}
 	} else {
 		if len(env) > 0 {
 			return RemoteExecArgs{
@@ -287,6 +301,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			From:        fileFrom,
 			Interpreter: interpreter,
 			Args:        commandParts,
+			ReuseDays:   reuseDays,
 		}
 		return parsed
 	}
