@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -42,8 +44,9 @@ var workspaceSwitchCmd = &cobra.Command{
 		// Save original values for rollback
 		origURL := cfg.WorkspaceURL
 		origName := cfg.WorkspaceName
+		origKubernetesSurface := cfg.KubernetesSurface
 
-		if err := config.SwitchWorkspace(newURL, newName); err != nil {
+		if err := config.SwitchWorkspace(newURL, newName, false); err != nil {
 			utils.CliErrorWithExit("Failed to update config: %s", err)
 		}
 
@@ -51,12 +54,31 @@ var workspaceSwitchCmd = &cobra.Command{
 		_, err = client.NewAlpaconAPIClient()
 		if err != nil {
 			// Revert to the original workspace
-			if revertErr := config.SwitchWorkspace(origURL, origName); revertErr != nil {
+			if revertErr := config.SwitchWorkspace(origURL, origName, origKubernetesSurface); revertErr != nil {
 				utils.CliErrorWithExit("Failed to connect to %q and could not revert config: %s (original error: %s)", newName, revertErr, err)
 			}
 			utils.CliErrorWithExit("Failed to connect to workspace %q: %s. Reverted to %q.", newName, err, origName)
 		}
 
+		refreshKubernetesSurface(newURL, newName, cfg.Insecure)
+
 		utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
 	},
+}
+
+// refreshKubernetesSurface asks the workspace just switched to whether it
+// exposes the Kubernetes surface; the value the login recorded belongs to the
+// workspace it logged in to, and a switch can cross regions. SwitchWorkspace
+// has already recorded false, so only a yes needs writing, and a failure
+// warns and leaves it false rather than undoing a switch that has happened.
+func refreshKubernetesSurface(workspaceURL, workspaceName string, insecure bool) {
+	envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpclient.New(insecure))
+	if err != nil {
+		utils.CliWarning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
+		return
+	}
+
+	if err := config.SetKubernetesSurface(envInfo.Surfaces.Kubernetes); err != nil {
+		utils.CliWarning("Could not save whether workspace %q supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
+	}
 }

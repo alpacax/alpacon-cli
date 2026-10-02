@@ -44,7 +44,11 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 }
 
 // SwitchWorkspace updates the workspace URL and name in the existing config.
-func SwitchWorkspace(newURL, newName string) error {
+// The Kubernetes surface answer belongs to a workspace, so it is written in the
+// same save: a switch forward passes false until the new workspace has been
+// asked, and a revert passes back the value the original workspace had. An
+// interrupted switch then never leaves one workspace's answer on another.
+func SwitchWorkspace(newURL, newName string, kubernetesSurface bool) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %v", err)
@@ -52,6 +56,7 @@ func SwitchWorkspace(newURL, newName string) error {
 
 	cfg.WorkspaceURL = newURL
 	cfg.WorkspaceName = newName
+	cfg.KubernetesSurface = kubernetesSurface
 
 	return saveConfig(&cfg)
 }
@@ -122,6 +127,22 @@ func saveConfig(config *Config) error {
 	}
 
 	return nil
+}
+
+// SetKubernetesSurface records whether the current workspace exposes the
+// Kubernetes surface, leaving every other field as it is.
+func SetKubernetesSurface(enabled bool) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load existing config: %w", err)
+	}
+	if cfg.KubernetesSurface == enabled {
+		return nil
+	}
+
+	cfg.KubernetesSurface = enabled
+
+	return saveConfig(&cfg)
 }
 
 func SaveRefreshedAuth0Token(accessToken string, expiresIn int) error {

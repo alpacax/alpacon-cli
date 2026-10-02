@@ -162,6 +162,8 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			}
 
 		}
+		persistKubernetesSurface(envInfo)
+
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -193,6 +195,17 @@ func init() {
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
 	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
+}
+
+// persistKubernetesSurface records the server's surfaces.kubernetes answer in
+// the config the login just wrote. Every branch above rebuilt the file with
+// CreateConfig, which resets the value, so it is written here once for all of
+// them. A failed write only keeps 'alpacon kube' hidden, which is no reason to
+// fail a login whose credential is already saved.
+func persistKubernetesSurface(envInfo *auth0.AuthEnvResponse) {
+	if err := config.SetKubernetesSurface(envInfo.Surfaces.Kubernetes); err != nil {
+		utils.CliWarning("Could not save whether this workspace supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login.", err)
+	}
 }
 
 func promptForLoginTarget(cfg config.Config) (workspaceURL, workspaceName, baseDomain string, err error) {
