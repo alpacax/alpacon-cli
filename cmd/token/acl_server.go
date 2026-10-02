@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	serverapi "github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
@@ -28,29 +29,45 @@ func init() {
 	aclServerCmd.AddCommand(aclServerDeleteCmd)
 }
 
+// maxConcurrentServerLookups bounds the burst a long --servers list sends at once.
+const maxConcurrentServerLookups = 8
+
 func resolveServerIDs(ac *client.AlpaconClient, names []string) ([]string, error) {
 	serverIDs := make([]string, len(names))
-	var mu sync.Mutex
+	errs := make([]error, len(names))
+	sem := make(chan struct{}, maxConcurrentServerLookups)
 	var wg sync.WaitGroup
-	var firstErr error
+	var firstFail atomic.Int64
+	firstFail.Store(int64(len(names)))
 
 	for i, name := range names {
-		wg.Add(1)
-		go func(idx int, n string) {
-			defer wg.Done()
-			id, err := serverapi.GetServerIDByName(ac, n)
-			mu.Lock()
-			defer mu.Unlock()
+		sem <- struct{}{}
+		if int64(i) > firstFail.Load() { // only the earliest failure is reported
+			<-sem
+			break
+		}
+		wg.Go(func() {
+			defer func() { <-sem }()
+			id, err := serverapi.GetServerIDByName(ac, name)
 			if err != nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("failed to resolve server '%s': %w", n, err)
+				errs[i] = fmt.Errorf("failed to resolve server '%s': %w", name, err)
+				for {
+					cur := firstFail.Load()
+					if int64(i) >= cur || firstFail.CompareAndSwap(cur, int64(i)) {
+						break
+					}
 				}
 				return
 			}
-			serverIDs[idx] = id
-		}(i, name)
+			serverIDs[i] = id
+		})
 	}
 	wg.Wait()
 
-	return serverIDs, firstErr
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return serverIDs, nil
 }

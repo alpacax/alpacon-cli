@@ -611,3 +611,55 @@ func TestRequestServerAction(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveServerNames(t *testing.T) {
+	t.Parallel()
+	servers := map[string]string{"web-01": "id-web", "db-01": "id-db"}
+
+	tests := []struct {
+		name          string
+		names         []string
+		wantIDs       []string
+		wantErr       string
+		wantBlank     bool
+		wantRequested []string
+	}{
+		{name: "positions preserved", names: []string{"db-01", "web-01"}, wantIDs: []string{"id-db", "id-web"}, wantRequested: []string{"db-01", "web-01"}},
+		{name: "duplicates resolved each time", names: []string{"web-01", "db-01", "web-01"}, wantIDs: []string{"id-web", "id-db", "id-web"}, wantRequested: []string{"web-01", "db-01", "web-01"}},
+		{name: "padded name resolves", names: []string{"  web-01  "}, wantIDs: []string{"id-web"}, wantRequested: []string{"web-01"}},
+		{name: "blank entry refused before any request", names: []string{"   "}, wantErr: `failed to resolve server "   ": server name is required`, wantBlank: true},
+		{name: "first failure stops the rest", names: []string{"web-01", "ghost", "db-01"}, wantErr: `failed to resolve server "ghost": no server found with the given name`, wantRequested: []string{"web-01", "ghost"}},
+		{name: "empty input", wantIDs: []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var requested []string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				name := r.URL.Query().Get("name")
+				requested = append(requested, name)
+				var results []ServerDetails
+				if id, ok := servers[name]; ok {
+					results = []ServerDetails{{ID: id, Name: name}}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{Count: len(results), Results: results})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			ids, err := ResolveServerNames(ac, tt.names)
+
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				assert.Equal(t, tt.wantBlank, errors.Is(err, api.ErrBlankName))
+				assert.Nil(t, ids)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantIDs, ids)
+			}
+			assert.Equal(t, tt.wantRequested, requested)
+		})
+	}
+}
