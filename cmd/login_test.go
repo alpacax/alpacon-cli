@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -742,6 +743,75 @@ func TestClassifyWhoamiVerification(t *testing.T) {
 	// 401 must fail, never fall back, so an invalid token cannot slip through.
 	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{code: http.StatusUnauthorized}))
 	assert.Equal(t, whoamiFail, classifyWhoamiVerification(errors.New("network down")))
+}
+
+type stubCodedStatusErr struct {
+	code int
+	api  string
+}
+
+func (e stubCodedStatusErr) Error() string       { return "stub" }
+func (e stubCodedStatusErr) HTTPStatusCode() int { return e.code }
+func (e stubCodedStatusErr) ErrorCode() string   { return e.api }
+func (e stubCodedStatusErr) ErrorSource() string { return "" }
+
+func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
+	t.Parallel()
+	outage := stubCodedStatusErr{code: http.StatusServiceUnavailable, api: utils.AuthVerificationUnavailable}
+	rejected := stubCodedStatusErr{code: http.StatusUnauthorized, api: utils.AuthAuthenticationFailed}
+
+	tests := []struct {
+		name        string
+		message     string
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:        "login outage keeps the user from re-checking a credential that was not refused",
+			message:     loginFailureMessage(outage),
+			contains:    []string{"could not verify", "not rejected", "try again later"},
+			notContains: []string{"verify your username", "log in again", "logging in again"},
+		},
+		{
+			name:     "login refusal keeps the credential hint",
+			message:  loginFailureMessage(rejected),
+			contains: []string{"Please verify your username, password, and workspace URL"},
+		},
+		{
+			name:        "whoami outage says the login is saved and to retry whoami",
+			message:     whoamiFailureMessage(outage),
+			contains:    []string{"saved", "alpacon whoami", "try again later"},
+			notContains: []string{"log in again", "logging in again"},
+		},
+		{
+			name:     "whoami refusal keeps the log-in-again hint",
+			message:  whoamiFailureMessage(rejected),
+			contains: []string{"Please try logging in again."},
+		},
+		{
+			name:        "profile outage says the login is saved and to retry",
+			message:     profileFailureMessage(outage),
+			contains:    []string{"saved", "alpacon whoami", "try again later"},
+			notContains: []string{"log in again", "logging in again"},
+		},
+		{
+			name:     "profile refusal keeps the log-in-again hint",
+			message:  profileFailureMessage(errors.New("boom")),
+			contains: []string{"Please try logging in again."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			for _, sub := range tt.contains {
+				assert.Contains(t, tt.message, sub)
+			}
+			for _, sub := range tt.notContains {
+				assert.NotContains(t, tt.message, sub)
+			}
+		})
+	}
 }
 
 func TestShouldFailOnProfileError(t *testing.T) {
