@@ -66,9 +66,13 @@ func TestSudoDenialHint(t *testing.T) {
 		{
 			// Checked before the branch split (sudo/services.py
 			// handle_sudo_approval_request), so no work session or policy lifts it.
-			name:            "workspace-mfa-disabled points at the workspace setting, not the session",
-			code:            "WORKSPACE_SUDO_WITH_MFA_DISABLED",
-			wantContains:    []string{"workspace access-control update"},
+			name: "workspace-mfa-disabled points at the workspace setting, not the session",
+			code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
+			wantContains: []string{
+				"workspace access-control update",
+				"self-hosted server without MFA sign-in",
+				"server administrator has to change it",
+			},
 			wantNotContains: []string{"work-session update"},
 		},
 		{

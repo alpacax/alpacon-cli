@@ -295,6 +295,8 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "multi-factor authentication required—complete MFA to continue", true
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
+	case utils.WorkspaceSudoWithMFAStepUpUnavailable:
+		return "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
 		if statusCode == http.StatusUnauthorized {
 			return reauthenticateMessage, true

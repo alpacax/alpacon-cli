@@ -321,6 +321,24 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+func TestSendRequest_403SudoWithMFAStepUpUnavailableExplainsServerAdmin(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "workspace_sudo_with_mfa_step_up_unavailable", "gate": "presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", err.Error())
+	assert.NotContains(t, err.Error(), "workspace_sudo_with_mfa_step_up_unavailable")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "workspace_sudo_with_mfa_step_up_unavailable", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface
