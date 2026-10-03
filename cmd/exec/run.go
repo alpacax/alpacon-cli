@@ -116,11 +116,14 @@ var sudoDenialHints = []struct {
 }{
 	{
 		// Checked before the websh/command branch split, so it answers every
-		// surface. Only a workspace admin can lift it.
+		// surface. Only a workspace admin can lift it, and on a self-hosted
+		// server without MFA sign-in the server refuses that change, so the
+		// guidance names both routes.
 		code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 		guidance: "sudo was denied: this workspace does not allow sudo with MFA at all, so no work session or policy can authorize it.\n" +
 			"A workspace admin lifts it (interactive terminal required):\n" +
-			"  alpacon workspace access-control update\n",
+			"  alpacon workspace access-control update\n" +
+			"On a self-hosted server without MFA sign-in this setting cannot be changed from the CLI or the web; a server administrator has to change it.\n",
 	},
 	{
 		// Nothing about the command line is wrong, so a re-run on a fresh

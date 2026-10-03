@@ -20,6 +20,11 @@ const (
 	// credential, did not reject it, and a retry can succeed.
 	AuthVerificationUnavailable = "auth_verification_unavailable"
 
+	// WorkspaceSudoWithMFAStepUpUnavailable rides a 403: the server refused a
+	// change to the workspace's sudo-with-MFA setting because this deployment has
+	// no MFA sign-in. Retrying or completing MFA cannot lift it.
+	WorkspaceSudoWithMFAStepUpUnavailable = "workspace_sudo_with_mfa_step_up_unavailable"
+
 	// Codes the server sends on DRF's own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"
