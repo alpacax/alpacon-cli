@@ -153,6 +153,12 @@ type FileExecution struct {
 	Interpreter string   `json:"interpreter"`
 	Args        []string `json:"args"`
 	Content     string   `json:"content"`
+	// ReuseDays proposes how long an approver's opt-in grant should last, in
+	// days (1 to 366). It is a proposal, not a grant: the approver decides
+	// whether reuse is granted at all. Sent only when the user asked for one—a
+	// nil leaves the key out, so a request with no proposal keeps the shape a
+	// server older than the field understands.
+	ReuseDays *int `json:"reuse_days,omitempty"`
 }
 
 // fileLaneRequest is the wire shape of a file-lane submission: CommandRequest
