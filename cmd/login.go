@@ -162,6 +162,13 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			}
 
 		}
+
+		// CreateConfig above stored only the host label; the schema name is what
+		// stays fixed when the workspace's URL slug is renamed.
+		if err := config.SetSchemaName(envInfo.Auth0.SchemaName); err != nil {
+			utils.CliWarning("Could not save the workspace identity: %s. Run 'alpacon login' again if workspace commands fail.", err)
+		}
+
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)

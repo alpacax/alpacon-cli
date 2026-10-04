@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -121,4 +124,40 @@ func TestGetUsageEstimate_ServerError(t *testing.T) {
 
 	_, err := GetUsageEstimate(ac, ts.URL, "uuid-123")
 	assert.Error(t, err)
+}
+
+// Logged in through a URL whose slug was renamed, the workspace is still known
+// to the payment API by its schema_name, so the client built from that config
+// must find it.
+func TestGetWorkspaceID_FindsWorkspaceAfterSlugRename(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, config.ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, config.ConfigFileName), []byte(`{
+		"workspace_url": "https://new-slug.us1.alpacon.io",
+		"workspace_name": "new-slug",
+		"schema_name": "frozen-schema",
+		"token": "alpat-token"
+	}`), 0o600))
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": "uuid-other", "schema_name": "other"},
+				{"id": "uuid-1", "schema_name": "frozen-schema"},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	ac, err := client.NewAlpaconAPIClient()
+	require.NoError(t, err)
+	ac.HTTPClient = ts.Client()
+
+	id, err := GetWorkspaceID(ac, ts.URL, ac.WorkspaceName)
+
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-1", id)
 }

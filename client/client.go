@@ -164,7 +164,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	client := &AlpaconClient{
 		HTTPClient:    httpClient,
 		BaseURL:       validConfig.WorkspaceURL,
-		WorkspaceName: validConfig.WorkspaceName,
+		WorkspaceName: validConfig.WorkspaceIdentity(),
 		Token:         validConfig.Token,
 		UserAgent:     utils.GetUserAgent(),
 	}

@@ -29,7 +29,7 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Workspace switching is available for Auth0-based logins only. Re-login with 'alpacon login <workspace_url>' to enable multi-workspace mode.")
 		}
 
-		if cfg.WorkspaceName == targetName {
+		if cfg.WorkspaceIdentity() == targetName {
 			utils.CliInfoWithExit("Already on workspace %q.", targetName)
 			return
 		}
@@ -41,7 +41,9 @@ var workspaceSwitchCmd = &cobra.Command{
 
 		// Save original values for rollback
 		origURL := cfg.WorkspaceURL
-		origName := cfg.WorkspaceName
+		origName := cfg.WorkspaceIdentity()
+		origHostLabel := cfg.WorkspaceName
+		origSchemaName := cfg.SchemaName
 
 		if err := config.SwitchWorkspace(newURL, newName); err != nil {
 			utils.CliErrorWithExit("Failed to update config: %s", err)
@@ -51,7 +53,7 @@ var workspaceSwitchCmd = &cobra.Command{
 		_, err = client.NewAlpaconAPIClient()
 		if err != nil {
 			// Revert to the original workspace
-			if revertErr := config.SwitchWorkspace(origURL, origName); revertErr != nil {
+			if revertErr := config.RestoreWorkspace(origURL, origHostLabel, origSchemaName); revertErr != nil {
 				utils.CliErrorWithExit("Failed to connect to %q and could not revert config: %s (original error: %s)", newName, revertErr, err)
 			}
 			utils.CliErrorWithExit("Failed to connect to workspace %q: %s. Reverted to %q.", newName, err, origName)

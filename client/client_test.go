@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1787,6 +1788,52 @@ func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://my-workspace.alpacon.io", ac.BaseURL)
 	assert.Equal(t, "my-workspace", ac.WorkspaceName)
+}
+
+// A workspace's URL slug can be renamed while its schema_name stays fixed, so a
+// login through the new URL leaves a host label that the server never calls the
+// workspace. The client must carry the schema_name, because that is what MFA
+// links and the usage lookup name the workspace by.
+func TestNewAlpaconAPIClient_PinsSchemaNameWhenSlugWasRenamed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigJSON(t, home, `{
+		"workspace_url": "https://new-slug.us1.alpacon.io",
+		"workspace_name": "new-slug",
+		"schema_name": "frozen-schema",
+		"token": "alpat-token",
+		"base_domain": "alpacon.io"
+	}`)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://new-slug.us1.alpacon.io", ac.BaseURL)
+	assert.Equal(t, "frozen-schema", ac.WorkspaceName)
+}
+
+// A config written before schema_name existed holds only the host label, which
+// keeps serving as the identity until the next login refreshes the file.
+func TestNewAlpaconAPIClient_LegacyConfigFallsBackToHostLabel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigJSON(t, home, `{
+		"workspace_url": "https://my-workspace.us1.alpacon.io",
+		"workspace_name": "my-workspace",
+		"token": "alpat-token"
+	}`)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.NoError(t, err)
+	assert.Equal(t, "my-workspace", ac.WorkspaceName)
+}
+
+func writeConfigJSON(t *testing.T, home, body string) {
+	t.Helper()
+	dir := filepath.Join(home, config.ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, config.ConfigFileName), []byte(body), 0o600))
 }
 
 // gorilla sends no User-Agent of its own and copies the header it is handed
