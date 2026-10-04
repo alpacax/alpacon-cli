@@ -126,6 +126,13 @@ var sudoDenialHints = []struct {
 			"On a self-hosted server without MFA sign-in this setting cannot be changed from the CLI or the web; a server administrator has to change it.\n",
 	},
 	{
+		// The server cannot run sudo MFA at all (typically self-hosted without
+		// MFA sign-in), so a step-up would never complete.
+		code: "SUDO_STEP_UP_UNAVAILABLE",
+		guidance: "sudo was denied: sudo with MFA is not available on this server.\n" +
+			"Use a work session whose policy allows the command without MFA, or ask an administrator.\n",
+	},
+	{
 		// Nothing about the command line is wrong, so a re-run on a fresh
 		// command is the only move.
 		code:     "SUDO_SESSION_MISSING",
