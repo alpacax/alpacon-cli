@@ -45,16 +45,23 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 
 // SwitchWorkspace updates the workspace URL, name and identity in the existing config.
 func SwitchWorkspace(newURL, newName string) error {
+	// The new URL is built from the schema name, so it is also the identity;
+	// keeping the old workspace's value would name the wrong one.
+	return RestoreWorkspace(newURL, newName, newName)
+}
+
+// RestoreWorkspace writes the URL, host label and schema name back in one save,
+// which is how a failed switch returns to the workspace it left. The schema name
+// may be empty, as it is in a config that predates the field.
+func RestoreWorkspace(url, hostLabel, schemaName string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %v", err)
 	}
 
-	cfg.WorkspaceURL = newURL
-	cfg.WorkspaceName = newName
-	// The new URL is built from the schema name, so it is also the identity;
-	// keeping the old workspace's value would name the wrong one.
-	cfg.SchemaName = newName
+	cfg.WorkspaceURL = url
+	cfg.WorkspaceName = hostLabel
+	cfg.SchemaName = schemaName
 
 	return saveConfig(&cfg)
 }
@@ -430,15 +437,28 @@ func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) error {
 	if workspaceName == "" {
 		return errors.New("no active workspace; run 'alpacon login' first")
 	}
+	// A session saved before schema_name was recorded sits under the host label,
+	// where GetActiveWorkSession still falls back to it. Every write for the
+	// current workspace drops it, or an unset would revive that older session.
+	legacyKey := ""
+	if workspaceName == cfg.WorkspaceIdentity() && cfg.WorkspaceName != workspaceName {
+		legacyKey = cfg.WorkspaceName
+	}
 	current := ""
+	hasLegacy := false
 	if cfg.ActiveWorkSessions != nil {
 		current = cfg.ActiveWorkSessions[workspaceName]
+		_, hasLegacy = cfg.ActiveWorkSessions[legacyKey]
+		hasLegacy = hasLegacy && legacyKey != ""
 	}
-	if current == uuid {
+	if current == uuid && !hasLegacy {
 		return nil
 	}
 	if cfg.ActiveWorkSessions == nil {
 		cfg.ActiveWorkSessions = map[string]string{}
+	}
+	if hasLegacy {
+		delete(cfg.ActiveWorkSessions, legacyKey)
 	}
 	if uuid == "" {
 		delete(cfg.ActiveWorkSessions, workspaceName)
