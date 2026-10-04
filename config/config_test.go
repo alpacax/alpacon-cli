@@ -365,3 +365,100 @@ func TestGetActiveWorkSessionReportsNoSessionWhenNoConfigExists(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, uuid)
 }
+
+func TestWorkspaceIdentity(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"schema name wins over a renamed host label", Config{WorkspaceName: "new-slug", SchemaName: "frozen"}, "frozen"},
+		{"legacy config falls back to the host label", Config{WorkspaceName: "my-workspace"}, "my-workspace"},
+		{"empty config has no identity", Config{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, tt.cfg.WorkspaceIdentity())
+		})
+	}
+}
+
+func TestSetSchemaName_KeepsEverythingElse(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "refresh", "alpacon.io", 3600, false))
+
+	require.NoError(t, SetSchemaName("frozen"))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
+	assert.Equal(t, "new-slug", cfg.WorkspaceName, "the host label stays as the URL's slug")
+	assert.Equal(t, "https://new-slug.us1.alpacon.io", cfg.WorkspaceURL)
+	assert.Equal(t, "access", cfg.AccessToken)
+}
+
+func TestSetSchemaName_EmptyKeepsTheStoredValue(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws.us1.alpacon.io", "ws", "", "", "access", "", "alpacon.io", 0, false))
+	require.NoError(t, SetSchemaName("frozen"))
+
+	// An older server omits schema_name from the env response.
+	require.NoError(t, SetSchemaName(""))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
+}
+
+func TestCreateConfig_ResetsSchemaNameUntilLoginRecordsIt(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://a.us1.alpacon.io", "a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetSchemaName("schema-a"))
+
+	require.NoError(t, CreateConfig("https://b.us1.alpacon.io", "b", "", "", "", "", "", 0, false))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "b", cfg.WorkspaceIdentity(), "one workspace's schema_name must not outlive its login")
+}
+
+func TestSwitchWorkspace_ReplacesSchemaName(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))
+	require.NoError(t, SetSchemaName("frozen"))
+
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "ws2", cfg.WorkspaceIdentity())
+}
+
+func TestActiveWorkSession_KeyedBySchemaName(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+	require.NoError(t, SetSchemaName("frozen"))
+
+	require.NoError(t, SetActiveWorkSession("uuid-1"))
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"frozen": "uuid-1"}, cfg.ActiveWorkSessions)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-1", got)
+}
+
+func TestGetActiveWorkSession_FindsSessionStoredUnderTheHostLabel(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-old"))
+	require.NoError(t, SetSchemaName("frozen"))
+
+	got, err := GetActiveWorkSession()
+
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-old", got, "a session saved before the upgrade stays reachable")
+}

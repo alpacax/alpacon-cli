@@ -43,7 +43,7 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	return saveConfig(&config)
 }
 
-// SwitchWorkspace updates the workspace URL and name in the existing config.
+// SwitchWorkspace updates the workspace URL, name and identity in the existing config.
 func SwitchWorkspace(newURL, newName string) error {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -52,6 +52,30 @@ func SwitchWorkspace(newURL, newName string) error {
 
 	cfg.WorkspaceURL = newURL
 	cfg.WorkspaceName = newName
+	// The new URL is built from the schema name, so it is also the identity;
+	// keeping the old workspace's value would name the wrong one.
+	cfg.SchemaName = newName
+
+	return saveConfig(&cfg)
+}
+
+// SetSchemaName records the current workspace's frozen identity, leaving every
+// other field as it is. An empty value (a server that does not report one) keeps
+// what is stored, so the host label keeps serving as the identity.
+func SetSchemaName(schemaName string) error {
+	if schemaName == "" {
+		return nil
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load existing config: %w", err)
+	}
+	if cfg.SchemaName == schemaName {
+		return nil
+	}
+
+	cfg.SchemaName = schemaName
 
 	return saveConfig(&cfg)
 }
@@ -323,7 +347,7 @@ func SetActiveWorkSession(uuid string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	return setActiveWorkSessionOn(&cfg, cfg.WorkspaceName, uuid)
+	return setActiveWorkSessionOn(&cfg, cfg.WorkspaceIdentity(), uuid)
 }
 
 // SetActiveWorkSessionFor persists the work-session UUID under workspaceName ("" clears it); workspaceName
@@ -353,6 +377,10 @@ func GetActiveWorkSession() (string, error) {
 	if cfg.ActiveWorkSessions == nil {
 		return "", nil
 	}
+	if uuid, ok := cfg.ActiveWorkSessions[cfg.WorkspaceIdentity()]; ok {
+		return uuid, nil
+	}
+	// A session saved before schema_name was recorded sits under the host label.
 	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
 }
 

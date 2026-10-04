@@ -29,7 +29,7 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Workspace switching is available for Auth0-based logins only. Re-login with 'alpacon login <workspace_url>' to enable multi-workspace mode.")
 		}
 
-		if cfg.WorkspaceName == targetName {
+		if cfg.WorkspaceIdentity() == targetName {
 			utils.CliInfoWithExit("Already on workspace %q.", targetName)
 			return
 		}
@@ -41,7 +41,7 @@ var workspaceSwitchCmd = &cobra.Command{
 
 		// Save original values for rollback
 		origURL := cfg.WorkspaceURL
-		origName := cfg.WorkspaceName
+		origName := cfg.WorkspaceIdentity()
 
 		if err := config.SwitchWorkspace(newURL, newName); err != nil {
 			utils.CliErrorWithExit("Failed to update config: %s", err)
