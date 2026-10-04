@@ -256,10 +256,13 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 
 	// Fast path: if MFA is already completed (e.g., recent sudo in another
 	// terminal), skip the browser and approve immediately.
-	if err := sl.ac.RefreshToken(); err == nil {
-		if err := sl.verifySudoGrant(grantID); err == nil {
-			return
-		}
+	// A failed refresh does not skip the attempt: an API or service token has no
+	// refresh token, and it is verify that names why it cannot prove MFA.
+	_ = sl.ac.RefreshToken()
+	if err := sl.verifySudoGrant(grantID); err == nil {
+		return
+	} else if sl.reportCredentialCannotProveMFA(err) {
+		return
 	}
 
 	// Slow path: open browser for MFA verification.
@@ -267,6 +270,9 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	// MFACompletion to DB for polling.
 	mfaURL, err := mfa.GetMFALinkByServerName(sl.ac, sl.serverName)
 	if err != nil {
+		if sl.reportCredentialCannotProveMFA(err) {
+			return
+		}
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
 		return
 	}
@@ -289,9 +295,23 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	}
 
 	if err := sl.verifySudoGrant(grantID); err != nil {
+		if sl.reportCredentialCannotProveMFA(err) {
+			return
+		}
 		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
 		return
 	}
+}
+
+// reportCredentialCannotProveMFA prints the sign-in hint and returns true when
+// err is the server's refusal of a credential that cannot complete sudo MFA.
+// Opening a browser or polling cannot change that, so the caller stops there.
+func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
+	if code, _ := utils.ParseErrorResponse(err); code != utils.SudoVerifyCredentialCannotProveMFA {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA cannot be completed with this credential: sign in with `alpacon login` to complete sudo MFA.\033[0m\r\n")
+	return true
 }
 
 func (sl *SudoListener) pollMFACompletion() bool {

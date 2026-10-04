@@ -39,6 +39,12 @@ func TestSudoDenialHint(t *testing.T) {
 			wantContains: []string{"step-up"},
 		},
 		{
+			name:            "step-up-unavailable says sudo with MFA is not available and names the way around",
+			code:            "SUDO_STEP_UP_UNAVAILABLE",
+			wantContains:    []string{"not available on this server", "without MFA", "administrator"},
+			wantNotContains: []string{"no guidance for that code"},
+		},
+		{
 			name:         "approval-required points to re-running after approval",
 			code:         "SUDO_APPROVAL_REQUIRED",
 			wantContains: []string{"approv"},

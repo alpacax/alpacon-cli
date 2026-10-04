@@ -25,6 +25,11 @@ const (
 	// no MFA sign-in. Retrying or completing MFA cannot lift it.
 	WorkspaceSudoWithMFAStepUpUnavailable = "workspace_sudo_with_mfa_step_up_unavailable"
 
+	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
+	// the credential is an API token, a service token or a non-interactive token,
+	// so it cannot complete sudo MFA. Signing in interactively can.
+	SudoVerifyCredentialCannotProveMFA = "sudo_verify_credential_cannot_prove_mfa"
+
 	// Codes the server sends on DRF's own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"

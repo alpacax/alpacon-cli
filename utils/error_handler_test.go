@@ -50,6 +50,24 @@ func TestHandleCommonErrors_SudoWithMFAStepUpUnavailableStartsNoStepUp(t *testin
 	assert.Equal(t, WorkspaceSudoWithMFAStepUpUnavailable, "workspace_sudo_with_mfa_step_up_unavailable")
 }
 
+// A credential that cannot prove MFA gains nothing from a browser step-up, so
+// the refusal must come back unchanged without running any callback.
+func TestHandleCommonErrors_CredentialCannotProveMFAStartsNoStepUp(t *testing.T) {
+	t.Parallel()
+	err := errors.New(`{"code": "sudo_verify_credential_cannot_prove_mfa", "gate": "presence"}`)
+	var called atomic.Bool
+	mark := func() { called.Store(true) }
+	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
+		OnMFARequired:      func(string) error { mark(); return nil },
+		OnUsernameRequired: func() error { mark(); return nil },
+		CheckMFACompleted:  func() (bool, error) { mark(); return true, nil },
+		RefreshToken:       func() error { mark(); return nil },
+		RetryOperation:     func() error { mark(); return nil },
+	})
+	assert.Equal(t, err, result)
+	assert.False(t, called.Load())
+}
+
 func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
 	t.Parallel()
 	t.Run("no callback returns original error", func(t *testing.T) {

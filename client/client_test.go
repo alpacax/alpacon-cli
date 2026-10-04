@@ -339,6 +339,24 @@ func TestSendRequest_403SudoWithMFAStepUpUnavailableExplainsServerAdmin(t *testi
 	assert.Equal(t, "workspace_sudo_with_mfa_step_up_unavailable", code)
 }
 
+func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "sudo_verify_credential_cannot_prove_mfa", "gate": "presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", err.Error())
+	assert.NotContains(t, err.Error(), "sudo_verify_credential_cannot_prove_mfa")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "sudo_verify_credential_cannot_prove_mfa", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface
