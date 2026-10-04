@@ -2,6 +2,10 @@ package utils
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -41,8 +45,6 @@ func TestHandleCommonErrors_SudoWithMFAStepUpUnavailableStartsNoStepUp(t *testin
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
 		OnMFARequired:      func(string) error { mark(); return nil },
 		OnUsernameRequired: func() error { mark(); return nil },
-		CheckMFACompleted:  func() (bool, error) { mark(); return true, nil },
-		RefreshToken:       func() error { mark(); return nil },
 		RetryOperation:     func() error { mark(); return nil },
 	})
 	assert.Equal(t, err, result)
@@ -60,8 +62,6 @@ func TestHandleCommonErrors_CredentialCannotProveMFAStartsNoStepUp(t *testing.T)
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
 		OnMFARequired:      func(string) error { mark(); return nil },
 		OnUsernameRequired: func() error { mark(); return nil },
-		CheckMFACompleted:  func() (bool, error) { mark(); return true, nil },
-		RefreshToken:       func() error { mark(); return nil },
 		RetryOperation:     func() error { mark(); return nil },
 	})
 	assert.Equal(t, err, result)
@@ -102,163 +102,167 @@ func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
 	assert.Equal(t, err, result)
 }
 
-func TestHandleCommonErrors_MFA_RefreshTokenError(t *testing.T) {
+const mfaRefusal = `{"code": "auth_mfa_required", "source": "command"}`
+
+func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
 	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	refreshErr := errors.New("refresh token expired")
-
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(srv string) error { return nil },
-		RefreshToken:  func() error { return refreshErr },
-		RetryOperation: func() error {
-			t.Error("RetryOperation should not be called when RefreshToken fails")
-			return nil
-		},
-	})
-
-	require.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
-	assert.ErrorIs(t, result, refreshErr)
-}
-
-func TestHandleCommonErrors_MFA_RefreshThenRetrySucceeds(t *testing.T) {
-	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	var refreshCount atomic.Int32
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(srv string) error { return nil },
-		RefreshToken: func() error {
-			refreshCount.Add(1)
-			return nil
-		},
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
-			retryCount.Add(1)
-			return nil // succeed on first retry
-		},
-	})
-
-	require.NoError(t, result)
-	assert.Equal(t, int32(1), refreshCount.Load(), "RefreshToken should be called once")
-	assert.Equal(t, int32(1), retryCount.Load(), "RetryOperation should be called once")
-}
-
-func TestHandleCommonErrors_MFA_PollingSuccess(t *testing.T) {
-	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	var pollCount atomic.Int32
-	var refreshCount atomic.Int32
-	var retryCount atomic.Int32
-
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(srv string) error { return nil },
-		CheckMFACompleted: func() (bool, error) {
-			if pollCount.Add(1) >= 3 {
-				return true, nil
+			if retryCount.Add(1) < 3 {
+				return errors.New(mfaRefusal)
 			}
-			return false, nil
-		},
-		RefreshToken: func() error {
-			refreshCount.Add(1)
-			return nil
-		},
-		RetryOperation: func() error {
-			retryCount.Add(1)
 			return nil
 		},
 	})
 
 	require.NoError(t, result)
-	assert.GreaterOrEqual(t, pollCount.Load(), int32(3), "should poll until completed")
-	assert.Equal(t, int32(1), refreshCount.Load(), "RefreshToken should be called once after completion")
-	assert.Equal(t, int32(1), retryCount.Load(), "RetryOperation should be called once after completion")
+	assert.Equal(t, int32(3), retryCount.Load(), "retry through the refusals and stop on the first success")
 }
 
-func TestHandleCommonErrors_MFA_PollingErrorRecovery(t *testing.T) {
+// Only auth_mfa_required means MFA has not landed yet. Anything else is the
+// operation's own answer and ends the wait at once, unretried.
+func TestHandleCommonErrors_MFA_AnotherErrorEndsTheWait(t *testing.T) {
 	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	var pollCount atomic.Int32
-
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(srv string) error { return nil },
-		CheckMFACompleted: func() (bool, error) {
-			n := pollCount.Add(1)
-			if n <= 2 {
-				return false, errors.New("endpoint not found")
-			}
-			return true, nil
-		},
-		RefreshToken:   func() error { return nil },
-		RetryOperation: func() error { return nil },
-	})
-
-	require.NoError(t, result)
-	assert.GreaterOrEqual(t, pollCount.Load(), int32(3), "should continue polling after errors")
-}
-
-func TestHandleCommonErrors_MFA_PollingThenRefreshFails(t *testing.T) {
-	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	refreshErr := errors.New("refresh token expired")
-
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired:     func(srv string) error { return nil },
-		CheckMFACompleted: func() (bool, error) { return true, nil },
-		RefreshToken:      func() error { return refreshErr },
-		RetryOperation: func() error {
-			t.Error("RetryOperation should not be called when RefreshToken fails")
-			return nil
-		},
-	})
-
-	require.ErrorContains(t, result, "failed to refresh token; please run 'alpacon login'")
-	assert.ErrorIs(t, result, refreshErr)
-}
-
-func TestHandleCommonErrors_MFA_PollingThenRetryFails(t *testing.T) {
-	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
+	withFastTimeout(t)
 	retryErr := errors.New("session creation failed")
+	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired:     func(srv string) error { return nil },
-		CheckMFACompleted: func() (bool, error) { return true, nil },
-		RefreshToken:      func() error { return nil },
-		RetryOperation:    func() error { return retryErr },
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			if retryCount.Add(1) == 1 {
+				return errors.New(mfaRefusal)
+			}
+			return retryErr
+		},
 	})
 
 	assert.Equal(t, retryErr, result)
+	assert.Equal(t, int32(2), retryCount.Load(), "the error must not be retried")
 }
 
-func TestHandleCommonErrors_MFA_PollingTimeout(t *testing.T) {
+func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 	withFastRetry(t)
 	withFastTimeout(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
+	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired:     func(srv string) error { return nil },
-		CheckMFACompleted: func() (bool, error) { return false, nil },
-		RefreshToken:      func() error { return nil },
-		RetryOperation:    func() error { return nil },
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return errors.New(mfaRefusal)
+		},
 	})
 
 	assert.ErrorContains(t, result, "MFA authentication timed out")
+	assert.Positive(t, retryCount.Load())
+	// 200ms at a 10ms interval, plus one attempt of slack for the deadline check.
+	assert.LessOrEqual(t, retryCount.Load(), int32(21), "the timeout must bound the retries")
 }
 
-func TestHandleCommonErrors_MFA_NilCheckMFACompleted_LegacyFlow(t *testing.T) {
-	withFastRetry(t)
-	err := errors.New(`{"code": "auth_mfa_required", "source": "command"}`)
-	var retryCount atomic.Int32
+func TestHandleCommonErrors_MFA_NoRetryReturnsTheRefusal(t *testing.T) {
+	t.Parallel()
+	err := errors.New(mfaRefusal)
+	var prompted atomic.Bool
 
 	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(srv string) error { return nil },
-		RefreshToken:  func() error { return nil },
+		OnMFARequired: func(string) error { prompted.Store(true); return nil },
+	})
+
+	assert.Equal(t, err, result)
+	assert.True(t, prompted.Load(), "the link is still worth showing")
+}
+
+type statusError int
+
+func (e statusError) Error() string       { return fmt.Sprintf("HTTP %d", int(e)) }
+func (e statusError) HTTPStatusCode() int { return int(e) }
+
+// A brief outage while the user is still in the browser does not end the wait:
+// attempts the server never acted on are ridden through.
+func TestHandleCommonErrors_MFA_RidesThroughUnprocessedAttempts(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
-			retryCount.Add(1)
-			return nil
+			switch retryCount.Add(1) {
+			case 1, 2:
+				return statusError(http.StatusServiceUnavailable)
+			case 3:
+				return errors.New(mfaRefusal)
+			default:
+				return nil
+			}
 		},
 	})
 
 	require.NoError(t, result)
-	assert.Equal(t, int32(1), retryCount.Load(), "legacy flow should still work")
+	assert.Equal(t, int32(4), retryCount.Load())
+}
+
+// The ride-through is bounded: that many unprocessed attempts in a row end the
+// wait with the last one's error.
+func TestHandleCommonErrors_MFA_EndsAfterConsecutiveUnprocessedAttempts(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return statusError(http.StatusTooManyRequests)
+		},
+	})
+
+	assert.Equal(t, http.StatusTooManyRequests, HTTPStatusCode(result))
+	assert.Equal(t, int32(MaxConsecutivePollFailures), retryCount.Load())
+}
+
+// A 502 or 504 can follow a request that already ran, so it ends the wait
+// rather than being sent again.
+func TestHandleCommonErrors_MFA_GatewayErrorEndsTheWait(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return statusError(http.StatusBadGateway)
+		},
+	})
+
+	assert.Equal(t, http.StatusBadGateway, HTTPStatusCode(result))
+	assert.Equal(t, int32(1), retryCount.Load())
+}
+
+func TestIsUnprocessedRequestError(t *testing.T) {
+	t.Parallel()
+	dial := &url.Error{Op: "Post", URL: "https://x", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}}
+	read := &url.Error{Op: "Post", URL: "https://x", Err: &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}}
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"dial failure", dial, true},
+		{"wrapped dial failure", fmt.Errorf("submit: %w", dial), true},
+		{"read failure after sending", read, false},
+		{"429", statusError(http.StatusTooManyRequests), true},
+		{"503", statusError(http.StatusServiceUnavailable), true},
+		{"502", statusError(http.StatusBadGateway), false},
+		{"504", statusError(http.StatusGatewayTimeout), false},
+		{"403", statusError(http.StatusForbidden), false},
+		{"plain error", errors.New("boom"), false},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, IsUnprocessedRequestError(tc.err), tc.name)
+	}
 }

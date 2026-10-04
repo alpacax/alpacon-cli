@@ -917,8 +917,6 @@ func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, str
 				return apiTestResponse(status, ct, body), nil
 			case "/api/auth0/mfa/":
 				return apiTestResponse(http.StatusOK, "application/json", `{"mfa_url": "https://example.com/mfa"}`), nil
-			case "/api/auth0/mfa/completion/":
-				return apiTestResponse(http.StatusOK, "application/json", `{"completed": true}`), nil
 			case "/api/auth/env/":
 				return apiTestResponse(http.StatusOK, "application/json", `{"auth0": {"domain": "auth0.example", "client_id": "cid", "audience": "aud", "schema_name": "acme"}}`), nil
 			case "/oauth/token/":
@@ -948,6 +946,45 @@ func TestRunAPI_MFARequiredOpensLinkAndRetriesOnce(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.JSONEq(t, `{"ok":true}`, stdout.String())
 	assert.Equal(t, int32(2), atomic.LoadInt32(calls), "the endpoint must be hit exactly twice")
+}
+
+// The MFA wait is the retried request itself: it keeps going while the endpoint
+// still refuses for MFA and ends on the first answer that is not that refusal.
+// mfaTestServer fails any completion probe as an unexpected request.
+func TestRunAPI_MFARequiredRetriesUntilTheEndpointStopsRefusing(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n <= 2 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusOK, "application/json", `{"ok":true}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.JSONEq(t, `{"ok":true}`, stdout.String())
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls), "the first call, one refused retry, and the one that passes")
+}
+
+// Under -v the refused attempts in between are not printed: stderr shows the
+// first exchange and the one that ended the wait.
+func TestRunAPI_MFAVerboseShowsOnlyTheFirstAndLastAttempt(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n <= 2 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusOK, "application/json", `{"ok":true}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x", Verbose: true}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.Equal(t, 2, strings.Count(stderr.String(), "GET /x HTTP/1.1"), stderr.String())
 }
 
 func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {

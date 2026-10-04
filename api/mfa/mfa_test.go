@@ -161,10 +161,6 @@ func TestErrorCallbacks_WiresEveryField(t *testing.T) {
 
 	assert.NotNil(t, cb.OnMFARequired)
 	assert.NotNil(t, cb.OnUsernameRequired)
-	// A nil CheckMFACompleted silently drops every caller onto the legacy
-	// retry loop in utils.HandleCommonErrors—no compile error, no failure.
-	assert.NotNil(t, cb.CheckMFACompleted)
-	assert.NotNil(t, cb.RefreshToken)
 
 	require.NotNil(t, cb.RetryOperation)
 	require.NoError(t, cb.RetryOperation())

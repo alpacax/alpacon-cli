@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,10 +26,11 @@ const (
 	// inline at the one place that prints it.
 	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
 
-	// defaultMFAPollInterval is how often the listener checks whether MFA completed.
+	// defaultMFAPollInterval is how often the listener retries the grant
+	// verification while it waits for MFA.
 	defaultMFAPollInterval = 500 * time.Millisecond
 
-	// defaultMFAPollTimeout is the longest the listener waits for MFA completion.
+	// defaultMFAPollTimeout is the longest the listener waits for MFA.
 	// The server expires the pending sudo grant after a short window; the buffer
 	// over that keeps a slow browser MFA from racing the expiry.
 	defaultMFAPollTimeout = 60 * time.Second
@@ -63,7 +65,7 @@ type SudoListener struct {
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
 	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
 	refreshToken func() error
-	// pollInterval and pollTimeout bound pollMFACompletion. Fields rather than
+	// pollInterval and pollTimeout bound retryVerifyUntilMFA. Fields rather than
 	// package vars: the poll runs on a goroutine that can outlive the test which
 	// started it, and a test shortening a shared knob would race the next one.
 	pollInterval time.Duration
@@ -266,8 +268,8 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	}
 
 	// Slow path: open browser for MFA verification.
-	// Use CLI-specific MFA URL (location=cli) so the server persists
-	// MFACompletion to DB for polling.
+	// Use the CLI-specific MFA URL (location=cli): completing it credits the
+	// MFA to this client, which the retried verification is checked against.
 	mfaURL, err := mfa.GetMFALinkByServerName(sl.ac, sl.serverName)
 	if err != nil {
 		if sl.reportCredentialCannotProveMFA(err) {
@@ -281,20 +283,11 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
-	// Poll for MFA completion
-	completed := sl.pollMFACompletion()
-	if !completed {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
-		return
-	}
-
-	// MFA completed — refresh token so server sees updated MFA claims
-	if err := sl.ac.RefreshToken(); err != nil {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to refresh access token after MFA: %s\033[0m\r\n", err)
-		return
-	}
-
-	if err := sl.verifySudoGrant(grantID); err != nil {
+	if err := sl.retryVerifyUntilMFA(grantID); err != nil {
+		if errors.Is(err, errMFAWaitEnded) {
+			fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
+			return
+		}
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
@@ -314,7 +307,21 @@ func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
 	return true
 }
 
-func (sl *SudoListener) pollMFACompletion() bool {
+// errMFAWaitEnded is what retryVerifyUntilMFA returns when the wait ran out, or
+// the listener stopped, while the server was still refusing for MFA.
+var errMFAWaitEnded = errors.New("MFA verification did not complete in time")
+
+// retryVerifyUntilMFA retries the grant verification until the server stops
+// refusing it for MFA. The step-up link names this client, so completing MFA
+// in the browser credits the client this listener's requests come from: the
+// next verification passes on the same access token, with no completion probe
+// or token refresh in between.
+//
+// auth_mfa_required keeps the wait going, and so does a verification the
+// server never acted on (utils.IsUnprocessedRequestError), up to
+// utils.MaxConsecutivePollFailures in a row. Any other answer is returned as is.
+// The attempts are bounded by pollTimeout / pollInterval.
+func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
 	// keeps over the server's pending-grant expiry is what this wait is built on,
 	// and a gap that widens to ten ticks at the tail spends that buffer against a
@@ -323,16 +330,28 @@ func (sl *SudoListener) pollMFACompletion() bool {
 	ticker := time.NewTicker(sl.pollInterval)
 	defer ticker.Stop()
 
+	failures := 0
 	for {
 		select {
 		case <-sl.done:
-			return false
+			return errMFAWaitEnded
 		case <-timeout:
-			return false
+			return errMFAWaitEnded
 		case <-ticker.C:
-			// The endpoint may lag the browser; a failure here is not an answer.
-			if completed, err := mfa.CheckMFACompletion(sl.ac); err == nil && completed {
-				return true
+			err := sl.verifySudoGrant(grantID)
+			if err == nil {
+				return nil
+			}
+			switch code, _ := utils.ParseErrorResponse(err); {
+			case code == utils.AuthMFARequired:
+				failures = 0
+			case utils.IsUnprocessedRequestError(err):
+				failures++
+				if failures >= utils.MaxConsecutivePollFailures {
+					return err
+				}
+			default:
+				return err
 			}
 		}
 	}

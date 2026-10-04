@@ -192,13 +192,6 @@ func handleTunnelStartError(err error, serverName string, retry func() error) er
 			_, err := iam.HandleUsernameRequired()
 			return err
 		},
-		RefreshToken: func() error {
-			c, err := getClient()
-			if err != nil {
-				return err
-			}
-			return c.RefreshToken()
-		},
 		RetryOperation: retry,
 	})
 }

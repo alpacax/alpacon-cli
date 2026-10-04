@@ -223,8 +223,13 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 	}
 
 	if isMFARequiredResponse(response) && request.Headers.Get("Authorization") == "" {
+		// The MFA wait retries the request once a second for minutes. Under -v only
+		// the attempt that ends it is shown: the refused ones in between repeat the
+		// first exchange, which is already on stderr.
+		var lastAttempt bytes.Buffer
 		retry := func() error {
-			retried, sendErr := sendAPIRequest(ac, opts, request, stderr)
+			lastAttempt.Reset()
+			retried, sendErr := sendAPIRequest(ac, opts, request, &lastAttempt)
 			if sendErr != nil {
 				return sendErr
 			}
@@ -234,7 +239,11 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			}
 			return nil
 		}
-		if handleErr := utils.HandleCommonErrors(mfaRequiredError{}, "", mfa.WorkspaceErrorCallbacks(ac, retry)); handleErr != nil {
+		handleErr := utils.HandleCommonErrors(mfaRequiredError{}, "", mfa.WorkspaceErrorCallbacks(ac, retry))
+		if _, err := stderr.Write(lastAttempt.Bytes()); err != nil {
+			return utils.ExitCodeGeneralError, err
+		}
+		if handleErr != nil {
 			if writeErr := writeAPIResponse(opts, response, stdout); writeErr != nil {
 				return utils.ExitCodeGeneralError, writeErr
 			}
