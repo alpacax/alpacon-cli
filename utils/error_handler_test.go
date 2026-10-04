@@ -157,7 +157,7 @@ func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 		},
 	})
 
-	assert.ErrorContains(t, result, "MFA authentication timed out")
+	require.ErrorContains(t, result, "MFA authentication timed out")
 	assert.Positive(t, retryCount.Load())
 	// 200ms at a 10ms interval, plus one attempt of slack for the deadline check.
 	assert.LessOrEqual(t, retryCount.Load(), int32(21), "the timeout must bound the retries")

@@ -212,7 +212,7 @@ func TestSudoListener_RetryVerifyUntilMFA_EndsOnStop(t *testing.T) {
 		err := sl.retryVerifyUntilMFA("grant-1")
 		elapsed := time.Since(start)
 
-		assert.ErrorIs(t, err, errMFAWaitEnded, "a stopped listener ends the wait unverified")
+		require.ErrorIs(t, err, errMFAWaitEnded, "a stopped listener ends the wait unverified")
 		assert.Equal(t, stopAfter, elapsed, "the stop must land on Stop(), not a retry tick later")
 	})
 }
