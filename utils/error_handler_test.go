@@ -263,6 +263,9 @@ func TestIsUnprocessedRequestError(t *testing.T) {
 		{"plain error", errors.New("boom"), false},
 	}
 	for _, tc := range cases {
-		assert.Equal(t, tc.want, IsUnprocessedRequestError(tc.err), tc.name)
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, IsUnprocessedRequestError(tc.err))
+		})
 	}
 }
