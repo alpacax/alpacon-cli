@@ -257,7 +257,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	// Fast path: if MFA is already completed (e.g., recent sudo in another
 	// terminal), skip the browser and approve immediately.
 	// A failed refresh does not skip the attempt: an API or service token has no
-	// refresh token, and it is verify that names why it cannot prove MFA.
+	// refresh token, and the verify call is what reports why it cannot prove MFA.
 	_ = sl.ac.RefreshToken()
 	if err := sl.verifySudoGrant(grantID); err == nil {
 		return
