@@ -32,7 +32,8 @@ var authorityDeleteCmd = &cobra.Command{
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete CA '%s'? A CA that has received certificate requests cannot be deleted.", authorityName)
+			utils.ConfirmAction("Delete CA '%s'? A CA that has received certificate requests cannot be deleted; "+
+				"to stop using one, delete the server it runs on with 'alpacon server delete'.", authorityName)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
