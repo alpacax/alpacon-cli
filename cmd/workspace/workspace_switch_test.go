@@ -43,7 +43,7 @@ func TestRefreshKubernetesSurface(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			require.NoError(t, config.CreateConfig("https://prev.example.com", "prev", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
 			require.NoError(t, config.SetKubernetesSurface(true))
-			require.NoError(t, config.SwitchWorkspace(ts.URL, "next", false))
+			require.NoError(t, config.SwitchWorkspace(ts.URL, "next"))
 
 			_, stderr := testutil.CaptureOutput(t, func() {
 				refreshKubernetesSurface(ts.URL, "next", false)

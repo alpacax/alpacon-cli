@@ -110,8 +110,8 @@ func TestExecDeclaresPurposeDemandSupport(t *testing.T) {
 	assert.False(t, hasPurpose, "an unstated purpose must not be sent as an empty string")
 }
 
-// TestExecSendsTheStatedPurpose covers the path the ADR actually intends: with a
-// purpose in hand the assessor judges on the first pass and no demand is issued.
+// TestExecSendsTheStatedPurpose covers the intended path: with a purpose in
+// hand the assessor judges on the first pass and no demand is issued.
 func TestExecSendsTheStatedPurpose(t *testing.T) {
 	t.Parallel()
 	var submitted atomic.Value

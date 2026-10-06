@@ -42,11 +42,11 @@ func TestParseSSHTarget(t *testing.T) {
 		},
 		{
 			name:  "Hostname and complex path",
-			input: "prod-docker:~/eunyoung/",
+			input: "prod-docker:~/alice/",
 			expected: SSHTarget{
 				User: "",
 				Host: "prod-docker",
-				Path: "~/eunyoung/",
+				Path: "~/alice/",
 			},
 		},
 		{
@@ -60,11 +60,11 @@ func TestParseSSHTarget(t *testing.T) {
 		},
 		{
 			name:  "Complex user with hostname and path",
-			input: "admin@prod-docker:~/eunyoung/test.txt",
+			input: "admin@prod-docker:~/alice/test.txt",
 			expected: SSHTarget{
 				User: "admin",
 				Host: "prod-docker",
-				Path: "~/eunyoung/test.txt",
+				Path: "~/alice/test.txt",
 			},
 		},
 		{
@@ -161,7 +161,7 @@ func TestIsRemoteTarget(t *testing.T) {
 		},
 		{
 			name:     "Complex remote path",
-			input:    "admin@prod-docker:~/eunyoung/test.txt",
+			input:    "admin@prod-docker:~/alice/test.txt",
 			expected: true,
 		},
 		{

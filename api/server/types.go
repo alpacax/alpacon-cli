@@ -15,7 +15,7 @@ type ServerAttributes struct {
 }
 
 // RegistrationTokenRequest is used to create a new server registration token.
-// ExpiresAt is an RFC3339 timestamp; omit to create a non-expiring token.
+// ExpiresAt is an RFC3339 timestamp; omitted, the server assigns the workspace maximum.
 type RegistrationTokenRequest struct {
 	Name          string   `json:"name"`
 	AllowedGroups []string `json:"allowed_groups,omitempty"`
@@ -92,22 +92,6 @@ type AnsibleGuideJsonResponse struct {
 	RunCommandCustom  string `json:"run_command_custom"`
 }
 
-type ServerStatus struct {
-	Code     string           `json:"code"`
-	Icon     string           `json:"icon"`
-	Meta     ServerStatusMeta `json:"meta"`
-	Text     string           `json:"text"`
-	Color    string           `json:"color"`
-	Messages []string         `json:"messages"`
-}
-
-type ServerStatusMeta struct {
-	Delay1d  float64 `json:"delay_1d"`
-	Delay1h  float64 `json:"delay_1h"`
-	Delay1w  float64 `json:"delay_1w"`
-	DelayNow float64 `json:"delay_now"`
-}
-
 // serverActionRequest is the actions-endpoint body; Force overrides the busy guard.
 type serverActionRequest struct {
 	Action string `json:"action"`
@@ -118,7 +102,6 @@ type ServerDetails struct {
 	ID               string            `json:"id"`
 	Name             string            `json:"name"`
 	RemoteIP         string            `json:"remote_ip"`
-	Status           ServerStatus      `json:"status"`
 	IsConnected      bool              `json:"is_connected"`
 	Commissioned     bool              `json:"commissioned"`
 	Starred          bool              `json:"starred"`

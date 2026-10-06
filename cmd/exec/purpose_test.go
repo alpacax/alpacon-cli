@@ -93,9 +93,9 @@ func TestExecPurposeRejectsBadArgsWithExit1(t *testing.T) {
 }
 
 // TestExecPurposeAcceptsAMultibytePurposeAtTheCeiling is the byte-vs-rune
-// regression. The server counts characters (DRF CharField(max_length=2000)); a
-// byte count refuses a Korean purpose at roughly 666 of them, while claiming the
-// server would refuse it.
+// regression. The server counts characters, not bytes, against its 2000-character
+// limit; a byte count refuses a Korean purpose at roughly 666 of them, while
+// claiming the server would refuse it.
 func TestExecPurposeAcceptsAMultibytePurposeAtTheCeiling(t *testing.T) {
 	t.Parallel()
 	korean := make([]rune, PurposeMaxLength)

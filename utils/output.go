@@ -175,6 +175,28 @@ func PrintTable(slice any) {
 	_ = tw.Flush()
 }
 
+// PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
+// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
+// ordinary failure for CliErrorWithExit.
+func PartialTableWithExit(rows any, msg string, args ...any) {
+	CliWarning(msg, args...)
+	PrintTable(rows)
+	os.Exit(ExitCodeGeneralError)
+}
+
+// PrintListOrExit prints a list a paginated read returned with err. On a nil err it
+// is PrintTable; otherwise it prints the rows as partial through PartialTableWithExit,
+// or fails with failMsg when there are none.
+func PrintListOrExit[T any](rows []T, err error, failMsg string) {
+	switch {
+	case err != nil && len(rows) > 0:
+		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
+	case err != nil:
+		CliErrorWithExit("%s: %s.", failMsg, err)
+	}
+	PrintTable(rows)
+}
+
 func PrintJson(body []byte) {
 	if OutputFormat == OutputFormatJSON {
 		var buf bytes.Buffer

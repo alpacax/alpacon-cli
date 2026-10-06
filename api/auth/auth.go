@@ -24,6 +24,9 @@ const (
 	tokenScopesURL = "/api/auth/tokens/scopes/"
 	statusURL      = "/api/status/"
 	whoamiURL      = "/api/auth/whoami/"
+
+	// Only the error code is read, so an oversized error body is cut off here.
+	maxErrorBody = 64 << 10
 )
 
 // GetWhoami fetches the caller's identity; a 404 means the endpoint is absent (old server).
@@ -93,7 +96,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode > http.StatusFound {
-		return fmt.Errorf("response status: %s", resp.Status)
+		return newLoginStatusError(resp)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -113,6 +116,30 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 	}
 
 	return nil
+}
+
+// loginStatusError keeps the status and the server's error code of a refused
+// login so callers can tell an outage (503) from a rejection.
+type loginStatusError struct {
+	status     string
+	statusCode int
+	code       string
+}
+
+func (e *loginStatusError) Error() string       { return "response status: " + e.status }
+func (e *loginStatusError) HTTPStatusCode() int { return e.statusCode }
+func (e *loginStatusError) ErrorCode() string   { return e.code }
+func (e *loginStatusError) ErrorSource() string { return "" }
+
+func newLoginStatusError(resp *http.Response) error {
+	e := &loginStatusError{status: resp.Status, statusCode: resp.StatusCode}
+	if body, err := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody)); err == nil {
+		var parsed utils.ErrorResponse
+		if json.Unmarshal(body, &parsed) == nil {
+			e.code = parsed.Code
+		}
+	}
+	return e
 }
 
 func loginTargetMetadata(loginReq *LoginRequest) (workspaceName, baseDomain string) {

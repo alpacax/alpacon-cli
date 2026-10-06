@@ -12,20 +12,20 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// FileContentMaxBytes is the server's ceiling on a verified file's content
-// (ADR 0053): 64 KB, counted in UTF-8 bytes. Checked locally so an oversized
-// script is refused before it travels.
+// FileContentMaxBytes is the server's ceiling on a verified file's content:
+// 64 KB, counted in UTF-8 bytes. Checked locally so an oversized script is
+// refused before it travels.
 const FileContentMaxBytes = 65536
 
 // DefaultInterpreter runs a verified file when --interpreter names none.
 const DefaultInterpreter = "/bin/bash"
 
-// fileExecRefusals maps the server's file-lane error codes (alpacon-server
-// utils/error_codes.py, ADR 0053) to guidance. Codes mirror the server by
-// hand—nothing enforces the sync, so fileExecRefusal answers only for codes it
-// carries and leaves the rest to the generic error path. The two clientBug
-// entries name fields this CLI never sends on the file lane: reaching one means
-// the request builder regressed, not that the user did anything wrong.
+// fileExecRefusals maps the server's file-lane error codes to guidance. Codes
+// mirror the server by hand—nothing enforces the sync, so fileExecRefusal
+// answers only for codes it carries and leaves the rest to the generic error
+// path. The two clientBug entries name fields this CLI never sends on the file
+// lane: reaching one means the request builder regressed, not that the user
+// did anything wrong.
 var fileExecRefusals = []struct {
 	code, message, hint string
 	// needsServer says message and hint are Sprintf formats taking the server
@@ -229,12 +229,39 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 	return "", "", false
 }
 
+const fileExecInlineCredentialMessage = "server rejected this script—it carries a credential"
+
+// fileExecInlineCredentialHint replaces credentialInlineHint on the file lane.
+// --env is refused alongside --file, and an ordinary command line would run the
+// script unreviewed, so it names neither.
+const fileExecInlineCredentialHint = "take the secret out of the script and have the script read it from a file or the environment on the host at run time, so it is not stored with the reviewed script.\n"
+
+func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) {
+	if !isCommandInlineCredentialError(err) {
+		return "", "", false
+	}
+	return fileExecInlineCredentialMessage, denialHintLine(fileExecInlineCredentialHint), true
+}
+
 // HandleFileExecRefusal reports a file-lane refusal and exits 1, or returns
 // false when err is something else. Under --output json the envelope carries the
 // server's code; table mode prints the message and the hint. It runs before
 // HandleCommandResult, which knows no server name and would print the raw code.
 func HandleFileExecRefusal(err error, serverName string) bool {
 	message, hint, ok := fileExecRefusal(err, serverName)
+	if !ok {
+		return false
+	}
+	reportCodedRefusal("command", err, message, hint)
+	return true
+}
+
+// HandleFileExecInlineCredential reports command_inline_credential with the
+// file lane's hint and exits 1, or returns false when err is something else.
+// Call it only on the file lane: the shell lane shares the code and answers it
+// in HandleCommandResult with --env.
+func HandleFileExecInlineCredential(err error) bool {
+	message, hint, ok := fileExecInlineCredentialRefusal(err)
 	if !ok {
 		return false
 	}

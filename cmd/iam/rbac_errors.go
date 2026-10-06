@@ -11,8 +11,8 @@ import (
 )
 
 // Codes this surface receives. All but permission_denied come from the binding endpoints;
-// that one is the troubleshoot read. The four below are new: alpacon-server used to answer
-// every role and token-scope refusal with a bare DRF {"detail": ...} 403, and now answers
+// that one is the troubleshoot read. The four below are new: the server used to answer
+// every role and token-scope refusal with a bare {"detail": ...} 403, and now answers
 // with one of these instead, carrying no detail of its own—the message has to be the CLI's.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
@@ -133,7 +133,7 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 }
 
 // isRoleGateCode reports whether code is compatible with the per-gate 403 guidance
-// above: either no code at all (the legacy DRF {"detail": ...} refusal every
+// above: either no code at all (the legacy bare {"detail": ...} refusal every
 // call site here predates) or one of the role gate's two coded refusals, whose
 // payload states no human detail and means exactly what the code-less 403
 // always meant.
@@ -147,8 +147,8 @@ func isRoleGateCode(code string) bool {
 }
 
 // permissionDeniedMessage renders codePermissionDenied, the troubleshoot read's
-// refusal. Every other call site of that code is a read (user_permission_list,
-// user_permission_cani), where "that is not an account you may read" holds—but
+// refusal. Every other call site of that code is a read (a permission list or
+// a permission check), where "that is not an account you may read" holds—but
 // describeRBACError is reachable from the role-write gate too, and that wording
 // would misdescribe a write refusal as a visibility problem.
 func permissionDeniedMessage(gate rbacGate) string {

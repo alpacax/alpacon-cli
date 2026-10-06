@@ -302,7 +302,7 @@ func TestRunExecWithApprovalWait_TimeoutCarriesTheApprovalRequestID(t *testing.T
 
 // TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation pins that an intent
 // deviation denial (the same HITL branch server-side as SUDO_APPROVAL_REQUIRED,
-// sudo/services.py, with only the code swapped) enters the poll loop rather than
+// with only the code swapped) enters the poll loop rather than
 // returning the first denial, and that a grant reaching the polled command
 // detail runs the command once more.
 func TestRunExecWithApprovalWait_EntersLoopOnIntentDeviation(t *testing.T) {

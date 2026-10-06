@@ -19,6 +19,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -1302,68 +1303,9 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 	}
 }
 
-func TestNextPollInterval(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		attempt int
-		want    time.Duration
-	}{
-		{name: "first attempt is initial interval", attempt: 0, want: 250 * time.Millisecond},
-		{name: "second doubles", attempt: 1, want: 500 * time.Millisecond},
-		{name: "third doubles", attempt: 2, want: 1 * time.Second},
-		{name: "fourth reaches cap", attempt: 3, want: 2 * time.Second},
-		{name: "beyond cap stays capped", attempt: 4, want: 2 * time.Second},
-		{name: "large attempt does not overflow", attempt: 64, want: 2 * time.Second},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, nextPollInterval(tt.attempt))
-		})
-	}
-}
-
-func TestAlignedPollDelay(t *testing.T) {
-	t.Parallel()
-	// The delay is the backoff for the attempt, clamped so the poll never lands
-	// past the next maxPollInterval grid boundary. This keeps the adaptive
-	// schedule a superset of a fixed maxPollInterval poller (poll points 0, 250,
-	// 750, 1750, 2000, 4000, 6000, ...), so it is never slower for any completion
-	// time while small files are still detected during the early ramp.
-	tests := []struct {
-		name    string
-		attempt int
-		elapsed time.Duration
-		want    time.Duration
-	}{
-		{name: "ramp: first attempt", attempt: 0, elapsed: 0, want: 250 * time.Millisecond},
-		{name: "ramp: second", attempt: 1, elapsed: 250 * time.Millisecond, want: 500 * time.Millisecond},
-		{name: "ramp: third", attempt: 2, elapsed: 750 * time.Millisecond, want: 1 * time.Second},
-		{name: "clamp to first boundary", attempt: 3, elapsed: 1750 * time.Millisecond, want: 250 * time.Millisecond},
-		{name: "steady state on boundary", attempt: 4, elapsed: 2 * time.Second, want: 2 * time.Second},
-		{name: "steady state stays on grid", attempt: 5, elapsed: 4 * time.Second, want: 2 * time.Second},
-		// The cases below exercise the clamp arithmetic in isolation: by attempt 4
-		// nextPollInterval saturates at maxPollInterval, so the result is purely
-		// the distance to the next 2s boundary regardless of the attempt value.
-		{name: "clamp from mid grid cell", attempt: 9, elapsed: 2500 * time.Millisecond, want: 1500 * time.Millisecond},
-		{name: "clamp just before boundary", attempt: 9, elapsed: 3800 * time.Millisecond, want: 200 * time.Millisecond},
-		{name: "large elapsed wraps onto grid", attempt: 9, elapsed: time.Hour + 500*time.Millisecond, want: 1500 * time.Millisecond},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, alignedPollDelay(tt.attempt, tt.elapsed))
-		})
-	}
-}
-
 func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	t.Parallel()
-	// Server reports "not yet complete" (success=null) twice, then succeeds.
-	// With adaptive backoff the two waits are 250ms + 500ms = 750ms. Assert the
-	// poll count and the lower bound only; alignedPollDelay's table test above
-	// pins the schedule itself, so no wall-clock ceiling is needed.
+	// Success=null twice, then success: two pollTick gaps.
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
@@ -1386,8 +1328,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	assert.True(t, success)
 	assert.Equal(t, "done", message)
 	assert.Equal(t, int32(3), calls.Load())
-	// Lower bound proves the two waits actually backed off (250ms+500ms).
-	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond, "two backoff waits should sum to at least 250ms+500ms")
+	assert.GreaterOrEqual(t, elapsed, 2*pollTick, "two waits should sum to at least two ticks")
 }
 
 func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
@@ -1436,6 +1377,158 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Equal(t, int32(1), calls.Load(), "fatal error must not be retried")
+}
+
+func TestPollTransferStatus_ThrottleMidTransferDoesNotEndWait(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch calls.Add(1) {
+		case 1:
+			_, _ = w.Write([]byte(`{"success": null, "message": null}`))
+		case 2:
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "throttled"})
+		default:
+			_, _ = w.Write([]byte(`{"success": true, "message": "done"}`))
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+
+	require.NoError(t, err)
+	assert.True(t, success)
+	assert.Equal(t, "done", message)
+	assert.Equal(t, int32(3), calls.Load())
+}
+
+func TestPollTransferStatus_ThrottleBudgetIsBounded(t *testing.T) {
+	const (
+		timeout = 200 * time.Millisecond
+		tick    = 5 * time.Millisecond
+		// Far past what the budget allows, so an unbounded budget fails on the
+		// 403 here instead of hanging the test.
+		maxCalls = 50
+	)
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > maxCalls {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(map[string]string{"detail": "throttled"})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	start := time.Now()
+	success, _, err := pollTransferStatus(ac, "upload", "test-id", timeout, tick)
+	elapsed := time.Since(start)
+
+	require.ErrorContains(t, err, "timed out")
+	assert.False(t, success)
+	assert.Greater(t, elapsed, timeout, "a 429 must extend the deadline")
+	assert.Less(t, elapsed, utils.ThrottleCeiling(timeout, tick))
+}
+
+func TestPollTransferStatus_ConsecutiveFailuresEndWait(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, _, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+
+	require.ErrorContains(t, err, "failed to check transfer status")
+	assert.False(t, success)
+	assert.Equal(t, int32(utils.MaxConsecutivePollFailures), calls.Load())
+}
+
+func TestPollTransferStatus_SuccessfulPollResetsFailureCount(t *testing.T) {
+	t.Parallel()
+	failuresBeforeCap := utils.MaxConsecutivePollFailures - 1
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := int(calls.Add(1))
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case n == failuresBeforeCap+1:
+			_, _ = w.Write([]byte(`{"success": null, "message": null}`))
+		case n <= 2*failuresBeforeCap+1:
+			w.WriteHeader(http.StatusBadGateway)
+		default:
+			_, _ = w.Write([]byte(`{"success": true, "message": "done"}`))
+		}
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+
+	require.NoError(t, err)
+	assert.True(t, success)
+	assert.Equal(t, "done", message)
+	assert.Equal(t, int32(2*failuresBeforeCap+2), calls.Load())
+}
+
+func TestPollTransferStatus_ThrottlesDoNotCountAsFailures(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) <= utils.MaxConsecutivePollFailures {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "throttled"})
+			return
+		}
+		_, _ = w.Write([]byte(`{"success": true, "message": "done"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, message, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+
+	require.NoError(t, err)
+	assert.True(t, success)
+	assert.Equal(t, "done", message)
+}
+
+func TestPollTransferStatus_ThrottleDoesNotResetFailureCount(t *testing.T) {
+	t.Parallel()
+	failuresBeforeCap := utils.MaxConsecutivePollFailures - 1
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if int(calls.Add(1)) == failuresBeforeCap+1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": "throttled"})
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	success, _, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+
+	require.ErrorContains(t, err, "failed to check transfer status")
+	assert.False(t, success)
+	assert.Equal(t, int32(utils.MaxConsecutivePollFailures+1), calls.Load())
 }
 
 func TestPollTransferStatus_ParseFailureReturnsEmptyMessage(t *testing.T) {

@@ -29,9 +29,7 @@ const (
 
 	backoffFactor = 2
 
-	// Poll interval backs off exponentially up to maxPollInterval.
-	initialPollInterval = 250 * time.Millisecond
-	maxPollInterval     = 2 * time.Second
+	pollTick = 250 * time.Millisecond
 
 	downloadMaxAttempts = 100
 
@@ -71,38 +69,15 @@ func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
 	return d
 }
 
-// nextPollInterval returns the backoff delay for a 0-based poll attempt.
-func nextPollInterval(attempt int) time.Duration {
-	return backoffDelay(attempt, initialPollInterval, maxPollInterval)
-}
-
-// alignedPollDelay returns the sleep before the next poll: the backoff for this
-// attempt, clamped so the poll never lands past the next maxPollInterval grid
-// boundary measured from the polling start. Snapping to that grid makes the
-// schedule a superset of a fixed maxPollInterval poller, so faster small-file
-// detection never costs a slower detection for any completion time.
-//
-// Aligning to absolute grid boundaries (rather than sleeping a full interval
-// after each response) absorbs request latency into the sleep, so in steady
-// state polls fire ~every maxPollInterval from the start instead of
-// maxPollInterval+RTT. This keeps detection bounded but makes the request rate
-// slightly higher than the old poller on high-latency links—negligible for the
-// short-lived transfers this polls, and a deliberate trade for the superset
-// guarantee.
-func alignedPollDelay(attempt int, elapsed time.Duration) time.Duration {
-	backoff := nextPollInterval(attempt)
-	toBoundary := maxPollInterval - elapsed%maxPollInterval
-	if toBoundary < backoff {
-		return toBoundary
-	}
-	return backoff
-}
-
 // PollTransferStatus polls the transfer status API until success/failure or timeout.
 // transferType should be "upload" or "download", id is the transfer ID.
 // timeout controls how long to poll before giving up.
 // Returns true if transfer succeeded, false if failed, and error if polling timed out or failed.
 func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout time.Duration) (bool, string, error) {
+	return pollTransferStatus(ac, transferType, id, timeout, pollTick)
+}
+
+func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
 	var statusURL string
 	if transferType == "upload" {
 		statusURL = fmt.Sprintf(uploadStatusURL, id)
@@ -112,33 +87,45 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 
 	start := time.Now()
 	deadline := start.Add(timeout)
+	budget := utils.NewThrottleBudget(timeout)
+	failures := 0
+	throttles := 0
 
-	for attempt := 0; ; attempt++ {
-		// Enforce the deadline before every request: time.Sleep can oversleep, so
-		// this top-of-loop check is what actually prevents a request firing past
-		// the timeout window.
-		if !time.Now().Before(deadline) {
-			break
-		}
+	// Checked before every request, since time.Sleep can oversleep the deadline.
+	for time.Now().Before(deadline) {
 		// A running transfer answers 200 with "success": null; only true or
-		// false is terminal. Any error response is fatal.
+		// false is terminal.
 		respBody, err := ac.SendGetRequest(statusURL)
-		if err != nil {
+		var delay time.Duration
+		switch {
+		case err != nil && !utils.IsTransientRequestError(err):
 			return false, "", fmt.Errorf("failed to check transfer status: %w", err)
-		}
-		var statusResp TransferStatusResponse
-		if err := json.Unmarshal(respBody, &statusResp); err != nil {
-			return false, "", fmt.Errorf("failed to parse transfer status response: %w", err)
-		}
-		if statusResp.Success != nil {
-			return *statusResp.Success, statusResp.Message, nil
+		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
+			delay = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err))
+			throttles++
+			budget.WarnThrottled(delay)
+			if newDeadline, extended := budget.Extend(deadline, delay); extended {
+				deadline = newDeadline
+			}
+		case err != nil:
+			failures++
+			if failures >= utils.MaxConsecutivePollFailures {
+				return false, "", fmt.Errorf("failed to check transfer status: %w", err)
+			}
+			delay = utils.NextPollBackoff(tick, failures-1, utils.RetryAfter(err))
+		default:
+			failures, throttles = 0, 0
+			var statusResp TransferStatusResponse
+			if err := json.Unmarshal(respBody, &statusResp); err != nil {
+				return false, "", fmt.Errorf("failed to parse transfer status response: %w", err)
+			}
+			if statusResp.Success != nil {
+				return *statusResp.Success, statusResp.Message, nil
+			}
+			delay = utils.NextPollTick(tick, time.Since(start))
 		}
 
-		now := time.Now()
-		delay := alignedPollDelay(attempt, now.Sub(start))
-		// Avoid sleeping into a poll whose scheduled start is already at or past
-		// the deadline; the top-of-loop check handles oversleep.
-		if !now.Add(delay).Before(deadline) {
+		if !time.Now().Add(delay).Before(deadline) {
 			break
 		}
 		time.Sleep(delay)

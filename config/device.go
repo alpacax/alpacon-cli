@@ -52,8 +52,8 @@ func IsValidDeviceID(id string) bool {
 //
 // The identifier is not a secret in the sense a password or a token is—knowing
 // it grants nothing to someone who cannot also authenticate as the user—but it
-// is not inert either. Under ADR 0054 it is the value an MFA presence proof
-// binds to, and it identifies this installation to the identity provider,
+// is not inert either. It is the value an MFA presence proof binds to, and
+// it identifies this installation to the identity provider,
 // travelling there in OAuth requests where it may be recorded in tenant logs.
 // So it is a stable, security-relevant identifier rather than a throwaway: the
 // file is kept at 0600 inside the 0700 config directory, out of reach of other

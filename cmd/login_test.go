@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -216,9 +217,9 @@ func TestParseCloudWorkspaceURL(t *testing.T) {
 		},
 		{
 			name:          "future region is still parsed from cloud URL shape",
-			workspaceURL:  "https://demo.eu1.alpacon.io",
+			workspaceURL:  "https://demo.zz9.alpacon.io",
 			wantWorkspace: "demo",
-			wantRegion:    "eu1",
+			wantRegion:    "zz9",
 			wantOK:        true,
 		},
 		{
@@ -732,18 +733,82 @@ func TestValidateCloudFlags(t *testing.T) {
 	}
 }
 
-type stubStatusErr struct{ code int }
+type stubStatusErr struct {
+	status int
+	code   string
+}
 
 func (e stubStatusErr) Error() string       { return "stub" }
-func (e stubStatusErr) HTTPStatusCode() int { return e.code }
+func (e stubStatusErr) HTTPStatusCode() int { return e.status }
+func (e stubStatusErr) ErrorCode() string   { return e.code }
+func (e stubStatusErr) ErrorSource() string { return "" }
 
 func TestClassifyWhoamiVerification(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, whoamiVerified, classifyWhoamiVerification(nil))
-	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{code: http.StatusNotFound}))
+	assert.Equal(t, whoamiFallback, classifyWhoamiVerification(stubStatusErr{status: http.StatusNotFound}))
 	// 401 must fail, never fall back, so an invalid token cannot slip through.
-	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{code: http.StatusUnauthorized}))
+	assert.Equal(t, whoamiFail, classifyWhoamiVerification(stubStatusErr{status: http.StatusUnauthorized}))
 	assert.Equal(t, whoamiFail, classifyWhoamiVerification(errors.New("network down")))
+}
+
+func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
+	t.Parallel()
+	outage := stubStatusErr{status: http.StatusServiceUnavailable, code: utils.AuthVerificationUnavailable}
+	rejected := stubStatusErr{status: http.StatusUnauthorized, code: utils.AuthAuthenticationFailed}
+
+	tests := []struct {
+		name        string
+		message     string
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:        "login outage keeps the user from re-checking a credential that was not refused",
+			message:     loginFailureMessage(outage),
+			contains:    []string{"could not verify", "not rejected", "try again in a moment"},
+			notContains: []string{"verify your username", "log in again", "logging in again"},
+		},
+		{
+			name:     "login refusal keeps the credential hint",
+			message:  loginFailureMessage(rejected),
+			contains: []string{"Please verify your username, password, and workspace URL"},
+		},
+		{
+			name:        "whoami outage says the login is saved and to retry whoami",
+			message:     whoamiFailureMessage(outage),
+			contains:    []string{"saved", "alpacon whoami", "try again in a moment"},
+			notContains: []string{"log in again", "logging in again"},
+		},
+		{
+			name:     "whoami refusal keeps the log-in-again hint",
+			message:  whoamiFailureMessage(rejected),
+			contains: []string{"Please try logging in again."},
+		},
+		{
+			name:        "profile outage says the login is saved and to retry",
+			message:     profileFailureMessage(outage),
+			contains:    []string{"saved", "alpacon whoami", "try again in a moment"},
+			notContains: []string{"log in again", "logging in again"},
+		},
+		{
+			name:     "profile refusal keeps the log-in-again hint",
+			message:  profileFailureMessage(rejected),
+			contains: []string{"Please try logging in again."},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			for _, sub := range tt.contains {
+				assert.Contains(t, tt.message, sub)
+			}
+			for _, sub := range tt.notContains {
+				assert.NotContains(t, tt.message, sub)
+			}
+		})
+	}
 }
 
 func TestShouldFailOnProfileError(t *testing.T) {

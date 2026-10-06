@@ -44,8 +44,8 @@ Run the command again later to check for completion.`,
 		}
 
 		// Ahead of the approval hold: a parked command has no approval request,
-		// so reporting one would name a queue it is not in (ADR 0052). This is
-		// the detach path's only sight of the demand—SubmitCommand returns before
+		// so reporting one would name a queue it is not in. This is the detach
+		// path's only sight of the demand—SubmitCommand returns before
 		// the verdict, so --detach cannot see it at submission time.
 		if event.IsAwaitingPurposeStatus(details.Status) {
 			utils.PrintPurposeDemand(
