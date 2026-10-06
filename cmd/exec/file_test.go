@@ -569,3 +569,92 @@ func TestExecFileLocalRefusalNeverReachesServer(t *testing.T) {
 	assert.Nil(t, capture.snapshot(), "no submission may reach the server")
 	assert.NotContains(t, stderr, "failed to submit")
 }
+
+// TestFileExecInlineCredentialRefusal pins the file lane's own answer to
+// command_inline_credential: the secret sits in the script, so the hint sends
+// it out of the script to be read on the host, and never to --env, which the
+// file lane refuses, or to an ordinary command line, which skips the review.
+func TestFileExecInlineCredentialRefusal(t *testing.T) {
+	t.Parallel()
+	coded := func(code string) error {
+		return errors.New("code: " + code + "; source: command")
+	}
+	tests := []struct {
+		name   string
+		err    error
+		wantOK bool
+	}{
+		{name: "inline credential answers", err: coded(utils.CommandInlineCredential), wantOK: true},
+		{name: "wrapped error still answers", err: fmt.Errorf("failed to execute command on 'prod' server: %w", coded(utils.CommandInlineCredential)), wantOK: true},
+		{name: "another code falls through", err: coded("file_exec_env_not_allowed")},
+		{name: "a plain error falls through", err: errors.New("boom")},
+		{name: "nil falls through"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			message, hint, ok := fileExecInlineCredentialRefusal(tt.err)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Empty(t, message)
+				assert.Empty(t, hint)
+				return
+			}
+			assert.Equal(t, fileExecInlineCredentialMessage, message)
+			assert.Contains(t, hint, "Hint:")
+			assert.Contains(t, hint, "out of the script")
+			assert.NotContains(t, hint, "--env")
+			assert.NotContains(t, hint, "alpacon exec")
+			assert.True(t, strings.HasSuffix(hint, "\n"), "hint must end with a newline: %q", hint)
+		})
+	}
+}
+
+// TestExecFileInlineCredentialPrintsFileLaneHint drives command_inline_credential
+// on the file lane through the real exec command: table mode prints the file
+// lane's hint and not the shell lane's --env example, and JSON mode keeps the
+// server's code in the envelope.
+func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
+	t.Parallel()
+	script := filepath.Join(t.TempDir(), "rotate.sh")
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\nmysql -pSecret -e 'select 1'\n"), 0o600))
+	respond := func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "command_inline_credential", "source": "command"}`))
+	}
+
+	t.Run("table", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, fileExecInlineCredentialMessage)
+		assert.Contains(t, stderr, "out of the script")
+		assert.NotContains(t, stderr, "--env")
+		assert.NotContains(t, stderr, "-pSecret", "the rejected script must never be echoed back")
+	})
+
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--output", "json", "--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		var envelope struct {
+			ErrorCode string `json:"error_code"`
+			Message   string `json:"message"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
+		assert.Equal(t, utils.CommandInlineCredential, envelope.ErrorCode)
+		assert.Contains(t, envelope.Message, fileExecInlineCredentialMessage)
+	})
+}

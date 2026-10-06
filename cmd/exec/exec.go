@@ -119,7 +119,9 @@ not somebody else's to grant. --output json emits {"status":"purpose_required",
 The server rejects a command whose command line carries a credential—a
 -p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
 user:pass@host connection string—before it runs, with exit code 1. Pass the
-secret with --env="KEY" instead; --output json emits an error envelope on
+secret with --env="KEY" instead. A --file script that carries a credential is
+refused the same way; take the secret out of the script and have the script
+read it on the host at run time. --output json emits an error envelope on
 stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
@@ -242,6 +244,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
 			}
+			if file != nil && HandleFileExecInlineCredential(err) {
+				return
+			}
 			utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
 			return
 		}
@@ -293,6 +298,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// A file-lane refusal names the server in its guidance, which
 	// HandleCommandResult does not know; it answers only its own codes.
 	if HandleFileExecRefusal(err, parsed.Server) {
+		return
+	}
+	// The shell lane's --env hint is one the file lane refuses.
+	if file != nil && HandleFileExecInlineCredential(err) {
 		return
 	}
 	HandleCommandResult(err, parsed.InvokedAs)
