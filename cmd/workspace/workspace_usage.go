@@ -11,9 +11,9 @@ import (
 )
 
 // noLimitText replaces a null service limit for display: a null limit means
-// unlimited or fair use (never a plan-limit refusal on that axis, paywall wave
-// wire contract §1.2), and a raw JSON `null` reads as a bug in the terminal
-// rather than as the fair-use answer it is.
+// unlimited or fair use (never a plan-limit refusal on that axis), and a raw
+// JSON `null` reads as a bug in the terminal rather than as the fair-use
+// answer it is.
 const noLimitText = "fair use / no cap"
 
 // renderedServiceUsage mirrors workspace.ServiceUsage for display, with Limit
@@ -85,10 +85,7 @@ var workspaceUsageCmd = &cobra.Command{
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		paymentBaseURL, err := workspace.GetPaymentAPIBaseURL(alpaconClient.BaseURL)
-		if err != nil {
-			utils.CliErrorWithExit("Failed to determine payment API URL: %s.", err)
-		}
+		paymentBaseURL := workspace.PaymentAPIBaseURL
 
 		workspaceID, err := workspace.GetWorkspaceID(alpaconClient, paymentBaseURL, alpaconClient.WorkspaceName)
 		if err != nil {

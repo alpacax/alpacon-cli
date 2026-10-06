@@ -14,29 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetPaymentAPIBaseURL(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name         string
-		workspaceURL string
-		expected     string
-	}{
-		{"production AP region", "https://myws.ap1.alpacon.io", paymentAPIProdURL},
-		{"production US region", "https://myws.us1.alpacon.io", paymentAPIProdURL},
-		{"staging dev region", "https://myws.dev.alpacon.io", paymentAPIStagingURL},
-		{"staging dev2 region", "https://myws.dev2.alpacon.io", paymentAPIStagingURL},
-		{"short hostname fallback", "https://alpacon.io", paymentAPIProdURL},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := GetPaymentAPIBaseURL(tt.workspaceURL)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, got)
-		})
-	}
-}
-
 func TestGetWorkspaceID(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
