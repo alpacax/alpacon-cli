@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -320,4 +324,68 @@ func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	_, hasRecordings := keys["recordings"]
 	assert.True(t, hasTimeline, "timeline key must be present in JSON output")
 	assert.True(t, hasRecordings, "recordings key must be present in JSON output")
+}
+
+// --no-records must reach the request, so the recording bytes are never downloaded,
+// and must still hold on a server too old to know include_records.
+func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		args           []string
+		ignoresParam   bool
+		wantParam      string
+		wantRecordings bool
+	}{
+		{"default asks for the records", []string{"timeline", "ses-1"}, false, "true", true},
+		{"no-records does not", []string{"timeline", "ses-1", "--no-records"}, false, "false", false},
+		{"no-records holds on an old server", []string{"timeline", "ses-1", "--no-records"}, true, "false", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var (
+				mu       sync.Mutex
+				gotParam string
+			)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path != "/api/work-sessions/sessions/ses-1/timeline/" {
+					_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","servers":[{"id":"srv-1","name":"web-01"}]}`))
+					return
+				}
+				param := r.URL.Query().Get("include_records")
+				mu.Lock()
+				gotParam = param
+				mu.Unlock()
+				// The client sends strconv.FormatBool output, so "false" is the
+				// only falsy spelling that can arrive here.
+				results := `{"type":"websh_session","id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:00Z"}`
+				if param != "false" || tc.ignoresParam {
+					results += `,{"type":"websh_record","session_id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:01Z","masked_record":"ls -la"}`
+				}
+				_, _ = w.Write([]byte(`{"count":2,"results":[` + results + `]}`))
+			}))
+			defer ts.Close()
+
+			stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, tc.args...)
+			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Equal(t, tc.wantParam, gotParam)
+
+			if tc.wantRecordings {
+				assert.Contains(t, stdout, "• 1 recording")
+				assert.Contains(t, stdout, "Recordings (1)")
+			} else {
+				// The badge goes with the bytes: its count rides on the recording
+				// items, so an unrequested recording cannot be counted either.
+				assert.NotContains(t, stdout, "recording")
+				assert.NotContains(t, stdout, "Recordings")
+			}
+		})
+	}
 }

@@ -6,7 +6,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'install.ps1')
 }
 
-Describe 'Get-DefaultInstallDir' {
+Describe 'Get-AlpaconDefaultInstallDir' {
     It 'refuses <Given>, which must not reach the permanent user PATH' -TestCases @(
         @{ Given = '' }
         @{ Given = '\\fileserver\profiles\jane\AppData\Local' }
@@ -16,11 +16,11 @@ Describe 'Get-DefaultInstallDir' {
         @{ Given = '/home/jane/.local' }
         @{ Given = ([char]0x212A + ':\Users\jane\AppData\Local') }
     ) {
-        Get-DefaultInstallDir -LocalAppData $Given | Should -BeNullOrEmpty
+        Get-AlpaconDefaultInstallDir -LocalAppData $Given | Should -BeNullOrEmpty
     }
 
     It 'accepts a path on a local drive' {
-        Get-DefaultInstallDir -LocalAppData 'C:\Users\jane\AppData\Local' |
+        Get-AlpaconDefaultInstallDir -LocalAppData 'C:\Users\jane\AppData\Local' |
             Should -BeExactly 'C:\Users\jane\AppData\Local\Alpacon\bin'
     }
 
@@ -33,7 +33,7 @@ Describe 'Get-DefaultInstallDir' {
         @{ Trailing = 'two backslashes'; LocalAppData = 'C:\Users\jane\AppData\Local\\'; Expected = 'C:\Users\jane\AppData\Local\Alpacon\bin' }
         @{ Trailing = 'one of each'; LocalAppData = 'C:\Users\jane\AppData\Local/\'; Expected = 'C:\Users\jane\AppData\Local\Alpacon\bin' }
     ) {
-        Get-DefaultInstallDir -LocalAppData $LocalAppData | Should -BeExactly $Expected
+        Get-AlpaconDefaultInstallDir -LocalAppData $LocalAppData | Should -BeExactly $Expected
     }
 }
 
@@ -82,66 +82,66 @@ Describe 'Get-AlpaconArch' {
     }
 }
 
-Describe 'ConvertFrom-ReleaseLocation' {
+Describe 'ConvertFrom-AlpaconReleaseLocation' {
     It 'reads the version out of a tag redirect' {
-        ConvertFrom-ReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2' |
+        ConvertFrom-AlpaconReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2' |
             Should -Be '1.11.2'
     }
 
     It 'keeps a pre-release suffix' {
-        ConvertFrom-ReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.12.0-rc1' |
+        ConvertFrom-AlpaconReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.12.0-rc1' |
             Should -Be '1.12.0-rc1'
     }
 
     It 'accepts a tag without the v prefix' {
-        ConvertFrom-ReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/1.11.2' |
+        ConvertFrom-AlpaconReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases/tag/1.11.2' |
             Should -Be '1.11.2'
     }
 
     It 'rejects a tag whose suffix only case-folds onto ASCII' {
-        { ConvertFrom-ReleaseLocation -Location ('https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2' + [char]0x212A) } |
+        { ConvertFrom-AlpaconReleaseLocation -Location ('https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2' + [char]0x212A) } |
             Should -Throw -ExpectedMessage '*Could not read a version*'
     }
 
     It 'rejects a location with anything after the tag' {
-        { ConvertFrom-ReleaseLocation -Location "https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2`n" } |
+        { ConvertFrom-AlpaconReleaseLocation -Location "https://github.com/alpacax/alpacon-cli/releases/tag/v1.11.2`n" } |
             Should -Throw -ExpectedMessage '*Could not read a version*'
     }
 
     It 'rejects a location that carries no tag' {
-        { ConvertFrom-ReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases' } |
+        { ConvertFrom-AlpaconReleaseLocation -Location 'https://github.com/alpacax/alpacon-cli/releases' } |
             Should -Throw -ExpectedMessage '*Could not read a version*'
     }
 
     It 'rejects an empty location' {
-        { ConvertFrom-ReleaseLocation -Location '' } |
+        { ConvertFrom-AlpaconReleaseLocation -Location '' } |
             Should -Throw -ExpectedMessage '*Could not read a version*'
     }
 }
 
-Describe 'Assert-FullLanguageMode' {
+Describe 'Assert-AlpaconFullLanguageMode' {
     It 'refuses <Mode>, which blocks the .NET calls the install needs' -TestCases @(
         @{ Mode = 'ConstrainedLanguage' }
         @{ Mode = 'RestrictedLanguage' }
         @{ Mode = 'NoLanguage' }
     ) {
-        { Assert-FullLanguageMode -LanguageMode $Mode } |
+        { Assert-AlpaconFullLanguageMode -LanguageMode $Mode } |
             Should -Throw -ExpectedMessage '*blocks the .NET calls*'
     }
 
     It 'passes on FullLanguage' {
-        { Assert-FullLanguageMode -LanguageMode 'FullLanguage' } | Should -Not -Throw
+        { Assert-AlpaconFullLanguageMode -LanguageMode 'FullLanguage' } | Should -Not -Throw
     }
 }
 
-Describe 'Get-ResponseUri' {
+Describe 'Get-AlpaconResponseUri' {
     It 'reads the ResponseUri Windows PowerShell 5.1 exposes' {
         $response = [pscustomobject]@{
             BaseResponse = [pscustomobject]@{
                 ResponseUri = [uri]'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
             }
         }
-        Get-ResponseUri -Response $response |
+        Get-AlpaconResponseUri -Response $response |
             Should -Be 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
     }
 
@@ -153,21 +153,21 @@ Describe 'Get-ResponseUri' {
                 }
             }
         }
-        Get-ResponseUri -Response $response |
+        Get-AlpaconResponseUri -Response $response |
             Should -Be 'https://github.com/alpacax/alpacon-cli/releases/tag/v1.2.3'
     }
 
     It 'returns nothing when the response names no URL' {
-        Get-ResponseUri -Response ([pscustomobject]@{ BaseResponse = [pscustomobject]@{} }) |
+        Get-AlpaconResponseUri -Response ([pscustomobject]@{ BaseResponse = [pscustomobject]@{} }) |
             Should -BeNullOrEmpty
     }
 
     It 'returns nothing when there is no underlying response' {
-        Get-ResponseUri -Response ([pscustomobject]@{ BaseResponse = $null }) | Should -BeNullOrEmpty
+        Get-AlpaconResponseUri -Response ([pscustomobject]@{ BaseResponse = $null }) | Should -BeNullOrEmpty
     }
 
     It 'returns nothing for a null response' {
-        Get-ResponseUri -Response $null | Should -BeNullOrEmpty
+        Get-AlpaconResponseUri -Response $null | Should -BeNullOrEmpty
     }
 }
 
@@ -229,23 +229,23 @@ Describe 'Get-LatestAlpaconVersion' {
     }
 }
 
-Describe 'ConvertTo-ResponseText' {
+Describe 'ConvertTo-AlpaconResponseText' {
     It 'decodes the byte array GitHub responses actually carry' {
         $bytes = [System.Text.Encoding]::UTF8.GetBytes("abcd1234  alpacon-1.11.2-windows-amd64.zip`n")
-        $text = ConvertTo-ResponseText -Content $bytes
+        $text = ConvertTo-AlpaconResponseText -Content $bytes
 
-        Get-ExpectedChecksum -ChecksumText $text -FileName 'alpacon-1.11.2-windows-amd64.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText $text -FileName 'alpacon-1.11.2-windows-amd64.zip' |
             Should -Be 'abcd1234'
     }
 
     It 'passes a string body through unchanged' {
-        ConvertTo-ResponseText -Content 'already text' | Should -Be 'already text'
+        ConvertTo-AlpaconResponseText -Content 'already text' | Should -Be 'already text'
     }
 
     It 'turns a null body into an empty string rather than failing later' {
         # GetType, not BeNullOrEmpty: that helper accepts null too, and null is
         # what this is meant to rule out.
-        (ConvertTo-ResponseText -Content $null).GetType().Name | Should -Be 'String'
+        (ConvertTo-AlpaconResponseText -Content $null).GetType().Name | Should -Be 'String'
     }
 
     It 'strips a BOM, which Trim does not treat as whitespace' {
@@ -254,12 +254,12 @@ Describe 'ConvertTo-ResponseText' {
         $bytes = [byte[]]([System.Text.Encoding]::UTF8.GetPreamble() +
             [System.Text.Encoding]::UTF8.GetBytes("abcd1234  alpacon-1.11.2-windows-amd64.zip`n"))
 
-        Get-ExpectedChecksum -ChecksumText (ConvertTo-ResponseText -Content $bytes) -FileName 'alpacon-1.11.2-windows-amd64.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText (ConvertTo-AlpaconResponseText -Content $bytes) -FileName 'alpacon-1.11.2-windows-amd64.zip' |
             Should -BeExactly 'abcd1234'
     }
 }
 
-Describe 'Get-ExpectedChecksum' {
+Describe 'Get-AlpaconExpectedChecksum' {
     BeforeAll {
         $script:ChecksumFile = @(
             'aaaa1111  alpacon-1.11.2-darwin-arm64.tar.gz'
@@ -271,83 +271,83 @@ Describe 'Get-ExpectedChecksum' {
     }
 
     It 'finds the line for the requested file' {
-        Get-ExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-arm64.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-arm64.zip' |
             Should -Be 'cccc3333'
     }
 
     It 'returns the hash in lower case' {
-        Get-ExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-amd64.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-amd64.zip' |
             Should -BeExactly 'bbbb2222'
     }
 
     It 'reads a file that uses CRLF line endings' {
         $crlf = $script:ChecksumFile -replace "`n", "`r`n"
-        Get-ExpectedChecksum -ChecksumText $crlf -FileName 'alpacon-1.11.2-windows-amd64.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText $crlf -FileName 'alpacon-1.11.2-windows-amd64.zip' |
             Should -BeExactly 'bbbb2222'
     }
 
     It 'tells two names apart when only their case differs' {
-        Get-ExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'ALPACON-1.11.2-WINDOWS-AMD64.ZIP' |
+        Get-AlpaconExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'ALPACON-1.11.2-WINDOWS-AMD64.ZIP' |
             Should -BeExactly 'dddd4444'
     }
 
     It 'keeps a file name that contains spaces whole' {
-        Get-ExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon 1.11.2 spaced.zip' |
+        Get-AlpaconExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon 1.11.2 spaced.zip' |
             Should -BeExactly 'eeee5555'
     }
 
     It 'rejects a file name that is not listed' {
-        { Get-ExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-arm.zip' } |
+        { Get-AlpaconExpectedChecksum -ChecksumText $script:ChecksumFile -FileName 'alpacon-1.11.2-windows-arm.zip' } |
             Should -Throw -ExpectedMessage '*No checksum*'
     }
 
     It 'rejects an empty checksum file' {
-        { Get-ExpectedChecksum -ChecksumText '' -FileName 'alpacon-1.11.2-windows-amd64.zip' } |
+        { Get-AlpaconExpectedChecksum -ChecksumText '' -FileName 'alpacon-1.11.2-windows-amd64.zip' } |
             Should -Throw -ExpectedMessage '*No checksum*'
     }
 }
 
-Describe 'Assert-Checksum' {
+Describe 'Assert-AlpaconChecksum' {
     It 'passes when the hashes match' {
-        { Assert-Checksum -ActualHash 'abcd' -ExpectedHash 'abcd' -FileName 'x.zip' } |
+        { Assert-AlpaconChecksum -ActualHash 'abcd' -ExpectedHash 'abcd' -FileName 'x.zip' } |
             Should -Not -Throw
     }
 
     It 'compares hashes without regard to case, since Get-FileHash returns uppercase' {
-        { Assert-Checksum -ActualHash 'ABCD' -ExpectedHash 'abcd' -FileName 'x.zip' } |
+        { Assert-AlpaconChecksum -ActualHash 'ABCD' -ExpectedHash 'abcd' -FileName 'x.zip' } |
             Should -Not -Throw
     }
 
     It 'throws and names the file when the hashes differ' {
-        { Assert-Checksum -ActualHash 'abcd' -ExpectedHash 'dcba' -FileName 'x.zip' } |
+        { Assert-AlpaconChecksum -ActualHash 'abcd' -ExpectedHash 'dcba' -FileName 'x.zip' } |
             Should -Throw -ExpectedMessage '*Checksum mismatch for x.zip*'
     }
 }
 
-Describe 'Resolve-InstallAction' {
+Describe 'Resolve-AlpaconInstallAction' {
     It 'installs when nothing is on disk' {
-        Resolve-InstallAction -InstalledVersion $null -TargetVersion '1.11.2' | Should -Be 'install'
+        Resolve-AlpaconInstallAction -InstalledVersion $null -TargetVersion '1.11.2' | Should -Be 'install'
     }
 
     It 'installs when the version marker is empty' {
-        Resolve-InstallAction -InstalledVersion '' -TargetVersion '1.11.2' | Should -Be 'install'
+        Resolve-AlpaconInstallAction -InstalledVersion '' -TargetVersion '1.11.2' | Should -Be 'install'
     }
 
     It 'skips when the installed version already matches' {
-        Resolve-InstallAction -InstalledVersion '1.11.2' -TargetVersion '1.11.2' | Should -Be 'skip'
+        Resolve-AlpaconInstallAction -InstalledVersion '1.11.2' -TargetVersion '1.11.2' | Should -Be 'skip'
     }
 
     It 'upgrades when the versions differ only in the case of a pre-release tag' {
-        Resolve-InstallAction -InstalledVersion '1.12.0-rc1' -TargetVersion '1.12.0-RC1' |
+        Resolve-AlpaconInstallAction -InstalledVersion '1.12.0-rc1' -TargetVersion '1.12.0-RC1' |
             Should -Be 'upgrade'
     }
 
     It 'upgrades when the installed version differs' {
-        Resolve-InstallAction -InstalledVersion '1.11.1' -TargetVersion '1.11.2' | Should -Be 'upgrade'
+        Resolve-AlpaconInstallAction -InstalledVersion '1.11.1' -TargetVersion '1.11.2' | Should -Be 'upgrade'
     }
 
     It 'installs on -Force even when the version already matches' {
-        Resolve-InstallAction -InstalledVersion '1.11.2' -TargetVersion '1.11.2' -Force | Should -Be 'install'
+        Resolve-AlpaconInstallAction -InstalledVersion '1.11.2' -TargetVersion '1.11.2' -Force | Should -Be 'install'
     }
 }
 
@@ -400,7 +400,7 @@ Describe 'Get-InstalledAlpaconVersion and Set-InstalledAlpaconVersion' {
     }
 }
 
-Describe 'ConvertFrom-VersionArgument' {
+Describe 'ConvertFrom-AlpaconVersionArgument' {
     It 'rejects <Given>, which would steer the download somewhere else' -TestCases @(
         @{ Given = '../../evil' }
         @{ Given = '1.10.0/../../evil' }
@@ -412,7 +412,7 @@ Describe 'ConvertFrom-VersionArgument' {
         @{ Given = '1.10.0?x' }
         @{ Given = ('1.10.0' + [char]0x212A) }
     ) {
-        { ConvertFrom-VersionArgument -Version $Given } |
+        { ConvertFrom-AlpaconVersionArgument -Version $Given } |
             Should -Throw -ExpectedMessage '*is not a version number*'
     }
 
@@ -422,7 +422,7 @@ Describe 'ConvertFrom-VersionArgument' {
         @{ Given = 'V1.10.0';    Expected = '1.10.0' }
         @{ Given = '1.12.0-rc1'; Expected = '1.12.0-rc1' }
     ) {
-        ConvertFrom-VersionArgument -Version $Given | Should -Be $Expected
+        ConvertFrom-AlpaconVersionArgument -Version $Given | Should -Be $Expected
     }
 }
 
@@ -474,28 +474,28 @@ Describe 'Test-AlpaconFileLocked' {
     }
 }
 
-Describe 'Add-PathEntry' {
+Describe 'Add-AlpaconPathEntry' {
     It 'appends to an empty PATH' {
-        Add-PathEntry -CurrentPath '' -Directory 'C:\bin' | Should -Be 'C:\bin'
+        Add-AlpaconPathEntry -CurrentPath '' -Directory 'C:\bin' | Should -Be 'C:\bin'
     }
 
     It 'appends to the end of an existing PATH' {
-        Add-PathEntry -CurrentPath 'C:\a;C:\b' -Directory 'C:\bin' | Should -Be 'C:\a;C:\b;C:\bin'
+        Add-AlpaconPathEntry -CurrentPath 'C:\a;C:\b' -Directory 'C:\bin' | Should -Be 'C:\a;C:\b;C:\bin'
     }
 
     It 'returns null, not empty, when the directory is already there' {
-        # Add-ToUserPath only checks for null, so an empty string here would
+        # Add-AlpaconToUserPath only checks for null, so an empty string here would
         # have it write an empty user PATH.
-        $answer = Add-PathEntry -CurrentPath 'C:\a;C:\bin' -Directory 'C:\bin'
+        $answer = Add-AlpaconPathEntry -CurrentPath 'C:\a;C:\bin' -Directory 'C:\bin'
         ($null -eq $answer) | Should -BeTrue -Because "nothing to add must read as null, got '$answer'"
     }
 
     It 'returns null when the directory is already there' {
-        Add-PathEntry -CurrentPath 'C:\a;C:\bin;C:\b' -Directory 'C:\bin' | Should -BeNullOrEmpty
+        Add-AlpaconPathEntry -CurrentPath 'C:\a;C:\bin;C:\b' -Directory 'C:\bin' | Should -BeNullOrEmpty
     }
 
     It 'matches case insensitively, the way Windows paths compare' {
-        Add-PathEntry -CurrentPath 'C:\A;C:\BIN' -Directory 'C:\bin' | Should -BeNullOrEmpty
+        Add-AlpaconPathEntry -CurrentPath 'C:\A;C:\BIN' -Directory 'C:\bin' | Should -BeNullOrEmpty
     }
 
     It 'treats <Existing> as the directory it already holds' -TestCases @(
@@ -503,21 +503,21 @@ Describe 'Add-PathEntry' {
         @{ Existing = '"C:\Alpacon\bin"' }
         @{ Existing = '  C:\Alpacon\bin  ' }
     ) {
-        Add-PathEntry -CurrentPath "C:\tools;$Existing" -Directory 'C:\Alpacon\bin' |
+        Add-AlpaconPathEntry -CurrentPath "C:\tools;$Existing" -Directory 'C:\Alpacon\bin' |
             Should -BeNullOrEmpty
     }
 
     It 'folds a relative segment onto the directory it names' -Skip:($env:OS -ne 'Windows_NT') {
         # Windows-only: what counts as an absolute path, and what GetFullPath
         # does with a backslash, are both Windows semantics.
-        Add-PathEntry -CurrentPath 'C:\Alpacon\tools\..\bin' -Directory 'C:\Alpacon\bin' |
+        Add-AlpaconPathEntry -CurrentPath 'C:\Alpacon\tools\..\bin' -Directory 'C:\Alpacon\bin' |
             Should -BeNullOrEmpty
     }
 
     It 'matches an entry that is still written as an environment token' {
         $env:ALPACON_TEST_ROOT = 'C:\Alpacon'
         try {
-            Add-PathEntry -CurrentPath '%ALPACON_TEST_ROOT%\bin' -Directory 'C:\Alpacon\bin' |
+            Add-AlpaconPathEntry -CurrentPath '%ALPACON_TEST_ROOT%\bin' -Directory 'C:\Alpacon\bin' |
                 Should -BeNullOrEmpty
         } finally {
             Remove-Item Env:\ALPACON_TEST_ROOT
@@ -527,17 +527,17 @@ Describe 'Add-PathEntry' {
     It 'leaves a relative entry alone rather than resolving it here' {
         # GetFullPath would resolve it against this process's working directory,
         # so a relative entry can never stand in for the absolute one.
-        Add-PathEntry -CurrentPath 'Alpacon\bin' -Directory 'C:\Alpacon\bin' |
+        Add-AlpaconPathEntry -CurrentPath 'Alpacon\bin' -Directory 'C:\Alpacon\bin' |
             Should -Be 'Alpacon\bin;C:\Alpacon\bin'
     }
 
     It 'appends after a trailing semicolon without rewriting what was there' {
-        Add-PathEntry -CurrentPath 'C:\tools;;C:\other;' -Directory 'C:\Alpacon\bin' |
+        Add-AlpaconPathEntry -CurrentPath 'C:\tools;;C:\other;' -Directory 'C:\Alpacon\bin' |
             Should -Be 'C:\tools;;C:\other;C:\Alpacon\bin'
     }
 }
 
-Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
+Describe 'Add-AlpaconToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
     BeforeEach {
         $script:SubKey = "Software\AlpaconInstallerTest\$([guid]::NewGuid())"
         $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($script:SubKey)
@@ -550,11 +550,11 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
     }
 
     It 'appends the directory and reports that it changed something' {
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeTrue
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeTrue
     }
 
     It 'leaves %USERPROFILE% unexpanded' {
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:SubKey)
         try {
             $raw = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
@@ -563,7 +563,7 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
     }
 
     It 'keeps the value kind as REG_EXPAND_SZ' {
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:SubKey)
         try {
             $key.GetValueKind('Path') | Should -Be ([Microsoft.Win32.RegistryValueKind]::ExpandString)
@@ -571,8 +571,8 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
     }
 
     It 'does not add the same directory twice' {
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeFalse
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Out-Null
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeFalse
 
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:SubKey)
         try {
@@ -588,7 +588,7 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
         $key.SetValue('Path', [string[]]@('C:\one', 'C:\two'), [Microsoft.Win32.RegistryValueKind]::MultiString)
         $key.Close()
 
-        { Add-ToUserPath -Directory 'C:\Alpacon\bin' -SubKey $script:SubKey } |
+        { Add-AlpaconToUserPath -Directory 'C:\Alpacon\bin' -SubKey $script:SubKey } |
             Should -Throw -ExpectedMessage '*will not rewrite*'
     }
 
@@ -597,7 +597,7 @@ Describe 'Add-ToUserPath' -Skip:($env:OS -ne 'Windows_NT') {
         $key.DeleteValue('Path')
         $key.Close()
 
-        Add-ToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeTrue
+        Add-AlpaconToUserPath -Directory 'C:\bin' -SubKey $script:SubKey | Should -BeTrue
 
         $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($script:SubKey)
         try {
@@ -652,27 +652,27 @@ Describe 'A run that installs nothing' {
         Mock -CommandName Get-AlpaconArch -MockWith { 'amd64' }
         Mock -CommandName Get-LatestAlpaconVersion -MockWith { '1.11.2' }
         Mock -CommandName Get-InstalledAlpaconVersion -MockWith { '1.11.2' }  # equal to latest: the skip branch
-        Mock -CommandName Add-ToUserPath -MockWith { $false }  # the entry is already there; cases that need more re-mock it
-        Mock -CommandName Add-ToSessionPath -MockWith { }  # would rewrite the suite shell's own PATH
-        Mock -CommandName Send-SettingChange -MockWith { }
+        Mock -CommandName Add-AlpaconToUserPath -MockWith { $false }  # the entry is already there; cases that need more re-mock it
+        Mock -CommandName Add-AlpaconToSessionPath -MockWith { }  # would rewrite the suite shell's own PATH
+        Mock -CommandName Send-AlpaconSettingChange -MockWith { }
         Mock -CommandName Get-ShadowingAlpacon -MockWith { $null }
         Mock -CommandName Write-Host -MockWith { }
         Mock -CommandName Write-Warning -MockWith { }
     }
 
     It 'puts the install directory back on the user PATH' {
-        Mock -CommandName Add-ToUserPath -MockWith { $true }
+        Mock -CommandName Add-AlpaconToUserPath -MockWith { $true }
 
         Invoke-AlpaconInstall
 
-        Should -Invoke -CommandName Add-ToUserPath -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke -CommandName Add-AlpaconToUserPath -Times 1 -Exactly -ParameterFilter {
             $Directory -eq 'C:\Users\jane\AppData\Local\Alpacon\bin'
         }
         Should -Invoke -CommandName Write-Host -Times 1 -Exactly -ParameterFilter {
             $Object -like 'Added *to your PATH*'
         }
-        Should -Invoke -CommandName Send-SettingChange -Times 1 -Exactly  # without it only new terminals see the repair
-        Should -Invoke -CommandName Add-ToSessionPath -Times 1 -Exactly -ParameterFilter {
+        Should -Invoke -CommandName Send-AlpaconSettingChange -Times 1 -Exactly  # without it only new terminals see the repair
+        Should -Invoke -CommandName Add-AlpaconToSessionPath -Times 1 -Exactly -ParameterFilter {
             $Directory -eq 'C:\Users\jane\AppData\Local\Alpacon\bin'
         }
     }
@@ -680,11 +680,11 @@ Describe 'A run that installs nothing' {
     It 'says nothing about the PATH when the entry is already there' {
         Invoke-AlpaconInstall
 
-        Should -Invoke -CommandName Add-ToUserPath -Times 1 -Exactly
+        Should -Invoke -CommandName Add-AlpaconToUserPath -Times 1 -Exactly
         Should -Invoke -CommandName Write-Host -Times 0 -Exactly -ParameterFilter {
             $Object -like 'Added *to your PATH*'
         }
-        Should -Invoke -CommandName Send-SettingChange -Times 0 -Exactly
+        Should -Invoke -CommandName Send-AlpaconSettingChange -Times 0 -Exactly
     }
 
     It 'still reports the version it found' {
@@ -696,7 +696,7 @@ Describe 'A run that installs nothing' {
     }
 
     It 'warns instead of failing when the user PATH cannot be written' {
-        Mock -CommandName Add-ToUserPath -MockWith { throw 'Requested registry access is not allowed.' }
+        Mock -CommandName Add-AlpaconToUserPath -MockWith { throw 'Requested registry access is not allowed.' }
 
         { Invoke-AlpaconInstall } | Should -Not -Throw
 
@@ -707,7 +707,7 @@ Describe 'A run that installs nothing' {
             $Object -like 'alpacon is already at 1.11.2.*'
         }
         # The catch sits above it, so a throw here must not cost this shell its entry.
-        Should -Invoke -CommandName Add-ToSessionPath -Times 1 -Exactly
+        Should -Invoke -CommandName Add-AlpaconToSessionPath -Times 1 -Exactly
     }
 
     It 'warns about a copy of alpacon that comes earlier on the PATH' {
@@ -760,6 +760,105 @@ Describe 'What the installer promises about itself and about the release' {
         @($offenders | ForEach-Object { $_.Extent.Text }) | Should -BeNullOrEmpty
     }
 
+    Context 'names irm | iex leaves in the caller''s shell' {
+        BeforeAll {
+            function Get-WrittenVariable {
+                param([System.Management.Automation.Language.Ast]$Target)
+
+                if ($Target -is [System.Management.Automation.Language.AttributedExpressionAst]) {
+                    Get-WrittenVariable -Target $Target.Child
+                } elseif ($Target -is [System.Management.Automation.Language.ParenExpressionAst]) {
+                    Get-WrittenVariable -Target $Target.Pipeline.GetPureExpression()
+                } elseif ($Target -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+                    foreach ($element in $Target.Elements) { Get-WrittenVariable -Target $element }
+                } elseif ($Target -is [System.Management.Automation.Language.VariableExpressionAst]) {
+                    $Target
+                }
+            }
+
+            function Find-UnprefixedLeak {
+                param([Parameter(Mandatory)][System.Management.Automation.Language.ScriptBlockAst]$Ast)
+
+                $increments = 'PlusPlus', 'MinusMinus', 'PostfixPlusPlus', 'PostfixMinusMinus'
+                foreach ($node in $Ast.FindAll({ $true }, $true)) {
+                    if ($node -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
+                        if ($node.Name -notlike '*Alpacon*') { $node.Name }
+                        continue
+                    }
+
+                    $target = if ($node -is [System.Management.Automation.Language.AssignmentStatementAst]) {
+                        $node.Left
+                    } elseif ($node -is [System.Management.Automation.Language.UnaryExpressionAst] -and
+                              "$($node.TokenKind)" -in $increments) {
+                        $node.Child
+                    }
+                    if (-not $target) { continue }
+
+                    $scope = $node.Parent
+                    while ($scope -isnot [System.Management.Automation.Language.ScriptBlockAst]) { $scope = $scope.Parent }
+                    $atFileScope = [object]::ReferenceEquals($scope, $Ast)
+
+                    foreach ($variable in @(Get-WrittenVariable -Target $target)) {
+                        $path = $variable.VariablePath
+                        if (-not $path.IsVariable) { continue }
+                        if (-not ($path.IsScript -or $path.IsGlobal -or $atFileScope)) { continue }
+                        $name = $path.UserPath -replace '^[A-Za-z]+:', ''
+                        if ($name -ne 'null' -and $name -notlike 'Alpacon*') { $variable.Extent.Text }
+                    }
+                }
+            }
+
+            function Find-UnprefixedLeakIn {
+                param([Parameter(Mandatory)][string]$Code)
+
+                $parseErrors = $null
+                $ast = [System.Management.Automation.Language.Parser]::ParseInput($Code, [ref]$null, [ref]$parseErrors)
+                $parseErrors | Should -BeNullOrEmpty
+                @(Find-UnprefixedLeak -Ast $ast)
+            }
+        }
+
+        It 'prefixes every name it leaves in the caller''s shell with Alpacon' {
+            $parseErrors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path $PSScriptRoot 'install.ps1'), [ref]$null, [ref]$parseErrors)
+            $parseErrors | Should -BeNullOrEmpty
+
+            @(Find-UnprefixedLeak -Ast $ast) | Should -BeNullOrEmpty
+        }
+
+        It 'catches <Code>' -TestCases @(
+            @{ Code = 'function Get-Thing { }' }
+            @{ Code = '$script:Thing = 1' }
+            @{ Code = '${script:Thing} = 1' }
+            @{ Code = '[string]$script:Thing = 1' }
+            @{ Code = '[ValidateNotNull()]$script:Thing = 1' }
+            @{ Code = '$script:Thing, $script:AlpaconOther = 1, 2' }
+            @{ Code = '($script:Thing, $script:AlpaconOther) = 1, 2' }
+            @{ Code = '$script:Thing += 1' }
+            @{ Code = '$script:Thing++' }
+            @{ Code = '--$script:Thing' }
+            @{ Code = '$global:Thing = 1' }
+            @{ Code = '$thing = 1' }
+            @{ Code = 'function Set-AlpaconThing { $script:Thing = 1 }' }
+            @{ Code = 'function Set-AlpaconThing { $global:Thing = 1 }' }
+        ) {
+            Find-UnprefixedLeakIn -Code $Code | Should -Not -BeNullOrEmpty
+        }
+
+        It 'lets <Code> through' -TestCases @(
+            @{ Code = 'function Set-AlpaconThing { $thing = 1 }' }
+            @{ Code = '$script:AlpaconThing = 1' }
+            @{ Code = '$script:AlpaconThing, $script:AlpaconOther = 1, 2' }
+            @{ Code = '$global:AlpaconThing++' }
+            @{ Code = '& { $thing = 1 }' }
+            @{ Code = '$env:Path = ''C:\bin''' }
+            @{ Code = '$null = 1' }
+        ) {
+            Find-UnprefixedLeakIn -Code $Code | Should -BeNullOrEmpty
+        }
+    }
+
     It 'decodes every response body in the same expression that reads it' {
         # Only e2e exercises the download itself, so this is what stands between
         # a byte[] body and the byte values being spelled out into the parser.
@@ -785,7 +884,7 @@ Describe 'What the installer promises about itself and about the release' {
             while ($call -and $call -isnot [System.Management.Automation.Language.CommandAst]) {
                 $call = $call.Parent
             }
-            -not ($call -and $call.GetCommandName() -eq 'ConvertTo-ResponseText')
+            -not ($call -and $call.GetCommandName() -eq 'ConvertTo-AlpaconResponseText')
         }
 
         @($undecoded | ForEach-Object { $_.Extent.Text }) | Should -BeNullOrEmpty

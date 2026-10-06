@@ -45,7 +45,7 @@ func TestGetWorkspacesFromToken(t *testing.T) {
 				"https://alpacon.io/workspaces": []map[string]any{
 					{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
 					{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
-					{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "dev"},
+					{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "zz9"},
 				},
 			},
 			expectErr: false,
@@ -231,7 +231,7 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
 			{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
-			{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "dev"},
+			{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "zz9"},
 		},
 	})
 
@@ -257,9 +257,9 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 			expectErr:  false,
 		},
 		{
-			name:       "Switch to ws3 in dev",
+			name:       "Switch to ws3 in a third region",
 			targetName: "ws3",
-			expectURL:  "https://ws3.dev.alpacon.io",
+			expectURL:  "https://ws3.zz9.alpacon.io",
 			expectName: "ws3",
 			expectErr:  false,
 		},

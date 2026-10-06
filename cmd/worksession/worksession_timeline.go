@@ -50,7 +50,8 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, true)
+			// Sent on the request so the recording bytes are never downloaded.
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
 		}()
 		go func() {
 			defer wg.Done()
@@ -69,7 +70,14 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		recordingsBySession, recordings := buildRecordingIndex(items)
+		// A server too old to know include_records sends the records anyway.
+		var (
+			recordingsBySession map[string][]wsapi.TimelineItem
+			recordings          []wsapi.TimelineItem
+		)
+		if !noRecords {
+			recordingsBySession, recordings = buildRecordingIndex(items)
+		}
 
 		rows := make([]wsapi.TimelineAttributes, 0)
 		for i := range items {
@@ -91,25 +99,22 @@ var workSessionTimelineCmd = &cobra.Command{
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			var recList []wsapi.TimelineItem
-			if !noRecords {
-				recList = recordings
-			}
-			outputTimelineJSON(rows, recList, serverMap)
+			outputTimelineJSON(rows, recordings, serverMap)
 			return
 		}
 
 		writer, cleanup := utils.WriteToPager()
 		defer cleanup()
 		printTimelineTableTo(writer, rows)
-		if !noRecords && len(recordings) > 0 {
+		if len(recordings) > 0 {
 			printRecordingsSectionTo(writer, recordings, serverMap)
 		}
 	},
 }
 
 func init() {
-	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false, "Hide the recordings section below the timeline")
+	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
+		"Skip recordings: hide the recordings section and the recording count on Websh rows")
 }
 
 func buildRecordingIndex(items []wsapi.TimelineItem) (bySession map[string][]wsapi.TimelineItem, flat []wsapi.TimelineItem) {

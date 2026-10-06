@@ -12,6 +12,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
@@ -87,4 +89,37 @@ func TestGetSystemLogList_NoExtraPagination(t *testing.T) {
 	if len(logs) != 25 {
 		t.Errorf("expected 25 logs, got %d", len(logs))
 	}
+}
+
+func TestGetSystemLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if strings.HasPrefix(r.URL.Path, "/api/servers/servers") {
+			_ = json.NewEncoder(w).Encode(api.ListResponse[server.ServerDetails]{
+				Count:   1,
+				Results: []server.ServerDetails{{ID: "srv-1", Name: "test-server"}},
+			})
+			return
+		}
+
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[LogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
+				Results: []LogEntry{{Program: "sshd", Level: 20, Process: "main", Msg: "first"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetSystemLogList(ac, "test-server", 200)
+
+	require.Error(t, err)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "[main] first", logs[0].Message)
 }

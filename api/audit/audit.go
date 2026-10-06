@@ -27,10 +27,8 @@ func GetAuditLogList(ac *client.AlpaconClient, tail int, userName string, app st
 		params["model"] = model
 	}
 
+	// On error the entries read so far are still projected and returned.
 	entries, err := api.FetchCursorPages[AuditLogEntry](ac, auditURL, params, tail)
-	if err != nil {
-		return nil, err
-	}
 
 	var auditList []AuditLogAttributes
 	for _, entry := range entries {
@@ -46,5 +44,5 @@ func GetAuditLogList(ac *client.AlpaconClient, tail int, userName string, app st
 		})
 	}
 
-	return auditList, nil
+	return auditList, err
 }

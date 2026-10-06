@@ -4,9 +4,9 @@ import "time"
 
 const (
 	// Poll pacing, in multiples of the caller's base tick, widening as the poll ages
-	// and again once the server pushes back. A fixed 1s tick burns alpacon-server's
-	// default 1000/hour service-token throttle in ~17 minutes, then starves itself—each
-	// freed slot goes to a request that is throttled again.
+	// and again once the server pushes back. A fixed 1s tick burns the server's
+	// service-token throttle, then starves itself—each freed slot goes to a
+	// request that is throttled again.
 	pollFastWindow    = 10
 	pollMediumWindow  = 60
 	pollMediumTick    = 5

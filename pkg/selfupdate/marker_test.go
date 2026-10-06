@@ -75,6 +75,6 @@ func TestTheMarkerNameMatchesTheWindowsInstaller(t *testing.T) {
 	// PowerShell prints every one of them when it fails. [^\r\n]* rather than
 	// .*$, since git checks the file out with CRLF on Windows and $ leaves the
 	// carriage return inside the match.
-	assignment := regexp.MustCompile(`(?m)^\$script:VersionMarkerName = [^\r\n]*`).FindString(string(script))
-	assert.Equal(t, "$script:VersionMarkerName = '"+installedVersionMarker+"'", assignment)
+	assignment := regexp.MustCompile(`(?m)^\$script:AlpaconVersionMarkerName = [^\r\n]*`).FindString(string(script))
+	assert.Equal(t, "$script:AlpaconVersionMarkerName = '"+installedVersionMarker+"'", assignment)
 }

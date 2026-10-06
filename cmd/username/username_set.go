@@ -16,7 +16,7 @@ var usernameSetCmd = &cobra.Command{
 	The username can be set once; it cannot be changed here afterward.
 	`,
 	Example: `
-	alpacon username set jschae
+	alpacon username set alice
 	`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
