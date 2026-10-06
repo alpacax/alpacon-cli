@@ -77,7 +77,8 @@ var workSessionTimelineCmd = &cobra.Command{
 
 		// A server too old to know include_records answers with the records
 		// anyway, so the flag also has to drop them here. Leaving the index
-		// empty takes the badge, the section and the JSON key with it.
+		// empty drops the badge and the section, and leaves the JSON
+		// "recordings" key as an empty array.
 		var (
 			recordingsBySession map[string][]wsapi.TimelineItem
 			recordings          []wsapi.TimelineItem
