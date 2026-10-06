@@ -283,7 +283,7 @@ func firstDenialCode(output string) string {
 }
 
 // isSanitizedDenialCode reports whether code has the [A-Z0-9_] shape
-// the plugin's sanitizer emits. Anything else in that slot came from the
+// that the plugin's sanitizer emits. Anything else in that slot came from the
 // command's own output, so it must never be echoed back into a hint.
 func isSanitizedDenialCode(code string) bool {
 	if code == "" {
