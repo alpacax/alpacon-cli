@@ -57,7 +57,7 @@ type CommandRejectedError struct {
 // AwaitingPurposeError is returned when the server parked a command at the
 // "awaiting_purpose" status: the verification gate would have queued it for a
 // human, so instead of opening an approval request it is asking the requester
-// what the command is for (ADR 0052). Nobody has been notified, so this is not
+// what the command is for. Nobody has been notified, so this is not
 // a wait—the answer is the caller's to give, with 'alpacon exec purpose'.
 // CommandID identifies the parked job; re-submitting would create a second
 // command that gets its own demand and may run twice.
@@ -96,9 +96,9 @@ type EventDetails struct {
 	AddedAt       time.Time           `json:"added_at"`
 	Server        types.ServerSummary `json:"server"`
 	RequestedBy   types.UserSummary   `json:"requested_by"`
-	// What the requester said this command is for, and when the ask expires
-	// (ADR 0052). Both are absent on a server predating the read exposure, and
-	// on any command nobody was asked—which is every command until the gate is
+	// What the requester said this command is for, and when the ask expires.
+	// Both are absent on a server predating the read exposure, and on any
+	// command nobody was asked—which is every command until the gate is
 	// enabled, so nil and empty are the ordinary shapes here.
 	//
 	// The expiry is server-derived and read instead of `purpose_requested_at`:
@@ -126,23 +126,23 @@ type CommandRequest struct {
 	Server      string            `json:"server"`
 	RunAfter    []string          `json:"run_after"`
 	WorkSession string            `json:"work_session,omitempty"`
-	// What this one command is for (ADR 0052). Sent only when the caller
-	// supplied it; with it in hand the assessor judges on the first pass and the
-	// demand round trip never happens, which is the steady state the ADR intends.
+	// What this one command is for. Sent only when the caller supplied it;
+	// with it in hand the assessor judges on the first pass and the
+	// demand round trip never happens, which is the steady state.
 	Purpose string `json:"purpose,omitempty"`
 	// Declares that this client answers a purpose demand. The gate does not arm
 	// without it, so the declaration is the opt-in—and it is unconditional here
 	// because every exec path surfaces the demand to its caller instead of
 	// stalling on it.
 	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
-	// File selects the verified file lane (ADR 0053). Its presence is what the
+	// File selects the verified file lane. Its presence is what the
 	// server switches on, so it is omitted from every generic-lane request and
 	// no existing request changes shape. When set, MarshalJSON leaves shell,
 	// line, env and data out of the body entirely—see fileLaneRequest.
 	File *FileExecution `json:"file,omitempty"`
 }
 
-// FileExecution is what a file-lane submission runs (ADR 0053): the file at Path
+// FileExecution is what a file-lane submission runs: the file at Path
 // on the target host, through Interpreter, with Args. Content is the bytes the
 // reviewer and the assessor judge and the server hashes; the agent hashes the
 // file on the target's disk and runs it only when the two digests match, so
@@ -265,15 +265,14 @@ func IsRunningStatus(status string) bool {
 }
 
 // IsAwaitingApprovalStatus reports whether status is the server's hold state for a
-// command parked pending out-of-band human approval (HITL). The server exposes
-// this via Command.compute_status when verification_status is "awaiting_approval"
-// and the command has not yet been delivered to the agent.
+// command parked pending out-of-band human approval (HITL). The server reports
+// it while the command awaits approval and has not yet been delivered to the agent.
 func IsAwaitingApprovalStatus(status string) bool {
 	return status == "awaiting_approval"
 }
 
 // IsAwaitingPurposeStatus reports whether status is the server's hold state for
-// a command parked while the gate asks the requester what it is for (ADR 0052).
+// a command parked while the gate asks the requester what it is for.
 // Unlike the approval hold this one is answerable here and expires on its own
 // in about a minute, after which the command takes the ordinary path.
 func IsAwaitingPurposeStatus(status string) bool {

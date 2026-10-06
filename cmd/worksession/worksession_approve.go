@@ -6,7 +6,7 @@ import (
 )
 
 // approveRejectExcludedMessage explains why the CLI no longer approves or rejects
-// work sessions. ADR 0015 makes the CLI an execution/request surface only:
+// work sessions. The CLI is an execution/request surface only:
 // approval happens out of band in the Alpacon console (web/Slack), and the server
 // now refuses (HTTP 403) approve/reject from the CLI credential channel. The
 // subcommands stay registered so the message is discoverable and existing scripts

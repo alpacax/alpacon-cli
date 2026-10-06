@@ -60,7 +60,7 @@ func TestFetchCursorPages_SinglePageNullNext(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
 		w.Header().Set("Content-Type", "application/json")
-		// Raw wire form of ESCursorPagination: null next, extra fields ignored.
+		// Raw wire form of the cursor pagination: null next, extra fields ignored.
 		_, _ = w.Write([]byte(`{"count":2,"next":null,"previous":null,"results":[{"name":"a"},{"name":"b"}]}`))
 	}))
 	defer ts.Close()
@@ -238,9 +238,10 @@ func TestFetchCursorPages_DoesNotMutateCallerParams(t *testing.T) {
 	assert.Equal(t, map[string]string{"app": "cert"}, params)
 }
 
-// newPageServer slices its items the way Django's PageNumberPagination does—offset
-// (page-1)*page_size, taken from the request itself—so a page_size that changes mid-walk
-// shows up as duplicated and skipped items instead of passing silently.
+// newPageServer slices its items the way the server's page-number pagination
+// does—offset (page-1)*page_size, taken from the request itself—so a page_size
+// that changes mid-walk shows up as duplicated and skipped items instead of
+// passing silently.
 func newPageServer(t *testing.T, total int, rec *requestRecorder) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

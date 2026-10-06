@@ -19,7 +19,7 @@ const (
 	usernameURL   = "/api/iam/username/"
 	inviteUserURL = "/api/workspaces/users/invite/"
 
-	// Server username error codes (alpacon-server iam/api/serializers.py)
+	// Username error codes the server sends
 	codeUsernameInvalid    = "user_username_invalid"
 	codeUsernameDisallowed = "user_username_disallowed"
 	codeUsernameInUse      = "user_username_in_use"

@@ -19,11 +19,6 @@ func TestExtractBaseDomain(t *testing.T) {
 			expected: "alpacon.io",
 		},
 		{
-			name:     "Dev environment URL",
-			input:    "https://myws.dev.alpacon.io",
-			expected: "alpacon.io",
-		},
-		{
 			name:     "US region URL",
 			input:    "https://myws.us1.alpacon.io",
 			expected: "alpacon.io",

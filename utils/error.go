@@ -12,7 +12,7 @@ const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
 
-	// Codes the server sends on DRF's own 401s (NotAuthenticated, AuthenticationFailed).
+	// Codes the server sends on its own 401s.
 	AuthTokenMissing         = "auth_token_missing"
 	AuthAuthenticationFailed = "auth_authentication_failed"
 
@@ -30,7 +30,7 @@ const (
 	// so it cannot complete sudo MFA. Signing in interactively can.
 	SudoVerifyCredentialCannotProveMFA = "sudo_verify_credential_cannot_prove_mfa"
 
-	// Codes the server sends on DRF's own 404/429/406/415 refusals, with no detail.
+	// Codes the server sends on its own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"
 	APINotAcceptable        = "api_not_acceptable"
@@ -39,11 +39,11 @@ const (
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
-	// CommandInlineCredential: alpacon-server refused a command because its command
+	// CommandInlineCredential: the server refused a command because its command
 	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such
 	// as PGPASSWORD=..., or a user:pass@host connection string), which the server
 	// would otherwise persist in the stored command line. Move the secret to
-	// --env instead. See alpacon-server ADR 0037 (Refs alpacax/alpacon-server#2745).
+	// --env instead.
 	// The rejected-forms list above is repeated in the exec and websh help text
 	// and the README's "When a command is denied" section—when the server-side
 	// gate changes, update all of them together.
@@ -55,16 +55,15 @@ const (
 	// where rewriting with --env costs the same. --env stays the only path.
 	CommandInlineCredential = "command_inline_credential"
 
-	// APITokenACLNotAllowed: alpacon-server refused the request because the token's
+	// APITokenACLNotAllowed: the server refused the request because the token's
 	// access control rules do not cover it—the command, the server, or the file path
 	// falls outside the envelope an admin granted this token. The refusal is
 	// permanent for the same request: a retry submits the same thing. Widen the
 	// rules with 'alpacon token acl' instead. The server sends this on a 403 with no
-	// human detail, so authStatusCodeMessage in client/client.go renders the message
-	// (Refs alpacax/alpacon-server#2804).
+	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
-	// WorkSession gate codes (returned by alpacon-server work_sessions/services.py)
+	// WorkSession gate codes the server returns
 	WorkSessionRequired         = "work_session_required"
 	WorkSessionNotUsable        = "work_session_not_usable"
 	WorkSessionNotActive        = "work_session_not_active"
@@ -128,7 +127,7 @@ const (
 	ExitCodeNotApproved = 6
 
 	// ExitCodePurposeRequired is the process exit code for a command the
-	// verification gate parked while it asks what the command is for (ADR 0052).
+	// verification gate parked while it asks what the command is for.
 	// It is deliberately not ExitCodePendingApproval (4): nothing is pending on a
 	// human, no approval request exists, and the next move belongs to the caller
 	// that submitted the command. Scripts and AI agents branch on it to answer

@@ -127,7 +127,7 @@ func PrintPurposeDemand(message, commandID string, expiresAt *time.Time) {
 }
 
 // purposeAnswerJSON is the envelope `alpacon exec purpose` prints under
-// --output json. ADR 0052 is an agent-facing flow end to end: `exec` and
+// --output json. The purpose flow is agent-facing end to end: `exec` and
 // `exec logs` both emit a machine-readable result, and the command that answers
 // them has to as well, or an agent that branched on exit 7 and answered has the
 // exit code and nothing else.

@@ -18,8 +18,8 @@ const (
 	workSessionActivatedEvent = "activated"
 )
 
-// Sub types confirmed against alpacon-server 2cafc0f67 by reading every
-// publish_work_session_status_change call site.
+// Sub types mirror the work session status changes the server publishes, by
+// hand.
 var waitAdapters = map[eventapi.EventType]waitAdapter{
 	eventTypeWorkSession: {
 		ok:      []string{"approved", workSessionActivatedEvent},

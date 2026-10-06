@@ -215,9 +215,9 @@ func TestParseCloudWorkspaceURL(t *testing.T) {
 		},
 		{
 			name:          "future region is still parsed from cloud URL shape",
-			workspaceURL:  "https://demo.eu1.alpacon.io",
+			workspaceURL:  "https://demo.zz9.alpacon.io",
 			wantWorkspace: "demo",
-			wantRegion:    "eu1",
+			wantRegion:    "zz9",
 			wantOK:        true,
 		},
 		{
