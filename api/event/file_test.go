@@ -103,13 +103,9 @@ func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 	}`, string(body))
 }
 
-// TestCommandRequestMarshal_FileReuseDays pins the proposal's wire shape: a nil
-// ReuseDays leaves reuse_days out of the file object entirely, so a request
-// without --reuse-days is what a server older than the field already accepts,
-// and a set one travels as an integer under that key.
 func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
 	t.Parallel()
-	file := func(reuseDays *int) *CommandRequest {
+	file := func(reuseDays int) *CommandRequest {
 		return &CommandRequest{
 			Server:   "srv-1",
 			RunAfter: []string{},
@@ -125,9 +121,8 @@ func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
 
 	t.Run("absent without a proposal", func(t *testing.T) {
 		t.Parallel()
-		body, err := json.Marshal(file(nil))
+		body, err := json.Marshal(file(0))
 		require.NoError(t, err)
-		assert.NotContains(t, string(body), "reuse_days")
 		assert.JSONEq(t, `{
 			"username": "",
 			"groupname": "",
@@ -145,8 +140,7 @@ func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
 
 	t.Run("an integer under reuse_days with one", func(t *testing.T) {
 		t.Parallel()
-		days := 30
-		body, err := json.Marshal(file(&days))
+		body, err := json.Marshal(file(30))
 		require.NoError(t, err)
 		assert.JSONEq(t, `{
 			"username": "",

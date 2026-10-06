@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -39,6 +40,18 @@ func checkPurpose(subject, purpose string) (string, string) {
 		return "", fmt.Sprintf("%s is limited to %d characters; the server refuses a longer one", subject, PurposeMaxLength)
 	}
 	return trimmed, ""
+}
+
+// checkReuseDays returns the days to propose, or a message when raw is not a whole number in range.
+func checkReuseDays(raw string) (int, string) {
+	days, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Sprintf("--reuse-days requires a whole number of days (%d to %d): %s", reuseDaysMin, reuseDaysMax, raw)
+	}
+	if days < reuseDaysMin || days > reuseDaysMax {
+		return 0, fmt.Sprintf("--reuse-days must be %d to %d days: %d", reuseDaysMin, reuseDaysMax, days)
+	}
+	return days, ""
 }
 
 // RemoteExecArgs holds parsed arguments for remote command execution.

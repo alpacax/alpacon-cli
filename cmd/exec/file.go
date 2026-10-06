@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -21,14 +20,9 @@ const FileContentMaxBytes = 65536
 // DefaultInterpreter runs a verified file when --interpreter names none.
 const DefaultInterpreter = "/bin/bash"
 
-// ReuseDaysMin and ReuseDaysMax bound the reuse duration --reuse-days proposes
-// (alpacon-server FILE_EXECUTION_GRANT_MAX_DAYS_MIN/MAX, ADR 0053): one day to
-// one year, the same span as an API token's lifetime, since a standing
-// permission to run unattended is a credential by another name. Checked
-// locally so a value the server would refuse never travels.
 const (
-	ReuseDaysMin = 1
-	ReuseDaysMax = 366
+	reuseDaysMin = 1
+	reuseDaysMax = 366
 )
 
 // fileExecRefusals maps the server's file-lane error codes (alpacon-server
@@ -81,13 +75,13 @@ var fileExecRefusals = []struct {
 	},
 	{
 		code:    "file_exec_invalid_reuse_days",
-		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", ReuseDaysMin, ReuseDaysMax),
-		hint:    "omit --reuse-days for a one-shot run with no proposal.\n",
+		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", reuseDaysMin, reuseDaysMax),
+		hint:    "propose 1 to 366 days, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
 	},
 	{
 		code:    "file_exec_reuse_exceeds_max",
 		message: "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
-		hint:    "resubmit with a shorter --reuse-days, or omit it to leave the duration to the approver and the workspace ceiling.\n",
+		hint:    "resubmit with a shorter --reuse-days, or omit it; an opted-in grant then lasts until the workspace ceiling.\n",
 	},
 	{
 		code:      "file_exec_line_not_allowed",
@@ -115,25 +109,8 @@ type FileExecArgs struct {
 	Interpreter string
 	// Args are passed to the script as given, one argv entry each.
 	Args []string
-	// ReuseDays is the duration --reuse-days proposed, already checked against
-	// ReuseDaysMin and ReuseDaysMax; 0 when the flag was not given, so no
-	// proposal travels.
+	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
 	ReuseDays int
-}
-
-// checkReuseDays validates a --reuse-days value, returning the days to propose
-// and an empty string when it passes. The server refuses anything outside
-// ReuseDaysMin to ReuseDaysMax with file_exec_invalid_reuse_days; the wording
-// here says the same thing, so the user learns it before a request is made.
-func checkReuseDays(raw string) (int, string) {
-	days, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil {
-		return 0, fmt.Sprintf("--reuse-days requires a whole number of days (%d to %d): %s", ReuseDaysMin, ReuseDaysMax, raw)
-	}
-	if days < ReuseDaysMin || days > ReuseDaysMax {
-		return 0, fmt.Sprintf("--reuse-days must be %d to %d days; omit it for a one-shot run with no proposal: %d", ReuseDaysMin, ReuseDaysMax, days)
-	}
-	return days, ""
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -159,19 +136,13 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 
 	// Args may be nil here; SubmitFileCommand sends it as the empty list the
 	// server defaults to.
-	file := event.FileExecution{
+	return event.FileExecution{
 		Path:        spec.Path,
 		Interpreter: interpreter,
 		Args:        spec.Args,
 		Content:     content,
-	}
-	// A proposal travels only when one was made: a nil leaves reuse_days out of
-	// the body, so a request without --reuse-days is byte-for-byte what it was
-	// before the flag existed.
-	if spec.ReuseDays > 0 {
-		file.ReuseDays = &spec.ReuseDays
-	}
-	return file, ""
+		ReuseDays:   spec.ReuseDays,
+	}, ""
 }
 
 // readFileContent reads at most FileContentMaxBytes+1 bytes of the file at

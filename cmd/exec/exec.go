@@ -53,6 +53,8 @@ is verified. Composition (pipes, redirection, &&) goes inside the script, where
 it is reviewed and hashed with it; a one-off composition around a script stays
 on the ordinary command line. A reviewer can mark an approval standing, and an
 unchanged re-run then stops asking anyone—one changed byte re-queues review.
+Standing is not permanent: it lasts the days --reuse-days proposed; with no
+proposal it lasts until the workspace ceiling, or indefinitely without one.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -80,15 +82,12 @@ Flags:
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
-  --reuse-days N                Propose how long an approval of --file should stay
-                                reusable, 1 to 366 days. A proposal is not a grant:
-                                the approver decides whether an unchanged re-run may
-                                skip review at all, and the workspace may set a
-                                ceiling lower than N, in which case the server
-                                refuses the request rather than shortening it. Omit
-                                it for a one-shot run with no proposal; if the
-                                approver opts in anyway, the grant lasts until the
-                                workspace ceiling, or indefinitely without one.
+  --reuse-days N                Propose how long an approval of --file stays
+                                reusable, 1 to 366 days. The approver decides
+                                whether to grant reuse; a workspace ceiling lower
+                                than N refuses the request. Without the flag an
+                                opted-in grant lasts until the workspace ceiling,
+                                or indefinitely without one.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.

@@ -72,7 +72,23 @@ func TestParseRemoteExecArgs_File(t *testing.T) {
 			},
 		},
 		{
-			name: "reuse days in both forms and at both bounds",
+			name: "reuse days at the floor as a separate value",
+			args: []string{"--reuse-days", "1", "--file", "/opt/deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", ReuseDays: 1},
+			},
+		},
+		{
+			name: "reuse days at the ceiling with an equals sign",
+			args: []string{"--reuse-days=366", "--file", "/opt/deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", ReuseDays: 366},
+			},
+		},
+		{
+			name: "repeated reuse days keeps the last value",
 			args: []string{"--reuse-days", "1", "--reuse-days=366", "--file", "/opt/deploy.sh", "prod-web"},
 			expected: RemoteExecArgs{
 				Server: "prod-web",
@@ -172,17 +188,17 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 		{
 			name:        "reuse days below the floor",
 			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days", "0", "prod-web"},
-			expectedErr: "--reuse-days must be 1 to 366 days; omit it for a one-shot run with no proposal: 0",
+			expectedErr: "--reuse-days must be 1 to 366 days: 0",
 		},
 		{
 			name:        "reuse days above the ceiling",
 			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days=367", "prod-web"},
-			expectedErr: "--reuse-days must be 1 to 366 days; omit it for a one-shot run with no proposal: 367",
+			expectedErr: "--reuse-days must be 1 to 366 days: 367",
 		},
 		{
 			name:        "negative reuse days",
 			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days", "-5", "prod-web"},
-			expectedErr: "--reuse-days must be 1 to 366 days; omit it for a one-shot run with no proposal: -5",
+			expectedErr: "--reuse-days must be 1 to 366 days: -5",
 		},
 		{
 			name:        "reuse days that is not a whole number",
@@ -274,22 +290,18 @@ func TestLoadFileExecution(t *testing.T) {
 		assert.Len(t, got.Content, FileContentMaxBytes)
 	})
 
-	// A proposal is carried only when one was made: nil keeps reuse_days out of
-	// the body, which is what keeps a request without --reuse-days byte-for-byte
-	// what it was before the flag existed.
-	t.Run("no reuse days leaves the proposal nil", func(t *testing.T) {
+	t.Run("no reuse days leaves the proposal zero", func(t *testing.T) {
 		t.Parallel()
 		got, msg := loadFileExecution(FileExecArgs{Path: rawPath})
 		require.Empty(t, msg)
-		assert.Nil(t, got.ReuseDays)
+		assert.Zero(t, got.ReuseDays)
 	})
 
 	t.Run("reuse days travel as the proposal", func(t *testing.T) {
 		t.Parallel()
 		got, msg := loadFileExecution(FileExecArgs{Path: rawPath, ReuseDays: 30})
 		require.Empty(t, msg)
-		require.NotNil(t, got.ReuseDays)
-		assert.Equal(t, 30, *got.ReuseDays)
+		assert.Equal(t, 30, got.ReuseDays)
 	})
 
 	t.Run("refuses an empty file", func(t *testing.T) {
