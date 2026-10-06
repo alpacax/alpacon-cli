@@ -56,7 +56,7 @@ func TestBuildCliErrorEnvelopeFromErr_PlainErr(t *testing.T) {
 }
 
 // The RBAC role gate and the token-scope gate now answer a 403 with a coded
-// body instead of DRF's bare {"detail": ...}—--output json must still carry
+// body instead of a legacy bare {"detail": ...}—--output json must still carry
 // error_code for these two new families the same way it always has for any
 // other coded refusal.
 func TestBuildCliErrorEnvelopeFromErr_ExtractsRBACPermissionRequiredCode(t *testing.T) {

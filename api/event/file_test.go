@@ -57,8 +57,8 @@ func newFileLaneCaptureServer(t *testing.T, capture *fileLaneBodyCapture) *httpt
 	}))
 }
 
-// TestCommandRequestMarshal_FileLaneOmitsRefusedKeys pins the wire contract of
-// ADR 0053: the server refuses a file-lane body carrying line, data or env by
+// TestCommandRequestMarshal_FileLaneOmitsRefusedKeys pins the wire contract: the
+// server refuses a file-lane body carrying line, data or env by
 // key presence—an empty string counts—so the keys must be absent, not empty.
 func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 	t.Parallel()

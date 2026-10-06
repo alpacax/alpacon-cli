@@ -12,9 +12,9 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// FileContentMaxBytes is the server's ceiling on a verified file's content
-// (ADR 0053): 64 KB, counted in UTF-8 bytes. Checked locally so an oversized
-// script is refused before it travels.
+// FileContentMaxBytes is the server's ceiling on a verified file's content:
+// 64 KB, counted in UTF-8 bytes. Checked locally so an oversized script is
+// refused before it travels.
 const FileContentMaxBytes = 65536
 
 // DefaultInterpreter runs a verified file when --interpreter names none.
@@ -25,12 +25,12 @@ const (
 	reuseDaysMax = 366
 )
 
-// fileExecRefusals maps the server's file-lane error codes (alpacon-server
-// utils/error_codes.py, ADR 0053) to guidance. Codes mirror the server by
-// hand—nothing enforces the sync, so fileExecRefusal answers only for codes it
-// carries and leaves the rest to the generic error path. The two clientBug
-// entries name fields this CLI never sends on the file lane: reaching one means
-// the request builder regressed, not that the user did anything wrong.
+// fileExecRefusals maps the server's file-lane error codes to guidance. Codes
+// mirror the server by hand—nothing enforces the sync, so fileExecRefusal
+// answers only for codes it carries and leaves the rest to the generic error
+// path. The two clientBug entries name fields this CLI never sends on the file
+// lane: reaching one means the request builder regressed, not that the user
+// did anything wrong.
 var fileExecRefusals = []struct {
 	code, message, hint string
 	// needsServer says message and hint are Sprintf formats taking the server

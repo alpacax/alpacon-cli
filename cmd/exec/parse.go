@@ -11,7 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// PurposeMaxLength is the server's ceiling on a stated purpose (ADR 0052).
+// PurposeMaxLength is the server's ceiling on a stated purpose.
 // Checked here so an over-long one is a usage error rather than a 400 that
 // costs a parked command its one demand.
 const PurposeMaxLength = 2000
@@ -27,8 +27,8 @@ const PurposeMaxLength = 2000
 // statement the assessor and the audit record attribute to the requester, so
 // the text itself reaches the server as typed.
 //
-// The ceiling is counted in runes, not bytes. The server validates with DRF's
-// CharField(max_length=...), which counts characters, so len() would refuse a
+// The ceiling is counted in runes, not bytes. The server limits purpose to
+// 2000 characters, counted in characters not bytes, so len() would refuse a
 // Korean purpose at roughly 666 of them—while telling the caller the server
 // would refuse it, which at that length is untrue.
 func checkPurpose(subject, purpose string) (string, string) {
@@ -62,8 +62,8 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
-	// What this command is for (ADR 0052). Sent on submission, so the assessor
-	// judges with it on the first pass and no demand is issued.
+	// What this command is for. Sent on submission, so the assessor judges
+	// with it on the first pass and no demand is issued.
 	Purpose string
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
@@ -75,9 +75,9 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
-	// File is set by --file and selects the verified file lane (ADR 0053), in
-	// which case Command is empty and the words after -- are the script's
-	// arguments. Nil on the generic lane, so every existing caller reads as before.
+	// File is set by --file and selects the verified file lane, in which case
+	// Command is empty and the words after -- are the script's arguments. Nil
+	// on the generic lane, so every existing caller reads as before.
 	File *FileExecArgs
 }
 

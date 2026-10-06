@@ -87,6 +87,153 @@ func TestWSListener_NextReconnectDelay(t *testing.T) {
 	}
 }
 
+func TestWSListener_ConnectAndListen_ResetsOnlyAfterStableLifetime(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		stableLifetime time.Duration
+		want           bool
+	}{
+		{"connection outliving the base delay but not the stable lifetime keeps the backoff", time.Second, false},
+		{"connection outliving the stable lifetime resets the backoff", time.Millisecond, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			upgrader := websocket.Upgrader{}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				time.Sleep(3 * testReconnectBaseDelay)
+				_ = conn.Close()
+			}))
+			defer ts.Close()
+
+			w := newProvisionedWSListener(nil, func() (string, error) {
+				return "ws" + strings.TrimPrefix(ts.URL, "http"), nil
+			}, time.Second)
+			w.handleFrame = func([]byte) {}
+			w.reconnectBaseDelay = testReconnectBaseDelay
+			w.stableLifetime = tt.stableLifetime
+
+			assert.Equal(t, tt.want, w.connectAndListen())
+		})
+	}
+}
+
+func TestWSListener_ListenLoop_KeepsBackoffAcrossShortConnections(t *testing.T) {
+	t.Parallel()
+	const attempts = 5
+
+	tests := []struct {
+		name           string
+		provisionDelay time.Duration
+		hold           time.Duration
+	}{
+		{"instant drops", 0, 0},
+		{"slow provision then instant drops", 3 * testReconnectBaseDelay, 0},
+		{"drops after outliving the base delay", 0, 3 * testReconnectBaseDelay},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			upgrader := websocket.Upgrader{}
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := upgrader.Upgrade(w, r, nil)
+				if err != nil {
+					return
+				}
+				time.Sleep(tt.hold)
+				_ = conn.Close()
+			}))
+			defer ts.Close()
+
+			started := make(chan time.Time, attempts)
+			wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+			w := newProvisionedWSListener(nil, func() (string, error) {
+				select {
+				case started <- time.Now():
+				default:
+				}
+				time.Sleep(tt.provisionDelay)
+				return wsURL, nil
+			}, time.Second)
+			w.handleFrame = func([]byte) {}
+			w.reconnectBaseDelay = testReconnectBaseDelay
+			w.stableLifetime = time.Second
+			w.Start()
+			defer w.Stop()
+
+			times := make([]time.Time, 0, attempts)
+			for len(times) < attempts {
+				select {
+				case at := <-started:
+					times = append(times, at)
+				case <-time.After(5 * time.Second):
+					t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+				}
+			}
+
+			// A reset after every drop would hold each wait at one base delay.
+			delay := testReconnectBaseDelay
+			for i := 1; i < attempts; i++ {
+				assert.GreaterOrEqual(t, times[i].Sub(times[i-1]), tt.provisionDelay+tt.hold+delay, "gap before attempt %d", i+1)
+				delay *= 2
+			}
+		})
+	}
+}
+
+func TestWSListener_ListenLoop_ResetsBackoffAfterStableConnections(t *testing.T) {
+	t.Parallel()
+	const (
+		attempts = 6
+		hold     = 3 * testReconnectBaseDelay
+	)
+	upgrader := websocket.Upgrader{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		time.Sleep(hold)
+		_ = conn.Close()
+	}))
+	defer ts.Close()
+
+	started := make(chan time.Time, attempts)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+	w := newProvisionedWSListener(nil, func() (string, error) {
+		select {
+		case started <- time.Now():
+		default:
+		}
+		return wsURL, nil
+	}, time.Second)
+	w.handleFrame = func([]byte) {}
+	w.reconnectBaseDelay = testReconnectBaseDelay
+	w.stableLifetime = time.Millisecond
+	w.Start()
+	defer w.Stop()
+
+	times := make([]time.Time, 0, attempts)
+	for len(times) < attempts {
+		select {
+		case at := <-started:
+			times = append(times, at)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("expected %d dial attempts, got %d", attempts, len(times))
+		}
+	}
+
+	// Without the reset the last wait alone would be 16 base delays; with it, one.
+	last := times[attempts-1].Sub(times[attempts-2])
+	assert.Less(t, last, hold+8*testReconnectBaseDelay)
+}
+
 func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T) {
 	t.Parallel()
 	// Responds 200 instead of upgrading, so Dial fails with ErrBadHandshake.

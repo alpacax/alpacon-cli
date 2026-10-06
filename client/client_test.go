@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -321,6 +322,42 @@ func TestSendRequest_403CodeWithoutDetailKeepsCodeSource(t *testing.T) {
 	assert.Equal(t, "command", source)
 }
 
+func TestSendRequest_403SudoWithMFAStepUpUnavailableExplainsServerAdmin(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "workspace_sudo_with_mfa_step_up_unavailable", "gate": "presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", err.Error())
+	assert.NotContains(t, err.Error(), "workspace_sudo_with_mfa_step_up_unavailable")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "workspace_sudo_with_mfa_step_up_unavailable", code)
+}
+
+func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "sudo_verify_credential_cannot_prove_mfa", "gate": "presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", err.Error())
+	assert.NotContains(t, err.Error(), "sudo_verify_credential_cannot_prove_mfa")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "sudo_verify_credential_cannot_prove_mfa", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface
@@ -367,9 +404,10 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 
 func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
 	t.Parallel()
-	// The server still returns 400 for an ACL denial until alpacax/alpacon-server#2804
-	// lands. checkAuthStatus only handles 401/403, so this body never reaches
-	// authStatusCodeMessage—the code must still survive for callers that route on it.
+	// A server may still answer an ACL denial with 400 rather than 403.
+	// checkAuthStatus only handles 401/403, so this body never reaches
+	// authStatusCodeMessage—the code must still survive for callers that route
+	// on it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -388,7 +426,7 @@ func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T)
 
 func TestSendRequest_CodeOnlyBodyRendersReadableMessage(t *testing.T) {
 	t.Parallel()
-	// Each code is paired with the status DRF actually sends it on.
+	// Each code is paired with the status the server actually sends it on.
 	tests := []struct {
 		name       string
 		statusCode int
@@ -494,7 +532,7 @@ func TestSendRequest_CodeWithFieldErrorsKeepsFieldMessagesVisible(t *testing.T) 
 
 func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) {
 	t.Parallel()
-	// "source" is also a real serializer field name, so this is field errors, not the envelope.
+	// "source" is also a real request field name, so this is field errors, not the envelope.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -511,7 +549,7 @@ func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) 
 
 func TestSendRequest_ValidationBodyWithCodeAndSourceFieldKeepsItsMessage(t *testing.T) {
 	t.Parallel()
-	// "source" is a real serializer field here too; a "code" alongside it must
+	// "source" is a real request field here too; a "code" alongside it must
 	// not make isEnvelopeOnly mistake the field error for the refusal envelope.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -807,7 +845,7 @@ func TestSendRequest_401CodedDenialNotMislabeledAsAuthFailure(t *testing.T) {
 }
 
 // The RBAC role gate and the token-scope gate now answer a refusal with one of
-// these four codes instead of DRF's bare {"detail": ...}, and send no detail of
+// these four codes instead of a legacy bare {"detail": ...}, and send no detail of
 // their own—checkAuthStatus must keep "gate"/"missing" on the error (for
 // cmd/iam's guidance table to read) and fall back to naming the missing
 // scope(s) in the generic message when there is one.
@@ -960,7 +998,8 @@ func TestLoadCurrentUser_PopulatesFieldsAndCaches(t *testing.T) {
 	assert.Equal(t, "alice", ac.Username)
 	assert.Equal(t, "staff", ac.Privileges)
 
-	// Without the trailing slash Django's APPEND_SLASH answers a 301 and the client pays a second round trip.
+	// Without the trailing slash the server answers a 301 redirect and the
+	// client pays a second round trip.
 	assert.Equal(t, "/api/iam/users/-/", requestedPath)
 
 	_ = ac.LoadCurrentUser() // second call must be a no-op
@@ -1262,11 +1301,8 @@ func stubTokenRenewal(t *testing.T, newToken string) *int {
 	return &calls
 }
 
-// staleTokenHandler answers the code-less 401 alpacon-server sends once an
-// access token expires: its Auth0 authenticator swallows the expired token
-// (auth0/auth.py) and IsAuthenticatedOr401 raises DRF's NotAuthenticated, which
-// no branch of the server's error_code_handler rewrites—so the body carries a
-// detail and no code.
+// staleTokenHandler answers the code-less 401 the server sends once an
+// access token expires: the body carries a detail and no code.
 func staleTokenHandler(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
@@ -1375,8 +1411,8 @@ func TestSendRequest_CodedIPNotAllowedIsNotRenewed(t *testing.T) {
 }
 
 // TestSendGetRequest_RenewsACodedStaleTokenAndRetries covers auth_token_missing,
-// which alpacon-server maps DRF's NotAuthenticated onto. A fresh token may clear
-// it just as it may the code-less 401.
+// which the server sends on the same 401. A fresh token may clear it just as
+// it may the code-less 401.
 func TestSendGetRequest_RenewsACodedStaleTokenAndRetries(t *testing.T) {
 	renewals := stubTokenRenewal(t, "fresh")
 
@@ -1489,8 +1525,34 @@ func TestSendRequest_LegacyTokenIsNotRenewed(t *testing.T) {
 	assert.Equal(t, 1, requests)
 }
 
+// The server could not check the credential, so renewing a token it never
+// judged would only add an Auth0 round trip to an outage.
+func TestSendRequest_AuthVerificationUnavailableExplainsRetryWithoutRenewal(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code": "auth_verification_unavailable"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "valid")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, "the server could not verify your credential right now—it was not rejected, so try again in a moment", err.Error())
+	assert.Equal(t, http.StatusServiceUnavailable, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthVerificationUnavailable, code)
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+}
+
 // A proxy, a WAF or an mTLS gate can answer 401 before the request ever reaches
-// alpacon-server, and what it writes is not the JSON every server error carries.
+// the server, and what it writes is not the JSON every server error carries.
 // No token this process can obtain moves that answer, so renewing on it would
 // spend an Auth0 round trip and a config rewrite to be refused the same way.
 func TestSendRequest_GatewayUnauthorizedIsNotRenewed(t *testing.T) {
@@ -1523,7 +1585,7 @@ func TestSendRequest_GatewayUnauthorizedIsNotRenewed(t *testing.T) {
 			_, err := ac.SendGetRequest("/api/test/")
 
 			require.Error(t, err)
-			assert.Equal(t, 0, *renewals, "a 401 alpacon-server did not write is not a stale credential")
+			assert.Equal(t, 0, *renewals, "a 401 the server did not write is not a stale credential")
 			assert.Equal(t, 1, requests, "a gateway refusal must not be replayed")
 		})
 	}
@@ -1727,6 +1789,52 @@ func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
 	assert.Equal(t, "my-workspace", ac.WorkspaceName)
 }
 
+// A workspace's URL slug can be renamed while its schema_name stays fixed, so a
+// login through the new URL leaves a host label that the server never calls the
+// workspace. The client must carry the schema_name, because that is what MFA
+// links and the usage lookup name the workspace by.
+func TestNewAlpaconAPIClient_PinsSchemaNameWhenSlugWasRenamed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigJSON(t, home, `{
+		"workspace_url": "https://new-slug.us1.alpacon.io",
+		"workspace_name": "new-slug",
+		"schema_name": "frozen-schema",
+		"token": "alpat-token",
+		"base_domain": "alpacon.io"
+	}`)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://new-slug.us1.alpacon.io", ac.BaseURL)
+	assert.Equal(t, "frozen-schema", ac.WorkspaceName)
+}
+
+// A config written before schema_name existed holds only the host label, which
+// keeps serving as the identity until the next login refreshes the file.
+func TestNewAlpaconAPIClient_LegacyConfigFallsBackToHostLabel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeConfigJSON(t, home, `{
+		"workspace_url": "https://my-workspace.us1.alpacon.io",
+		"workspace_name": "my-workspace",
+		"token": "alpat-token"
+	}`)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.NoError(t, err)
+	assert.Equal(t, "my-workspace", ac.WorkspaceName)
+}
+
+func writeConfigJSON(t *testing.T, home, body string) {
+	t.Helper()
+	dir := filepath.Join(home, config.ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, config.ConfigFileName), []byte(body), 0o600))
+}
+
 // gorilla sends no User-Agent of its own and copies the header it is handed
 // verbatim, so whatever these two build is exactly what reaches the server.
 func TestSetWebsocketHeader_CarriesTheUserAgent(t *testing.T) {
@@ -1872,8 +1980,8 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 	}
 }
 
-// TestPlanLimitMessage covers the client classification (§1.3) and the
-// CLI/MCP/alpamon message template (§1.6) of the paywall wave's wire contract.
+// TestPlanLimitMessage covers the client classification and the
+// CLI/MCP/alpamon message template for a 402.
 // workspaceURL is exercised directly here—an httptest server's URL is always
 // self-hosted-shaped, so the acme.us1.alpacon.io billing-link case can only be
 // reached by calling planLimitMessage itself rather than through a full
@@ -1963,8 +2071,8 @@ func TestPlanLimitMessage(t *testing.T) {
 		},
 		{
 			// workspace_free_limit_exceeded is deliberately absent from
-			// legacyPlanLimitAxis: a gate-less 402 with this code may be
-			// alpacon-account's own Free-workspace refusal, not a plan limit.
+			// legacyPlanLimitAxis: a gate-less 402 with this code may be a
+			// Free-workspace refusal, not a plan limit.
 			name:         "workspace axis is excluded from the legacy code map",
 			code:         "workspace_free_limit_exceeded",
 			workspaceURL: "https://acme.us1.alpacon.io",
@@ -2066,8 +2174,7 @@ func TestConsoleLabel(t *testing.T) {
 // what today's client renders as garbled field errors: before axis/next joined
 // the envelope isEnvelopeOnly rejected this body on sight of "axis", and the
 // fallback field-validation renderer turned it into
-// "axis: server; gate: plan; next: ...". This is the exact shape release order
-// step 5 in the paywall wave plan calls out as today's (cosmetic) CLI output.
+// "axis: server; gate: plan; next: ...".
 func TestSendRequest_PlanLimitEnvelopeRendersReadableMessage(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2163,8 +2270,8 @@ func TestSendRequest_PlanLimitGatelessWorkspaceAxisCodeNotReclassified(t *testin
 }
 
 // TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors guards
-// isEnvelopeOnly's statusCode gate: axis/next are 402 plan-limit fields only
-// (§1.1), so a validation response on any other status that happens to carry
+// isEnvelopeOnly's statusCode gate: axis/next are 402 plan-limit fields only,
+// so a validation response on any other status that happens to carry
 // same-named fields must still render their messages rather than being
 // swallowed into a bare code-only message.
 func TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 )
 
 // consoleOnlySubcommands stay registered so a script calling them gets an
-// actionable exit, but ADR 0015 moved the action itself to the console, so the
+// actionable exit, but the action itself lives in the console, so the
 // no-subcommand guidance must never offer them as something to run.
 var consoleOnlySubcommands = map[string]bool{"approve": true, "reject": true}
 

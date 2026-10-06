@@ -230,7 +230,7 @@ func (e statusOnlyError) Error() string       { return "forbidden" }
 func (e statusOnlyError) HTTPStatusCode() int { return e.status }
 
 // codedForbiddenError is a 403 that also carries the code/gate/missing a real
-// alpacon-server RBAC or token-scope refusal sends—everything the new routing
+// server RBAC or token-scope refusal sends—everything the new routing
 // in describeRBACError reads, without round-tripping through an httptest
 // server and the client package's JSON parsing to get there.
 type codedForbiddenError struct {
@@ -436,8 +436,8 @@ func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	assert.Contains(t, got.Error(), "not an account you may read")
 }
 
-// codePermissionDenied's wording assumed a read (user_permission_list,
-// user_permission_cani); describeRBACError is reachable from the role-write
+// codePermissionDenied's wording assumed a read (a permission list
+// or a permission check); describeRBACError is reachable from the role-write
 // gate too, where "that is not an account you may read" misdescribes a write
 // refusal as a visibility problem.
 func TestDescribeRBACError_MapsPermissionDeniedForWrite(t *testing.T) {
@@ -452,7 +452,7 @@ func TestDescribeRBACError_MapsPermissionDeniedForWrite(t *testing.T) {
 	assert.Contains(t, got.Error(), "permission to make that change")
 }
 
-// alpacon-server's role gate now answers a refusal with a coded 403 instead of
+// The server's role gate now answers a refusal with a coded 403 instead of
 // a bare {"detail": ...}. The guidance must not change with it: a coded
 // refusal and the code-less one it replaces name exactly the same fix, for
 // every gate and both credential kinds.

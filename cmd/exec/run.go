@@ -17,19 +17,19 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// sudoDenialLinePrefix is the terminal-facing denial line alpacon_approval.c
-// emits via g_plugin_printf ("Alpacon denied this sudo command (CODE)."), up to
-// the code slot. The other "Permission denied (CODE)" form is assigned to
-// *errstr, which only reaches the audit log—not the invoking terminal—so it must
-// not be matched. Anchoring on this full prefix (not a bare "(CODE)") stops a
-// command whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
+// sudoDenialLinePrefix is the terminal-facing denial line the sudo plugin
+// prints ("Alpacon denied this sudo command (CODE)."), up to the code slot.
+// The other "Permission denied (CODE)" form only reaches the audit log—not the
+// invoking terminal—so it must not be matched. Anchoring on this full prefix
+// (not a bare "(CODE)") stops a command whose own output prints
+// "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 
 // sudoDenialCodelessLine is the denial line the agent emits with no code to
-// name: alpacon_approval.c with an empty error_code_buf, pam_alpamon.c with
-// code[0] == '\0'. Its own literal rather than sudoDenialLinePrefix with an
-// empty slot—the sanitizer rejects a bad code whole, so the parentheses go with
-// it and no empty-slot form ever reaches the terminal.
+// name because the plugin has none to report. Its own literal rather than
+// sudoDenialLinePrefix with an empty slot—the sanitizer rejects a bad code
+// whole, so the parentheses go with it and no empty-slot form ever reaches
+// the terminal.
 const sudoDenialCodelessLine = "Alpacon denied this sudo command."
 
 // sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
@@ -39,7 +39,7 @@ const sudoDenialCodelessLine = "Alpacon denied this sudo command."
 const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
-// alpacon-server inline-credential gate (utils.CommandInlineCredential, ADR 0037).
+// server's inline-credential gate (utils.CommandInlineCredential).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
 
 // ExecInvocation and WebshInvocation are the two Invocation values (see the
@@ -82,18 +82,18 @@ var (
 )
 
 // sudoDenialHints maps a non-interactive sudo denial code to actionable
-// guidance. Codes mirror alpacon-server utils/error_codes.py by hand—nothing
-// enforces the sync, which is why sudoDenialHint falls back to naming a code
-// this table does not carry.
+// guidance. Codes mirror the server's by hand—nothing enforces the sync,
+// which is why sudoDenialHint falls back to naming a code this table does not
+// carry.
 //
-// The codes are UPPERCASE because alpacon_approval.c only passes [A-Z0-9_]
+// The codes are UPPERCASE because the plugin only passes [A-Z0-9_]
 // codes through its sanitizer into the user-facing denial line (lowercase
 // values are dropped). Each hint stays at the denial *category* level (what to
 // do)—the server never sends the risk score or reasoning to a client.
 //
 // pendingApproval marks the codes the server emits after creating an approval
 // grant: the sudo call still fails now (an interactive sudo cannot wait on an
-// out-of-band approval, ADR 0016 §3), but a reviewer can still approve it.
+// out-of-band approval), but a reviewer can still approve it.
 // Flagging them here rather than in a second list is what keeps the hints and
 // that code set from drifting apart.
 //
@@ -116,11 +116,21 @@ var sudoDenialHints = []struct {
 }{
 	{
 		// Checked before the websh/command branch split, so it answers every
-		// surface. Only a workspace admin can lift it.
+		// surface. Only a workspace admin can lift it, and on a self-hosted
+		// server without MFA sign-in the server refuses that change, so the
+		// guidance names both routes.
 		code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 		guidance: "sudo was denied: this workspace does not allow sudo with MFA at all, so no work session or policy can authorize it.\n" +
 			"A workspace admin lifts it (interactive terminal required):\n" +
-			"  alpacon workspace access-control update\n",
+			"  alpacon workspace access-control update\n" +
+			"On a self-hosted server without MFA sign-in this setting cannot be changed from the CLI or the web; a server administrator has to change it.\n",
+	},
+	{
+		// The server cannot run sudo MFA at all (typically self-hosted without
+		// MFA sign-in), so a step-up would never complete.
+		code: "SUDO_STEP_UP_UNAVAILABLE",
+		guidance: "sudo was denied: sudo with MFA is not available on this server.\n" +
+			"Use a work session whose policy allows the command without MFA, or ask an administrator.\n",
 	},
 	{
 		// Nothing about the command line is wrong, so a re-run on a fresh
@@ -129,8 +139,7 @@ var sudoDenialHints = []struct {
 		guidance: "sudo was denied: the server could not match this sudo call to its command. Re-run the command; if it repeats, the agent and the server disagree about the command's state.\n",
 	},
 	{
-		// The scope ceiling of ADR 0014. Wording follows
-		// validateSessionForSudoUpdate in
+		// Wording follows validateSessionForSudoUpdate in
 		// cmd/worksession/worksession_update.go, which answers the same gap.
 		code: "WORK_SESSION_SCOPE_NOT_ALLOWED",
 		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
@@ -173,10 +182,9 @@ var sudoDenialHints = []struct {
 	},
 	{
 		// The session title and description both ride in the risk payload the
-		// judge reads, but only the title is a way around the wait (ADR 0016
-		// §4-5): a description edit on an approved/active session is queued for
-		// an approval of its own (work_sessions/services.py
-		// compute_modification_split). The hint says "may" because an
+		// judge reads, but only the title is a way around the wait: a
+		// description edit on an approved/active session is queued for an
+		// approval of its own. The hint says "may" because an
 		// approval-bypassing principal escapes that queue.
 		code: "SUDO_INTENT_DEVIATION",
 		guidance: "sudo needs approval: this command reads as off-purpose for your work session, so an approval request was created.\n" +
@@ -205,8 +213,8 @@ type approvalOutcome int
 
 // commandRun submits one command and streams it to completion. The retry,
 // presence step-up and approval-wait layers take one so they serve the generic
-// lane and the verified file lane (ADR 0053) alike: the lane is decided once, by
-// whoever builds the closure, and a re-run after MFA or approval is the same
+// lane and the verified file lane alike: the lane is decided once, by whoever
+// builds the closure, and a re-run after MFA or approval is the same
 // closure called again.
 type commandRun func() error
 
@@ -249,13 +257,13 @@ func denialHintLine(guidance string) string {
 
 // firstDenialCode returns the code carried by the first well-formed terminal
 // denial line in output, or "" when output holds none. It accepts only the
-// [A-Z0-9_] shape alpacon_approval.c's sanitizer emits, capped at the 63 chars
-// its buffer holds, so the code it hands back can be printed verbatim—a
+// [A-Z0-9_] shape that the plugin's sanitizer emits, capped at the 63 chars its
+// buffer holds, so the code it hands back can be printed verbatim—a
 // command's own output cannot smuggle escapes or newlines into a hint through
 // it. It answers for known and unknown codes alike; only sudoDenialHint, which
 // consults the table first, cares about the difference.
 func firstDenialCode(output string) string {
-	const maxCodeLen = 63 // alpacon_approval.c holds the code in a char[64]
+	const maxCodeLen = 63 // the plugin's code buffer holds 64 bytes, NUL included
 	rest := output
 	for {
 		_, after, found := strings.Cut(rest, sudoDenialLinePrefix)
@@ -274,7 +282,7 @@ func firstDenialCode(output string) string {
 }
 
 // isSanitizedDenialCode reports whether code has the [A-Z0-9_] shape
-// alpacon_approval.c's sanitizer emits. Anything else in that slot came from the
+// that the plugin's sanitizer emits. Anything else in that slot came from the
 // command's own output, so it must never be echoed back into a hint.
 func isSanitizedDenialCode(code string) bool {
 	if code == "" {
@@ -292,9 +300,9 @@ func isSanitizedDenialCode(code string) bool {
 // non-interactive sudo denial. Returns "" when no such denial is present.
 //
 // A code with no table entry still gets a hint naming it: the server adds codes
-// on its own release train and nothing enforces this table's sync with
-// alpacon-server utils/error_codes.py, so returning "" for one would leave the
-// next drift invisible until someone reported a bare denial line.
+// on its own release train and nothing enforces this table's sync with the
+// server's codes, so returning "" for one would leave the next drift invisible
+// until someone reported a bare denial line.
 //
 // A denial carrying no code gets a last, thinner hint: without a category from
 // the server there is only the console to point at.
@@ -369,8 +377,8 @@ func pendingSudoDenial(output string) (hint string, pending bool) {
 	return "", false
 }
 
-// isCommandInlineCredentialError reports whether err carries the alpacon-server
-// inline-credential gate code (utils.CommandInlineCredential, ADR 0037): the
+// isCommandInlineCredentialError reports whether err carries the server's
+// inline-credential gate code (utils.CommandInlineCredential): the
 // submitted command line itself contained a credential (e.g. a -p/--password
 // flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
 // connection string), so the server refused the command before it ever ran
@@ -515,9 +523,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 }
 
 // RunFileExecWithApprovalWait is RunExecWithApprovalWait for the verified file
-// lane (ADR 0053). Only the submission differs—the file object in place of a
-// command line—so the presence step-up, the approval wait and the re-run after a
-// grant are the same layers the generic lane runs through.
+// lane. Only the submission differs—the file object in place of a command
+// line—so the presence step-up, the approval wait and the re-run after a grant
+// are the same layers the generic lane runs through.
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
 		return runWithPresenceStepUp(ac, serverName, func() error {
@@ -649,8 +657,8 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 				// the sentence they print differs.
 				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired}
 			}
-			// A fixed gap over a 30m wait outspends the default 1000/hour
-			// service-token quota, so the gap widens as the wait ages.
+			// A fixed gap over a 30m wait outspends the server's service-token
+			// throttle, so the gap widens as the wait ages.
 			poll.Reset(utils.NextPollTick(approvalWaitPollInterval, time.Since(started)))
 		}
 	}

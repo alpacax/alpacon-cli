@@ -3,37 +3,14 @@ package workspace
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strings"
 
 	"github.com/alpacax/alpacon-cli/client"
 )
 
 const (
-	paymentAPIProdURL    = "https://pay.alpacax.com"
-	paymentAPIStagingURL = "https://pay.staging.alpacax.com"
+	PaymentAPIBaseURL    = "https://pay.alpacax.com"
 	paymentWorkspacesURL = "/api/workspaces/workspaces/"
 )
-
-// GetPaymentAPIBaseURL determines the payment API base URL from the workspace URL.
-// Dev regions use the staging payment API; all others use production.
-func GetPaymentAPIBaseURL(workspaceURL string) (string, error) {
-	parsed, err := url.Parse(workspaceURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse workspace URL: %w", err)
-	}
-
-	// Host format: {schema_name}.{region}.alpacon.io
-	parts := strings.Split(parsed.Hostname(), ".")
-	if len(parts) >= 4 {
-		region := parts[1]
-		if strings.Contains(region, "dev") {
-			return paymentAPIStagingURL, nil
-		}
-	}
-
-	return paymentAPIProdURL, nil
-}
 
 // GetWorkspaceID retrieves the workspace UUID from the payment API by matching schema_name.
 // It follows pagination until the workspace is found or all pages are exhausted.

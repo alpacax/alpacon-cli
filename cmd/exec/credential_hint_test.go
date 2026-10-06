@@ -66,8 +66,8 @@ func TestCredentialInlineHint(t *testing.T) {
 }
 
 // newInlineCredentialDenialServer returns a test server that resolves one
-// server and rejects the command submission with the alpacon-server
-// inline-credential gate (command_inline_credential, ADR 0037).
+// server and rejects the command submission with the server's
+// inline-credential gate (command_inline_credential).
 func newInlineCredentialDenialServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

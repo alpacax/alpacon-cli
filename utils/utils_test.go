@@ -524,6 +524,28 @@ func TestSplitAndTrim(t *testing.T) {
 	}
 }
 
+func TestCompactStrings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input []string
+		want  []string
+	}{
+		{"normal", []string{"web-01", "db-01"}, []string{"web-01", "db-01"}},
+		{"whitespace around values", []string{" web-01 ", "\tdb-01\n"}, []string{"web-01", "db-01"}},
+		{"empty and blank entries dropped", []string{"", "web-01", "   ", "db-01"}, []string{"web-01", "db-01"}},
+		{"duplicates kept in order", []string{"web-01", "db-01", "web-01"}, []string{"web-01", "db-01", "web-01"}},
+		{"only blanks", []string{"", " "}, nil},
+		{"nil input", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, CompactStrings(tt.input))
+		})
+	}
+}
+
 func TestSplitPath(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

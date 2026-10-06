@@ -637,3 +637,34 @@ func TestSudoListener_TriesOneRefreshBeforeGivingUpOnAnUnauthorizedFirstSession(
 	assert.Equal(t, int32(2), sessions.Load(), "that refresh buys exactly one more attempt")
 	assert.Error(t, sl.Err(), "websh still needs the reason it gave up")
 }
+
+func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *testing.T) {
+	// No t.Parallel: HOME is redirected so the token refresh finds no stored config.
+	t.Setenv("HOME", t.TempDir())
+
+	var verifies, others atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/api/sudo/grants/grant-1/verify/") {
+			verifies.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code": "sudo_verify_credential_cannot_prove_mfa", "gate": "presence"}`))
+			return
+		}
+		others.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer ts.Close()
+
+	sl := newTestSudoListener(ts)
+	var event sudoMFAEvent
+	event.Payload.SudoGrantID = "grant-1"
+
+	_, stderr := testutil.CaptureOutput(t, func() { sl.handleSudoMFA(event) })
+
+	assert.Contains(t, stderr, "sign in with `alpacon login` to complete sudo MFA")
+	assert.NotContains(t, stderr, "Failed to get MFA link")
+	assert.NotContains(t, stderr, "Opening browser")
+	assert.Equal(t, int32(1), verifies.Load(), "the refusal must not start a retry loop")
+	assert.Zero(t, others.Load(), "no MFA link lookup or poll after the refusal")
+}

@@ -45,7 +45,7 @@ type CommandOutputListener struct {
 	finished   chan struct{}
 }
 
-// commandOutputEnvelope is the WS message format emitted by alpacon-server. One
+// commandOutputEnvelope is the WS message format emitted by the server. One
 // struct for both payloads: command_output names the command in command_id,
 // command_fin in id.
 type commandOutputEnvelope struct {

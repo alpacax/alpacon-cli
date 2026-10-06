@@ -46,7 +46,7 @@ func GetWorkspaceList(cfg config.Config) ([]WorkspaceListEntry, error) {
 		return nil, err
 	}
 
-	currentName := cfg.WorkspaceName
+	currentName := cfg.WorkspaceIdentity()
 	var entries []WorkspaceListEntry
 	for _, ws := range workspaces {
 		current := ""
