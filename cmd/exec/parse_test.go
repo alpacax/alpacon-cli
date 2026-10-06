@@ -928,9 +928,9 @@ func TestParseRemoteExecArgs_Errors(t *testing.T) {
 	}
 }
 
-// The --purpose flag (ADR 0052). The ceiling is counted in runes: the server
-// validates with DRF's CharField(max_length=...), which counts characters, so a
-// byte count would refuse a Korean purpose at roughly a third of the limit.
+// The --purpose flag. The ceiling is counted in runes: the server limits
+// purpose to 2000 characters, counted in characters not bytes, so a byte count
+// would refuse a Korean purpose at roughly a third of the limit.
 func TestParseRemoteExecArgsPurpose(t *testing.T) {
 	t.Parallel()
 	koreanAtCeiling := make([]rune, PurposeMaxLength)

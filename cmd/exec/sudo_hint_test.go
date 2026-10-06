@@ -26,9 +26,8 @@ func TestSudoDenialHint(t *testing.T) {
 		wantNotContains []string
 	}{
 		{
-			// Adding a policy is an expansion, so the server queues it for approval
-			// (sudo/services.py classify_sudo_policies_split). "Add it and re-run"
-			// alone would read as immediate.
+			// Adding a policy is an expansion, so the server queues it for approval.
+			// "Add it and re-run" alone would read as immediate.
 			name:         "no-policy names the policy edit and its own approval",
 			code:         "SUDO_NO_WORKSESSION_POLICY",
 			wantContains: []string{"work-session update", "may require approval"},
@@ -70,8 +69,8 @@ func TestSudoDenialHint(t *testing.T) {
 			wantNotContains: []string{`--description "`},
 		},
 		{
-			// Checked before the branch split (sudo/services.py
-			// handle_sudo_approval_request), so no work session or policy lifts it.
+			// Checked before the approval branch split, so no work session or
+			// policy lifts it.
 			name: "workspace-mfa-disabled points at the workspace setting, not the session",
 			code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 			wantContains: []string{
@@ -184,8 +183,8 @@ func TestHasSudoApprovalDenial(t *testing.T) {
 	}{
 		{"the real approval denial line", denialLine("SUDO_APPROVAL_REQUIRED"), true},
 		{
-			// The server takes the same HITL branch and only swaps the code
-			// (sudo/services.py), so an approval request is in flight here too.
+			// The server takes the same HITL branch and only swaps the code,
+			// so an approval request is in flight here too.
 			name:   "an intent-deviation denial",
 			output: denialLine("SUDO_INTENT_DEVIATION"),
 			want:   true,
@@ -317,7 +316,7 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 			name:   "forged parenthesized token",
 			output: "echo \"(SUDO_RISK_DENIED)\"\n(SUDO_RISK_DENIED)\n",
 		},
-		// alpacon_approval.c only ever emits [A-Z0-9_]; anything else in that slot
+		// The plugin only ever emits [A-Z0-9_]; anything else in that slot
 		// came from the command's own output, so it must not be echoed back.
 		{"escape sequence in the code slot", denialLine("\x1b[31mSUDO_FAKE"), nil},
 		{"lowercase code", denialLine("sudo_lowercase"), nil},
@@ -341,7 +340,7 @@ func TestSudoDenialHintFallsBackToTheRawCode(t *testing.T) {
 	}
 
 	t.Run("a code longer than the plugin's buffer is not echoed", func(t *testing.T) {
-		// The 63-char cap mirrors alpacon_approval.c's char[64], so it is the bound
+		// The 63-char cap mirrors the plugin's 64-byte code buffer, so it is the bound
 		// most likely to drift silently: a longer code has the sanitizer's own
 		// shape and would otherwise be echoed verbatim.
 		atCap := strings.Repeat("A", 63)

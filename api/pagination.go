@@ -11,8 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// The server caps page_size at 100 for both paginators
-// (api.pagination.MyPageNumberPagination and history.pagination.ESCursorPagination).
+// The server caps page_size at 100 for both its page-number and cursor pagination.
 const maxPageSize = 100
 
 // copyParams returns a shallow copy so the pagination loop never mutates the caller's map.

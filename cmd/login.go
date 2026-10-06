@@ -28,7 +28,7 @@ const (
 )
 
 // knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
-// Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
+// Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
 var (

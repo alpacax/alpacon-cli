@@ -12,7 +12,7 @@ REMOTE_ROOT_PATH="/root"
 REMOTE_USER_PATH="/your/remote/path"
 TEST_FILE="test.txt"
 TEST_FOLDER="test_folder"
-WORKSPACE_URL="WORKSPACE_URL" # https://dev.alpacon.io/alpacax
+WORKSPACE_URL="WORKSPACE_URL" # https://WORKSPACE.REGION.alpacon.io
 TEST_CONTENT_PREFIX="Hello from Alpacon CLI test"
 TEST_CONTENT="$TEST_CONTENT_PREFIX! $(date)"
 

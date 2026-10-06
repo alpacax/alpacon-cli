@@ -38,7 +38,7 @@ const (
 	// for a transient reason does not take the session with it.
 	CapabilityWebsocketReconnect = "websocket-reconnect"
 
-	// serverGateTokenScope is the "gate" value alpacon-server sends on a
+	// serverGateTokenScope is the "gate" value the server sends on a
 	// token-scope refusal (api_token_scope_missing, api_token_scope_action_unresolved).
 	// It is the only gate whose "missing" is a scope string; every other gate's
 	// "missing" names a permission or role, so authStatusMessage's fallback
@@ -49,8 +49,8 @@ const (
 	// auth_token_missing/auth_authentication_failed.
 	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
 
-	// gatePlan is the "gate" value alpacon-server sends on every 402 plan
-	// refusal, limit or feature lock alike (paywall wave wire contract §1.1).
+	// gatePlan is the "gate" value the server sends on every 402 plan
+	// refusal, limit or feature lock alike.
 	gatePlan = "plan"
 
 	// axisServer is the one axis whose remedy carries an extra hint: a host that
@@ -68,11 +68,10 @@ const (
 )
 
 // legacyPlanLimitAxis maps a 402's "code" to its axis for a server that
-// predates the "gate"/"axis" envelope (client classification rule 2, ADR 0069
-// D8: the client table shrinks to what the server doesn't say). Deliberately
-// excludes workspace_free_limit_exceeded: that gate-less 402 can also be
-// alpacon-account's own Free-workspace refusal, which this rule must not
-// repaint as a plan limit.
+// predates the "gate"/"axis" envelope. Deliberately excludes
+// workspace_free_limit_exceeded: that gate-less 402 can also be a
+// Free-workspace refusal, which this mapping must not repaint as a plan
+// limit.
 var legacyPlanLimitAxis = map[string]string{
 	"server_limit_exceeded":      "server",
 	"user_limit_exceeded":        "user",
@@ -102,19 +101,19 @@ type apiError struct {
 	code    string
 	source  string
 	// gate and missing carry the optional "gate"/"missing" fields a coded
-	// 402/403/405/429 may send beside "code": alpacon-server states which gate
+	// 402/403/405/429 may send beside "code": the server states which gate
 	// refused the request and what it was missing, but sends no human "detail"
 	// on these routes, so a caller such as cmd/iam's RBAC guidance table reads
 	// these instead of trying to parse one out of nothing. missing is normalized
 	// to a slice regardless of whether the server sent one scope string or a list.
 	gate    string
 	missing []string
-	// axis and next carry the optional 402 plan-limit fields (paywall wave wire
-	// contract §1.1): axis names which limit refused the request, and next is a
-	// self-relative entitlements-read path a member-scoped caller can read for
-	// the numbers this contract never puts in the body. planLimitMessage reads
-	// axis to build the user-facing text; next is carried for a future
-	// programmatic reader, not this CLI's plain-text rendering.
+	// axis and next carry the optional 402 plan-limit fields: axis names which
+	// limit refused the request, and next is a self-relative entitlements-read
+	// path a member-scoped caller can read for the numbers the 402 body never
+	// carries. planLimitMessage reads axis to build the user-facing text; next
+	// is carried for a future programmatic reader, not this CLI's plain-text
+	// rendering.
 	axis string
 	next string
 	// retryAfter is the Retry-After header's parsed delay, set by
@@ -124,7 +123,7 @@ type apiError struct {
 	retryAfter time.Duration
 	statusCode int
 	// apiPayload records that the body was a JSON object—the shape every
-	// alpacon-server error response has. It is a filter, not a provenance flag:
+	// server error response has. It is a filter, not a provenance flag:
 	// only the negative holds, since anything standing in front of the server
 	// can emit a JSON object too. The stale-token retry reads it to drop
 	// gateway refusals, and nothing may read it as proof of who wrote the body.
@@ -233,7 +232,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 	}
 }
 
-// isJSONObject reports whether body is a JSON object. alpacon-server renders
+// isJSONObject reports whether body is a JSON object. The server renders
 // every error as one, so anything else on a 401—an HTML page, a bare string,
 // nothing at all—came from a proxy, a WAF or an mTLS gate ahead of it. Only
 // that direction holds: a JSON object clears the test whoever wrote it.
@@ -415,12 +414,11 @@ func readJSONResponse(resp *http.Response) ([]byte, error) {
 // renews it and sends the request once more.
 //
 // The renewal belongs here rather than in each polling loop because only the
-// process-wide credential is stale, not the request: alpacon-server rejects a
-// stale token in its permission layer (utils/api/permissions.py), before the
-// view runs, so the first attempt changed nothing and the replay is the same
-// request rather than a second one. A client built at startup and held for a
-// half-hour approval wait would otherwise never re-enter the refresh that
-// NewAlpaconAPIClient runs once.
+// process-wide credential is stale, not the request: the server rejects a
+// stale token before the request is handled, so the first attempt changed
+// nothing and the replay is the same request rather than a second one. A
+// client built at startup and held for a half-hour approval wait would
+// otherwise never re-enter the refresh that NewAlpaconAPIClient runs once.
 func (ac *AlpaconClient) sendRequest(req *http.Request) ([]byte, error) {
 	body, err := ac.roundTrip(req)
 	retry, ok := ac.renewedRequest(req, err)
@@ -489,17 +487,13 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 }
 
 // isStaleCredential reports whether err is a 401 a fresh access token could
-// plausibly move. alpacon-server's Auth0 authenticator returns no user on every
-// bearer rejection, whether it absorbs an exception or declines outright
-// (auth0/auth.py), so the request falls through to IsAuthenticatedOr401 and
-// raises DRF's NotAuthenticated—a 401 older servers leave uncoded and newer ones
-// code auth_token_missing. An expired token lands there, and so does every other
-// Auth0-bearer rejection: a workspace-claim mismatch, the authenticator-level MFA
-// gate, an uninvited user. Those cost one grant and one replay before surfacing
-// the same error, and the MFA case a refresh may genuinely fix. So that 401 is
-// not proof of expiry—it is the only one worth spending one retry on, because a
-// coded refusal (MFA required, IP not allowed, token ACL, auth_authentication_failed)
-// names what it wants and a new token is not it.
+// plausibly move. A code-less 401, or one coded auth_token_missing, may be a
+// stale access token. Other Auth0 bearer rejections—a workspace mismatch, MFA,
+// an uninvited user—also land there and cost one renewal and one replay before
+// surfacing the same error. So that 401 is not proof of expiry—it is the only
+// one worth spending one retry on, because a coded refusal (MFA required, IP
+// not allowed, token ACL, auth_authentication_failed) names what it wants and
+// a new token is not it.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false
@@ -570,7 +564,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 }
 
 // rewritePlanLimitMessage replaces err's message with planLimitMessage's
-// §1.6 rendering when the 402 it carries classifies as a plan limit or a
+// rendering when the 402 it carries classifies as a plan limit or a
 // feature lock (client classification rules 1–3); rule 4 (any other 402)
 // leaves the generic message parseAPIError already built untouched.
 func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
@@ -584,8 +578,8 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 	return err
 }
 
-// planLimitMessage implements the client classification (§1.3) and the CLI/MCP/
-// alpamon message template (§1.6) for a 402 from alpacon-server:
+// planLimitMessage implements the client classification and the CLI/MCP/alpamon
+// message template for a 402 from the server:
 //
 //  1. gate=="plan" with axis present: a plan limit on axis.
 //  2. gate absent and code is one of the six legacy *_limit_exceeded codes: a
@@ -627,7 +621,7 @@ func axisDisplayName(axis string) string {
 
 // planLimitRemedy picks the count-cap or monthly-reset remedy sentence:
 // retryAfter is only ever set on a monthly axis (websh, webftp, websh-share)
-// and only when the limit is above zero (§1.1), so its presence alone decides
+// and only when the limit is above zero, so its presence alone decides
 // which sentence applies. axisServer gets an extra hint no other axis needs:
 // a host cap is the one limit a stale, undeleted entry can trip by accident.
 func planLimitRemedy(axis string, retryAfter time.Duration) string {
@@ -1099,7 +1093,8 @@ func withStatus(err error, statusCode int) error {
 }
 
 // withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
-// that is what DRF throttling sends, and misreading an HTTP-date would stall a poll.
+// that is what a throttled response sends, and misreading an HTTP-date would
+// stall a poll.
 // When err is (or wraps) an *apiError, the delay is also stored there directly so
 // planLimitMessage can read it without re-parsing the header or unwrapping the
 // *retryAfterError this still returns for every other caller (the exec/websh poll
@@ -1167,7 +1162,7 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 
 	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
 	// value is the envelope's string code stays out; a list "code" field is a
-	// real serializer field and is rendered like any other. Keys are sorted
+	// real request field and is rendered like any other. Keys are sorted
 	// for deterministic output.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {
@@ -1215,10 +1210,10 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 
 // isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
 // string for "code"/"source"/"gate"/"detail", "axis"/"next" the same but only
-// on a 402 (the plan-limit fields, paywall wave wire contract §1.1—on any
-// other status they are not part of the envelope, so a validation response
-// that happens to have a field named "axis" or "next" still renders as a
-// field error rather than being swallowed into a code-only message), and for
+// on a 402 (the plan-limit fields—on any other status they are not part of
+// the envelope, so a validation response that happens to have a field named
+// "axis" or "next" still renders as a field error rather than being swallowed
+// into a code-only message), and for
 // "missing" either a single scope string or a list of them.
 func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
@@ -1323,7 +1318,7 @@ func codeOnlyMessage(code string) string {
 }
 
 // parseGateAndMissing extracts the optional "gate" and "missing" fields a coded
-// 402/403/405/429 response may carry beside "code": alpacon-server states which
+// 402/403/405/429 response may carry beside "code": the server states which
 // gate refused the request and what it was missing, but sends no human "detail"
 // on these routes, so a caller such as cmd/iam's RBAC guidance table reads these
 // instead. "missing" is accepted as either one scope string or a list of them—

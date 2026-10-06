@@ -16,7 +16,7 @@ const (
 	EventTypeSudo          = "sudo"
 	EventTypeCommandOutput = "command_output"
 	// Subscribed with a server id, not a command id: that is the channel
-	// alpacon-server publishes it on.
+	// the server publishes it on.
 	EventTypeCommandFin = "command_fin"
 )
 
