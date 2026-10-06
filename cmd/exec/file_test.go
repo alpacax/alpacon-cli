@@ -611,9 +611,9 @@ func TestFileExecInlineCredentialRefusal(t *testing.T) {
 }
 
 // TestExecFileInlineCredentialPrintsFileLaneHint drives command_inline_credential
-// on the file lane through the real exec command: table mode prints the file
-// lane's hint and not the shell lane's --env example, and JSON mode keeps the
-// server's code in the envelope.
+// on the file lane through the real exec command: table and --detach print the
+// file lane's hint and not the shell lane's --env example, and JSON mode keeps
+// the server's code in the envelope.
 func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 	t.Parallel()
 	script := filepath.Join(t.TempDir(), "rotate.sh")
@@ -637,6 +637,21 @@ func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 		assert.Contains(t, stderr, "out of the script")
 		assert.NotContains(t, stderr, "--env")
 		assert.NotContains(t, stderr, "-pSecret", "the rejected script must never be echoed back")
+	})
+
+	t.Run("detach", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--detach", "--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, fileExecInlineCredentialMessage)
+		assert.Contains(t, stderr, "out of the script")
+		assert.NotContains(t, stderr, "failed to submit")
 	})
 
 	t.Run("json", func(t *testing.T) {

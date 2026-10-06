@@ -229,9 +229,6 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 	return "", "", false
 }
 
-// fileExecInlineCredentialMessage is the file lane's error line for
-// command_inline_credential: the credential sits in the script, not on a
-// command line the user typed.
 const fileExecInlineCredentialMessage = "server rejected this script—it carries a credential"
 
 // fileExecInlineCredentialHint replaces credentialInlineHint on the file lane.
@@ -239,9 +236,6 @@ const fileExecInlineCredentialMessage = "server rejected this script—it carrie
 // script unreviewed, so it names neither.
 const fileExecInlineCredentialHint = "take the secret out of the script and have the script read it from a file or the environment on the host at run time, so it is not stored with the reviewed script.\n"
 
-// fileExecInlineCredentialRefusal renders command_inline_credential for the
-// file lane, or answers false for every other error. It is kept out of
-// fileExecRefusals because the shell lane shares the code and keeps its own hint.
 func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) {
 	if !isCommandInlineCredentialError(err) {
 		return "", "", false

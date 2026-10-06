@@ -300,7 +300,6 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if HandleFileExecRefusal(err, parsed.Server) {
 		return
 	}
-	// The shell lane's --env hint is one the file lane refuses.
 	if file != nil && HandleFileExecInlineCredential(err) {
 		return
 	}
