@@ -20,6 +20,12 @@ const (
 	certURL        = "/api/cert/certificates/"
 )
 
+// AuthorityCannotBeDeleted rides a 400 on a CA delete: the CA has received a
+// certificate sign request, so the server keeps it along with its sign
+// requests, issued certificates and revoke requests. Deleting the server the
+// CA runs on is how to stop using it.
+const AuthorityCannotBeDeleted = "cert_authority_cannot_be_deleted"
+
 func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignRequestResponse, error) {
 	var response SignRequestResponse
 
