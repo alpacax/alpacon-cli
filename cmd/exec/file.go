@@ -229,12 +229,39 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 	return "", "", false
 }
 
+const fileExecInlineCredentialMessage = "server rejected this script—it carries a credential"
+
+// fileExecInlineCredentialHint replaces credentialInlineHint on the file lane.
+// --env is refused alongside --file, and an ordinary command line would run the
+// script unreviewed, so it names neither.
+const fileExecInlineCredentialHint = "take the secret out of the script and have the script read it from a file or the environment on the host at run time, so it is not stored with the reviewed script.\n"
+
+func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) {
+	if !isCommandInlineCredentialError(err) {
+		return "", "", false
+	}
+	return fileExecInlineCredentialMessage, denialHintLine(fileExecInlineCredentialHint), true
+}
+
 // HandleFileExecRefusal reports a file-lane refusal and exits 1, or returns
 // false when err is something else. Under --output json the envelope carries the
 // server's code; table mode prints the message and the hint. It runs before
 // HandleCommandResult, which knows no server name and would print the raw code.
 func HandleFileExecRefusal(err error, serverName string) bool {
 	message, hint, ok := fileExecRefusal(err, serverName)
+	if !ok {
+		return false
+	}
+	reportCodedRefusal("command", err, message, hint)
+	return true
+}
+
+// HandleFileExecInlineCredential reports command_inline_credential with the
+// file lane's hint and exits 1, or returns false when err is something else.
+// Call it only on the file lane: the shell lane shares the code and answers it
+// in HandleCommandResult with --env.
+func HandleFileExecInlineCredential(err error) bool {
+	message, hint, ok := fileExecInlineCredentialRefusal(err)
 	if !ok {
 		return false
 	}

@@ -378,11 +378,12 @@ func pendingSudoDenial(output string) (hint string, pending bool) {
 }
 
 // isCommandInlineCredentialError reports whether err carries the server's
-// inline-credential gate code (utils.CommandInlineCredential): the
-// submitted command line itself contained a credential (e.g. a -p/--password
-// flag, a KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host
-// connection string), so the server refused the command before it ever ran
-// rather than persist that line.
+// inline-credential gate code (utils.CommandInlineCredential): the submitted
+// content itself contained a credential (e.g. a -p/--password flag, a
+// KEY=VALUE secret such as PGPASSWORD=..., or a user:pass@host connection
+// string), so the server refused it before it ever ran rather than persist it.
+// The content is the command line on the exec and websh lanes and the verified
+// file's content on the --file lane.
 func isCommandInlineCredentialError(err error) bool {
 	code, _ := utils.ParseErrorResponse(err)
 	return code == utils.CommandInlineCredential
