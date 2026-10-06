@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -2587,4 +2588,55 @@ func TestSendRawRequest_RenewalPreservesCustomUserAgent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 	assert.Equal(t, []string{"custom-agent", "custom-agent"}, agents)
+}
+
+// The cursor-paginator codes reach a user only after api.FetchCursorPages has spent
+// its restarts, so the message has to name the remedy rather than echo the code.
+func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		want   string
+	}{
+		{
+			name:   "expired snapshot",
+			status: http.StatusBadRequest,
+			code:   utils.APICursorExpired,
+			want:   "the search snapshot this page was read from expired—read the listing again from the start",
+		},
+		{
+			name:   "refused cursor",
+			status: http.StatusBadRequest,
+			code:   utils.APIInvalidCursor,
+			want:   "the server would not take this page's cursor—read the listing again from the start",
+		},
+		{
+			name:   "refused search",
+			status: http.StatusServiceUnavailable,
+			code:   utils.APISearchUnavailable,
+			want:   "the search backend would not start this read right now—try again in a moment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, tt.code)
+			}))
+			defer ts.Close()
+
+			_, err := newTestClient(ts.URL).SendGetRequest("/api/history/logs/")
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+		})
+	}
 }

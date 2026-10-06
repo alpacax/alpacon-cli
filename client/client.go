@@ -1312,6 +1312,12 @@ func codeOnlyMessage(code string) string {
 		return "the server does not support the request's content type"
 	case utils.AuthVerificationUnavailable:
 		return "the server could not verify your credential right now—it was not rejected, so try again in a moment"
+	case utils.APICursorExpired:
+		return "the search snapshot this page was read from expired—read the listing again from the start"
+	case utils.APIInvalidCursor:
+		return "the server would not take this page's cursor—read the listing again from the start"
+	case utils.APISearchUnavailable:
+		return "the search backend would not start this read right now—try again in a moment"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}

@@ -146,3 +146,27 @@ func TestGetWebFTPLogList_FollowsCursor(t *testing.T) {
 	require.Len(t, logs, 2)
 	assert.Equal(t, "b.txt", logs[1].FileName)
 }
+
+func TestGetWebFTPLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[WebFTPLogEntry]{
+				Next:    "eyJzIjpbMV0sImQiOiJhZnRlciJ9",
+				Results: []WebFTPLogEntry{{FileName: "report.csv", Action: "upload"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	logs, err := GetWebFTPLogList(ac, 50, "", "", "")
+
+	require.Error(t, err)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "report.csv", logs[0].FileName)
+}

@@ -36,6 +36,12 @@ const (
 	APINotAcceptable        = "api_not_acceptable"
 	APIUnsupportedMediaType = "api_unsupported_media_type"
 
+	// Codes the Elasticsearch cursor paginator sends when a walk cannot go on: an
+	// expired snapshot (400), a mismatched cursor (400), or no snapshot opened (503).
+	APICursorExpired     = "api_cursor_expired"
+	APIInvalidCursor     = "api_invalid_cursor"
+	APISearchUnavailable = "api_search_unavailable"
+
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
