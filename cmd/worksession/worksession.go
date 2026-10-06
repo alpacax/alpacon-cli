@@ -45,7 +45,9 @@ Gated operations (require an active WorkSession under interactive auth):
   tunnel—'alpacon tunnel' (port forwarding)
   sudo—'Privilege elevation' on Alpacon web (binding op: pending/approved/active allowed)
 
-Bypass: Token auth (API token or Service token) skips the requirement.
+Bypass: Token auth (API token or Service token) skips the requirement for 'exec', 'cp',
+'edit', and 'websh SERVER COMMAND', but cannot open an interactive 'websh' terminal or a
+'tunnel'—those need browser login.
 
 Lifecycle:  pending → approved → active → complete | expired | revoked  (pending only → rejected | cancelled)
 

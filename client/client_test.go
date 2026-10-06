@@ -394,6 +394,7 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 	_, err := ac.SendGetRequest("/api/test/")
 	require.ErrorContains(t, err, "token access control")
 	require.ErrorContains(t, err, "alpacon token acl")
+	require.ErrorContains(t, err, "needs browser login")
 	// The no-raw-code contract: callers read the code via ErrorCode(), not the message.
 	assert.NotContains(t, err.Error(), "api_token_acl_not_allowed")
 	// A token missing a rule is not a stale session—never suggest re-login.

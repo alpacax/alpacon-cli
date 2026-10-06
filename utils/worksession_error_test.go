@@ -76,6 +76,26 @@ func TestBuildWorkSessionDiagnostic_APIToken(t *testing.T) {
 	assert.NotContains(t, got, "(interactive)")
 }
 
+func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		operation string
+		want      string
+	}{
+		{"interactive Websh needs browser login", "websh", "cannot open an interactive terminal; it needs browser login"},
+		{"command is bypassed by a token", "command", "bypass this check"},
+		{"webftp is bypassed by a token", "webftp", "bypass this check"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := buildWorkSessionDiagnostic(WorkSessionRequired, tt.operation, "prod-1", "Browser login", "")
+			assert.Contains(t, got, tt.want)
+		})
+	}
+}
+
 func TestBuildWorkSessionErrorEnvelope(t *testing.T) {
 	t.Parallel()
 	tests := []string{

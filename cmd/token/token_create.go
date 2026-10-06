@@ -65,17 +65,17 @@ func init() {
 
 	tokenCreateCmd.Flags().StringVarP(&name, "name", "n", "", "A name to remember the token easily.")
 	tokenCreateCmd.Flags().BoolVarP(&limit, "limit", "l", true, "Set to true to apply usage limits.")
-	tokenCreateCmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "This token can be used by the specified time. (in days)")
-	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,command:create"). Omit to default to full access.`)
+	tokenCreateCmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "Days until the token expires (0 = the workspace's maximum token lifetime).")
+	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,command:create"). Omit to get every scope you can grant: "*" for a superuser, your roles' scopes otherwise.`)
 }
 
 func promptForToken() (auth.APITokenRequest, error) {
 	var tokenRequest auth.APITokenRequest
 	tokenRequest.Name = utils.PromptForRequiredInput("Token name: ")
-	if utils.PromptForBool("Set expiration for token?") {
+	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
 		tokenRequest.ExpiresAt = utils.TimeFormat(utils.PromptForIntInput("Valid days for the token (default: 30): ", 30))
 	}
-	scopes := utils.PromptForListInput("Scopes (comma-separated, default *): ")
+	scopes := utils.PromptForListInput("Scopes (comma-separated, default: every scope you can grant): ")
 	if len(scopes) > 0 {
 		tokenRequest.Scopes = scopes
 	}

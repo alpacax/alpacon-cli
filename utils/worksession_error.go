@@ -69,8 +69,15 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
-	fmt.Fprint(&sb, "Note: Tokens issued by Alpacon (service or personal API token) bypass this check.")
+	fmt.Fprint(&sb, workSessionTokenNote(operation))
 	return sb.String()
+}
+
+func workSessionTokenNote(operation string) string {
+	if operation == "websh" {
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs browser login."
+	}
+	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }
 
 func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS string) workSessionErrorJSON {
