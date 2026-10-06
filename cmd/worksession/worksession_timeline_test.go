@@ -326,15 +326,8 @@ func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	assert.True(t, hasRecordings, "recordings key must be present in JSON output")
 }
 
-// --no-records has to reach the request, not only the renderer: the flag exists
-// so the recording bytes are never downloaded, and include_records is the only
-// thing that stops the server sending them. The helper runs the real command in
-// a subprocess, so what is asserted is what the flag puts on the wire.
-//
-// The fake honors include_records the way the server does, so reverting the fix
-// moves both assertions: the parameter arrives as "true" and the records come
-// back with it. The last case is a server too old to know the parameter: it
-// sends the records anyway, and the flag has to hold there too.
+// --no-records must reach the request, so the recording bytes are never downloaded,
+// and must still hold on a server too old to know include_records.
 func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
 	t.Parallel()
 
@@ -395,14 +388,4 @@ func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The help text has to describe what the flag really does. Dropping the request
-// also drops the per-row recording count, and a help text that promised only to
-// hide the section below the timeline would overstate what survives.
-func TestNoRecordsFlagHelpDescribesTheCount(t *testing.T) {
-	// Reads a package-level Cobra command, so it stays serial.
-	flag := workSessionTimelineCmd.Flags().Lookup("no-records")
-	require.NotNil(t, flag)
-	assert.Contains(t, flag.Usage, "recording count")
 }

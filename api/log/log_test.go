@@ -119,8 +119,6 @@ func TestGetSystemLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	logs, err := GetSystemLogList(ac, "test-server", 200)
 
-	// The projection runs over what the walk did read, so the caller can show a short
-	// log instead of nothing; the error is what says it is short.
 	require.Error(t, err)
 	require.Len(t, logs, 1)
 	assert.Equal(t, "[main] first", logs[0].Message)

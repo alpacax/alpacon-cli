@@ -49,12 +49,5 @@ func runWebFTP(cmd *cobra.Command, args []string) {
 	}
 
 	logList, err := webftp.GetWebFTPLogList(alpaconClient, tail, serverName, userName, action)
-	switch {
-	case err != nil && len(logList) > 0:
-		utils.PartialTableWithExit(logList, "Showing only the %d entries read before the request failed: %s.", len(logList), err)
-	case err != nil:
-		utils.CliErrorWithExit("Failed to get WebFTP logs: %s.", err)
-	}
-
-	utils.PrintTable(logList)
+	utils.PrintListOrExit(logList, err, "Failed to get WebFTP logs")
 }

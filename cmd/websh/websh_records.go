@@ -32,8 +32,6 @@ Use --query to search records by command text (fuzzy match).`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// A cursor walk that failed part-way still returns the records it read, so the
-		// error is only fatal when it came back with nothing.
 		records, err := websh.GetSessionRecords(alpaconClient, sessionID, query, limit)
 		if err != nil && len(records) == 0 {
 			utils.CliErrorWithExit("Failed to retrieve Websh session records: %s.", err)

@@ -166,8 +166,6 @@ func TestGetWebFTPLogList_KeepsEntriesReadBeforeAFailure(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	logs, err := GetWebFTPLogList(ac, 50, "", "", "")
 
-	// The projection runs over what the walk did read, so the caller can show a short
-	// list instead of nothing; the error is what says it is short.
 	require.Error(t, err)
 	require.Len(t, logs, 1)
 	assert.Equal(t, "report.csv", logs[0].FileName)

@@ -49,12 +49,5 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	auditList, err := audit.GetAuditLogList(alpaconClient, tail, userName, app, model)
-	switch {
-	case err != nil && len(auditList) > 0:
-		utils.PartialTableWithExit(auditList, "Showing only the %d entries read before the request failed: %s.", len(auditList), err)
-	case err != nil:
-		utils.CliErrorWithExit("Failed to get audit logs: %s.", err)
-	}
-
-	utils.PrintTable(auditList)
+	utils.PrintListOrExit(auditList, err, "Failed to get audit logs")
 }

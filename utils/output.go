@@ -175,18 +175,26 @@ func PrintTable(slice any) {
 	_ = tw.Flush()
 }
 
-// PartialTableWithExit prints the rows a list walk collected before it failed and
-// exits with ExitCodeGeneralError: stderr says why the list is short, stdout carries
-// the rows, and the non-zero exit is what keeps a script from reading a truncated
-// list as the whole answer. Nothing in the body marks it—under --output json the rows
-// are a plain array like any other—so the data never goes out without the exit code.
-//
-// Reserve it for a walk that genuinely has rows; one that collected none is an
-// ordinary failure and belongs to CliErrorWithExit.
+// PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
+// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
+// ordinary failure for CliErrorWithExit.
 func PartialTableWithExit(rows any, msg string, args ...any) {
 	CliWarning(msg, args...)
 	PrintTable(rows)
 	os.Exit(ExitCodeGeneralError)
+}
+
+// PrintListOrExit prints a list a paginated read returned with err. On a nil err it
+// is PrintTable; otherwise it prints the rows as partial through PartialTableWithExit,
+// or fails with failMsg when there are none.
+func PrintListOrExit[T any](rows []T, err error, failMsg string) {
+	switch {
+	case err != nil && len(rows) > 0:
+		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
+	case err != nil:
+		CliErrorWithExit("%s: %s.", failMsg, err)
+	}
+	PrintTable(rows)
 }
 
 func PrintJson(body []byte) {

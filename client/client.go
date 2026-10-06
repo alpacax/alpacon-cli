@@ -1313,9 +1313,6 @@ func codeOnlyMessage(code string) string {
 		return "the server does not support the request's content type"
 	case utils.AuthVerificationUnavailable:
 		return "the server could not verify your credential right now—it was not rejected, so try again in a moment"
-	// The cursor-paginator codes reach a user only once api.FetchCursorPages has spent
-	// its restarts on them, so each line says the listing has to be read again rather
-	// than that the request was wrong.
 	case utils.APICursorExpired:
 		return "the search snapshot this page was read from expired—read the listing again from the start"
 	case utils.APIInvalidCursor:

@@ -343,8 +343,6 @@ func TestGetSessionRecords_KeepsRecordsReadBeforeAFailure(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	records, err := GetSessionRecords(ac, "sess-1", "", 50)
 
-	// The records the walk did read come back with the error, so the command can show
-	// a short list instead of nothing.
 	require.Error(t, err)
 	require.Len(t, records, 1)
 	assert.Equal(t, "docker ps", records[0].Record)

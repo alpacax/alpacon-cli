@@ -50,12 +50,7 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			// The flag rides on the request, not just the renderer, so the
-			// recording bytes are never downloaded. That empties
-			// buildRecordingIndex too, which is why the "• N recordings" badge
-			// goes with them: the count rides on the recording items
-			// themselves, so there is no keeping the badge without asking for
-			// the bytes. The flag's help text says so.
+			// Sent on the request so the recording bytes are never downloaded.
 			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
 		}()
 		go func() {
@@ -75,10 +70,7 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		// A server too old to know include_records answers with the records
-		// anyway, so the flag also has to drop them here. Leaving the index
-		// empty drops the badge and the section, and leaves the JSON
-		// "recordings" key as an empty array.
+		// A server too old to know include_records sends the records anyway.
 		var (
 			recordingsBySession map[string][]wsapi.TimelineItem
 			recordings          []wsapi.TimelineItem
@@ -122,7 +114,7 @@ var workSessionTimelineCmd = &cobra.Command{
 
 func init() {
 	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
-		"Skip recordings: they are not requested, so neither the recordings section nor the recording count on websh rows is shown")
+		"Skip recordings: hide the recordings section and the recording count on Websh rows")
 }
 
 func buildRecordingIndex(items []wsapi.TimelineItem) (bySession map[string][]wsapi.TimelineItem, flat []wsapi.TimelineItem) {

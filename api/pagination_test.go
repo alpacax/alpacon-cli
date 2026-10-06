@@ -156,10 +156,7 @@ func servedNames(items []cursorItem) []string {
 	return names
 }
 
-// noRestartDelay drops the pause FetchCursorPages takes before a restart, so a test
-// of the restart itself does not pay for it. The caller must be serial—
-// cursorRestartTick is package state, and restoring it under a parallel neighbour
-// that reads it would race.
+// noRestartDelay zeroes cursorRestartTick; the caller must be serial.
 func noRestartDelay(t *testing.T) {
 	t.Helper()
 	previous := cursorRestartTick
@@ -167,29 +164,51 @@ func noRestartDelay(t *testing.T) {
 	t.Cleanup(func() { cursorRestartTick = previous })
 }
 
-// newRestartingCursorServer serves two-page cursor walks and fails exactly one
-// request: the failPage-th request it sees, with status and code. Everything after
-// that is served normally, so a walk started again gets through.
-func newRestartingCursorServer(t *testing.T, rec *requestRecorder, failPage, status int, code string) *httptest.Server {
+// cursorFailure picks which requests newRestartingCursorServer fails, by 1-based
+// request number and the cursor the request carried, and what it answers with.
+type cursorFailure struct {
+	when       func(n int, cursor string) bool
+	status     int
+	code       string
+	retryAfter string
+}
+
+// newRestartingCursorServer serves three-page cursor walks (a, b, c) and fails every
+// request fail.when matches.
+func newRestartingCursorServer(t *testing.T, rec *requestRecorder, fail cursorFailure) *httptest.Server {
 	t.Helper()
+	pages := map[string]CursorListResponse[cursorItem]{
+		"":       {Next: "TOKEN2", Results: []cursorItem{{Name: "a"}}},
+		"TOKEN2": {Next: "TOKEN3", Results: []cursorItem{{Name: "b"}}},
+		"TOKEN3": {Results: []cursorItem{{Name: "c"}}},
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
 		w.Header().Set("Content-Type", "application/json")
-		if rec.count() == failPage {
-			w.WriteHeader(status)
-			_, _ = fmt.Fprintf(w, `{"code":%q}`, code)
+		cursor := r.URL.Query().Get("cursor")
+		if fail.when(rec.count(), cursor) {
+			if fail.retryAfter != "" {
+				w.Header().Set("Retry-After", fail.retryAfter)
+			}
+			w.WriteHeader(fail.status)
+			if fail.code != "" {
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, fail.code)
+			} else {
+				_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+			}
 			return
 		}
-		if r.URL.Query().Get("cursor") == "" {
-			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
-				Next:    "TOKEN2",
-				Results: []cursorItem{{Name: "a"}},
-			})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Results: []cursorItem{{Name: "b"}}})
+		_ = json.NewEncoder(w).Encode(pages[cursor])
 	}))
 }
+
+// failRequest fails only the n-th request.
+func failRequest(n int) func(int, string) bool {
+	return func(got int, _ string) bool { return got == n }
+}
+
+// failCursorPages fails every request that carries a cursor.
+func failCursorPages(_ int, cursor string) bool { return cursor != "" }
 
 // Serial: noRestartDelay writes package state.
 func TestFetchCursorPages_RestartsABrokenWalk(t *testing.T) {
@@ -207,14 +226,14 @@ func TestFetchCursorPages_RestartsABrokenWalk(t *testing.T) {
 			status:   http.StatusBadRequest,
 			code:     utils.APICursorExpired,
 			// The restarted walk sends no cursor on its own first request.
-			wantCursors: []string{"", "TOKEN2", "", "TOKEN2"},
+			wantCursors: []string{"", "TOKEN2", "", "TOKEN2", "TOKEN3"},
 		},
 		{
 			name:        "a cursor the server will not take",
 			failPage:    2,
 			status:      http.StatusBadRequest,
 			code:        utils.APIInvalidCursor,
-			wantCursors: []string{"", "TOKEN2", "", "TOKEN2"},
+			wantCursors: []string{"", "TOKEN2", "", "TOKEN2", "TOKEN3"},
 		},
 		{
 			// A refused point-in-time open can only land on a cursor-less request,
@@ -223,21 +242,21 @@ func TestFetchCursorPages_RestartsABrokenWalk(t *testing.T) {
 			failPage:    1,
 			status:      http.StatusServiceUnavailable,
 			code:        utils.APISearchUnavailable,
-			wantCursors: []string{"", "", "TOKEN2"},
+			wantCursors: []string{"", "", "TOKEN2", "TOKEN3"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := &requestRecorder{}
-			ts := newRestartingCursorServer(t, rec, tt.failPage, tt.status, tt.code)
+			ts := newRestartingCursorServer(t, rec, cursorFailure{when: failRequest(tt.failPage), status: tt.status, code: tt.code})
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 			items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
 
 			require.NoError(t, err)
-			assert.Equal(t, []string{"a", "b"}, servedNames(items))
+			assert.Equal(t, []string{"a", "b", "c"}, servedNames(items))
 			assert.Equal(t, tt.wantCursors, rec.queried("cursor"))
 		})
 	}
@@ -248,19 +267,7 @@ func TestFetchCursorPages_BoundsRestarts(t *testing.T) {
 	noRestartDelay(t)
 	rec := &requestRecorder{}
 	// Every cursor-borne page loses its snapshot, so no walk ever finishes.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec.record(r)
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Query().Get("cursor") == "" {
-			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
-				Next:    "TOKEN2",
-				Results: []cursorItem{{Name: "a"}},
-			})
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = fmt.Fprintf(w, `{"code":%q}`, utils.APICursorExpired)
-	}))
+	ts := newRestartingCursorServer(t, rec, cursorFailure{when: failCursorPages, status: http.StatusBadRequest, code: utils.APICursorExpired})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -278,25 +285,11 @@ func TestFetchCursorPages_KeepsTheLongestWalkAcrossRestarts(t *testing.T) {
 	rec := &requestRecorder{}
 	// The first walk reads two pages before losing its snapshot; every walk after it
 	// loses one on its own first page, so the most any restart can offer is nothing.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec.record(r)
-		w.Header().Set("Content-Type", "application/json")
-		switch rec.count() {
-		case 1:
-			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
-				Next:    "TOKEN2",
-				Results: []cursorItem{{Name: "a"}},
-			})
-		case 2:
-			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
-				Next:    "TOKEN3",
-				Results: []cursorItem{{Name: "b"}},
-			})
-		default:
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, `{"code":%q}`, utils.APICursorExpired)
-		}
-	}))
+	ts := newRestartingCursorServer(t, rec, cursorFailure{
+		when:   func(n int, _ string) bool { return n >= 3 },
+		status: http.StatusBadRequest,
+		code:   utils.APICursorExpired,
+	})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -316,7 +309,7 @@ func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
 	cursorRestartTick = tick
 
 	rec := &requestRecorder{}
-	ts := newRestartingCursorServer(t, rec, 1, http.StatusServiceUnavailable, utils.APISearchUnavailable)
+	ts := newRestartingCursorServer(t, rec, cursorFailure{when: failRequest(1), status: http.StatusServiceUnavailable, code: utils.APISearchUnavailable})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -330,24 +323,37 @@ func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, tick)
 }
 
+// Serial: the subject is a timing window, and noRestartDelay's seam is what it writes.
+func TestFetchCursorPages_RestartHonorsRetryAfter(t *testing.T) {
+	noRestartDelay(t)
+	// Small enough that the backoff alone would finish far inside one second, large
+	// enough that the 60-tick cap leaves a one-second Retry-After uncapped.
+	cursorRestartTick = 20 * time.Millisecond
+
+	rec := &requestRecorder{}
+	ts := newRestartingCursorServer(t, rec, cursorFailure{
+		when:       failRequest(1),
+		status:     http.StatusServiceUnavailable,
+		code:       utils.APISearchUnavailable,
+		retryAfter: "1",
+	})
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	started := time.Now()
+	_, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+	elapsed := time.Since(started)
+
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, elapsed, time.Second)
+}
+
 func TestFetchCursorPages_KeepsPagesReadBeforeAFailure(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}
 	// A 500 is not the server refusing a cursor, so the walk ends rather than restarts—
 	// and what it had already read comes back with the error instead of being dropped.
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rec.record(r)
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Query().Get("cursor") == "" {
-			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{
-				Next:    "TOKEN2",
-				Results: []cursorItem{{Name: "a"}},
-			})
-			return
-		}
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
-	}))
+	ts := newRestartingCursorServer(t, rec, cursorFailure{when: failCursorPages, status: http.StatusInternalServerError})
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}

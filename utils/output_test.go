@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	osexec "os/exec"
 	"strings"
@@ -310,33 +311,112 @@ func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 	}
 }
 
-func TestPartialTableWithExit(t *testing.T) {
+func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 	t.Parallel()
-	var stdout, stderr bytes.Buffer
-	helper := osexec.Command(os.Args[0], "-test.run=^TestPartialTableWithExitHelperProcess$")
-	helper.Env = append(os.Environ(), "GO_WANT_PARTIAL_TABLE_HELPER=1")
-	helper.Stdout = &stdout
-	helper.Stderr = &stderr
+	tests := []struct {
+		name         string
+		helperCase   string
+		wantExit     int
+		wantStdout   string
+		wantJSON     string
+		wantStderr   string
+		stdoutIsNone bool
+	}{
+		{
+			name:       "partial table",
+			helperCase: "partial-table",
+			wantExit:   ExitCodeGeneralError,
+			wantStdout: "alpha",
+			wantStderr: "read before the request failed",
+		},
+		{
+			// Only the exit code marks the list short here, so stdout must stay a
+			// plain array a script can parse.
+			name:       "partial json",
+			helperCase: "partial-json",
+			wantExit:   ExitCodeGeneralError,
+			wantJSON:   `[{"name":"alpha","id":1}]`,
+			wantStderr: "read before the request failed",
+		},
+		{
+			name:       "list complete",
+			helperCase: "list-complete",
+			wantExit:   0,
+			wantStdout: "alpha",
+		},
+		{
+			name:       "list partial",
+			helperCase: "list-partial",
+			wantExit:   ExitCodeGeneralError,
+			wantStdout: "alpha",
+			wantStderr: "Showing only the 1 entries read before the request failed: boom.",
+		},
+		{
+			name:         "list empty with error",
+			helperCase:   "list-failed",
+			wantExit:     ExitCodeGeneralError,
+			wantStderr:   "Failed to get logs: boom.",
+			stdoutIsNone: true,
+		},
+	}
 
-	err := helper.Run()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			helper := osexec.Command(os.Args[0], "-test.run=^TestPartialListOutputHelperProcess$")
+			helper.Env = append(os.Environ(), "GO_WANT_PARTIAL_LIST_HELPER="+tt.helperCase)
+			helper.Stdout = &stdout
+			helper.Stderr = &stderr
 
-	var exitErr *osexec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	// Non-zero is the only thing marking the list short under --output json, so it is
-	// what a script branches on.
-	assert.Equal(t, ExitCodeGeneralError, exitErr.ExitCode())
-	// The rows go to stdout and the reason to stderr, so a pipe still carries data only.
-	assert.Contains(t, stdout.String(), "alpha")
-	assert.Contains(t, stderr.String(), "read before the request failed")
-	assert.NotContains(t, stdout.String(), "read before the request failed")
+			err := helper.Run()
+
+			exitCode := 0
+			var exitErr *osexec.ExitError
+			if errors.As(err, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantExit, exitCode, "stderr: %s", stderr.String())
+
+			if tt.wantStdout != "" {
+				assert.Contains(t, stdout.String(), tt.wantStdout)
+			}
+			if tt.wantJSON != "" {
+				assert.JSONEq(t, tt.wantJSON, stdout.String())
+			}
+			if tt.stdoutIsNone {
+				assert.Empty(t, strings.TrimSpace(stdout.String()))
+			}
+			if tt.wantStderr != "" {
+				assert.Contains(t, stderr.String(), tt.wantStderr)
+				assert.NotContains(t, stdout.String(), tt.wantStderr)
+			}
+		})
+	}
 }
 
-// Serial: the child reaches an os.Exit, and the parent's own run of this function is
-// a two-line guard that parallelism buys nothing for.
-func TestPartialTableWithExitHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_PARTIAL_TABLE_HELPER") != "1" {
+// Serial: the child reaches an os.Exit.
+func TestPartialListOutputHelperProcess(t *testing.T) {
+	helperCase := os.Getenv("GO_WANT_PARTIAL_LIST_HELPER")
+	if helperCase == "" {
 		return
 	}
-	PartialTableWithExit([]outputTestItem{{Name: "alpha", ID: 1}},
-		"Showing only the %d entries read before the request failed: %s.", 1, "boom")
+	rows := []outputTestItem{{Name: "alpha", ID: 1}}
+	boom := errors.New("boom")
+	switch helperCase {
+	case "partial-table":
+		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+	case "partial-json":
+		OutputFormat = OutputFormatJSON
+		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+	case "list-complete":
+		PrintListOrExit(rows, nil, "Failed to get logs")
+	case "list-partial":
+		PrintListOrExit(rows, boom, "Failed to get logs")
+	case "list-failed":
+		PrintListOrExit([]outputTestItem{}, boom, "Failed to get logs")
+	}
+	os.Exit(0)
 }

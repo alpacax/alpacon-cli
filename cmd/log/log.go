@@ -33,14 +33,7 @@ var LogCmd = &cobra.Command{
 		}
 
 		logList, err := log.GetSystemLogList(alpaconClient, serverName, tail)
-		switch {
-		case err != nil && len(logList) > 0:
-			utils.PartialTableWithExit(logList, "Showing only the %d entries read before the request failed: %s.", len(logList), err)
-		case err != nil:
-			utils.CliErrorWithExit("Failed to get logs: %s.", err)
-		}
-
-		utils.PrintTable(logList)
+		utils.PrintListOrExit(logList, err, "Failed to get logs")
 	},
 }
 

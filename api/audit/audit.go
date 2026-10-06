@@ -27,9 +27,7 @@ func GetAuditLogList(ac *client.AlpaconClient, tail int, userName string, app st
 		params["model"] = model
 	}
 
-	// The error is carried past the projection, not returned ahead of it: a cursor walk
-	// that failed part-way still hands back the entries it read, and dropping them here
-	// would leave the caller the same nothing it used to get.
+	// On error the entries read so far are still projected and returned.
 	entries, err := api.FetchCursorPages[AuditLogEntry](ac, auditURL, params, tail)
 
 	var auditList []AuditLogAttributes

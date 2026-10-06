@@ -26,12 +26,8 @@ const (
 	APINotAcceptable        = "api_not_acceptable"
 	APIUnsupportedMediaType = "api_unsupported_media_type"
 
-	// Codes the Elasticsearch cursor paginator sends when the walk it was serving
-	// cannot go on: the point-in-time snapshot behind the cursor expired (400), the
-	// cursor does not match the read it arrived on (400), or the cluster would not
-	// open a snapshot at all (503). A snapshot that is gone cannot be resumed, so
-	// all three are answered by walking again from the first page rather than by
-	// retrying the page that failed—see api.FetchCursorPages.
+	// Codes the Elasticsearch cursor paginator sends when a walk cannot go on: an
+	// expired snapshot (400), a mismatched cursor (400), or no snapshot opened (503).
 	APICursorExpired     = "api_cursor_expired"
 	APIInvalidCursor     = "api_invalid_cursor"
 	APISearchUnavailable = "api_search_unavailable"
