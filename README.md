@@ -160,7 +160,7 @@ $ alpacon login <URL> -t <TOKEN_KEY>
 $ alpacon exec <server> "..."
 ```
 
-A token cannot open an interactive `websh` terminal or a `tunnel`; those need browser login.
+A token cannot open an interactive `websh` terminal or a `tunnel`; those need `alpacon login` without `-t`.
 
 See `alpacon work-session --help` for session lifecycle, gating, and error codes.
 

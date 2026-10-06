@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -65,10 +66,11 @@ const (
 	// access control rules do not cover it—the command, the server, or the file path
 	// falls outside the envelope an admin granted this token. The refusal is
 	// permanent for the same request: a retry submits the same thing. Widen the
-	// rules with 'alpacon token acl' instead—except for an interactive terminal or a
-	// tunnel, which no rule opens to a token. The server sends this on a 403 with no
+	// rules with 'alpacon token acl' instead. The server sends this on a 403 with no
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
+
+	APITokenScopeMissing = "api_token_scope_missing"
 
 	// WorkSession gate codes the server returns
 	WorkSessionRequired         = "work_session_required"
@@ -263,6 +265,16 @@ func ParseErrorResponse(err error) (string, string) {
 	}
 
 	return "", ""
+}
+
+// InteractiveOnly rewrites a token's refusal of an action only an interactive login may
+// take; a scope refusal counts, since granting the scope only reaches the ACL refusal.
+func InteractiveOnly(err error, action string) error {
+	switch code, _ := ParseErrorResponse(err); code {
+	case APITokenACLNotAllowed, APITokenScopeMissing:
+		return fmt.Errorf("a token cannot %s; run 'alpacon login' without -t and try again", action)
+	}
+	return err
 }
 
 // ParseErrorGateAndMissing returns the "gate" and "missing" fields a coded

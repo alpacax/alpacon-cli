@@ -33,7 +33,7 @@ const (
 	// codeTokenScopeMissing and codeTokenScopeActionUnresolved are the token-scope
 	// gate's refusals—an API token whose bound scopes do not cover this call, or a
 	// call whose action the server could not resolve to a scope at all.
-	codeTokenScopeMissing          = "api_token_scope_missing"
+	codeTokenScopeMissing          = utils.APITokenScopeMissing
 	codeTokenScopeActionUnresolved = "api_token_scope_action_unresolved"
 )
 

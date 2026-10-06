@@ -51,8 +51,8 @@ var TunnelCmd = &cobra.Command{
 	Use --work-session to attach this tunnel to a specific work-session. This
 	overrides the workspace's active work-session set via 'alpacon work-session use'.
 
-	Requires Browser login (Auth0) and an active WorkSession. Token auth (API token
-	or Service token) cannot open a tunnel.
+	Requires an active WorkSession when using Browser login (Auth0). Token auth (API
+	token or Service token) cannot open a tunnel—that needs 'alpacon login' without -t.
 	`,
 	Example: `
 	# Forward local 9000 to remote 8082
@@ -181,7 +181,7 @@ func handleTunnelStartError(err error, serverName string, retry func() error) er
 		return ac, clientErr
 	}
 
-	return utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
+	return utils.InteractiveOnly(utils.HandleCommonErrors(err, serverName, utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(srv string) error {
 			c, err := getClient()
 			if err != nil {
@@ -201,7 +201,7 @@ func handleTunnelStartError(err error, serverName string, retry func() error) er
 			return c.RefreshToken()
 		},
 		RetryOperation: retry,
-	})
+	}), "open a tunnel")
 }
 
 func executeTunnel(serverName string, sigChan <-chan os.Signal) error {

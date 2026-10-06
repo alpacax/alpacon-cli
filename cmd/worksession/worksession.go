@@ -47,7 +47,7 @@ Gated operations (require an active WorkSession under interactive auth):
 
 Bypass: Token auth (API token or Service token) skips the requirement for 'exec', 'cp',
 'edit', and 'websh SERVER COMMAND', but cannot open an interactive 'websh' terminal or a
-'tunnel'—those need browser login.
+'tunnel'—those need 'alpacon login' without -t.
 
 Lifecycle:  pending → approved → active → complete | expired | revoked  (pending only → rejected | cancelled)
 
