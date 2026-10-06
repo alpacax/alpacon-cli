@@ -30,8 +30,9 @@ var approvalListCmd = &cobra.Command{
 	Short:   "List approval requests",
 	Long: `List approval requests. Defaults to pending status.
 
-Superusers see all workspace requests. Non-superusers are
-restricted to their own requests (equivalent to --my).`,
+The server scopes the result to what you may see: requests you can
+decide, plus ones you settled or voted on. Pass --my to list only the
+requests you submitted.`,
 	Example: `  alpacon approval ls
   alpacon approval ls --status approved
   alpacon approval ls --type sudo
@@ -51,25 +52,7 @@ restricted to their own requests (equivalent to --my).`,
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		// Server enforces /api/approvals/approvals/ as superuser-only. Auto-fall back to
-		// the my-requests endpoint for non-superusers so the default `approval ls` does not
-		// return a confusing 403.
-		useMyEndpoint := myRequests
-		if !useMyEndpoint {
-			if err := ac.LoadCurrentUser(); err != nil {
-				utils.CliErrorWithExit("Failed to load current user: %s.", err)
-			}
-			if ac.Privileges != "superuser" {
-				useMyEndpoint = true
-			}
-		}
-
-		var requests []approvalapi.ApprovalRequestAttributes
-		if useMyEndpoint {
-			requests, err = approvalapi.ListMyApprovalRequests(ac, statusFilter, typeFilter)
-		} else {
-			requests, err = approvalapi.ListApprovalRequests(ac, statusFilter, typeFilter)
-		}
+		requests, err := listRequests(ac, myRequests, statusFilter, typeFilter)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to list approval requests: %s.", err)
 		}
@@ -82,6 +65,13 @@ func init() {
 	approvalListCmd.Flags().StringVar(&statusFilter, "status", "pending", "Filter by status: pending|approved|rejected|cancelled|expired")
 	approvalListCmd.Flags().StringVar(&typeFilter, "type", "", "Filter by request type: sudo|work_session|username|groupname|service_token|svc_token_mod|app_username|work_session_mod|sudo_policy")
 	approvalListCmd.Flags().BoolVar(&myRequests, "my", false, "Show only requests you submitted")
+}
+
+func listRequests(ac *client.AlpaconClient, my bool, status, requestType string) ([]approvalapi.ApprovalRequestAttributes, error) {
+	if my {
+		return approvalapi.ListMyApprovalRequests(ac, status, requestType)
+	}
+	return approvalapi.ListApprovalRequests(ac, status, requestType)
 }
 
 func validateEnumFlag(flag, value string, valid []string) error {
