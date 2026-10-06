@@ -13,6 +13,9 @@ import (
 const (
 	wsReconnectBaseDelay = 1 * time.Second
 	wsReconnectMaxDelay  = 30 * time.Second
+	// A connection that drops sooner keeps backing off, so a flapping server settles
+	// at one provision per cap-length wait however long it holds each connection.
+	wsStableConnectionLifetime = wsReconnectMaxDelay
 )
 
 // wsListener is the shared dial/reconnect/shutdown skeleton for event WebSocket
@@ -32,6 +35,7 @@ type wsListener struct {
 	// The first backoff step, lowered by tests so a reconnect assertion does not have to
 	// sit through the production delay.
 	reconnectBaseDelay time.Duration
+	stableLifetime     time.Duration
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
@@ -55,6 +59,7 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string
 		wsHeader:           wsHeader,
 		handshakeTimeout:   handshakeTimeout,
 		reconnectBaseDelay: wsReconnectBaseDelay,
+		stableLifetime:     wsStableConnectionLifetime,
 		done:               make(chan struct{}),
 		stopped:            make(chan struct{}),
 		connected:          make(chan struct{}),
@@ -113,7 +118,6 @@ func (w *wsListener) listenLoop() {
 		default:
 		}
 
-		// Reset backoff if we had a successful connection that later dropped
 		if w.connectAndListen() {
 			delay = w.reconnectBaseDelay
 		}
@@ -137,9 +141,9 @@ func nextReconnectDelay(delay time.Duration) time.Duration {
 }
 
 // connectAndListen dials the event WebSocket, runs onConnected if set, then reads
-// until the connection drops or Stop is called. Returns whether it connected and
-// subscribed, so the caller can reset backoff.
-func (w *wsListener) connectAndListen() (connected bool) {
+// until the connection drops or Stop is called. Returns whether the subscribed
+// connection outlived stableLifetime.
+func (w *wsListener) connectAndListen() bool {
 	wsURL, err := w.provision()
 	if err != nil {
 		return false
@@ -177,16 +181,17 @@ func (w *wsListener) connectAndListen() (connected bool) {
 
 	w.connectOnce.Do(func() { close(w.connected) })
 
+	subscribed := time.Now()
 	for {
 		select {
 		case <-w.done:
-			return true
+			return false
 		default:
 		}
 
 		_, message, readErr := conn.ReadMessage()
 		if readErr != nil {
-			return true
+			return time.Since(subscribed) > w.stableLifetime
 		}
 
 		w.handleFrame(message)
