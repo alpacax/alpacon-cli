@@ -82,13 +82,43 @@ func TestWebSocketConnReadSkipsAnEmptyMessage(t *testing.T) {
 	assert.Equal(t, "abc", string(buf[:n]))
 }
 
+func TestWebSocketConnReadKeepsReturningTheErrorOfAMessageCutShort(t *testing.T) {
+	t.Parallel()
+	partial := bytes.Repeat([]byte("x"), 8<<10) // past the server's write buffer, so a fragment goes out
+	conn := NewWebSocketConn(dialWebSocketServer(t, func(c *websocket.Conn) {
+		w, err := c.NextWriter(websocket.BinaryMessage)
+		if err != nil {
+			t.Errorf("next writer: %v", err)
+			return
+		}
+		if _, err := w.Write(partial); err != nil {
+			t.Errorf("write fragment: %v", err)
+			return
+		}
+		_ = c.UnderlyingConn().Close()
+	}))
+
+	var got []byte
+	buf := make([]byte, 1<<10)
+	var err error
+	for err == nil {
+		var n int
+		n, err = conn.Read(buf)
+		got = append(got, buf[:n]...)
+	}
+	_, again := conn.Read(buf)
+
+	assert.NotEmpty(t, got)
+	assert.Equal(t, partial[:len(got)], got)
+	assert.True(t, websocket.IsCloseError(err, websocket.CloseAbnormalClosure), "read must end with an abnormal closure, got %v", err)
+	assert.Equal(t, err, again)
+}
+
 // BenchmarkWebSocketConnRead reads the way smux's recvLoop does: header first, then payload.
 func BenchmarkWebSocketConnRead(b *testing.B) {
 	const header, payload = 8, 32 << 10
 	message := make([]byte, header+payload)
-	ready := make(chan struct{})
 	conn := NewWebSocketConn(dialWebSocketServer(b, func(c *websocket.Conn) {
-		<-ready
 		for c.WriteMessage(websocket.BinaryMessage, message) == nil {
 		}
 	}))
@@ -96,7 +126,6 @@ func BenchmarkWebSocketConnRead(b *testing.B) {
 
 	b.SetBytes(int64(len(message)))
 	b.ReportAllocs()
-	close(ready)
 	for b.Loop() {
 		if _, err := io.ReadFull(conn, hdr); err != nil {
 			b.Fatal(err)
