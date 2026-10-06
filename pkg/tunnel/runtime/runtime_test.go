@@ -81,6 +81,16 @@ func (e *tempNetError) Error() string   { return e.msg }
 func (e *tempNetError) Timeout() bool   { return e.timeout }
 func (e *tempNetError) Temporary() bool { return e.temporary }
 
+type writeCountingConn struct {
+	net.Conn
+	writes *atomic.Int32
+}
+
+func (c *writeCountingConn) Write(b []byte) (int, error) {
+	c.writes.Add(1)
+	return c.Conn.Write(b)
+}
+
 func TestShutdownRunsOnce(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("shutdown cause")
@@ -416,16 +426,6 @@ func TestBuildTunnelMetadata(t *testing.T) {
 	}
 }
 
-type writeCountingConn struct {
-	net.Conn
-	writes *atomic.Int32
-}
-
-func (c *writeCountingConn) Write(b []byte) (int, error) {
-	c.writes.Add(1)
-	return c.Conn.Write(b)
-}
-
 func TestTunnelDialerSendsAWholeSmuxFrameInOneWrite(t *testing.T) {
 	t.Parallel()
 	upgrader := websocket.Upgrader{}
@@ -444,7 +444,8 @@ func TestTunnelDialerSendsAWholeSmuxFrameInOneWrite(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	var writes atomic.Int32
-	dialer := *newTunnelDialer()
+	maxFrameSize := config.GetSmuxConfig().MaxFrameSize
+	dialer := *newTunnelDialer(maxFrameSize)
 	dialer.NetDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 		if err != nil {
@@ -456,7 +457,7 @@ func TestTunnelDialerSendsAWholeSmuxFrameInOneWrite(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	writes.Store(0)
-	frame := make([]byte, smuxHeaderSize+config.GetSmuxConfig().MaxFrameSize)
+	frame := make([]byte, smuxHeaderSize+maxFrameSize)
 
 	err = conn.WriteMessage(websocket.BinaryMessage, frame)
 
@@ -464,10 +465,11 @@ func TestTunnelDialerSendsAWholeSmuxFrameInOneWrite(t *testing.T) {
 	assert.Equal(t, int32(1), writes.Load())
 }
 
-func TestTunnelDialerKeepsTheDefaultHandshakeTimeout(t *testing.T) {
+func TestTunnelDialerKeepsTheDefaultDialerSettings(t *testing.T) {
 	t.Parallel()
 
-	dialer := newTunnelDialer()
+	dialer := newTunnelDialer(config.GetSmuxConfig().MaxFrameSize)
 
 	assert.Equal(t, websocket.DefaultDialer.HandshakeTimeout, dialer.HandshakeTimeout)
+	assert.NotNil(t, dialer.Proxy)
 }

@@ -22,14 +22,6 @@ import (
 
 const smuxHeaderSize = 8 // version, command, length, stream id
 
-func newTunnelDialer() *websocket.Dialer {
-	return &websocket.Dialer{
-		Proxy:            http.ProxyFromEnvironment,
-		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
-		WriteBufferSize:  smuxHeaderSize + config.GetSmuxConfig().MaxFrameSize,
-	}
-}
-
 // StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
 	ServerName    string
@@ -105,14 +97,15 @@ func Start(opts StartOptions) (*Runtime, error) {
 		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
 	}
 
+	smuxConfig := config.GetSmuxConfig()
 	headers := alpaconClient.SetWebsocketHeader()
-	wsConn, _, err := newTunnelDialer().Dial(tunnelSession.WebsocketURL, headers)
+	wsConn, _, err := newTunnelDialer(smuxConfig.MaxFrameSize).Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("failed to connect to proxy server: %w", err)
 	}
 
-	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), config.GetSmuxConfig())
+	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)
 	if err != nil {
 		_ = listener.Close()
 		_ = wsConn.Close()
@@ -315,6 +308,14 @@ func (r *Runtime) handleTCPConnection(tcpConn net.Conn) {
 	<-errChan
 	if r.verbose {
 		utils.CliInfo("Connection closed: %s", tcpConn.RemoteAddr())
+	}
+}
+
+func newTunnelDialer(maxFrameSize int) *websocket.Dialer {
+	return &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+		WriteBufferSize:  smuxHeaderSize + maxFrameSize,
 	}
 }
 
