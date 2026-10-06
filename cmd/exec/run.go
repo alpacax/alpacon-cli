@@ -19,10 +19,10 @@ import (
 
 // sudoDenialLinePrefix is the terminal-facing denial line the sudo plugin
 // prints ("Alpacon denied this sudo command (CODE)."), up to the code slot.
-// The other "Permission denied (CODE)" form is assigned to
-// *errstr, which only reaches the audit log—not the invoking terminal—so it must
-// not be matched. Anchoring on this full prefix (not a bare "(CODE)") stops a
-// command whose own output prints "(SUDO_RISK_DENIED)" from forging a hint.
+// The other "Permission denied (CODE)" form only reaches the audit log—not the
+// invoking terminal—so it must not be matched. Anchoring on this full prefix
+// (not a bare "(CODE)") stops a command whose own output prints
+// "(SUDO_RISK_DENIED)" from forging a hint.
 const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 
 // sudoDenialCodelessLine is the denial line the agent emits with no code to
@@ -139,8 +139,7 @@ var sudoDenialHints = []struct {
 		guidance: "sudo was denied: the server could not match this sudo call to its command. Re-run the command; if it repeats, the agent and the server disagree about the command's state.\n",
 	},
 	{
-		// The scope ceiling. Wording follows
-		// validateSessionForSudoUpdate in
+		// Wording follows validateSessionForSudoUpdate in
 		// cmd/worksession/worksession_update.go, which answers the same gap.
 		code: "WORK_SESSION_SCOPE_NOT_ALLOWED",
 		guidance: "sudo was denied: your work session does not include the 'sudo' scope, the ceiling checked before any policy.\n" +
@@ -214,8 +213,8 @@ type approvalOutcome int
 
 // commandRun submits one command and streams it to completion. The retry,
 // presence step-up and approval-wait layers take one so they serve the generic
-// lane and the verified file lane alike: the lane is decided once, by
-// whoever builds the closure, and a re-run after MFA or approval is the same
+// lane and the verified file lane alike: the lane is decided once, by whoever
+// builds the closure, and a re-run after MFA or approval is the same
 // closure called again.
 type commandRun func() error
 
@@ -258,7 +257,7 @@ func denialHintLine(guidance string) string {
 
 // firstDenialCode returns the code carried by the first well-formed terminal
 // denial line in output, or "" when output holds none. It accepts only the
-// [A-Z0-9_] shape the plugin's sanitizer emits, capped at the 63 chars its
+// [A-Z0-9_] shape that the plugin's sanitizer emits, capped at the 63 chars its
 // buffer holds, so the code it hands back can be printed verbatim—a
 // command's own output cannot smuggle escapes or newlines into a hint through
 // it. It answers for known and unknown codes alike; only sudoDenialHint, which
@@ -524,9 +523,9 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 }
 
 // RunFileExecWithApprovalWait is RunExecWithApprovalWait for the verified file
-// lane. Only the submission differs—the file object in place of a
-// command line—so the presence step-up, the approval wait and the re-run after a
-// grant are the same layers the generic lane runs through.
+// lane. Only the submission differs—the file object in place of a command
+// line—so the presence step-up, the approval wait and the re-run after a grant
+// are the same layers the generic lane runs through.
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
 		return runWithPresenceStepUp(ac, serverName, func() error {

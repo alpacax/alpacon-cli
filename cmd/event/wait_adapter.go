@@ -18,8 +18,8 @@ const (
 	workSessionActivatedEvent = "activated"
 )
 
-// Sub types mirror the work session status changes the server publishes, by
-// hand.
+// Sub types are copied by hand from the work session status changes the server
+// publishes; nothing keeps the two in sync.
 var waitAdapters = map[eventapi.EventType]waitAdapter{
 	eventTypeWorkSession: {
 		ok:      []string{"approved", workSessionActivatedEvent},

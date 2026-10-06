@@ -127,23 +127,23 @@ type CommandRequest struct {
 	RunAfter    []string          `json:"run_after"`
 	WorkSession string            `json:"work_session,omitempty"`
 	// What this one command is for. Sent only when the caller supplied it;
-	// with it in hand the assessor judges on the first pass and the
-	// demand round trip never happens, which is the steady state.
+	// with it in hand the assessor judges on the first pass and the demand
+	// round trip never happens.
 	Purpose string `json:"purpose,omitempty"`
 	// Declares that this client answers a purpose demand. The gate does not arm
 	// without it, so the declaration is the opt-in—and it is unconditional here
 	// because every exec path surfaces the demand to its caller instead of
 	// stalling on it.
 	PurposeDemandSupported bool `json:"purpose_demand_supported,omitempty"`
-	// File selects the verified file lane. Its presence is what the
-	// server switches on, so it is omitted from every generic-lane request and
-	// no existing request changes shape. When set, MarshalJSON leaves shell,
+	// File selects the verified file lane. Its presence is what the server
+	// switches on, so it is omitted from every generic-lane request and no
+	// existing request changes shape. When set, MarshalJSON leaves shell,
 	// line, env and data out of the body entirely—see fileLaneRequest.
 	File *FileExecution `json:"file,omitempty"`
 }
 
-// FileExecution is what a file-lane submission runs: the file at Path
-// on the target host, through Interpreter, with Args. Content is the bytes the
+// FileExecution is what a file-lane submission runs: the file at Path on the
+// target host, through Interpreter, with Args. Content is the bytes the
 // reviewer and the assessor judge and the server hashes; the agent hashes the
 // file on the target's disk and runs it only when the two digests match, so
 // Content is sent byte-for-byte—never trimmed, re-encoded, or normalized.

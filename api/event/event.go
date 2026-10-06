@@ -229,11 +229,11 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	return postCommand(ac, commandRequest)
 }
 
-// SubmitFileCommand submits a verified file execution: the same
-// endpoint as SubmitCommand, selected onto the file lane by the file object. The
-// body carries no line, data or env—the server derives the first two and
-// refuses all three by key presence. A nil Args is sent as an empty list, which
-// is the server's default and the shape the contract names.
+// SubmitFileCommand submits a verified file execution: the same endpoint as
+// SubmitCommand, selected onto the file lane by the file object. The body
+// carries no line, data or env—the server derives the first two and refuses
+// all three by key presence. A nil Args is sent as an empty list, which is the
+// server's default and the shape the contract names.
 func SubmitFileCommand(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {

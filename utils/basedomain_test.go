@@ -19,8 +19,8 @@ func TestExtractBaseDomain(t *testing.T) {
 			expected: "alpacon.io",
 		},
 		{
-			name:     "US region URL",
-			input:    "https://myws.us1.alpacon.io",
+			name:     "Unlisted region URL",
+			input:    "https://myws.zz9.alpacon.io",
 			expected: "alpacon.io",
 		},
 		{

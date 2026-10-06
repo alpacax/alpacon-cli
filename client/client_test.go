@@ -404,9 +404,10 @@ func TestSendRequest_403ACLDeniedExplainsTokenAccessControl(t *testing.T) {
 
 func TestSendRequest_400ACLDeniedKeepsCodeWithoutAuthStatusMessage(t *testing.T) {
 	t.Parallel()
-	// The server returns 400 for an ACL denial. checkAuthStatus only handles
-	// 401/403, so this body never reaches
-	// authStatusCodeMessage—the code must still survive for callers that route on it.
+	// A server may still answer an ACL denial with 400 rather than 403.
+	// checkAuthStatus only handles 401/403, so this body never reaches
+	// authStatusCodeMessage—the code must still survive for callers that route
+	// on it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -531,7 +532,7 @@ func TestSendRequest_CodeWithFieldErrorsKeepsFieldMessagesVisible(t *testing.T) 
 
 func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) {
 	t.Parallel()
-	// "source" is also a real serializer field name, so this is field errors, not the envelope.
+	// "source" is also a real request field name, so this is field errors, not the envelope.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -548,7 +549,7 @@ func TestSendRequest_ValidationBodyWithSourceFieldKeepsItsMessage(t *testing.T) 
 
 func TestSendRequest_ValidationBodyWithCodeAndSourceFieldKeepsItsMessage(t *testing.T) {
 	t.Parallel()
-	// "source" is a real serializer field here too; a "code" alongside it must
+	// "source" is a real request field here too; a "code" alongside it must
 	// not make isEnvelopeOnly mistake the field error for the refusal envelope.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -1162,7 +1162,7 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 
 	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
 	// value is the envelope's string code stays out; a list "code" field is a
-	// real serializer field and is rendered like any other. Keys are sorted
+	// real request field and is rendered like any other. Keys are sorted
 	// for deterministic output.
 	fields := make([]string, 0, len(parsed))
 	for field := range parsed {

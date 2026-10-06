@@ -276,8 +276,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	}
 	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
 	// A command parked for its purpose is reported first: it has no approval
-	// request yet, so the pending-approval path below would name a queue it is not
-	// in.
+	// request yet, so the pending-approval path below would name a queue it is
+	// not in.
 	if HandlePurposeDemand(err) {
 		return
 	}

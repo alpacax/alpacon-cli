@@ -6,11 +6,11 @@ import (
 )
 
 // approveRejectExcludedMessage explains why the CLI no longer approves or rejects
-// work sessions. The CLI is an execution/request surface only:
-// approval happens out of band in the Alpacon console (web/Slack), and the server
-// now refuses (HTTP 403) approve/reject from the CLI credential channel. The
-// subcommands stay registered so the message is discoverable and existing scripts
-// get an intentional, actionable exit instead of an "unknown command".
+// work sessions. The CLI is an execution/request surface only: approval
+// happens out of band in the Alpacon console (web/Slack), and the server now
+// refuses (HTTP 403) approve/reject from the CLI credential channel. The
+// subcommands stay registered so the message is discoverable and existing
+// scripts get an intentional, actionable exit instead of an "unknown command".
 const approveRejectExcludedMessage = "Approvals must be done in the Alpacon console (web), not the CLI. " +
 	"The CLI is an execution and request surface only; approval and rejection happen out of band. " +
 	"Use 'alpacon work-session ls' to track a session's status."

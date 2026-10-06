@@ -231,8 +231,8 @@ so it is recorded and scoped accordingly.`,
 		}
 
 		if !shouldWait {
-			// A session that lands pending needs a human to approve it out of band.
-			// Emit the structured pending-approval signal and exit with
+			// A session that lands pending needs a human to approve it out of
+			// band. Emit the structured pending-approval signal and exit with
 			// ExitCodePendingApproval so a machine consumer (AI agent, CI) can branch
 			// on "wait or check later" instead of treating the pending create as a
 			// success. Other statuses (e.g. auto-approved) keep the existing success

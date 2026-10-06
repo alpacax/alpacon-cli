@@ -49,8 +49,8 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
-	// What this command is for. Sent on submission, so the assessor
-	// judges with it on the first pass and no demand is issued.
+	// What this command is for. Sent on submission, so the assessor judges
+	// with it on the first pass and no demand is issued.
 	Purpose string
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
@@ -62,9 +62,9 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
-	// File is set by --file and selects the verified file lane, in
-	// which case Command is empty and the words after -- are the script's
-	// arguments. Nil on the generic lane, so every existing caller reads as before.
+	// File is set by --file and selects the verified file lane, in which case
+	// Command is empty and the words after -- are the script's arguments. Nil
+	// on the generic lane, so every existing caller reads as before.
 	File *FileExecArgs
 }
 

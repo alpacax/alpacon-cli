@@ -185,7 +185,7 @@ _ = json.NewEncoder(w).Encode(resp)
 
 This repository is public, and so is everything in it: comments, test fixtures, assertion messages, scripts, help text, README.md, and this file.
 
-- Never reference private AlpacaX internals: names of private repositories, their source paths, function, class, or setting names, commit hashes, issue links (`alpacax/<private-repo>#N`), internal decision-record or design-doc numbers, the server's framework or configuration (rate-limit values included), non-public regions or hosts, internal workspace names, or people's names. Before naming another `alpacax` repository, check `gh repo view alpacax/<name> --json visibility`
+- Never reference private AlpacaX internals: names of private repositories and their source paths, private function, class, or setting names, commit hashes, issue links (`alpacax/<private-repo>#N`), internal decision-record or design-doc numbers, the server's framework or configuration (rate-limit values included), non-public regions or hosts, internal workspace names, or people's names. Before naming another `alpacax` repository, check `gh repo view alpacax/<name> --json visibility`
 - Describe the behavior the CLI relies on and name only the wire contract it uses: status codes, error code strings, JSON fields, routes, and headers. Write "the server returns 402 with `gate: plan`", not where the server decides it
 - When a rule came from an internal document, state the rule in the comment instead of citing the document
 - Test fixtures use the advertised regions (`us1`, `ap1`), an obviously fictional region such as `zz9`, and neutral names such as `my-server` or `alice`
