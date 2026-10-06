@@ -25,31 +25,31 @@ param(
     [switch]$Force
 )
 
-$script:ExeName = 'alpacon.exe'
-$script:VersionMarkerName = 'installed-version.txt'
+$script:AlpaconExeName = 'alpacon.exe'
+$script:AlpaconVersionMarkerName = 'installed-version.txt'
 # The check behind both refusals answers "held by something", not "held by alpacon".
-$script:LockedMessage = 'alpacon.exe cannot be replaced. Close alpacon if it is running. A virus scanner reading the file, or an account not allowed to open it for writing, looks the same from here.'
+$script:AlpaconLockedMessage = 'alpacon.exe cannot be replaced. Close alpacon if it is running. A virus scanner reading the file, or an account not allowed to open it for writing, looks the same from here.'
 # A release version, with an optional pre-release or build suffix. The set is
 # listed rather than excluded so a version can never steer a URL or a file name
 # somewhere else, and \z rather than $ because $ also matches before a trailing
 # newline, which a CI wrapper reading a version out of a file would carry in.
-$script:VersionPattern = '[0-9]+\.[0-9]+\.[0-9]+[-.0-9A-Za-z+]*'
+$script:AlpaconVersionPattern = '[0-9]+\.[0-9]+\.[0-9]+[-.0-9A-Za-z+]*'
 # A drive letter with a separator, or a UNC prefix. Path.IsPathRooted is not
 # this test: it also accepts the drive-relative 'C:foo' and the root-relative
 # '\foo', neither of which names one directory on its own. Written as a regex
 # rather than a method call so that file scope stays inside what constrained
 # language mode allows.
-$script:AbsolutePathPattern = '^([A-Za-z]:[\\/]|\\\\)'
+$script:AlpaconAbsolutePathPattern = '^([A-Za-z]:[\\/]|\\\\)'
 # A drive-qualified path. The install directory goes into the permanent user
 # PATH, so a UNC or relative entry, which names something else on every other
 # machine, is refused. A mapped network drive still gets through.
-$script:DriveRootedPattern = '^[A-Za-z]:[\\/]'
-$script:ReleaseBaseUrl = 'https://github.com/alpacax/alpacon-cli/releases/download'
-$script:LatestReleaseUrl = 'https://github.com/alpacax/alpacon-cli/releases/latest'
-function Get-DefaultInstallDir {
+$script:AlpaconDriveRootedPattern = '^[A-Za-z]:[\\/]'
+$script:AlpaconReleaseBaseUrl = 'https://github.com/alpacax/alpacon-cli/releases/download'
+$script:AlpaconLatestReleaseUrl = 'https://github.com/alpacax/alpacon-cli/releases/latest'
+function Get-AlpaconDefaultInstallDir {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$LocalAppData)
 
-    if ($LocalAppData -cnotmatch "$script:DriveRootedPattern") { return $null }
+    if ($LocalAppData -cnotmatch "$script:AlpaconDriveRootedPattern") { return $null }
 
     # Joined as a string, not with Join-Path: a drive-qualified path is a
     # PowerShell drive reference off Windows, and Join-Path fails on it.
@@ -75,17 +75,17 @@ function Get-AlpaconArch {
     throw "Alpacon does not ship a Windows build for processor architecture '$ProcessorArchitecture'."
 }
 
-function ConvertFrom-ReleaseLocation {
+function ConvertFrom-AlpaconReleaseLocation {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Location)
 
-    if ($Location -cnotmatch "/releases/tag/[vV]?(?<version>$script:VersionPattern)\z") {
+    if ($Location -cnotmatch "/releases/tag/[vV]?(?<version>$script:AlpaconVersionPattern)\z") {
         throw "Could not read a version from the release redirect '$Location'."
     }
 
     return $Matches['version']
 }
 
-function Assert-FullLanguageMode {
+function Assert-AlpaconFullLanguageMode {
     param([string]$LanguageMode = $ExecutionContext.SessionState.LanguageMode)
 
     if ($LanguageMode -ne 'FullLanguage') {
@@ -93,7 +93,7 @@ function Assert-FullLanguageMode {
     }
 }
 
-function Get-ResponseUri {
+function Get-AlpaconResponseUri {
     param($Response)
 
     if ($null -eq $Response) { return $null }
@@ -113,7 +113,7 @@ function Get-ResponseUri {
     return $null
 }
 
-function ConvertFrom-VersionArgument {
+function ConvertFrom-AlpaconVersionArgument {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Version)
 
     # The version goes straight into a download URL and an archive file name,
@@ -123,7 +123,7 @@ function ConvertFrom-VersionArgument {
     # -cmatch rather than -match: under case-insensitive matching [A-Za-z] also
     # accepts characters that case-fold onto ASCII, such as U+212A KELVIN SIGN,
     # which would then travel into the URL and the archive name.
-    if ($Version -cnotmatch "^[vV]?$script:VersionPattern\z") {
+    if ($Version -cnotmatch "^[vV]?$script:AlpaconVersionPattern\z") {
         throw "'$Version' is not a version number like 1.10.0."
     }
 
@@ -131,7 +131,7 @@ function ConvertFrom-VersionArgument {
 }
 
 function Get-LatestAlpaconVersion {
-    param([string]$LatestUrl = $script:LatestReleaseUrl)
+    param([string]$LatestUrl = $script:AlpaconLatestReleaseUrl)
 
     # The GitHub API is rate limited to 60 calls an hour per IP, which a shared
     # office network or a CI runner can exhaust. The releases/latest redirect
@@ -146,15 +146,15 @@ function Get-LatestAlpaconVersion {
         throw "Could not reach $LatestUrl to find the latest alpacon release. Check this machine can reach github.com, or pass -Version to skip the lookup. ($($_.Exception.Message))"
     }
 
-    $landed = Get-ResponseUri -Response $response
+    $landed = Get-AlpaconResponseUri -Response $response
     if ([string]::IsNullOrWhiteSpace($landed)) {
         throw "The response from '$LatestUrl' did not say which release it landed on."
     }
 
-    return ConvertFrom-ReleaseLocation -Location $landed
+    return ConvertFrom-AlpaconReleaseLocation -Location $landed
 }
 
-function ConvertTo-ResponseText {
+function ConvertTo-AlpaconResponseText {
     param([Parameter(Mandatory)][AllowNull()]$Content)
 
     # GitHub serves release assets as application/octet-stream, so
@@ -168,7 +168,7 @@ function ConvertTo-ResponseText {
     return ([string]$Content).TrimStart([char]0xFEFF)
 }
 
-function Get-ExpectedChecksum {
+function Get-AlpaconExpectedChecksum {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$ChecksumText,
         [Parameter(Mandatory)][string]$FileName
@@ -186,7 +186,7 @@ function Get-ExpectedChecksum {
     throw "No checksum for '$FileName' in the checksum file."
 }
 
-function Assert-Checksum {
+function Assert-AlpaconChecksum {
     param(
         [Parameter(Mandatory)][string]$ActualHash,
         [Parameter(Mandatory)][string]$ExpectedHash,
@@ -208,9 +208,9 @@ function Get-InstalledAlpaconVersion {
     # trusting the marker alone would make the next run skip the repair.
     # 'alpacon update' rewrites the marker on both of its endings, so a
     # self-update between two runs does not strand it.
-    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir $script:ExeName))) { return $null }
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir $script:AlpaconExeName))) { return $null }
 
-    $marker = Join-Path $InstallDir $script:VersionMarkerName
+    $marker = Join-Path $InstallDir $script:AlpaconVersionMarkerName
     if (-not (Test-Path -LiteralPath $marker)) { return $null }
 
     $version = Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue
@@ -225,7 +225,7 @@ function Set-InstalledAlpaconVersion {
         [Parameter(Mandatory)][string]$Version
     )
 
-    Set-Content -LiteralPath (Join-Path $InstallDir $script:VersionMarkerName) -Value $Version -NoNewline
+    Set-Content -LiteralPath (Join-Path $InstallDir $script:AlpaconVersionMarkerName) -Value $Version -NoNewline
 }
 
 function Test-AlpaconFileLocked {
@@ -251,7 +251,7 @@ function Test-AlpaconFileLocked {
     }
 }
 
-function Resolve-InstallAction {
+function Resolve-AlpaconInstallAction {
     param(
         [Parameter()][AllowNull()][AllowEmptyString()][string]$InstalledVersion,
         [Parameter(Mandatory)][string]$TargetVersion,
@@ -264,7 +264,7 @@ function Resolve-InstallAction {
     return 'upgrade'
 }
 
-function ConvertTo-ComparablePath {
+function ConvertTo-AlpaconComparablePath {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
 
     # PATH entries are written by hand as often as by installers: quoted, with a
@@ -272,7 +272,7 @@ function ConvertTo-ComparablePath {
     # the same directory as the plain absolute path this script appends, and
     # the registry is read unexpanded, so the tokens do reach here.
     $trimmed = [Environment]::ExpandEnvironmentVariables($Path.Trim().Trim('"')).TrimEnd('\')
-    if ($trimmed -cmatch "$script:AbsolutePathPattern") {
+    if ($trimmed -cmatch "$script:AlpaconAbsolutePathPattern") {
         # Folds '..' segments. Only for absolute paths: GetFullPath would resolve
         # anything else against this process's working directory, which has
         # nothing to do with where that entry points for anyone else.
@@ -282,15 +282,15 @@ function ConvertTo-ComparablePath {
     return $trimmed
 }
 
-function Add-PathEntry {
+function Add-AlpaconPathEntry {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$CurrentPath,
         [Parameter(Mandatory)][string]$Directory
     )
 
-    $target = ConvertTo-ComparablePath -Path $Directory
+    $target = ConvertTo-AlpaconComparablePath -Path $Directory
     foreach ($entry in ($CurrentPath -split ';')) {
-        if ((ConvertTo-ComparablePath -Path $entry) -eq $target) { return $null }
+        if ((ConvertTo-AlpaconComparablePath -Path $entry) -eq $target) { return $null }
     }
 
     # Append rather than rebuild, so the entries a user has keep their spelling.
@@ -300,16 +300,16 @@ function Add-PathEntry {
     return ($CurrentPath.TrimEnd(';') + ';' + $Directory)
 }
 
-function Add-ToSessionPath {
+function Add-AlpaconToSessionPath {
     param([Parameter(Mandatory)][string]$Directory)
 
     # irm | iex runs inside the caller's shell, so this makes alpacon usable
     # right away instead of only in the next terminal.
-    $updated = Add-PathEntry -CurrentPath "$env:Path" -Directory $Directory
+    $updated = Add-AlpaconPathEntry -CurrentPath "$env:Path" -Directory $Directory
     if ($updated) { $env:Path = $updated }
 }
 
-function Add-ToUserPath {
+function Add-AlpaconToUserPath {
     param(
         [Parameter(Mandatory)][string]$Directory,
         [string]$SubKey = 'Environment'
@@ -341,7 +341,7 @@ function Add-ToUserPath {
             throw "Your user PATH is stored as $kind, which this installer will not rewrite."
         }
 
-        $updated = Add-PathEntry -CurrentPath ([string]$current) -Directory $Directory
+        $updated = Add-AlpaconPathEntry -CurrentPath ([string]$current) -Directory $Directory
         if ($null -eq $updated) { return $false }
 
         $key.SetValue('Path', $updated, $kind)
@@ -351,7 +351,7 @@ function Add-ToUserPath {
     }
 }
 
-function Send-SettingChange {
+function Send-AlpaconSettingChange {
     if (-not ('AlpaconNative.Win32' -as [type])) {
         Add-Type -Namespace 'AlpaconNative' -Name 'Win32' -MemberDefinition @'
 [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
@@ -382,7 +382,7 @@ function Get-ShadowingAlpacon {
     )
 
     if (-not $Resolved) { return $null }
-    if ((ConvertTo-ComparablePath -Path $Resolved.Source) -eq (ConvertTo-ComparablePath -Path $ExePath)) {
+    if ((ConvertTo-AlpaconComparablePath -Path $Resolved.Source) -eq (ConvertTo-AlpaconComparablePath -Path $ExePath)) {
         return $null
     }
 
@@ -396,11 +396,11 @@ function Set-AlpaconPath {
     )
 
     try {
-        if (Add-ToUserPath -Directory $InstallDir) {
+        if (Add-AlpaconToUserPath -Directory $InstallDir) {
             # The broadcast only refreshes open windows; the registry write is
             # what sets the PATH, so a failed broadcast is not a failed write.
             try {
-                Send-SettingChange
+                Send-AlpaconSettingChange
             } catch {
                 $null = $_  # silent: irm | iex takes no -Verbose, and the line below states the cost
             }
@@ -413,9 +413,9 @@ function Set-AlpaconPath {
         Write-Warning "Add it yourself, or call alpacon by its full path."
     }
 
-    Add-ToSessionPath -Directory $InstallDir
+    Add-AlpaconToSessionPath -Directory $InstallDir
 
-    $shadow = Get-ShadowingAlpacon -ExePath $ExePath  # after Add-ToSessionPath: it asks what this shell runs now
+    $shadow = Get-ShadowingAlpacon -ExePath $ExePath  # after Add-AlpaconToSessionPath: it asks what this shell runs now
     if ($shadow) {
         Write-Warning "'alpacon' still resolves to $shadow, which comes earlier on your PATH."
         Write-Warning "Remove that copy, or put $InstallDir ahead of it."
@@ -434,7 +434,7 @@ function Invoke-AlpaconInstall {
     # Constrained language mode blocks the .NET calls below long before the
     # first one fails, so name the cause once instead of surfacing it as an
     # unrecognisable method error.
-    Assert-FullLanguageMode
+    Assert-AlpaconFullLanguageMode
 
     Set-StrictMode -Version 3.0
     $ErrorActionPreference = 'Stop'
@@ -445,7 +445,7 @@ function Invoke-AlpaconInstall {
     if (-not $env:LOCALAPPDATA) {
         throw 'This installer runs on Windows only.'
     }
-    $InstallDir = Get-DefaultInstallDir -LocalAppData "$env:LOCALAPPDATA"
+    $InstallDir = Get-AlpaconDefaultInstallDir -LocalAppData "$env:LOCALAPPDATA"
     if (-not $InstallDir) {
         throw "LOCALAPPDATA is '$env:LOCALAPPDATA', which does not start with a drive letter. Unpack the release zip yourself and put alpacon.exe on your PATH."
     }
@@ -467,11 +467,11 @@ function Invoke-AlpaconInstall {
         # -Version "$env:PINNED_VERSION" carries when the variable is unset, and
         # a pipeline that meant to pin a version must hear about it rather than
         # get the latest release.
-        $target = if ($PSBoundParameters.ContainsKey('Version')) { ConvertFrom-VersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
+        $target = if ($PSBoundParameters.ContainsKey('Version')) { ConvertFrom-AlpaconVersionArgument -Version $Version } else { Get-LatestAlpaconVersion }
 
-        $exePath = Join-Path $InstallDir $script:ExeName
+        $exePath = Join-Path $InstallDir $script:AlpaconExeName
         $installed = Get-InstalledAlpaconVersion -InstallDir $InstallDir
-        $action = Resolve-InstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
+        $action = Resolve-AlpaconInstallAction -InstalledVersion $installed -TargetVersion $target -Force:$Force
         if ($action -eq 'skip') {
             # Both PATHs need repair even here: this shell can predate the
             # install, and the entry can have been wiped by another installer.
@@ -481,7 +481,7 @@ function Invoke-AlpaconInstall {
         }
 
         if (Test-AlpaconFileLocked -Path $exePath) {
-            throw $script:LockedMessage
+            throw $script:AlpaconLockedMessage
         }
 
         $zipName = "alpacon-$target-windows-$arch.zip"
@@ -491,8 +491,8 @@ function Invoke-AlpaconInstall {
 
         try {
             $zipPath = Join-Path $work $zipName
-            $zipUrl = "$script:ReleaseBaseUrl/v$target/$zipName"
-            $sumUrl = "$script:ReleaseBaseUrl/v$target/$sumName"
+            $zipUrl = "$script:AlpaconReleaseBaseUrl/v$target/$zipName"
+            $sumUrl = "$script:AlpaconReleaseBaseUrl/v$target/$sumName"
             try {
                 Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
             } catch {
@@ -503,25 +503,25 @@ function Invoke-AlpaconInstall {
             } catch {
                 throw "Could not download the checksums for alpacon $target from $sumUrl. ($($_.Exception.Message))"
             }
-            $sumText = ConvertTo-ResponseText -Content $sumResponse.Content
+            $sumText = ConvertTo-AlpaconResponseText -Content $sumResponse.Content
 
-            $expected = Get-ExpectedChecksum -ChecksumText $sumText -FileName $zipName
+            $expected = Get-AlpaconExpectedChecksum -ChecksumText $sumText -FileName $zipName
             $actual = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
-            Assert-Checksum -ActualHash $actual -ExpectedHash $expected -FileName $zipName
+            Assert-AlpaconChecksum -ActualHash $actual -ExpectedHash $expected -FileName $zipName
 
             Expand-Archive -LiteralPath $zipPath -DestinationPath $work -Force
             if (-not (Test-Path -LiteralPath $InstallDir)) {
                 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
             }
             try {
-                Move-Item -LiteralPath (Join-Path $work $script:ExeName) -Destination $exePath -Force
+                Move-Item -LiteralPath (Join-Path $work $script:AlpaconExeName) -Destination $exePath -Force
             } catch {
                 # The lock check above ran before the download, so alpacon can
                 # have been started in the seconds since. Only say so when the
                 # file really is held; a full disk, a missing source and a
                 # denied write all arrive here too, under unrelated types.
                 if (-not (Test-AlpaconFileLocked -Path $exePath)) { throw }
-                throw $script:LockedMessage
+                throw $script:AlpaconLockedMessage
             }
 
             # Belt and braces: neither Invoke-WebRequest -OutFile nor
@@ -540,7 +540,7 @@ function Invoke-AlpaconInstall {
         Set-AlpaconPath -InstallDir $InstallDir -ExePath $exePath
 
         if ($action -eq 'upgrade') {
-            # Not "updated": Resolve-InstallAction only knows the versions
+            # Not "updated": Resolve-AlpaconInstallAction only knows the versions
             # differ, so a pinned -Version can be going backwards.
             Write-Host "Replaced alpacon $installed with $target."
         } else {
