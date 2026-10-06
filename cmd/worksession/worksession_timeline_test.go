@@ -333,18 +333,21 @@ func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 //
 // The fake honors include_records the way the server does, so reverting the fix
 // moves both assertions: the parameter arrives as "true" and the records come
-// back with it.
+// back with it. The last case is a server too old to know the parameter: it
+// sends the records anyway, and the flag has to hold there too.
 func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name           string
 		args           []string
+		ignoresParam   bool
 		wantParam      string
 		wantRecordings bool
 	}{
-		{"default asks for the records", []string{"timeline", "ses-1"}, "true", true},
-		{"no-records does not", []string{"timeline", "ses-1", "--no-records"}, "false", false},
+		{"default asks for the records", []string{"timeline", "ses-1"}, false, "true", true},
+		{"no-records does not", []string{"timeline", "ses-1", "--no-records"}, false, "false", false},
+		{"no-records holds on an old server", []string{"timeline", "ses-1", "--no-records"}, true, "false", false},
 	}
 
 	for _, tc := range tests {
@@ -367,7 +370,7 @@ func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
 				// The client sends strconv.FormatBool output, so "false" is the
 				// only falsy spelling that can arrive here.
 				results := `{"type":"websh_session","id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:00Z"}`
-				if param != "false" {
+				if param != "false" || tc.ignoresParam {
 					results += `,{"type":"websh_record","session_id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:01Z","masked_record":"ls -la"}`
 				}
 				_, _ = w.Write([]byte(`{"count":2,"results":[` + results + `]}`))

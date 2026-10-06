@@ -75,7 +75,16 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		recordingsBySession, recordings := buildRecordingIndex(items)
+		// A server too old to know include_records answers with the records
+		// anyway, so the flag also has to drop them here. Leaving the index
+		// empty takes the badge, the section and the JSON key with it.
+		var (
+			recordingsBySession map[string][]wsapi.TimelineItem
+			recordings          []wsapi.TimelineItem
+		)
+		if !noRecords {
+			recordingsBySession, recordings = buildRecordingIndex(items)
+		}
 
 		rows := make([]wsapi.TimelineAttributes, 0)
 		for i := range items {
@@ -96,21 +105,15 @@ var workSessionTimelineCmd = &cobra.Command{
 			rows = append(rows, row)
 		}
 
-		// The display guards stay: a server too old to know include_records
-		// answers with the records anyway, and the flag has to hold there too.
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			var recList []wsapi.TimelineItem
-			if !noRecords {
-				recList = recordings
-			}
-			outputTimelineJSON(rows, recList, serverMap)
+			outputTimelineJSON(rows, recordings, serverMap)
 			return
 		}
 
 		writer, cleanup := utils.WriteToPager()
 		defer cleanup()
 		printTimelineTableTo(writer, rows)
-		if !noRecords && len(recordings) > 0 {
+		if len(recordings) > 0 {
 			printRecordingsSectionTo(writer, recordings, serverMap)
 		}
 	},
