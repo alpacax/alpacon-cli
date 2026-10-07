@@ -1,7 +1,7 @@
 package workspace
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/workspace"
@@ -43,55 +43,47 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("%s", err)
 		}
 
-		// Save original values for rollback
-		origURL := cfg.WorkspaceURL
-		origName := cfg.WorkspaceIdentity()
-		origHostLabel := cfg.WorkspaceName
-		origSchemaName := cfg.SchemaName
-		origKubernetesSurface := cfg.KubernetesSurface
+		// The env endpoint needs no credential, so the answer is in hand before
+		// the switch and lands in the same save as the workspace it describes.
+		kubernetesSurface := fetchKubernetesSurface(newURL, newName, cfg.Insecure)
 
-		if err := config.SwitchWorkspace(newURL, newName); err != nil {
-			utils.CliErrorWithExit("Failed to update config: %s", err)
-		}
-
-		// Verify connectivity to the new workspace
-		_, err = client.NewAlpaconAPIClient()
-		if err != nil {
-			// Revert to the original workspace
-			if revertErr := config.RestoreWorkspace(origURL, origHostLabel, origSchemaName, origKubernetesSurface); revertErr != nil {
-				utils.CliErrorWithExit("Failed to connect to %q and could not revert config: %s (original error: %s)", newName, revertErr, err)
-			}
-			utils.CliErrorWithExit("Failed to connect to workspace %q: %s. Reverted to %q.", newName, err, origName)
-		}
-
-		if errors.Is(refreshKubernetesSurface(newURL, newName, cfg.Insecure), config.ErrWorkspaceChanged) {
-			utils.CliErrorWithExit("Switched to workspace %q, but another alpacon process has since changed the current workspace. Run 'alpacon workspace list' to see which one is current.", newName)
+		if err := commitSwitch(cfg, newURL, newName, kubernetesSurface, verifyConnection); err != nil {
+			utils.CliErrorWithExit("%s", err)
 		}
 
 		utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
 	},
 }
 
-// refreshKubernetesSurface asks the workspace just switched to whether it
-// exposes the Kubernetes surface; the value the login recorded belongs to the
-// workspace it logged in to, and a switch can cross regions. SwitchWorkspace
-// has already recorded false, so only a yes needs writing, and a failure
-// warns and leaves it false rather than undoing a switch that has happened.
-// It returns config.ErrWorkspaceChanged when another process has moved the
-// config off this workspace meanwhile, so the switch no longer stands.
-func refreshKubernetesSurface(workspaceURL, workspaceName string, insecure bool) error {
-	envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpclient.New(insecure))
-	if err != nil {
-		utils.CliWarning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
-		return nil
+func verifyConnection() error {
+	_, err := client.NewAlpaconAPIClient()
+	return err
+}
+
+// commitSwitch saves the new workspace with its Kubernetes surface answer, then runs verify;
+// on failure it restores orig in one save, so no save pairs a workspace with another's answer.
+func commitSwitch(orig config.Config, newURL, newName string, kubernetesSurface bool, verify func() error) error {
+	if err := config.SwitchWorkspace(newURL, newName, kubernetesSurface); err != nil {
+		return fmt.Errorf("failed to update config: %w", err)
 	}
 
-	err = config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
-	if errors.Is(err, config.ErrWorkspaceChanged) {
-		return err
+	if err := verify(); err != nil {
+		if revertErr := config.RestoreWorkspace(orig.WorkspaceURL, orig.WorkspaceName, orig.SchemaName, orig.KubernetesSurface); revertErr != nil {
+			return fmt.Errorf("failed to connect to %q and could not revert config: %w (original error: %s)", newName, revertErr, err)
+		}
+		return fmt.Errorf("failed to connect to workspace %q: %w; reverted to %q", newName, err, orig.WorkspaceIdentity())
 	}
-	if err != nil {
-		utils.CliWarning("Could not save whether workspace %q supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
-	}
+
 	return nil
+}
+
+// fetchKubernetesSurface asks the target workspace, since a switch can cross regions
+// and the login's answer does not carry over; an unreachable endpoint reads as no.
+func fetchKubernetesSurface(workspaceURL, workspaceName string, insecure bool) bool {
+	envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpclient.New(insecure))
+	if err != nil {
+		utils.CliWarning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until you run 'alpacon login'.", workspaceName, err)
+		return false
+	}
+	return envInfo.Surfaces.Kubernetes
 }

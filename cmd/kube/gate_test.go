@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newGateTree builds a root with a kube look-alike so the gate can be driven
-// in parallel: the package-level KubeCmd is not read at all, since Cobra
-// mutates a command lazily. cmd/kube_gate_test.go covers the real tree.
+// newGateTree builds a kube look-alike so these tests can run in parallel without reading
+// the package-level KubeCmd; cmd/kube_gate_test.go covers the real tree.
 func newGateTree() (root, real *cobra.Command) {
 	root = &cobra.Command{Use: "alpacon", Run: func(*cobra.Command, []string) {}}
 	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "View Kubernetes clusters", Args: cobra.NoArgs}

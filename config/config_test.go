@@ -152,7 +152,7 @@ func TestSwitchWorkspace(t *testing.T) {
 	require.NoError(t, err)
 
 	// Switch workspace
-	err = SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
+	err = SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false)
 	require.NoError(t, err)
 
 	// Verify only URL and name changed
@@ -171,12 +171,18 @@ func TestSwitchWorkspace_RecordsKubernetesSurface(t *testing.T) {
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-token", "", "alpacon.io", 3600, false))
 	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
 
-	// A switch forward clears the old workspace's answer in the same write.
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+	// A switch writes the new workspace's answer in the same save.
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "ws2", cfg.WorkspaceName)
 	assert.False(t, cfg.KubernetesSurface)
+
+	require.NoError(t, SwitchWorkspace("https://ws3.us1.alpacon.io", "ws3", true))
+	cfg, err = LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "ws3", cfg.WorkspaceName)
+	assert.True(t, cfg.KubernetesSurface)
 
 	// A failed switch restores the original workspace's answer in the same write.
 	require.NoError(t, RestoreWorkspace("https://ws1.us1.alpacon.io", "ws1", "", true))
@@ -230,7 +236,7 @@ func TestSetKubernetesSurface_RefusesAnotherWorkspace(t *testing.T) {
 	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
 
 	// Another shell switched to ws2 while ws1's answer was being fetched.
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
 
 	err := SetKubernetesSurface("https://ws1.us1.alpacon.io", true)
 	require.ErrorIs(t, err, ErrWorkspaceChanged)
@@ -259,7 +265,7 @@ func TestCreateConfig_ResetsKubernetesSurface(t *testing.T) {
 func TestSwitchWorkspace_NoExistingConfig(t *testing.T) {
 	setupTestConfig(t)
 
-	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2")
+	err := SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false)
 	assert.Error(t, err)
 }
 
@@ -315,14 +321,14 @@ func TestActiveWorkSession_PerWorkspaceIsolation(t *testing.T) {
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-A"))
 
-	require.NoError(t, SwitchWorkspace("https://ws-b.example.com", "ws-b"))
+	require.NoError(t, SwitchWorkspace("https://ws-b.example.com", "ws-b", false))
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, got, "switching workspace should yield empty active session for new workspace")
 
 	require.NoError(t, SetActiveWorkSession("uuid-B"))
 
-	require.NoError(t, SwitchWorkspace("https://ws-a.example.com", "ws-a"))
+	require.NoError(t, SwitchWorkspace("https://ws-a.example.com", "ws-a", false))
 	got, err = GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-A", got, "switching back should restore original active session")
@@ -522,7 +528,7 @@ func TestSwitchWorkspace_ReplacesSchemaName(t *testing.T) {
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))
 	require.NoError(t, SetSchemaName("frozen"))
 
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -561,7 +567,7 @@ func TestRestoreWorkspace_PutsBackHostLabelAndSchemaName(t *testing.T) {
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))
 	require.NoError(t, SetSchemaName("frozen"))
 	require.NoError(t, SetActiveWorkSession("uuid-1"))
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
 
 	require.NoError(t, RestoreWorkspace("https://new-slug.us1.alpacon.io", "new-slug", "frozen", false))
 
@@ -579,7 +585,7 @@ func TestRestoreWorkspace_LegacyConfigStaysWithoutSchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access", "", "alpacon.io", 0, false))
 	require.NoError(t, SetActiveWorkSession("uuid-old"))
-	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
 
 	require.NoError(t, RestoreWorkspace("https://ws1.us1.alpacon.io", "ws1", "", false))
 

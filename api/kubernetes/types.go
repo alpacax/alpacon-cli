@@ -60,7 +60,6 @@ func (o Optional[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(o.Value)
 }
 
-// groupSummary is a minimal projection used to build a UUID→name map for group display.
 type groupSummary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`

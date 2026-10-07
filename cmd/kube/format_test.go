@@ -58,13 +58,22 @@ func TestFormatJSONValue(t *testing.T) {
 	}
 }
 
+// withLocalZone pins time.Local so expected cells are literals, not formatTime's own expression;
+// it reassigns a process-wide value, so its callers stay serial.
+func withLocalZone(t *testing.T) {
+	t.Helper()
+	orig := time.Local
+	time.Local = time.FixedZone("KST", 9*60*60)
+	t.Cleanup(func() { time.Local = orig })
+}
+
 func TestFormatTime(t *testing.T) {
-	t.Parallel()
+	withLocalZone(t)
 	ts := time.Date(2026, 9, 30, 8, 15, 42, 0, time.UTC)
 
 	assert.Empty(t, formatTime(nil))
 	assert.Empty(t, formatTime(&time.Time{}))
-	assert.Equal(t, ts.Local().Format("2006-01-02 15:04"), formatTime(&ts))
+	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts))
 }
 
 type statusErr struct{ code int }
@@ -95,7 +104,7 @@ func TestIsSurfaceOff(t *testing.T) {
 }
 
 func TestDescribeRows(t *testing.T) {
-	t.Parallel()
+	withLocalZone(t)
 	version := "v1.31.2"
 	nodes := 3
 	seen := time.Date(2026, 9, 30, 8, 15, 0, 0, time.UTC)
@@ -128,10 +137,10 @@ func TestDescribeRows(t *testing.T) {
 				{"Status", `{"phase":"ready"}`},
 				{"Groups", "platform, sre"},
 				{"Tags", "env=prod"},
-				{"Last connectivity", seen.Local().Format("2006-01-02 15:04")},
+				{"Last connectivity", "2026-09-30 17:15"},
 				{"Last synced at", ""},
-				{"Added at", added.Local().Format("2006-01-02 15:04")},
-				{"Updated at", seen.Local().Format("2006-01-02 15:04")},
+				{"Added at", "2026-09-18 10:02"},
+				{"Updated at", "2026-09-30 17:15"},
 			},
 		},
 		{
@@ -154,15 +163,14 @@ func TestDescribeRows(t *testing.T) {
 				{"Tags", ""},
 				{"Last connectivity", ""},
 				{"Last synced at", ""},
-				{"Added at", added.Local().Format("2006-01-02 15:04")},
-				{"Updated at", added.Local().Format("2006-01-02 15:04")},
+				{"Added at", "2026-09-18 10:02"},
+				{"Updated at", "2026-09-18 10:02"},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			assert.Equal(t, tt.expected, describeRows(&tt.cluster, tt.groups))
 		})
 	}

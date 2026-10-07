@@ -78,9 +78,8 @@ func Execute() {
 	}
 }
 
-// kubernetesSurfaceEnabled reads what the last login or workspace switch
-// recorded from the server. With no config, an unreadable one, or no
-// credential in it, nothing can reach the clusters, so the group stays hidden.
+// kubernetesSurfaceEnabled reads the answer the last login or switch recorded;
+// no readable config or no credential means nothing can reach the clusters.
 func kubernetesSurfaceEnabled() bool {
 	cfg, err := config.LoadConfig()
 	if err != nil {

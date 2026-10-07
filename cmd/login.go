@@ -203,11 +203,8 @@ func init() {
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
 }
 
-// persistKubernetesSurface records the server's surfaces.kubernetes answer in
-// the config the login just wrote. Every branch above rebuilt the file with
-// CreateConfig, which resets the value, so it is written here once for all of
-// them. A failed write only keeps 'alpacon kube' hidden, which is no reason to
-// fail a login whose credential is already saved.
+// persistKubernetesSurface records surfaces.kubernetes after every branch's CreateConfig reset it.
+// A failed write only keeps 'alpacon kube' hidden, so it warns rather than failing the login.
 func persistKubernetesSurface(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
 	err := config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
 	switch {

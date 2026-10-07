@@ -31,9 +31,8 @@ func formatJSONValue(raw json.RawMessage) string {
 	return compact.String()
 }
 
-// formatTags renders a {key: value} tag object as "k=v" pairs sorted by key.
-// A string value prints bare; any other value prints as compact JSON. Anything
-// that is not an object falls back to formatJSONValue.
+// formatTags renders tags as "k=v" sorted by key, strings bare and other values as compact JSON;
+// anything that is not an object falls back to formatJSONValue.
 func formatTags(raw json.RawMessage) string {
 	var tags map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &tags); err != nil || tags == nil {

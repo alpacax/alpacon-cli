@@ -36,10 +36,8 @@ func applySurfaceGate(root, real *cobra.Command, enabled bool) {
 	root.AddCommand(newDisabledKubeCmd(real))
 }
 
-// newDisabledKubeCmd answers every invocation under real's name and aliases
-// with NotEnabledMessage. It has no children, so 'kube ls' stops here;
-// DisableFlagParsing keeps --help and unknown flags from being handled before
-// Run; ArbitraryArgs keeps a missing or extra argument from failing first.
+// newDisabledKubeCmd answers every path under real's name and aliases with NotEnabledMessage:
+// no children, no flag parsing and arbitrary args, so nothing Cobra checks first can fail.
 func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 	disabled := &cobra.Command{
 		Use:                real.Use,

@@ -141,9 +141,8 @@ func TestKubeGateEnabledReachesGroup(t *testing.T) {
 	assert.NotContains(t, stderr, kube.NotEnabledMessage)
 }
 
-// A config that still says yes while the server has turned the surface off
-// meets a 404 on the list endpoint; that reads as the same not-enabled answer.
-// A 404 on one cluster's detail is a cluster deleted after it was resolved.
+// A stale yes meets a 404 on the cluster list, which reads as not enabled;
+// a 404 on one cluster's detail is a cluster deleted after it was resolved.
 func TestKubeGateMapsServerNotFound(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
