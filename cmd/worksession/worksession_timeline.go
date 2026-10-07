@@ -51,6 +51,8 @@ var workSessionTimelineCmd = &cobra.Command{
 		go func() {
 			defer wg.Done()
 			// Sent on the request so the recording bytes are never downloaded.
+			// It also picks the response shape: a read that wants no records
+			// is the one that can be paginated.
 			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
 		}()
 		go func() {

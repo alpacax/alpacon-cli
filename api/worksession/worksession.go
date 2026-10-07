@@ -141,9 +141,43 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }
 
+// GetWorkSessionTimeline reads a work session's activity timeline.
+//
+// The route answers in two shapes and the request picks between them. Naming
+// either `cursor` or `page_size` selects the paginated one, whose `next` is an
+// opaque cursor string and whose pages carry no recording bytes at all; naming
+// neither serves the whole timeline under `results`, recordings embedded. So
+// includeRecords decides the shape, not just the parameter: there is no
+// paginated read that comes back with recordings in it.
+//
+// `include_records` rides on both requests even though a page ignores it, for
+// a server that does not paginate this route—it reads the parameter, and
+// dropping it there would put recordings back into a read that asked for none.
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
 	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), nil)
-	return api.FetchAllPages[TimelineItem](ac, endpoint, map[string]string{
-		"include_records": strconv.FormatBool(includeRecords),
-	})
+	params := map[string]string{"include_records": strconv.FormatBool(includeRecords)}
+	if includeRecords {
+		return getWholeWorkSessionTimeline(ac, endpoint, params)
+	}
+	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
+}
+
+// getWholeWorkSessionTimeline takes the unpaginated shape in one request. It
+// names neither `cursor` nor `page_size`, which is what holds the server to
+// that shape, so nothing here may add either.
+func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, params map[string]string) ([]TimelineItem, error) {
+	body, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
+	if err != nil {
+		return nil, err
+	}
+	// Neither ListResponse nor CursorListResponse: this shape has no `next` of
+	// either type, and decoding through one of them would claim a paginator the
+	// response does not come from.
+	var response struct {
+		Results []TimelineItem `json:"results"`
+	}
+	if err = json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	return response.Results, nil
 }

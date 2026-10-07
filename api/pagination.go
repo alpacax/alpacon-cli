@@ -72,6 +72,11 @@ func FetchPagesUpTo[T any](ac *client.AlpaconClient, endpoint string, params map
 	return result, nil
 }
 
+// FetchAllCursorPages walks every cursor page. It is FetchCursorPages with no bound.
+func FetchAllCursorPages[T any](ac *client.AlpaconClient, endpoint string, params map[string]string) ([]T, error) {
+	return FetchCursorPages[T](ac, endpoint, params, math.MaxInt)
+}
+
 // FetchCursorPages follows the Elasticsearch cursor contract, accumulating up to limit items.
 // A walk the server says is over is started again from the first page, up to
 // cursorRestartLimit times.
