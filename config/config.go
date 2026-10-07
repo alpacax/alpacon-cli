@@ -158,12 +158,23 @@ func saveConfig(config *Config) error {
 	return nil
 }
 
-// SetKubernetesSurface records whether the current workspace exposes the
-// Kubernetes surface, leaving every other field as it is.
-func SetKubernetesSurface(enabled bool) error {
+// ErrWorkspaceChanged reports that the config names a different workspace than
+// the one a value was fetched for, so the value was not written.
+var ErrWorkspaceChanged = errors.New("the config now names another workspace")
+
+// SetKubernetesSurface records whether the workspace at workspaceURL exposes the
+// Kubernetes surface, leaving every other field as it is. The URL is a parameter,
+// not a fresh read: the answer comes from a network call, and another shell's
+// login or switch during it would otherwise file one workspace's answer under
+// another. When the config no longer names workspaceURL it returns
+// ErrWorkspaceChanged and writes nothing.
+func SetKubernetesSurface(workspaceURL string, enabled bool) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load existing config: %w", err)
+	}
+	if cfg.WorkspaceURL != workspaceURL {
+		return ErrWorkspaceChanged
 	}
 	if cfg.KubernetesSurface == enabled {
 		return nil

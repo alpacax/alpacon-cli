@@ -168,7 +168,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 		if err := config.SetSchemaName(envInfo.Auth0.SchemaName); err != nil {
 			utils.CliWarning("Could not save the workspace identity: %s. Run 'alpacon login' again if workspace commands fail.", err)
 		}
-		persistKubernetesSurface(envInfo)
+		persistKubernetesSurface(workspaceURL, envInfo)
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -208,8 +208,12 @@ func init() {
 // CreateConfig, which resets the value, so it is written here once for all of
 // them. A failed write only keeps 'alpacon kube' hidden, which is no reason to
 // fail a login whose credential is already saved.
-func persistKubernetesSurface(envInfo *auth0.AuthEnvResponse) {
-	if err := config.SetKubernetesSurface(envInfo.Surfaces.Kubernetes); err != nil {
+func persistKubernetesSurface(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
+	err := config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
+	switch {
+	case errors.Is(err, config.ErrWorkspaceChanged):
+		utils.CliWarning("Did not save Kubernetes support for %s: %s since this login started.", workspaceURL, err)
+	case err != nil:
 		utils.CliWarning("Could not save whether this workspace supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login.", err)
 	}
 }

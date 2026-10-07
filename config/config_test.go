@@ -169,7 +169,7 @@ func TestSwitchWorkspace_RecordsKubernetesSurface(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-token", "", "alpacon.io", 3600, false))
-	require.NoError(t, SetKubernetesSurface(true))
+	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
 
 	// A switch forward clears the old workspace's answer in the same write.
 	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
@@ -193,7 +193,7 @@ func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
 	require.NoError(t, SetActiveWorkSession("ses-1"))
 
-	require.NoError(t, SetKubernetesSurface(true))
+	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
 
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
 	assert.Equal(t, "alpacon.io", cfg.BaseDomain)
 	assert.Equal(t, map[string]string{"ws1": "ses-1"}, cfg.ActiveWorkSessions)
 
-	require.NoError(t, SetKubernetesSurface(false))
+	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", false))
 
 	homeDir, err := os.UserHomeDir()
 	require.NoError(t, err)
@@ -219,15 +219,33 @@ func TestSetKubernetesSurface_PreservesOtherFields(t *testing.T) {
 func TestSetKubernetesSurface_NoExistingConfig(t *testing.T) {
 	setupTestConfig(t)
 
-	err := SetKubernetesSurface(true)
+	err := SetKubernetesSurface("https://ws1.us1.alpacon.io", true)
 	require.ErrorIs(t, err, fs.ErrNotExist)
+}
+
+func TestSetKubernetesSurface_RefusesAnotherWorkspace(t *testing.T) {
+	setupTestConfig(t)
+
+	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "token", "", "", "", "", 0, false))
+	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
+
+	// Another shell switched to ws2 while ws1's answer was being fetched.
+	require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2"))
+
+	err := SetKubernetesSurface("https://ws1.us1.alpacon.io", true)
+	require.ErrorIs(t, err, ErrWorkspaceChanged)
+
+	cfg, err := LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
+	assert.False(t, cfg.KubernetesSurface)
 }
 
 func TestCreateConfig_ResetsKubernetesSurface(t *testing.T) {
 	setupTestConfig(t)
 
 	require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "token", "", "", "", "", 0, false))
-	require.NoError(t, SetKubernetesSurface(true))
+	require.NoError(t, SetKubernetesSurface("https://ws1.us1.alpacon.io", true))
 
 	// A fresh login rebuilds the file; the capability belongs to the old
 	// login until the new one records its own answer.

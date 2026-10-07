@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"errors"
+
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/api/workspace"
 	"github.com/alpacax/alpacon-cli/client"
@@ -80,7 +82,11 @@ func refreshKubernetesSurface(workspaceURL, workspaceName string, insecure bool)
 		return
 	}
 
-	if err := config.SetKubernetesSurface(envInfo.Surfaces.Kubernetes); err != nil {
+	err = config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
+	switch {
+	case errors.Is(err, config.ErrWorkspaceChanged):
+		utils.CliWarning("Did not save Kubernetes support for workspace %q: %s since this switch started.", workspaceName, err)
+	case err != nil:
 		utils.CliWarning("Could not save whether workspace %q supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
 	}
 }

@@ -17,12 +17,14 @@ func TestRefreshKubernetesSurface(t *testing.T) {
 		name          string
 		status        int
 		body          string
+		movedAway     bool
 		expected      bool
 		expectWarning string
 	}{
 		{name: "workspace exposes kubernetes", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":true}}`, expected: true},
 		{name: "workspace without kubernetes", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":false}}`},
 		{name: "older server omits surfaces", status: http.StatusOK, body: `{"auth0":{"method":"auth0"}}`},
+		{name: "another shell switched away meanwhile", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":true}}`, movedAway: true, expectWarning: "Did not save Kubernetes support for workspace"},
 		{name: "env unreachable stays false", status: http.StatusInternalServerError, body: `{}`, expectWarning: "Could not check Kubernetes support on workspace"},
 	}
 
@@ -42,8 +44,12 @@ func TestRefreshKubernetesSurface(t *testing.T) {
 			// workspace said yes, and SwitchWorkspace has cleared it.
 			t.Setenv("HOME", t.TempDir())
 			require.NoError(t, config.CreateConfig("https://prev.example.com", "prev", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
-			require.NoError(t, config.SetKubernetesSurface(true))
+			require.NoError(t, config.SetKubernetesSurface("https://prev.example.com", true))
 			require.NoError(t, config.SwitchWorkspace(ts.URL, "next"))
+
+			if tt.movedAway {
+				require.NoError(t, config.SwitchWorkspace("https://elsewhere.example.com", "elsewhere"))
+			}
 
 			_, stderr := testutil.CaptureOutput(t, func() {
 				refreshKubernetesSurface(ts.URL, "next", false)
