@@ -402,6 +402,7 @@ func TestDeleteCA_RefusedWithHistory(t *testing.T) {
 	ac := newTestClient(server)
 	err := DeleteCA(ac, "test-ca-id")
 	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, AuthorityCannotBeDeleted, code)
 }
