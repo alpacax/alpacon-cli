@@ -1,8 +1,7 @@
 package worksession
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -63,10 +62,7 @@ Error codes returned when a session check fails:
 
 Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := cmd.Help(); err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Approval and rejection happen in the Alpacon console (web) or Slack. Run 'alpacon work-session --help' for more information")
+		return utils.RequireSubcommand(cmd, "Approval and rejection happen in the Alpacon console (web) or Slack.")
 	},
 }
 

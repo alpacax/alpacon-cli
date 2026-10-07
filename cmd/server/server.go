@@ -1,8 +1,7 @@
 package server
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -14,11 +13,7 @@ var ServerCmd = &cobra.Command{
 	// "unknown command" instead of falling through to the help below.
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Run 'alpacon server --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

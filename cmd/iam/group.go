@@ -1,8 +1,7 @@
 package iam
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var GroupCmd = &cobra.Command{
 	Short: "Manage groups, members, and permissions",
 	Long:  "Manage groups, role-based access controls, and group membership within the Alpacon workspace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Run 'alpacon group --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

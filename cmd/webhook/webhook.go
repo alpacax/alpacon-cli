@@ -1,8 +1,7 @@
 package webhook
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var WebhookCmd = &cobra.Command{
 	Aliases: []string{"webhooks"},
 	Short:   "Configure webhooks for event notifications",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Run 'alpacon webhook --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

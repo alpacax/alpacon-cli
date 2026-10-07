@@ -1,8 +1,7 @@
 package approval
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -24,10 +23,7 @@ Subcommands for tracking:
   describe  Show details of a request
   cancel    Cancel a pending request you submitted`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := cmd.Help(); err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Approval and rejection happen in the Alpacon console (web) or Slack. Run 'alpacon approval --help' for more information")
+		return utils.RequireSubcommand(cmd, "Approval and rejection happen in the Alpacon console (web) or Slack.")
 	},
 }
 

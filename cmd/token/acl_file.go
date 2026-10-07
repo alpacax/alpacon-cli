@@ -1,8 +1,7 @@
 package token
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -13,8 +12,7 @@ var aclFileCmd = &cobra.Command{
 
 Deny-by-default: if no file ACL exists for a token, all file transfers are denied.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = cmd.Help()
-		return errors.New("a subcommand is required. Run 'alpacon token acl file --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

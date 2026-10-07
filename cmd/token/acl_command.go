@@ -1,8 +1,7 @@
 package token
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -12,8 +11,7 @@ var aclCommandCmd = &cobra.Command{
 	Long: `Configure which server-side shell commands an API token is allowed to execute
 via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = cmd.Help()
-		return errors.New("a subcommand is required. Run 'alpacon token acl command --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 
