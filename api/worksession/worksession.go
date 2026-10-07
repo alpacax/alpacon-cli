@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
 	"path"
 	"strconv"
 	"strings"
@@ -162,6 +163,19 @@ func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords 
 	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
 }
 
+// ErrTimelinePaginated is what the whole-timeline read answers once the route
+// stops serving the shape it asks for. The two shapes are told apart by one
+// key: the unpaginated answer has no `next` at all, and a paginator's always
+// carries one, null on its last page included. So a `next` in the answer to a
+// request that named neither `cursor` nor `page_size` means the route now
+// paginates regardless, and the recordings this read exists for are gone from
+// it—a page would otherwise decode as a whole session and be shown as one.
+var ErrTimelinePaginated = errors.New(
+	"this server paginates the work session timeline, which this version of alpacon reads only whole, " +
+		"so it would show the first page as the whole session; run 'alpacon update' to install a version " +
+		"that reads the timeline page by page and its recordings through the per-session recording route",
+)
+
 // getWholeWorkSessionTimeline takes the unpaginated shape in one request. It
 // names neither `cursor` nor `page_size`, which is what holds the server to
 // that shape, so nothing here may add either.
@@ -172,12 +186,22 @@ func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, para
 	}
 	// Neither ListResponse nor CursorListResponse: this shape has no `next` of
 	// either type, and decoding through one of them would claim a paginator the
-	// response does not come from.
+	// response does not come from. Next is read for one reason—so that a `next`
+	// nothing claimed is refused rather than dropped on the floor, which is how
+	// a first page would come back looking like a whole session.
 	var response struct {
-		Results []TimelineItem `json:"results"`
+		Results []TimelineItem  `json:"results"`
+		Next    json.RawMessage `json:"next"`
 	}
 	if err = json.Unmarshal(body, &response); err != nil {
 		return nil, err
+	}
+	// Absent is nil; anything else is a key the unpaginated shape does not
+	// have. A null one counts: it is a paginator's last page, not a whole
+	// timeline, and on a session short enough to fit one page it is the only
+	// thing distinguishing the two.
+	if len(response.Next) > 0 {
+		return nil, ErrTimelinePaginated
 	}
 	return response.Results, nil
 }

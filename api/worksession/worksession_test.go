@@ -443,6 +443,63 @@ func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T
 	}
 }
 
+// The route serving a page to a request that named neither cursor nor
+// page_size is the next step of the server change this read is written
+// against: the unpaginated shape stops existing. Results alone would decode
+// that page as a whole session—recordings gone, nothing said—so the read
+// refuses it instead and names what to upgrade.
+func TestGetWorkSessionTimeline_RefusesAPageWhenItAskedForTheWholeTimeline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "more pages to come",
+			body: `{"next":"TOKEN2","results":[{"type":"command","line":"ls -la"}]}`,
+		},
+		{
+			// A paginator's last page carries next as null, and a session short
+			// enough to fit one page is nothing but a last page. Reading null as
+			// the unpaginated shape would let exactly those sessions lose their
+			// recordings in silence, which is the failure this guard exists for.
+			name: "null next on a single page",
+			body: `{"next":null,"results":[{"type":"command","line":"ls -la"}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+			require.ErrorIs(t, err, ErrTimelinePaginated)
+			assert.Empty(t, result)
+			assert.Contains(t, err.Error(), "alpacon update")
+		})
+	}
+}
+
+// The counterpart: today's unpaginated answer carries no next at all, and the
+// guard has to stay off it or every whole-timeline read fails.
+func TestGetWorkSessionTimeline_AcceptsAnAnswerWithNoNextKey(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"type":"command","line":"ls -la"},{"type":"websh_record","masked_record":"ls -la\n"}]}`))
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "websh_record", result[1].Type)
+}
+
 func TestUpdateWorkSession(t *testing.T) {
 	t.Parallel()
 	var gotBody WorkSessionUpdateRequest
