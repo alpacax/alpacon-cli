@@ -1048,13 +1048,17 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		case dialHeaders <- r.Header.Clone():
 		default:
 		}
+		// Counted before the handshake completes: the client re-sends the
+		// terminal size as soon as it has the 101, so a count taken after
+		// Upgrade can still be pending when the test reads it.
+		upgrade := upgrades.Add(1)
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
 			return
 		}
 		defer func() { _ = ws.Close() }()
 
-		if upgrades.Add(1) == 1 {
+		if upgrade == 1 {
 			// A service going down for a restart is not the session ending.
 			_ = ws.WriteControl(
 				websocket.CloseMessage,
