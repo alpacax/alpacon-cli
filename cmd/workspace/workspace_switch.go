@@ -64,7 +64,9 @@ var workspaceSwitchCmd = &cobra.Command{
 			utils.CliErrorWithExit("Failed to connect to workspace %q: %s. Reverted to %q.", newName, err, origName)
 		}
 
-		refreshKubernetesSurface(newURL, newName, cfg.Insecure)
+		if errors.Is(refreshKubernetesSurface(newURL, newName, cfg.Insecure), config.ErrWorkspaceChanged) {
+			utils.CliErrorWithExit("Switched to workspace %q, but another alpacon process has since changed the current workspace. Run 'alpacon workspace list' to see which one is current.", newName)
+		}
 
 		utils.CliSuccess("Switched to workspace %q (%s)", newName, newURL)
 	},
@@ -75,18 +77,21 @@ var workspaceSwitchCmd = &cobra.Command{
 // workspace it logged in to, and a switch can cross regions. SwitchWorkspace
 // has already recorded false, so only a yes needs writing, and a failure
 // warns and leaves it false rather than undoing a switch that has happened.
-func refreshKubernetesSurface(workspaceURL, workspaceName string, insecure bool) {
+// It returns config.ErrWorkspaceChanged when another process has moved the
+// config off this workspace meanwhile, so the switch no longer stands.
+func refreshKubernetesSurface(workspaceURL, workspaceName string, insecure bool) error {
 	envInfo, err := auth0.FetchAuthEnv(workspaceURL, httpclient.New(insecure))
 	if err != nil {
 		utils.CliWarning("Could not check Kubernetes support on workspace %q: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
-		return
+		return nil
 	}
 
 	err = config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
-	switch {
-	case errors.Is(err, config.ErrWorkspaceChanged):
-		utils.CliWarning("Did not save Kubernetes support for workspace %q: %s since this switch started.", workspaceName, err)
-	case err != nil:
+	if errors.Is(err, config.ErrWorkspaceChanged) {
+		return err
+	}
+	if err != nil {
 		utils.CliWarning("Could not save whether workspace %q supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login or switch.", workspaceName, err)
 	}
+	return nil
 }

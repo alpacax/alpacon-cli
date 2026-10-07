@@ -20,11 +20,12 @@ func TestRefreshKubernetesSurface(t *testing.T) {
 		movedAway     bool
 		expected      bool
 		expectWarning string
+		expectErr     error
 	}{
 		{name: "workspace exposes kubernetes", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":true}}`, expected: true},
 		{name: "workspace without kubernetes", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":false}}`},
 		{name: "older server omits surfaces", status: http.StatusOK, body: `{"auth0":{"method":"auth0"}}`},
-		{name: "another shell switched away meanwhile", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":true}}`, movedAway: true, expectWarning: "Did not save Kubernetes support for workspace"},
+		{name: "another shell switched away meanwhile", status: http.StatusOK, body: `{"auth0":{"method":"auth0"},"surfaces":{"kubernetes":true}}`, movedAway: true, expectErr: config.ErrWorkspaceChanged},
 		{name: "env unreachable stays false", status: http.StatusInternalServerError, body: `{}`, expectWarning: "Could not check Kubernetes support on workspace"},
 	}
 
@@ -51,9 +52,15 @@ func TestRefreshKubernetesSurface(t *testing.T) {
 				require.NoError(t, config.SwitchWorkspace("https://elsewhere.example.com", "elsewhere"))
 			}
 
+			var refreshErr error
 			_, stderr := testutil.CaptureOutput(t, func() {
-				refreshKubernetesSurface(ts.URL, "next", false)
+				refreshErr = refreshKubernetesSurface(ts.URL, "next", false)
 			})
+			if tt.expectErr != nil {
+				require.ErrorIs(t, refreshErr, tt.expectErr)
+			} else {
+				require.NoError(t, refreshErr)
+			}
 
 			cfg, err := config.LoadConfig()
 			require.NoError(t, err)
