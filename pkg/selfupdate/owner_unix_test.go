@@ -34,3 +34,15 @@ func TestExecRunnerSeparatesAnAnswerFromAQueryThatCouldNotAnswer(t *testing.T) {
 	require.Error(t, missing)
 	assert.NotErrorIs(t, missing, ErrOwnerUnknown, "a manager that is not installed here has answered too")
 }
+
+func TestExecRunnerAnswersForAMissingManagerEvenPastItsDeadline(t *testing.T) {
+	original := packageQueryTimeout
+	t.Cleanup(func() { packageQueryTimeout = original })
+	// Expired before the exec, as on a runner too slow to start one in time:
+	// a binary that is not there never ran, so the deadline did not stop it.
+	packageQueryTimeout = time.Nanosecond
+
+	_, missing := ExecRunner("alpacon-no-such-package-manager", "-qf", "/usr/local/bin/alpacon")
+	require.Error(t, missing)
+	assert.NotErrorIs(t, missing, ErrOwnerUnknown, "a manager that is not installed here has answered too")
+}

@@ -47,16 +47,22 @@ func ExecRunner(name string, args ...string) ([]byte, error) {
 		return out, nil
 	}
 
-	// The deadline first: a killed process reports an ExitError like any other
-	// non-zero exit, and rpm is killed mid-query exactly when another
+	// A manager not installed on this host is an answer, and one that never
+	// started cannot have been stopped by the deadline, however late it ran.
+	if errors.Is(err, exec.ErrNotFound) {
+		return nil, err
+	}
+
+	// The deadline before the exit: a killed process reports an ExitError like
+	// any other non-zero exit, and rpm is killed mid-query exactly when another
 	// transaction holds its database.
 	if ctx.Err() != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrOwnerUnknown, name, ctx.Err())
 	}
 
-	// A non-zero exit is an answer, and so is a manager not installed on this host.
+	// A non-zero exit is an answer.
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) || errors.Is(err, exec.ErrNotFound) {
+	if errors.As(err, &exitErr) {
 		return nil, err
 	}
 	return nil, fmt.Errorf("%w: %s: %w", ErrOwnerUnknown, name, err)
