@@ -14,7 +14,7 @@ var tokenCmd = &cobra.Command{
 		if err := cmd.Help(); err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon server token create', 'alpacon server token ls', or 'alpacon server token delete'. Run 'alpacon server token --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon server token --help' for more information")
 	},
 }
 

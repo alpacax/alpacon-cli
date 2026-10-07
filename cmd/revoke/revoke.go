@@ -15,7 +15,7 @@ var RevokeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon revoke list', 'alpacon revoke create', 'alpacon revoke describe', 'alpacon revoke approve', 'alpacon revoke deny', 'alpacon revoke retry', or 'alpacon revoke cancel'. Run 'alpacon revoke --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon revoke --help' for more information")
 	},
 }
 

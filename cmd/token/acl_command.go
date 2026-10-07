@@ -13,7 +13,7 @@ var aclCommandCmd = &cobra.Command{
 via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = cmd.Help()
-		return errors.New("a subcommand is required")
+		return errors.New("a subcommand is required. Run 'alpacon token acl command --help' for more information")
 	},
 }
 

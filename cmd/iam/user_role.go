@@ -55,7 +55,7 @@ role_audit_log:read scope, on either deployment.`,
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon user role ls', 'alpacon user role catalog', 'alpacon user role describe', 'alpacon user role grant', 'alpacon user role revoke', or 'alpacon user role history'. Run 'alpacon user role --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon user role --help' for more information")
 	},
 }
 

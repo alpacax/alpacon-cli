@@ -22,7 +22,7 @@ and where each one came from.`,
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon user permission ls' or 'alpacon user permission can-i'. Run 'alpacon user permission --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon user permission --help' for more information")
 	},
 }
 

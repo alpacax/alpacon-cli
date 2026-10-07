@@ -14,7 +14,7 @@ var pythonCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon package python list', 'alpacon package python upload', or 'alpacon package python download'. Run 'alpacon package python --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon package python --help' for more information")
 	},
 }
 

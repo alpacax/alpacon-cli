@@ -19,7 +19,7 @@ var aclServerCmd = &cobra.Command{
 Deny-by-default: if no server ACL exists for a token, access to all servers is denied.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_ = cmd.Help()
-		return errors.New("a subcommand is required")
+		return errors.New("a subcommand is required. Run 'alpacon token acl server --help' for more information")
 	},
 }
 

@@ -14,7 +14,7 @@ var systemCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon package system list', 'alpacon package system upload', or 'alpacon package system download'. Run 'alpacon package system --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon package system --help' for more information")
 	},
 }
 

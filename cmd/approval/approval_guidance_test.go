@@ -2,19 +2,13 @@ package approval
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// consoleOnlySubcommands stay registered so a script calling them gets an
-// actionable exit, but the action itself lives in the console, so the
-// no-subcommand guidance must never offer them as something to run.
-var consoleOnlySubcommands = map[string]bool{"approve": true, "reject": true}
-
-func TestApprovalGuidanceMatchesRegisteredSubcommands(t *testing.T) {
+func TestApprovalGuidanceKeepsConsolePointer(t *testing.T) {
 	var help bytes.Buffer
 	ApprovalCmd.SetOut(&help)
 	ApprovalCmd.SetErr(&help)
@@ -24,16 +18,7 @@ func TestApprovalGuidanceMatchesRegisteredSubcommands(t *testing.T) {
 	})
 
 	err := ApprovalCmd.RunE(ApprovalCmd, nil)
-	require.Error(t, err)
-	guidance := err.Error()
 
-	for _, sub := range ApprovalCmd.Commands() {
-		name := sub.Name()
-		mention := fmt.Sprintf("'alpacon approval %s'", name)
-		if consoleOnlySubcommands[name] {
-			assert.NotContains(t, guidance, mention)
-			continue
-		}
-		assert.Contains(t, guidance, mention)
-	}
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Alpacon console")
 }

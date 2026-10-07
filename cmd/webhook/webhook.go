@@ -15,7 +15,7 @@ var WebhookCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return errors.New("a subcommand is required. Use 'alpacon webhook list', 'alpacon webhook create', 'alpacon webhook describe', 'alpacon webhook update', or 'alpacon webhook delete'. Run 'alpacon webhook --help' for more information")
+		return errors.New("a subcommand is required. Run 'alpacon webhook --help' for more information")
 	},
 }
 
