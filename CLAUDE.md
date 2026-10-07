@@ -108,7 +108,7 @@ PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
   }
   ```
 - **CLI output helpers**: `utils.CliError*/CliInfo*/CliWarning` all write to stderr. stdout is reserved for data output (tables, JSON)
-- **Group commands**: `RunE`—returns error to trigger help when no subcommand is given
+- **Group commands**: `RunE` returns `utils.RequireSubcommand(cmd)`, which prints the help and returns an error pointing to `Run '<path> --help'`. The error never lists subcommands: the help already prints them from the live command tree, and a hand-written copy drifts when the command set changes. Guidance the tree cannot carry, such as where approvals happen, goes in as an extra argument. `cmd/group_guidance_test.go` walks `RootCmd` and fails on a group whose error names a subcommand or that skips the help
 - **Leaf commands**: `Run` + `utils.CliErrorWithExit`—preserves colored output; `RunE` would print plain text and may append usage on error
 - **Version injection**: `utils.Version` is set via `-ldflags` at build time by GoReleaser. Local builds default to `"dev"`
 - **Subcommand aliases**: list → `["list"]`, delete → `["rm"]`, describe → `["desc"]`, group → semantic alias (e.g., `workspace` → `ws`)

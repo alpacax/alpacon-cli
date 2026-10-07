@@ -1,13 +1,13 @@
 package token
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 
 	serverapi "github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +18,7 @@ var aclServerCmd = &cobra.Command{
 
 Deny-by-default: if no server ACL exists for a token, access to all servers is denied.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = cmd.Help()
-		return errors.New("a subcommand is required")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

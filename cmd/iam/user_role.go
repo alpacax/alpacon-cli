@@ -1,7 +1,6 @@
 package iam
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -51,11 +50,7 @@ role_audit_log:read scope, on either deployment.`,
   alpacon user role revoke john superuser --cascade
   alpacon user role history john`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon user role ls', 'alpacon user role catalog', 'alpacon user role describe', 'alpacon user role grant', 'alpacon user role revoke', or 'alpacon user role history'. Run 'alpacon user role --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

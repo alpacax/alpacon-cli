@@ -1,8 +1,7 @@
 package token
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -10,11 +9,7 @@ var TokenCmd = &cobra.Command{
 	Use:   "token",
 	Short: "Manage API tokens for CI/CD and automation",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Run 'alpacon token --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

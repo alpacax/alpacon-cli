@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -704,6 +705,16 @@ func RequirePositiveInt(flagName string, value int) {
 	if value <= 0 {
 		CliErrorWithExitCode(ExitCodeUsageError, "--%s must be a positive integer.", flagName)
 	}
+}
+
+// RequireSubcommand prints cmd's help, then returns an error that points to --help
+// instead of repeating the subcommand list the help already printed.
+func RequireSubcommand(cmd *cobra.Command, notes ...string) error {
+	if err := cmd.Help(); err != nil {
+		return err
+	}
+	parts := append([]string{"a subcommand is required."}, notes...)
+	return fmt.Errorf("%s Run '%s --help' for more information", strings.Join(parts, " "), cmd.CommandPath())
 }
 
 // ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.
