@@ -103,6 +103,62 @@ func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 	}`, string(body))
 }
 
+func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
+	t.Parallel()
+	file := func(reuseDays int) *CommandRequest {
+		return &CommandRequest{
+			Server:   "srv-1",
+			RunAfter: []string{},
+			File: &FileExecution{
+				Path:        "/opt/deploy.sh",
+				Interpreter: "/bin/bash",
+				Args:        []string{},
+				Content:     "#!/bin/bash\n",
+				ReuseDays:   reuseDays,
+			},
+		}
+	}
+
+	t.Run("absent without a proposal", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(file(0))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"username": "",
+			"groupname": "",
+			"scheduled_at": null,
+			"server": "srv-1",
+			"run_after": [],
+			"file": {
+				"path": "/opt/deploy.sh",
+				"interpreter": "/bin/bash",
+				"args": [],
+				"content": "#!/bin/bash\n"
+			}
+		}`, string(body))
+	})
+
+	t.Run("an integer under reuse_days with one", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(file(30))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"username": "",
+			"groupname": "",
+			"scheduled_at": null,
+			"server": "srv-1",
+			"run_after": [],
+			"file": {
+				"path": "/opt/deploy.sh",
+				"interpreter": "/bin/bash",
+				"args": [],
+				"content": "#!/bin/bash\n",
+				"reuse_days": 30
+			}
+		}`, string(body))
+	})
+}
+
 // TestFileLaneRequestMirrorsCommandRequest guards the hand-copied field list:
 // a field added to CommandRequest later must either be one the file lane
 // refuses (shell, line, env, data) or appear on fileLaneRequest under the same

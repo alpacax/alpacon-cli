@@ -20,6 +20,11 @@ const FileContentMaxBytes = 65536
 // DefaultInterpreter runs a verified file when --interpreter names none.
 const DefaultInterpreter = "/bin/bash"
 
+const (
+	reuseDaysMin = 1
+	reuseDaysMax = 366
+)
+
 // fileExecRefusals maps the server's file-lane error codes to guidance. Codes
 // mirror the server by hand—nothing enforces the sync, so fileExecRefusal
 // answers only for codes it carries and leaves the rest to the generic error
@@ -69,6 +74,16 @@ var fileExecRefusals = []struct {
 		hint:    "set the variables inside the script, where they are reviewed and hashed with it.\n",
 	},
 	{
+		code:    "file_exec_invalid_reuse_days",
+		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", reuseDaysMin, reuseDaysMax),
+		hint:    "propose a duration in that range, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
+	},
+	{
+		code:    "file_exec_reuse_exceeds_max",
+		message: "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
+		hint:    "resubmit with a shorter --reuse-days, or omit it; an opted-in grant then lasts until the workspace ceiling.\n",
+	},
+	{
 		code:      "file_exec_line_not_allowed",
 		message:   "the server refused the request: it carried a command line alongside the file",
 		clientBug: true,
@@ -81,9 +96,10 @@ var fileExecRefusals = []struct {
 }
 
 // FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter and the arguments after --. From and
-// Interpreter are as typed, empty when the flag was not given; loadFileExecution
-// fills the defaults, so a re-run hint can repeat only what the user said.
+// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
+// From and Interpreter are as typed, empty when the flag was not given;
+// loadFileExecution fills the defaults, so a re-run hint can repeat only what
+// the user said.
 type FileExecArgs struct {
 	// Path is the script's location on the target server, and by default the
 	// local file the content is read from.
@@ -94,6 +110,8 @@ type FileExecArgs struct {
 	Interpreter string
 	// Args are passed to the script as given, one argv entry each.
 	Args []string
+	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
+	ReuseDays int
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -124,6 +142,7 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		Interpreter: interpreter,
 		Args:        spec.Args,
 		Content:     content,
+		ReuseDays:   spec.ReuseDays,
 	}, ""
 }
 
