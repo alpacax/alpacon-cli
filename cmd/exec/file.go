@@ -76,7 +76,7 @@ var fileExecRefusals = []struct {
 	{
 		code:    "file_exec_invalid_reuse_days",
 		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", reuseDaysMin, reuseDaysMax),
-		hint:    "propose 1 to 366 days, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
+		hint:    "propose a duration in that range, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
 	},
 	{
 		code:    "file_exec_reuse_exceeds_max",
@@ -96,9 +96,10 @@ var fileExecRefusals = []struct {
 }
 
 // FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter and the arguments after --. From and
-// Interpreter are as typed, empty when the flag was not given; loadFileExecution
-// fills the defaults, so a re-run hint can repeat only what the user said.
+// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
+// From and Interpreter are as typed, empty when the flag was not given;
+// loadFileExecution fills the defaults, so a re-run hint can repeat only what
+// the user said.
 type FileExecArgs struct {
 	// Path is the script's location on the target server, and by default the
 	// local file the content is read from.

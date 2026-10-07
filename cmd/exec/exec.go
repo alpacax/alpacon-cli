@@ -53,8 +53,8 @@ is verified. Composition (pipes, redirection, &&) goes inside the script, where
 it is reviewed and hashed with it; a one-off composition around a script stays
 on the ordinary command line. A reviewer can mark an approval standing, and an
 unchanged re-run then stops asking anyone—one changed byte re-queues review.
-Standing is not permanent: it lasts the days --reuse-days proposed; with no
-proposal it lasts until the workspace ceiling, or indefinitely without one.
+Standing lasts the days --reuse-days proposed; with no proposal it lasts
+until the workspace ceiling, or indefinitely when the workspace has none.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
