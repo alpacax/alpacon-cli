@@ -15,11 +15,12 @@ var authorityDeleteCmd = &cobra.Command{
 	Short:   "Delete a CA that has no certificate history",
 	Long: `
 	This command removes a Certificate Authority (CA) that has never received a certificate sign request.
-	A CA that has received one cannot be deleted: the server refuses with cert_authority_cannot_be_deleted
-	and keeps the CA along with its sign requests, issued certificates and revoke requests.
-	To stop using such a CA, delete the server it runs on ('alpacon server delete'). The server has to be
-	disconnected first, since a connected server cannot be deleted, and this removes the server itself,
-	not just the CA. The CA then leaves the CA list and signs no new requests, while its records are kept.
+	A CA that has received one cannot be deleted: the server refuses and keeps the CA along with
+	its sign requests, issued certificates and revoke requests.
+	To stop using such a CA, remove the server it runs on (the Server column of 'alpacon authority ls'):
+	run 'alpamon unregister' on that host, then delete it with 'alpacon server delete' if it is still
+	listed. This removes the server itself, not just the CA. The CA then leaves the CA list and signs
+	no new requests, while its records are kept.
 	Note that this action requires manual configuration adjustments to alpamon-cert-authority.
 	`,
 	Example: `
@@ -33,9 +34,7 @@ var authorityDeleteCmd = &cobra.Command{
 
 		yes, _ := cmd.Flags().GetBool("yes")
 		if !yes {
-			utils.ConfirmAction("Delete CA '%s'? A CA that has received certificate requests cannot be deleted; "+
-				"to stop using one, disconnect the server it runs on and delete it with 'alpacon server delete' "+
-				"(this removes the server itself).", authorityName)
+			utils.ConfirmAction("A CA that has received certificate requests cannot be deleted. Delete CA '%s'?", authorityName)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -57,12 +56,12 @@ var authorityDeleteCmd = &cobra.Command{
 	},
 }
 
-// deleteCAErrorText maps a DeleteCA error to the message shown to the user.
 func deleteCAErrorText(authorityName string, err error) string {
-	if code, _ := utils.ParseErrorResponse(err); code == cert.AuthorityCannotBeDeleted {
+	if code, _ := utils.ParseErrorResponse(err); code == cert.CodeAuthorityCannotBeDeleted {
 		return fmt.Sprintf("CA '%s' has received certificate requests, so it cannot be deleted; "+
-			"its records are kept. To stop using it, disconnect the server it runs on and delete it "+
-			"with 'alpacon server delete' (this removes the server itself).", authorityName)
+			"its records are kept. To stop using it, remove the server it runs on (the Server column of "+
+			"'alpacon authority ls'): run 'alpamon unregister' on that host, then 'alpacon server delete' "+
+			"if it is still listed. This removes the server itself.", authorityName)
 	}
 	return fmt.Sprintf("Failed to delete the CA: %s.", err)
 }

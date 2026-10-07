@@ -404,7 +404,7 @@ func TestDeleteCA_RefusedWithHistory(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
 	code, _ := utils.ParseErrorResponse(err)
-	assert.Equal(t, AuthorityCannotBeDeleted, code)
+	assert.Equal(t, CodeAuthorityCannotBeDeleted, code)
 }
 
 func TestDownloadCertificateByCSR(t *testing.T) {

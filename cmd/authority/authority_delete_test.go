@@ -42,7 +42,7 @@ func TestDeleteCAErrorText(t *testing.T) {
 			name:        "history refusal mapped",
 			contentType: "application/json",
 			body:        `{"code":"cert_authority_cannot_be_deleted"}`,
-			wantMatch:   "disconnect the server it runs on and delete it",
+			wantMatch:   "run 'alpamon unregister' on that host",
 			wantNoMatch: "Failed to delete the CA",
 		},
 		{
@@ -50,14 +50,14 @@ func TestDeleteCAErrorText(t *testing.T) {
 			contentType: "application/json",
 			body:        `{"code":"cert_request_in_progress"}`,
 			wantMatch:   "Failed to delete the CA",
-			wantNoMatch: "disconnect the server",
+			wantNoMatch: "alpamon unregister",
 		},
 		{
 			name:        "non-JSON 400 falls back",
 			contentType: "text/html",
 			body:        "<html>Bad Request</html>",
 			wantMatch:   "Failed to delete the CA",
-			wantNoMatch: "disconnect the server",
+			wantNoMatch: "alpamon unregister",
 		},
 		{
 			name:      "transport error falls back",
