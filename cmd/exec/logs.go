@@ -38,7 +38,7 @@ Run the command again later to check for completion.`,
 
 		details, err := event.GetCommandByID(alpaconClient, jobID)
 		if err != nil {
-			utils.HandleWorkSessionError(err, "command", "", authMethod, "")
+			utils.HandleWorkSessionError(err, utils.OperationCommand, "", authMethod, "")
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}

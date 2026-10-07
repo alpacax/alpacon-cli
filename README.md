@@ -153,12 +153,14 @@ $ alpacon cp ./file.txt <server>:/tmp/
 $ alpacon tunnel <server> -l 9000 -r 8082
 ```
 
-CI/CD and API automation use token auth, which bypasses work sessions:
+CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
 
 ```bash
 $ alpacon login <URL> -t <TOKEN_KEY>
 $ alpacon exec <server> "..."
 ```
+
+A token cannot open an interactive `websh` terminal, run `websh watch`, `websh join`, or `websh invite`, or open a `tunnel`; those need `alpacon login` without `-t`.
 
 See `alpacon work-session --help` for session lifecycle, gating, and error codes.
 

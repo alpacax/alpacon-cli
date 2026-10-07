@@ -11,9 +11,8 @@ import (
 )
 
 // Codes this surface receives. All but permission_denied come from the binding endpoints;
-// that one is the troubleshoot read. The four below are new: the server used to answer
-// every role and token-scope refusal with a bare {"detail": ...} 403, and now answers
-// with one of these instead, carrying no detail of its own—the message has to be the CLI's.
+// that one is the troubleshoot read. The role-gate codes below and utils' token-scope codes
+// carry no detail of their own, so the message has to be the CLI's.
 const (
 	codeAdminLastRemoval     = "rbac_admin_last_removal_forbidden"
 	codePermissionDenied     = "permission_denied"
@@ -29,12 +28,6 @@ const (
 	// whether the server states a code for it.
 	codeRolePermissionRequired       = "rbac_permission_required"
 	codeRoleObjectPermissionRequired = "rbac_object_permission_required"
-
-	// codeTokenScopeMissing and codeTokenScopeActionUnresolved are the token-scope
-	// gate's refusals—an API token whose bound scopes do not cover this call, or a
-	// call whose action the server could not resolve to a scope at all.
-	codeTokenScopeMissing          = "api_token_scope_missing"
-	codeTokenScopeActionUnresolved = "api_token_scope_action_unresolved"
 )
 
 // Gates for describeRBACError. gateRoleRead is first so the zero value is the safest gate.
@@ -98,9 +91,9 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 		return rewrite(err, "this workspace is suspended, so it accepts no changes")
 	case codePermissionDenied:
 		return rewrite(err, permissionDeniedMessage(gate))
-	case codeTokenScopeMissing:
+	case utils.APITokenScopeMissing:
 		return rewrite(err, tokenScopeMissingMessage(err))
-	case codeTokenScopeActionUnresolved:
+	case utils.APITokenScopeActionUnresolved:
 		return rewrite(err, "this token cannot be used for this command; use a login session or a token with an explicit scope")
 	}
 

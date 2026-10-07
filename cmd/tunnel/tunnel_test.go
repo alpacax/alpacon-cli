@@ -1,10 +1,18 @@
 package tunnel
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func parseTunnelCommandArgs(t *testing.T, rawArgs []string) (*cobra.Command, []string) {
@@ -98,4 +106,54 @@ func TestExecuteTunnelCommandRunModeReturnsErrorForInvalidRemotePort(t *testing.
 	if exitCode != 1 {
 		t.Fatalf("exitCode = %d, want 1", exitCode)
 	}
+}
+
+// tunnelCreateError returns a real tunnel create refusal, whose code is only in ErrorCode().
+func tunnelCreateError(t *testing.T, code string) error {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "srv-1", "name": "my-server"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprintf(w, `{"code": %q}`, code)
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := tunnelapi.CreateTunnelSession(ac, "my-server", "", "", 8082, "")
+	require.Error(t, err)
+	return err
+}
+
+func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		code string
+	}{
+		{"token access control refusal", utils.APITokenACLNotAllowed},
+		{"token scope refusal", utils.APITokenScopeMissing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := tunnelCreateError(t, tt.code)
+
+			got := handleTunnelStartError(err, "my-server", nil)
+
+			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t and try again")
+		})
+	}
+}
+
+func TestHandleTunnelStartError_OtherRefusalPassesThrough(t *testing.T) {
+	t.Parallel()
+	err := tunnelCreateError(t, utils.WorkSessionRequired)
+
+	got := handleTunnelStartError(err, "my-server", nil)
+
+	assert.Equal(t, err, got)
 }

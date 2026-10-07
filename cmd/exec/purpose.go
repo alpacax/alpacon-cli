@@ -79,7 +79,7 @@ command's state with 'alpacon exec logs JOB_ID' rather than re-submitting it.`,
 		}
 
 		if err = event.AnswerPurposeDemand(alpaconClient, jobID, purpose); err != nil {
-			utils.HandleWorkSessionError(err, "command", "", authMethod, "")
+			utils.HandleWorkSessionError(err, utils.OperationCommand, "", authMethod, "")
 			// The server answers a settled command and a bystander's answer with
 			// one code, so this cannot say which happened—which is exactly the
 			// branch a machine consumer needs a field rather than prose for.
