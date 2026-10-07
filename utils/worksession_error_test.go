@@ -82,16 +82,18 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 		name      string
 		operation string
 		want      string
+		notWant   string
 	}{
-		{"interactive Websh needs a login without a token", "websh", "cannot open an interactive terminal; it needs 'alpacon login' without -t"},
-		{"command is bypassed by a token", "command", "bypass this check"},
-		{"webftp is bypassed by a token", "webftp", "bypass this check"},
+		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t", "bypass this check"},
+		{"command is bypassed by a token", OperationCommand, "bypass this check", "cannot open an interactive terminal"},
+		{"webftp is bypassed by a token", OperationWebFTP, "bypass this check", "cannot open an interactive terminal"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := buildWorkSessionDiagnostic(WorkSessionRequired, tt.operation, "prod-1", "Browser login", "")
 			assert.Contains(t, got, tt.want)
+			assert.NotContains(t, got, tt.notWant)
 		})
 	}
 }

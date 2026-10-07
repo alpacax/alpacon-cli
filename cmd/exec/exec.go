@@ -252,7 +252,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
-			utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
 			}
@@ -291,7 +291,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
-	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+	utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 	// A command parked for its purpose is reported first: it has no approval
 	// request yet, so the pending-approval path below would name a queue it is
 	// not in.

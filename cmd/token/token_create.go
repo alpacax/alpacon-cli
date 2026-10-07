@@ -73,11 +73,21 @@ func promptForToken() (auth.APITokenRequest, error) {
 	var tokenRequest auth.APITokenRequest
 	tokenRequest.Name = utils.PromptForRequiredInput("Token name: ")
 	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
-		tokenRequest.ExpiresAt = utils.TimeFormat(utils.PromptForIntInput("Valid days for the token (default: 30): ", 30))
+		tokenRequest.ExpiresAt = utils.TimeFormat(promptForExpiryDays())
 	}
 	scopes := utils.PromptForListInput("Scopes (comma-separated, default: every scope you can grant): ")
 	if len(scopes) > 0 {
 		tokenRequest.Scopes = scopes
 	}
 	return tokenRequest, nil
+}
+
+func promptForExpiryDays() int {
+	for {
+		days := utils.PromptForRequiredIntInput("Valid days for the token: ")
+		if days > 0 {
+			return days
+		}
+		utils.CliWarning("Enter a number of days greater than 0.")
+	}
 }

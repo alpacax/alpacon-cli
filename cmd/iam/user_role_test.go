@@ -502,7 +502,7 @@ func TestDescribeRBACError_TokenScopeMissingNamesTheScope(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			coded := codedForbiddenError{code: codeTokenScopeMissing, gate: "token_scope", missing: tt.missing}
+			coded := codedForbiddenError{code: utils.APITokenScopeMissing, gate: "token_scope", missing: tt.missing}
 			got := describeRBACError(ac, gateRoleRead, coded)
 			require.Error(t, got)
 			assert.Contains(t, got.Error(), tt.want)
@@ -514,7 +514,7 @@ func TestDescribeRBACError_TokenScopeMissingNamesTheScope(t *testing.T) {
 func TestDescribeRBACError_TokenScopeMissingWithoutMissingFallsBackGenerically(t *testing.T) {
 	t.Parallel()
 	ac := &client.AlpaconClient{Token: "alpat-token"}
-	coded := codedForbiddenError{code: codeTokenScopeMissing, gate: "token_scope"}
+	coded := codedForbiddenError{code: utils.APITokenScopeMissing, gate: "token_scope"}
 
 	got := describeRBACError(ac, gateRoleRead, coded)
 	require.Error(t, got)
@@ -524,7 +524,7 @@ func TestDescribeRBACError_TokenScopeMissingWithoutMissingFallsBackGenerically(t
 func TestDescribeRBACError_TokenScopeActionUnresolved(t *testing.T) {
 	t.Parallel()
 	ac := &client.AlpaconClient{Token: "alpat-token"}
-	coded := codedForbiddenError{code: codeTokenScopeActionUnresolved, gate: "token_scope"}
+	coded := codedForbiddenError{code: utils.APITokenScopeActionUnresolved, gate: "token_scope"}
 
 	got := describeRBACError(ac, gateRoleRead, coded)
 	require.Error(t, got)

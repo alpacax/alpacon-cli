@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// Operations HandleWorkSessionError reports; each is also the WorkSession scope it requires.
+const (
+	OperationCommand = "command"
+	OperationWebFTP  = "webftp"
+	OperationWebsh   = "websh"
+)
+
 type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
 type workSessionErrorCtx struct {
@@ -74,7 +81,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 }
 
 func workSessionTokenNote(operation string) string {
-	if operation == "websh" {
+	if operation == OperationWebsh {
 		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs 'alpacon login' without -t."
 	}
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."

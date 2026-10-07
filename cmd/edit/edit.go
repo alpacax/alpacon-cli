@@ -87,7 +87,7 @@ redirections, or '&&' will not work.`,
 		}, deps)
 		if err != nil {
 			printPreservedTempPath(result)
-			utils.HandleWorkSessionError(err, "webftp", target.Server, authMethod, workSessionID)
+			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
 			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
 		}
 

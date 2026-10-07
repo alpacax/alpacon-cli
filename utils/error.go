@@ -70,7 +70,10 @@ const (
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
-	APITokenScopeMissing = "api_token_scope_missing"
+	// The token-scope gate's refusals: the token's scopes do not cover this call, or
+	// the server could not resolve the call's action to a scope at all.
+	APITokenScopeMissing          = "api_token_scope_missing"
+	APITokenScopeActionUnresolved = "api_token_scope_action_unresolved"
 
 	// WorkSession gate codes the server returns
 	WorkSessionRequired         = "work_session_required"
