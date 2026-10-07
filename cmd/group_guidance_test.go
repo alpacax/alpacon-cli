@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/cmd/approval"
+	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/cmd/workspace"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
@@ -50,4 +52,6 @@ func TestGroupNoSubcommandErrorPointsToHelpInsteadOfListingSubcommands(t *testin
 	walk(RootCmd)
 
 	require.GreaterOrEqual(t, len(errs), 25, "expected to inspect the group commands")
+	assert.Contains(t, errs[approval.ApprovalCmd], "Alpacon console")
+	assert.Contains(t, errs[worksession.WorkSessionCmd], "Alpacon console")
 }
