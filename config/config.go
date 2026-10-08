@@ -43,17 +43,18 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 	return saveConfig(&config)
 }
 
-// SwitchWorkspace updates the workspace URL, name and identity in the existing config.
-func SwitchWorkspace(newURL, newName string) error {
+// SwitchWorkspace updates the workspace URL, name, identity and Kubernetes surface
+// answer in one save, so the config never pairs a workspace with another's answer.
+func SwitchWorkspace(newURL, newName string, kubernetesSurface bool) error {
 	// The new URL is built from the schema name, so it is also the identity;
 	// keeping the old workspace's value would name the wrong one.
-	return RestoreWorkspace(newURL, newName, newName)
+	return RestoreWorkspace(newURL, newName, newName, kubernetesSurface)
 }
 
-// RestoreWorkspace writes the URL, host label and schema name back in one save,
-// which is how a failed switch returns to the workspace it left. The schema name
-// may be empty, as it is in a config that predates the field.
-func RestoreWorkspace(url, hostLabel, schemaName string) error {
+// RestoreWorkspace writes the URL, host label, schema name and Kubernetes surface
+// answer back in one save, which is how a failed switch returns to the workspace
+// it left. The schema name may be empty, as it is in a config that predates the field.
+func RestoreWorkspace(url, hostLabel, schemaName string, kubernetesSurface bool) error {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %v", err)
@@ -62,6 +63,7 @@ func RestoreWorkspace(url, hostLabel, schemaName string) error {
 	cfg.WorkspaceURL = url
 	cfg.WorkspaceName = hostLabel
 	cfg.SchemaName = schemaName
+	cfg.KubernetesSurface = kubernetesSurface
 
 	return saveConfig(&cfg)
 }
@@ -153,6 +155,33 @@ func saveConfig(config *Config) error {
 	}
 
 	return nil
+}
+
+// ErrWorkspaceChanged reports that the config names a different workspace than
+// the one a value was fetched for, so the value was not written.
+var ErrWorkspaceChanged = errors.New("the config now names another workspace")
+
+// SetKubernetesSurface records whether the workspace at workspaceURL exposes the
+// Kubernetes surface, leaving every other field as it is. The URL is a parameter,
+// not a fresh read: the answer comes from a network call, and another shell's
+// login or switch during it would otherwise file one workspace's answer under
+// another. When the config no longer names workspaceURL it returns
+// ErrWorkspaceChanged and writes nothing.
+func SetKubernetesSurface(workspaceURL string, enabled bool) error {
+	cfg, err := LoadConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load existing config: %w", err)
+	}
+	if cfg.WorkspaceURL != workspaceURL {
+		return ErrWorkspaceChanged
+	}
+	if cfg.KubernetesSurface == enabled {
+		return nil
+	}
+
+	cfg.KubernetesSurface = enabled
+
+	return saveConfig(&cfg)
 }
 
 func SaveRefreshedAuth0Token(accessToken string, expiresIn int) error {

@@ -18,6 +18,7 @@ import (
 	"github.com/alpacax/alpacon-cli/cmd/exec"
 	"github.com/alpacax/alpacon-cli/cmd/ftp"
 	"github.com/alpacax/alpacon-cli/cmd/iam"
+	"github.com/alpacax/alpacon-cli/cmd/kube"
 	"github.com/alpacax/alpacon-cli/cmd/log"
 	"github.com/alpacax/alpacon-cli/cmd/note"
 	"github.com/alpacax/alpacon-cli/cmd/packages"
@@ -71,9 +72,20 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 }
 
 func Execute() {
+	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	if err := RootCmd.Execute(); err != nil {
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// kubernetesSurfaceEnabled reads the answer the last login or switch recorded;
+// no readable config or no credential means nothing can reach the clusters.
+func kubernetesSurfaceEnabled() bool {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return false
+	}
+	return (cfg.AccessToken != "" || cfg.Token != "") && cfg.KubernetesSurface
 }
 
 func init() {
@@ -170,6 +182,9 @@ func init() {
 
 	// approval
 	RootCmd.AddCommand(approval.ApprovalCmd)
+
+	// kube
+	RootCmd.AddCommand(kube.KubeCmd)
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)

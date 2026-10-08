@@ -21,6 +21,11 @@ type Config struct {
 	// ActiveWorkSessions maps workspace identity (see WorkspaceIdentity) to active work-session UUID.
 	// Nil (not an empty map) when the key is absent from the JSON config file.
 	ActiveWorkSessions map[string]string `json:"active_work_sessions,omitempty"`
+	// KubernetesSurface records the server's surfaces.kubernetes answer from
+	// /api/auth/env, taken at login and on workspace switch; absent means the
+	// server never said yes. It only decides whether 'alpacon kube' is shown—
+	// the server refuses the endpoints on its own, so this is not a control.
+	KubernetesSurface bool `json:"kubernetes_surface,omitempty"`
 }
 
 // WorkspaceIdentity is the value that names the current workspace to the server

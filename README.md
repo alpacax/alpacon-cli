@@ -217,6 +217,15 @@ $ alpacon server create                          # interactive: prompts for name
 $ alpacon server rm <server>
 ```
 
+### Kubernetes clusters
+```bash
+$ alpacon kube ls                                # aliases: k8s, clusters
+$ alpacon kube describe <cluster>
+$ alpacon kube ls --output json
+```
+
+The `kube` group appears only on workspaces whose server reports Kubernetes support. The CLI records that answer at `alpacon login` and `alpacon workspace switch`; elsewhere `kube` is hidden from help, and calling it prints a notice and exits with `1`. If support was turned on after you logged in, run `alpacon login` again.
+
 ### Websh (terminal in your shell)
 ```bash
 $ alpacon websh <server>
