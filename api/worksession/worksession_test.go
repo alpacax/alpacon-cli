@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
 	"time"
@@ -418,6 +419,40 @@ func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
 	for _, item := range result {
 		assert.NotEqual(t, "websh_record", item.Type)
 	}
+}
+
+// The shape switch in `newTimelineContractServer` already fails a read that
+// forgets to opt in: it would answer one unpaginated page, carrying the
+// recording and one item more than the paginated walk returns. This asserts
+// the opt-in on the wire as well, so what the requests name is legible without
+// reading the fake. `page_size` is checked for presence rather than for its
+// value, which belongs to `api.FetchCursorPages` and not to this read.
+func TestGetWorkSessionTimeline_ExcludeRecordsNamesPageSizeThenTheCursor(t *testing.T) {
+	t.Parallel()
+	var sent []url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.URL.Query())
+		w.Header().Set("Content-Type", "application/json")
+		var next any
+		if len(sent) == 1 {
+			next = "page-2"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"next":    next,
+			"results": []TimelineItem{{Type: "command", Line: "ls"}},
+		})
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	require.Len(t, sent, 2)
+	assert.NotEmpty(t, sent[0].Get("page_size"))
+	assert.Empty(t, sent[0].Get("cursor"))
+	assert.NotEmpty(t, sent[1].Get("page_size"))
+	assert.Equal(t, "page-2", sent[1].Get("cursor"))
 }
 
 // A server that does not paginate this route answers the whole list whatever

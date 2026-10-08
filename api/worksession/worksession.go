@@ -147,7 +147,8 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 // The route answers in two shapes and the request picks between them. Naming
 // either `cursor` or `page_size` selects the paginated one, whose `next` is an
 // opaque cursor string and whose pages carry no recording bytes at all; naming
-// neither serves the whole timeline under `results`, recordings embedded. So
+// neither serves the whole timeline under `results`, with the recordings
+// embedded. So
 // includeRecords decides the shape, not just the parameter: there is no
 // paginated read that comes back with recordings in it.
 //
