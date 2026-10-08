@@ -69,6 +69,10 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 		{"kube", "bogus"},
 		{"kube", "ls", "--bogus"},
 		{"--output", "json", "kube", "ls"},
+		{"kube", "config", "prod"},
+		{"kube", "config", "--help"},
+		{"kube", "proxy", "prod"},
+		{"kube", "proxy", "prod", "--port", "18444"},
 	}
 
 	for _, h := range homes {
@@ -113,7 +117,7 @@ func TestKubeGateRootHelp(t *testing.T) {
 
 			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 			if tt.expected {
-				assert.Regexp(t, `(?m)^\s+kube\s+View Kubernetes clusters`, stdout)
+				assert.Regexp(t, `(?m)^\s+kube\s+Access Kubernetes clusters`, stdout)
 			} else {
 				assert.NotRegexp(t, `(?m)^\s+kube\s`, stdout)
 			}
@@ -133,6 +137,8 @@ func TestKubeGateEnabledReachesGroup(t *testing.T) {
 		assert.Contains(t, stdout, "alpacon kube [command]", "%v", args)
 		assert.Regexp(t, `(?m)^\s+ls\s+List Kubernetes clusters`, stdout, "%v", args)
 		assert.Regexp(t, `(?m)^\s+describe\s+Show details of a Kubernetes cluster`, stdout, "%v", args)
+		assert.Regexp(t, `(?m)^\s+config\s+Write a kubeconfig context for a cluster`, stdout, "%v", args)
+		assert.Regexp(t, `(?m)^\s+proxy\s+Run a local proxy for a cluster`, stdout, "%v", args)
 	}
 
 	_, stderr, exitCode := runKubeGate(t, home, "kube")

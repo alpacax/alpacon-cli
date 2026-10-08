@@ -95,6 +95,15 @@ const (
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
 
+	// Refusals of a kube session the server names itself. An AI agent's
+	// WorkSession cannot open one yet; the cluster's agent is not connected;
+	// the agent did not accept the session, which the server then closed; and
+	// the caller has no user name the session could act as.
+	KubeSessionAgentModeNotSupported = "kube_session_agent_mode_not_supported"
+	ClusterNotConnected              = "cluster_not_connected"
+	KubeSessionChannelOpenFailed     = "kube_session_channel_open_failed"
+	KubeSessionPrincipalNotSupported = "kube_session_principal_not_supported"
+
 	// WorkSession extension approval. Every 'work-session extend' request
 	// requires a reason and follows the workspace's approval policy, the same
 	// rule 'work-session create' uses; a session may hold only one pending

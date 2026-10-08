@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -197,9 +199,41 @@ func TestKubeCommandNamesAndAliases(t *testing.T) {
 	assert.Equal(t, []string{"list"}, kubeListCmd.Aliases)
 	assert.Equal(t, []string{"desc"}, kubeDescribeCmd.Aliases)
 
-	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}} {
+	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}, {"config"}, {"proxy"}} {
 		found, _, err := KubeCmd.Find(path)
 		require.NoError(t, err, "%v", path)
 		assert.NotSame(t, KubeCmd, found, "%v must resolve to a subcommand", path)
+	}
+}
+
+// The warning names a real risk only when an earlier KUBECONFIG entry can
+// override what was written.
+func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")
+	t.Setenv("KUBECONFIG", first+string(os.PathListSeparator)+second)
+	withOutputFormat(t, utils.OutputFormatTable)
+
+	tests := []struct {
+		name    string
+		written string
+		warned  bool
+	}{
+		{name: "first file", written: first},
+		{name: "later file", written: second, warned: true},
+		{name: "file outside KUBECONFIG", written: filepath.Join(dir, "other")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr := testutil.CaptureOutput(t, func() {
+				printKubeConfigResult(&kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+			})
+
+			if tt.warned {
+				assert.Contains(t, stderr, "KUBECONFIG lists files before")
+			} else {
+				assert.NotContains(t, stderr, "KUBECONFIG lists files before")
+			}
+		})
 	}
 }

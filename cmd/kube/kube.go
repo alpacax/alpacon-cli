@@ -8,8 +8,9 @@ import (
 var KubeCmd = &cobra.Command{
 	Use:     "kube",
 	Aliases: []string{"k8s", "clusters"},
-	Short:   "View Kubernetes clusters",
-	Long: `View the Kubernetes clusters registered in the workspace.
+	Short:   "Access Kubernetes clusters",
+	Long: `View the Kubernetes clusters registered in the workspace, and write a
+kubeconfig context that lets kubectl reach one under your WorkSession.
 
 Clusters are registered by the agent running inside each cluster, not from
 the CLI. This group appears only when the server reports that Kubernetes
@@ -26,4 +27,6 @@ support is enabled for the workspace; 'alpacon login' and
 func init() {
 	KubeCmd.AddCommand(kubeListCmd)
 	KubeCmd.AddCommand(kubeDescribeCmd)
+	KubeCmd.AddCommand(kubeConfigCmd)
+	KubeCmd.AddCommand(kubeProxyCmd)
 }
