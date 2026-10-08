@@ -64,3 +64,25 @@ type groupSummary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
+
+// ClientTypeCLI is the client_type a session opened from this CLI declares.
+const ClientTypeCLI = "cli"
+
+// KubeSessionCreateRequest opens a proxy session to one cluster. Cluster and
+// WorkSession are UUIDs; WorkSession is left out when no session is active.
+type KubeSessionCreateRequest struct {
+	Cluster     string `json:"cluster"`
+	WorkSession string `json:"work_session,omitempty"`
+	ClientType  string `json:"client_type"`
+}
+
+// KubeSessionResponse is the session the server opened. ChannelToken is the
+// credential kubectl presents to ProxyURL until TokenExpiredAt.
+type KubeSessionResponse struct {
+	ID             string    `json:"id"`
+	Cluster        string    `json:"cluster"`
+	ChannelID      string    `json:"channel_id"`
+	ChannelToken   string    `json:"channel_token"`
+	TokenExpiredAt time.Time `json:"token_expired_at"`
+	ProxyURL       string    `json:"proxy_url"`
+}
