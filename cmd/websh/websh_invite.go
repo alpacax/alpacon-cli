@@ -32,7 +32,7 @@ An invitation email will be sent to each specified address.`,
 
 		err = websh.InviteToSession(alpaconClient, sessionID, emails, readOnly)
 		if err != nil {
-			utils.CliErrorWithExit("Failed to invite users to websh session: %s.", err)
+			utils.CliErrorWithExit("Failed to invite users to websh session: %s.", utils.InteractiveOnly(err, "invite users to a Websh session"))
 		}
 
 		utils.CliSuccess("Invitations have been successfully sent to invitees.")

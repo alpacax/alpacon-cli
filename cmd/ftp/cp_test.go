@@ -46,7 +46,7 @@ func TestIsRemotePath(t *testing.T) {
 		},
 		{
 			name:     "Complex remote path",
-			path:     "admin@prod-docker:~/eunyoung/test.txt",
+			path:     "admin@prod-docker:~/alice/test.txt",
 			expected: true,
 		},
 		{
@@ -224,17 +224,17 @@ func TestCpCommandSSHParsing(t *testing.T) {
 		},
 		{
 			name:         "Local to remote with path",
-			args:         []string{"test.txt", "prod-docker:~/eunyoung/"},
-			expectedArgs: []string{"test.txt", "prod-docker:~/eunyoung/"},
+			args:         []string{"test.txt", "prod-docker:~/alice/"},
+			expectedArgs: []string{"test.txt", "prod-docker:~/alice/"},
 			expectedUser: "",
-			description:  "alpacon cp test.txt prod-docker:~/eunyoung/",
+			description:  "alpacon cp test.txt prod-docker:~/alice/",
 		},
 		{
 			name:         "Remote to local copy",
-			args:         []string{"prod-docker:~/eunyoung/test.txt", "."},
-			expectedArgs: []string{"prod-docker:~/eunyoung/test.txt", "."},
+			args:         []string{"prod-docker:~/alice/test.txt", "."},
+			expectedArgs: []string{"prod-docker:~/alice/test.txt", "."},
 			expectedUser: "",
-			description:  "alpacon cp prod-docker:~/eunyoung/test.txt .",
+			description:  "alpacon cp prod-docker:~/alice/test.txt .",
 		},
 		{
 			name:         "Remote with user to local",
@@ -305,16 +305,16 @@ func TestRequiredCpPatterns(t *testing.T) {
 			shouldBeLocal:  false,
 		},
 		{
-			description:    "alpacon cp test.txt prod-docker:~/eunyoung/",
+			description:    "alpacon cp test.txt prod-docker:~/alice/",
 			command:        "cp",
-			args:           []string{"test.txt", "prod-docker:~/eunyoung/"},
+			args:           []string{"test.txt", "prod-docker:~/alice/"},
 			shouldBeRemote: true, // destination is remote
 			shouldBeLocal:  false,
 		},
 		{
-			description:    "alpacon cp prod-docker:~/eunyoung/test.txt .",
+			description:    "alpacon cp prod-docker:~/alice/test.txt .",
 			command:        "cp",
-			args:           []string{"prod-docker:~/eunyoung/test.txt", "."},
+			args:           []string{"prod-docker:~/alice/test.txt", "."},
 			shouldBeRemote: false, // destination is local
 			shouldBeLocal:  true,
 		},

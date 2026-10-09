@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,9 +217,9 @@ func TestParseCloudWorkspaceURL(t *testing.T) {
 		},
 		{
 			name:          "future region is still parsed from cloud URL shape",
-			workspaceURL:  "https://demo.eu1.alpacon.io",
+			workspaceURL:  "https://demo.zz9.alpacon.io",
 			wantWorkspace: "demo",
-			wantRegion:    "eu1",
+			wantRegion:    "zz9",
 			wantOK:        true,
 		},
 		{
@@ -960,4 +962,46 @@ func TestPrintDeviceCodePrompt(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPersistKubernetesSurface(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
+
+	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.True(t, cfg.KubernetesSurface)
+	assert.Equal(t, "token", cfg.Token)
+
+	// A server that stops reporting the surface turns it back off.
+	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{})
+	cfg, err = config.LoadConfig()
+	require.NoError(t, err)
+	assert.False(t, cfg.KubernetesSurface)
+}
+
+func TestPersistKubernetesSurface_WarnsWithoutConfig(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	})
+
+	assert.Contains(t, stderr, "Could not save whether this workspace supports Kubernetes")
+}
+
+func TestPersistKubernetesSurface_SkipsAnotherWorkspace(t *testing.T) {
+	setTestHome(t, t.TempDir())
+	// Another shell's login replaced the config while this login was in flight.
+	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	})
+
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.False(t, cfg.KubernetesSurface)
+	assert.Contains(t, stderr, "Did not save Kubernetes support for https://ws.example.com")
 }

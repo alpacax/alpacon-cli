@@ -20,6 +20,10 @@ const (
 	certURL        = "/api/cert/certificates/"
 )
 
+// CodeAuthorityCannotBeDeleted rides a 400 on a CA delete: the CA has received a
+// certificate sign request, so the server keeps it and its records.
+const CodeAuthorityCannotBeDeleted = "cert_authority_cannot_be_deleted"
+
 func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignRequestResponse, error) {
 	var response SignRequestResponse
 

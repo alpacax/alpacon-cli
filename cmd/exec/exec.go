@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -52,6 +53,8 @@ is verified. Composition (pipes, redirection, &&) goes inside the script, where
 it is reviewed and hashed with it; a one-off composition around a script stays
 on the ordinary command line. A reviewer can mark an approval standing, and an
 unchanged re-run then stops asking anyone—one changed byte re-queues review.
+Standing lasts the days --reuse-days proposed; with no proposal it lasts
+until the workspace ceiling, or indefinitely when the workspace has none.
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -79,6 +82,12 @@ Flags:
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
+  --reuse-days N                Propose how long an approval of --file stays
+                                reusable, 1 to 366 days. The approver decides
+                                whether to grant reuse; a workspace ceiling lower
+                                than N refuses the request. Without the flag an
+                                opted-in grant lasts until the workspace ceiling,
+                                or indefinitely without one.
   --work-session [UUID]         Attach this command to a work-session.
                                 Overrides the workspace's active session set via
                                 'alpacon work-session use'.
@@ -119,7 +128,9 @@ not somebody else's to grant. --output json emits {"status":"purpose_required",
 The server rejects a command whose command line carries a credential—a
 -p/--password flag, a KEY=VALUE secret such as PGPASSWORD=..., or a
 user:pass@host connection string—before it runs, with exit code 1. Pass the
-secret with --env="KEY" instead; --output json emits an error envelope on
+secret with --env="KEY" instead. A --file script that carries a credential is
+refused the same way; take the secret out of the script and have the script
+read it on the host at run time. --output json emits an error envelope on
 stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
@@ -155,7 +166,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   # /opt/deploy.sh must exist on prod-web; its content is read from the same path
   # locally unless --file-from names another copy. Script arguments go after --.
   alpacon exec --file /opt/deploy.sh root@prod-web -- --fast
-  alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web`,
+  alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web
+
+  # Propose that the approval stay reusable for 30 days; the approver decides
+  alpacon exec --file /opt/deploy.sh --reuse-days 30 root@prod-web -- --fast`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
 	// would otherwise be consumed by Cobra's flag parser.
 	// All flags are parsed manually in the Run function.
@@ -238,8 +252,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			}))
 		}
 		if err != nil {
-			utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+			utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 			if HandleFileExecRefusal(err, parsed.Server) {
+				return
+			}
+			if file != nil && HandleFileExecInlineCredential(err) {
 				return
 			}
 			utils.CliErrorWithExit("failed to submit command on '%s': %s", parsed.Server, err)
@@ -274,10 +291,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	} else {
 		err = RunExecWithApprovalWait(alpaconClient, parsed.Server, parsed.Command, parsed.Username, parsed.Groupname, env, workSessionID, parsed.Purpose, parsed.WaitTimeout(), out)
 	}
-	utils.HandleWorkSessionError(err, "command", parsed.Server, authMethod, workSessionID)
+	utils.HandleWorkSessionError(err, utils.OperationCommand, parsed.Server, authMethod, workSessionID)
 	// A command parked for its purpose is reported first: it has no approval
 	// request yet, so the pending-approval path below would name a queue it is
-	// not in (ADR 0052).
+	// not in.
 	if HandlePurposeDemand(err) {
 		return
 	}
@@ -293,6 +310,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// A file-lane refusal names the server in its guidance, which
 	// HandleCommandResult does not know; it answers only its own codes.
 	if HandleFileExecRefusal(err, parsed.Server) {
+		return
+	}
+	if file != nil && HandleFileExecInlineCredential(err) {
 		return
 	}
 	HandleCommandResult(err, parsed.InvokedAs)
@@ -340,6 +360,9 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		}
 		if parsed.File.Interpreter != "" {
 			parts = append(parts, "--interpreter "+argvQuote(parsed.File.Interpreter))
+		}
+		if parsed.File.ReuseDays > 0 {
+			parts = append(parts, "--reuse-days "+strconv.Itoa(parsed.File.ReuseDays))
 		}
 		parts = append(parts, parsed.Server)
 		if len(parsed.File.Args) > 0 {

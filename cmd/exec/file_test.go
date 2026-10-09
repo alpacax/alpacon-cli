@@ -72,6 +72,38 @@ func TestParseRemoteExecArgs_File(t *testing.T) {
 			},
 		},
 		{
+			name: "reuse days at the floor as a separate value",
+			args: []string{"--reuse-days", "1", "--file", "/opt/deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", ReuseDays: 1},
+			},
+		},
+		{
+			name: "reuse days at the ceiling with an equals sign",
+			args: []string{"--reuse-days=366", "--file", "/opt/deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", ReuseDays: 366},
+			},
+		},
+		{
+			name: "repeated reuse days keeps the last value",
+			args: []string{"--reuse-days", "1", "--reuse-days=366", "--file", "/opt/deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", ReuseDays: 366},
+			},
+		},
+		{
+			name: "reuse days given after file",
+			args: []string{"--file", "/opt/deploy.sh", "--reuse-days", "30", "prod-web", "--", "--fast"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}, ReuseDays: 30},
+			},
+		},
+		{
 			name: "combines with the generic-lane flags",
 			args: []string{"-u", "deploy", "-g", "ops", "--work-session", "ses-1", "--purpose", "rollout", "--wait", "--file", "/opt/deploy.sh", "prod-web", "--", "--fast"},
 			expected: RemoteExecArgs{
@@ -148,6 +180,41 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 			args:        []string{"--interpreter", "/bin/sh", "prod-web", "uptime"},
 			expectedErr: "--interpreter requires --file",
 		},
+		{
+			name:        "reuse days without file",
+			args:        []string{"--reuse-days", "30", "prod-web", "uptime"},
+			expectedErr: "--reuse-days requires --file; only a verified file execution can propose a reuse duration",
+		},
+		{
+			name:        "reuse days below the floor",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days", "0", "prod-web"},
+			expectedErr: "--reuse-days must be 1 to 366 days: 0",
+		},
+		{
+			name:        "reuse days above the ceiling",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days=367", "prod-web"},
+			expectedErr: "--reuse-days must be 1 to 366 days: 367",
+		},
+		{
+			name:        "negative reuse days",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days", "-5", "prod-web"},
+			expectedErr: "--reuse-days must be 1 to 366 days: -5",
+		},
+		{
+			name:        "reuse days that is not a whole number",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days", "30d", "prod-web"},
+			expectedErr: "--reuse-days requires a whole number of days (1 to 366): 30d",
+		},
+		{
+			name:        "empty reuse days",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days=", "prod-web"},
+			expectedErr: "--reuse-days requires a whole number of days (1 to 366): ",
+		},
+		{
+			name:        "reuse days flag with no value",
+			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days"},
+			expectedErr: "flag needs an argument: --reuse-days",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -221,6 +288,20 @@ func TestLoadFileExecution(t *testing.T) {
 		got, msg := loadFileExecution(FileExecArgs{Path: atCeiling})
 		require.Empty(t, msg)
 		assert.Len(t, got.Content, FileContentMaxBytes)
+	})
+
+	t.Run("no reuse days leaves the proposal zero", func(t *testing.T) {
+		t.Parallel()
+		got, msg := loadFileExecution(FileExecArgs{Path: rawPath})
+		require.Empty(t, msg)
+		assert.Zero(t, got.ReuseDays)
+	})
+
+	t.Run("reuse days travel as the proposal", func(t *testing.T) {
+		t.Parallel()
+		got, msg := loadFileExecution(FileExecArgs{Path: rawPath, ReuseDays: 30})
+		require.Empty(t, msg)
+		assert.Equal(t, 30, got.ReuseDays)
 	})
 
 	t.Run("refuses an empty file", func(t *testing.T) {
@@ -330,6 +411,20 @@ func TestFileExecRefusal(t *testing.T) {
 			wantOK:       true,
 		},
 		{
+			name:         "invalid reuse days names the range and the omission",
+			err:          coded("file_exec_invalid_reuse_days"),
+			wantMessage:  "the server refused the reuse proposal: a reuse duration must be 1 to 366 days",
+			wantHintPart: "omit --reuse-days",
+			wantOK:       true,
+		},
+		{
+			name:         "reuse past the ceiling says to shorten or drop it",
+			err:          coded("file_exec_reuse_exceeds_max"),
+			wantMessage:  "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
+			wantHintPart: "shorter --reuse-days, or omit it",
+			wantOK:       true,
+		},
+		{
 			name:         "line not allowed is a client bug",
 			err:          coded("file_exec_line_not_allowed"),
 			wantMessage:  "the server refused the request: it carried a command line alongside the file",
@@ -401,10 +496,11 @@ func TestReRunHint_File(t *testing.T) {
 				From:        "./deploy.sh",
 				Interpreter: "/bin/sh",
 				Args:        []string{"--fast", "two words"},
+				ReuseDays:   30,
 			},
 		})
 		assert.Equal(t,
-			"alpacon exec -u root -g wheel --work-session ses-1 --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web -- --fast 'two words'",
+			"alpacon exec -u root -g wheel --work-session ses-1 --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh --reuse-days 30 prod-web -- --fast 'two words'",
 			hint.Command)
 	})
 	// The arguments were argv on the first run and reached the server as a
@@ -568,4 +664,108 @@ func TestExecFileLocalRefusalNeverReachesServer(t *testing.T) {
 	assert.Contains(t, stderr, "is empty; a verified file needs content to hash")
 	assert.Nil(t, capture.snapshot(), "no submission may reach the server")
 	assert.NotContains(t, stderr, "failed to submit")
+}
+
+// TestFileExecInlineCredentialRefusal pins the file lane's own answer to
+// command_inline_credential: the secret sits in the script, so the hint sends
+// it out of the script to be read on the host, and never to --env, which the
+// file lane refuses, or to an ordinary command line, which skips the review.
+func TestFileExecInlineCredentialRefusal(t *testing.T) {
+	t.Parallel()
+	coded := func(code string) error {
+		return errors.New("code: " + code + "; source: command")
+	}
+	tests := []struct {
+		name   string
+		err    error
+		wantOK bool
+	}{
+		{name: "inline credential answers", err: coded(utils.CommandInlineCredential), wantOK: true},
+		{name: "wrapped error still answers", err: fmt.Errorf("failed to execute command on 'prod' server: %w", coded(utils.CommandInlineCredential)), wantOK: true},
+		{name: "another code falls through", err: coded("file_exec_env_not_allowed")},
+		{name: "a plain error falls through", err: errors.New("boom")},
+		{name: "nil falls through"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			message, hint, ok := fileExecInlineCredentialRefusal(tt.err)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Empty(t, message)
+				assert.Empty(t, hint)
+				return
+			}
+			assert.Equal(t, fileExecInlineCredentialMessage, message)
+			assert.Contains(t, hint, "Hint:")
+			assert.Contains(t, hint, "out of the script")
+			assert.NotContains(t, hint, "--env")
+			assert.NotContains(t, hint, "alpacon exec")
+			assert.True(t, strings.HasSuffix(hint, "\n"), "hint must end with a newline: %q", hint)
+		})
+	}
+}
+
+// TestExecFileInlineCredentialPrintsFileLaneHint drives command_inline_credential
+// on the file lane through the real exec command: table and --detach print the
+// file lane's hint and not the shell lane's --env example, and JSON mode keeps
+// the server's code in the envelope.
+func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
+	t.Parallel()
+	script := filepath.Join(t.TempDir(), "rotate.sh")
+	require.NoError(t, os.WriteFile(script, []byte("#!/bin/bash\nmysql -pSecret -e 'select 1'\n"), 0o600))
+	respond := func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "command_inline_credential", "source": "command"}`))
+	}
+
+	t.Run("table", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, fileExecInlineCredentialMessage)
+		assert.Contains(t, stderr, "out of the script")
+		assert.NotContains(t, stderr, "--env")
+		assert.NotContains(t, stderr, "-pSecret", "the rejected script must never be echoed back")
+	})
+
+	t.Run("detach", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--detach", "--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, fileExecInlineCredentialMessage)
+		assert.Contains(t, stderr, "out of the script")
+		assert.NotContains(t, stderr, "failed to submit")
+	})
+
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		var capture fileLaneHelperCapture
+		ts := newFileLaneServer(&capture, respond)
+		defer ts.Close()
+
+		stdout, stderr, exitCode := runExecHelper(t, ts.URL,
+			"--output", "json", "--file", "/opt/rotate.sh", "--file-from", script, "prod")
+		assert.Equal(t, 1, exitCode)
+		assert.Empty(t, stdout)
+		var envelope struct {
+			ErrorCode string `json:"error_code"`
+			Message   string `json:"message"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
+		assert.Equal(t, utils.CommandInlineCredential, envelope.ErrorCode)
+		assert.Contains(t, envelope.Message, fileExecInlineCredentialMessage)
+	})
 }

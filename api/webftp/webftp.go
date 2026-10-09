@@ -34,10 +34,8 @@ func GetWebFTPLogList(ac *client.AlpaconClient, tail int, serverName string, use
 		params["action"] = action
 	}
 
+	// On error the entries read so far are still projected and returned.
 	entries, err := api.FetchCursorPages[WebFTPLogEntry](ac, webftpLogURL, params, tail)
-	if err != nil {
-		return nil, err
-	}
 
 	var logList []WebFTPLogAttributes
 	for _, entry := range entries {
@@ -61,5 +59,5 @@ func GetWebFTPLogList(ac *client.AlpaconClient, tail int, serverName string, use
 		})
 	}
 
-	return logList, nil
+	return logList, err
 }

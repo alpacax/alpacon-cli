@@ -45,7 +45,7 @@ func TestGetWorkspacesFromToken(t *testing.T) {
 				"https://alpacon.io/workspaces": []map[string]any{
 					{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
 					{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
-					{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "dev"},
+					{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "zz9"},
 				},
 			},
 			expectErr: false,
@@ -231,7 +231,7 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 		"https://alpacon.io/workspaces": []map[string]any{
 			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
 			{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
-			{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "dev"},
+			{"schema_name": "ws3", "auth0_id": "org_ghi", "region": "zz9"},
 		},
 	})
 
@@ -257,9 +257,9 @@ func TestValidateAndBuildWorkspaceURL(t *testing.T) {
 			expectErr:  false,
 		},
 		{
-			name:       "Switch to ws3 in dev",
+			name:       "Switch to ws3 in a third region",
 			targetName: "ws3",
-			expectURL:  "https://ws3.dev.alpacon.io",
+			expectURL:  "https://ws3.zz9.alpacon.io",
 			expectName: "ws3",
 			expectErr:  false,
 		},
@@ -301,4 +301,40 @@ func TestValidateAndBuildWorkspaceURL_InvalidToken(t *testing.T) {
 
 	_, _, err := ValidateAndBuildWorkspaceURL(cfg, "ws1")
 	assert.Error(t, err)
+}
+
+func TestGetWorkspaceList_MarksCurrentBySchemaName(t *testing.T) {
+	t.Parallel()
+	token := buildTestJWT(t, map[string]any{
+		"https://alpacon.io/workspaces": []map[string]any{
+			{"schema_name": "ws1", "auth0_id": "org_abc", "region": "ap1"},
+			{"schema_name": "ws2", "auth0_id": "org_def", "region": "us1"},
+		},
+	})
+
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want string
+	}{
+		{"renamed slug", config.Config{WorkspaceName: "renamed-slug", SchemaName: "ws2"}, "ws2"},
+		{"legacy config with only the host label", config.Config{WorkspaceName: "ws1"}, "ws1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tt.cfg.AccessToken = token
+
+			entries, err := GetWorkspaceList(tt.cfg)
+
+			require.NoError(t, err)
+			var marked []string
+			for _, e := range entries {
+				if e.Current == "*" {
+					marked = append(marked, e.Name)
+				}
+			}
+			assert.Equal(t, []string{tt.want}, marked)
+		})
+	}
 }

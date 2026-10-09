@@ -49,9 +49,5 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	auditList, err := audit.GetAuditLogList(alpaconClient, tail, userName, app, model)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to get audit logs: %s.", err)
-	}
-
-	utils.PrintTable(auditList)
+	utils.PrintListOrExit(auditList, err, "Failed to get audit logs")
 }

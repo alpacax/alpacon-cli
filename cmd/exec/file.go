@@ -12,20 +12,25 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// FileContentMaxBytes is the server's ceiling on a verified file's content
-// (ADR 0053): 64 KB, counted in UTF-8 bytes. Checked locally so an oversized
-// script is refused before it travels.
+// FileContentMaxBytes is the server's ceiling on a verified file's content:
+// 64 KB, counted in UTF-8 bytes. Checked locally so an oversized script is
+// refused before it travels.
 const FileContentMaxBytes = 65536
 
 // DefaultInterpreter runs a verified file when --interpreter names none.
 const DefaultInterpreter = "/bin/bash"
 
-// fileExecRefusals maps the server's file-lane error codes (alpacon-server
-// utils/error_codes.py, ADR 0053) to guidance. Codes mirror the server by
-// hand—nothing enforces the sync, so fileExecRefusal answers only for codes it
-// carries and leaves the rest to the generic error path. The two clientBug
-// entries name fields this CLI never sends on the file lane: reaching one means
-// the request builder regressed, not that the user did anything wrong.
+const (
+	reuseDaysMin = 1
+	reuseDaysMax = 366
+)
+
+// fileExecRefusals maps the server's file-lane error codes to guidance. Codes
+// mirror the server by hand—nothing enforces the sync, so fileExecRefusal
+// answers only for codes it carries and leaves the rest to the generic error
+// path. The two clientBug entries name fields this CLI never sends on the file
+// lane: reaching one means the request builder regressed, not that the user
+// did anything wrong.
 var fileExecRefusals = []struct {
 	code, message, hint string
 	// needsServer says message and hint are Sprintf formats taking the server
@@ -69,6 +74,16 @@ var fileExecRefusals = []struct {
 		hint:    "set the variables inside the script, where they are reviewed and hashed with it.\n",
 	},
 	{
+		code:    "file_exec_invalid_reuse_days",
+		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", reuseDaysMin, reuseDaysMax),
+		hint:    "propose a duration in that range, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
+	},
+	{
+		code:    "file_exec_reuse_exceeds_max",
+		message: "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
+		hint:    "resubmit with a shorter --reuse-days, or omit it; an opted-in grant then lasts until the workspace ceiling.\n",
+	},
+	{
 		code:      "file_exec_line_not_allowed",
 		message:   "the server refused the request: it carried a command line alongside the file",
 		clientBug: true,
@@ -81,9 +96,10 @@ var fileExecRefusals = []struct {
 }
 
 // FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter and the arguments after --. From and
-// Interpreter are as typed, empty when the flag was not given; loadFileExecution
-// fills the defaults, so a re-run hint can repeat only what the user said.
+// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
+// From and Interpreter are as typed, empty when the flag was not given;
+// loadFileExecution fills the defaults, so a re-run hint can repeat only what
+// the user said.
 type FileExecArgs struct {
 	// Path is the script's location on the target server, and by default the
 	// local file the content is read from.
@@ -94,6 +110,8 @@ type FileExecArgs struct {
 	Interpreter string
 	// Args are passed to the script as given, one argv entry each.
 	Args []string
+	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
+	ReuseDays int
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -124,6 +142,7 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		Interpreter: interpreter,
 		Args:        spec.Args,
 		Content:     content,
+		ReuseDays:   spec.ReuseDays,
 	}, ""
 }
 
@@ -229,12 +248,39 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 	return "", "", false
 }
 
+const fileExecInlineCredentialMessage = "server rejected this script—it carries a credential"
+
+// fileExecInlineCredentialHint replaces credentialInlineHint on the file lane.
+// --env is refused alongside --file, and an ordinary command line would run the
+// script unreviewed, so it names neither.
+const fileExecInlineCredentialHint = "take the secret out of the script and have the script read it from a file or the environment on the host at run time, so it is not stored with the reviewed script.\n"
+
+func fileExecInlineCredentialRefusal(err error) (message, hint string, ok bool) {
+	if !isCommandInlineCredentialError(err) {
+		return "", "", false
+	}
+	return fileExecInlineCredentialMessage, denialHintLine(fileExecInlineCredentialHint), true
+}
+
 // HandleFileExecRefusal reports a file-lane refusal and exits 1, or returns
 // false when err is something else. Under --output json the envelope carries the
 // server's code; table mode prints the message and the hint. It runs before
 // HandleCommandResult, which knows no server name and would print the raw code.
 func HandleFileExecRefusal(err error, serverName string) bool {
 	message, hint, ok := fileExecRefusal(err, serverName)
+	if !ok {
+		return false
+	}
+	reportCodedRefusal("command", err, message, hint)
+	return true
+}
+
+// HandleFileExecInlineCredential reports command_inline_credential with the
+// file lane's hint and exits 1, or returns false when err is something else.
+// Call it only on the file lane: the shell lane shares the code and answers it
+// in HandleCommandResult with --env.
+func HandleFileExecInlineCredential(err error) bool {
+	message, hint, ok := fileExecInlineCredentialRefusal(err)
 	if !ok {
 		return false
 	}

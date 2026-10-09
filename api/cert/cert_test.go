@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -386,6 +387,24 @@ func TestDeleteCSR(t *testing.T) {
 	ac := newTestClient(server)
 	err := DeleteCSR(ac, "test-csr-id")
 	assert.NoError(t, err)
+}
+
+func TestDeleteCA_RefusedWithHistory(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":"cert_authority_cannot_be_deleted"}`))
+	}))
+	defer server.Close()
+
+	ac := newTestClient(server)
+	err := DeleteCA(ac, "test-ca-id")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, CodeAuthorityCannotBeDeleted, code)
 }
 
 func TestDownloadCertificateByCSR(t *testing.T) {

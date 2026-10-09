@@ -155,7 +155,10 @@ line carries a credential—a -p/--password flag, a KEY=VALUE secret such as
 PGPASSWORD=..., or a user:pass@host connection string—with exit code 1. Pass
 the secret with --env="KEY" instead; --output json emits an error envelope on
 stderr with error_code command_inline_credential.
-Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
+Requires an active WorkSession when using Browser login (Auth0). Token auth (API
+token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
+but cannot open an interactive terminal or watch, join, or invite to a session—those
+need 'alpacon login' without -t.`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
 
@@ -189,7 +192,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon websh watch SESSION_ID            # Watch a session (read-only, staff/superuser only)
   alpacon websh invite SESSION_ID --email user@example.com
   alpacon websh close SESSION_ID            # Close a session
-  alpacon websh force-close SESSION_ID      # Force close (admin only)
+  alpacon websh force-close SESSION_ID      # Force close (Superuser only)
 
 Flags:
   -u, --username [USER_NAME]         Specify the username for command execution.
@@ -289,8 +292,8 @@ Note: All flags must be placed before the server name.
 			}))
 
 			if err != nil {
-				utils.HandleWorkSessionError(err, "websh", serverName, authMethod, workSessionID)
-				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, err)
+				utils.HandleWorkSessionError(err, utils.OperationWebsh, serverName, authMethod, workSessionID)
+				utils.CliErrorWithExit("Failed to create websh session for '%s' server: %s.", serverName, utils.InteractiveOnly(err, "open an interactive Websh terminal"))
 			}
 		}
 		// Set up sudo MFA listener in background so it doesn't delay

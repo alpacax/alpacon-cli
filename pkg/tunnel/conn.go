@@ -9,9 +9,9 @@ import (
 
 // WebSocketConn wraps a WebSocket connection to implement io.ReadWriteCloser interface.
 type WebSocketConn struct {
-	conn       *websocket.Conn
-	readBuffer []byte
-	writeMu    sync.Mutex
+	conn    *websocket.Conn
+	message io.Reader
+	writeMu sync.Mutex
 }
 
 func NewWebSocketConn(conn *websocket.Conn) *WebSocketConn {
@@ -19,23 +19,24 @@ func NewWebSocketConn(conn *websocket.Conn) *WebSocketConn {
 }
 
 func (w *WebSocketConn) Read(b []byte) (int, error) {
-	if len(w.readBuffer) > 0 {
-		n := copy(b, w.readBuffer)
-		w.readBuffer = w.readBuffer[n:]
-		return n, nil
-	}
+	for {
+		if w.message == nil {
+			_, r, err := w.conn.NextReader()
+			if err != nil {
+				return 0, err
+			}
+			w.message = r
+		}
 
-	_, msg, err := w.conn.ReadMessage()
-	if err != nil {
-		return 0, err
+		n, err := w.message.Read(b)
+		if err != io.EOF {
+			return n, err
+		}
+		w.message = nil
+		if n > 0 {
+			return n, nil
+		}
 	}
-
-	n := copy(b, msg)
-	if n < len(msg) {
-		w.readBuffer = msg[n:]
-	}
-
-	return n, nil
 }
 
 func (w *WebSocketConn) Write(b []byte) (int, error) {

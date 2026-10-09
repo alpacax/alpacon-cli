@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -10,7 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-// PurposeMaxLength is the server's ceiling on a stated purpose (ADR 0052).
+// PurposeMaxLength is the server's ceiling on a stated purpose.
 // Checked here so an over-long one is a usage error rather than a 400 that
 // costs a parked command its one demand.
 const PurposeMaxLength = 2000
@@ -26,8 +27,8 @@ const PurposeMaxLength = 2000
 // statement the assessor and the audit record attribute to the requester, so
 // the text itself reaches the server as typed.
 //
-// The ceiling is counted in runes, not bytes. The server validates with DRF's
-// CharField(max_length=...), which counts characters, so len() would refuse a
+// The ceiling is counted in runes, not bytes. The server limits purpose to
+// 2000 characters, counted in characters not bytes, so len() would refuse a
 // Korean purpose at roughly 666 of them—while telling the caller the server
 // would refuse it, which at that length is untrue.
 func checkPurpose(subject, purpose string) (string, string) {
@@ -41,6 +42,18 @@ func checkPurpose(subject, purpose string) (string, string) {
 	return trimmed, ""
 }
 
+// checkReuseDays returns the days to propose, or a message when raw is not a whole number in range.
+func checkReuseDays(raw string) (int, string) {
+	days, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Sprintf("--reuse-days requires a whole number of days (%d to %d): %s", reuseDaysMin, reuseDaysMax, raw)
+	}
+	if days < reuseDaysMin || days > reuseDaysMax {
+		return 0, fmt.Sprintf("--reuse-days must be %d to %d days: %d", reuseDaysMin, reuseDaysMax, days)
+	}
+	return days, ""
+}
+
 // RemoteExecArgs holds parsed arguments for remote command execution.
 type RemoteExecArgs struct {
 	Username      string
@@ -49,8 +62,8 @@ type RemoteExecArgs struct {
 	OutputFormat  string
 	Server        string
 	Command       string
-	// What this command is for (ADR 0052). Sent on submission, so the assessor
-	// judges with it on the first pass and no demand is issued.
+	// What this command is for. Sent on submission, so the assessor judges
+	// with it on the first pass and no demand is issued.
 	Purpose string
 	// InvokedAs selects which syntax a hint renders its example in. The caller
 	// sets it, not ParseRemoteExecArgs: websh command mode marks its args
@@ -62,9 +75,9 @@ type RemoteExecArgs struct {
 	Wait         bool
 	ShowHelp     bool
 	Err          string
-	// File is set by --file and selects the verified file lane (ADR 0053), in
-	// which case Command is empty and the words after -- are the script's
-	// arguments. Nil on the generic lane, so every existing caller reads as before.
+	// File is set by --file and selects the verified file lane, in which case
+	// Command is empty and the words after -- are the script's arguments. Nil
+	// on the generic lane, so every existing caller reads as before.
 	File *FileExecArgs
 }
 
@@ -90,6 +103,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		username, groupname, workSessionID, outputFormat, server string
 		purpose                                                  string
 		filePath, fileFrom, interpreter                          string
+		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
 		wait                                                     bool
@@ -204,6 +218,16 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if !strings.HasPrefix(interpreter, "/") {
 				return RemoteExecArgs{Err: fmt.Sprintf("--interpreter must be an absolute path (starting with /): %s", interpreter)}
 			}
+		case arg == "--reuse-days" || strings.HasPrefix(arg, "--reuse-days="):
+			var raw, errMsg string
+			raw, i, errMsg = extractFlagValue(args, i, "--reuse-days")
+			if errMsg != "" {
+				return RemoteExecArgs{Err: errMsg}
+			}
+			var msg string
+			if reuseDays, msg = checkReuseDays(raw); msg != "" {
+				return RemoteExecArgs{Err: msg}
+			}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -247,6 +271,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if interpreter != "" {
 			return RemoteExecArgs{Err: "--interpreter requires --file"}
 		}
+		if reuseDays > 0 {
+			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+		}
 	} else {
 		if len(env) > 0 {
 			return RemoteExecArgs{
@@ -287,6 +314,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			From:        fileFrom,
 			Interpreter: interpreter,
 			Args:        commandParts,
+			ReuseDays:   reuseDays,
 		}
 		return parsed
 	}

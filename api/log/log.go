@@ -23,10 +23,8 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, tail int) ([]
 		"server": serverID,
 	}
 
+	// On error the entries read so far are still projected and returned.
 	entries, err := api.FetchCursorPages[LogEntry](ac, getSystemLogURL, params, tail)
-	if err != nil {
-		return nil, err
-	}
 
 	var logList []LogAttributes
 	for _, log := range entries {
@@ -38,7 +36,7 @@ func GetSystemLogList(ac *client.AlpaconClient, serverName string, tail int) ([]
 		})
 	}
 
-	return logList, nil
+	return logList, err
 }
 
 func getLogLevel(level int) string {

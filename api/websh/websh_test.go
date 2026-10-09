@@ -324,6 +324,30 @@ func TestGetSessionRecords_FollowsCursor(t *testing.T) {
 	assert.Equal(t, "ls -la", records[1].Record)
 }
 
+func TestGetSessionRecords_KeepsRecordsReadBeforeAFailure(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(api.CursorListResponse[SessionRecord]{
+				Next:    "TOKEN2",
+				Results: []SessionRecord{{AddedAt: "t1", Record: "docker ps"}},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"detail":"internal server error"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	records, err := GetSessionRecords(ac, "sess-1", "", 50)
+
+	require.Error(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "docker ps", records[0].Record)
+}
+
 func TestGetSessionRecords_QueryHitsSearchEndpoint(t *testing.T) {
 	t.Parallel()
 	var gotQuery string
@@ -1024,13 +1048,17 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		case dialHeaders <- r.Header.Clone():
 		default:
 		}
+		// Counted before the handshake completes: the client re-sends the
+		// terminal size as soon as it has the 101, so a count taken after
+		// Upgrade can still be pending when the test reads it.
+		upgrade := upgrades.Add(1)
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if !assert.NoError(t, err) {
 			return
 		}
 		defer func() { _ = ws.Close() }()
 
-		if upgrades.Add(1) == 1 {
+		if upgrade == 1 {
 			// A service going down for a restart is not the session ending.
 			_ = ws.WriteControl(
 				websocket.CloseMessage,

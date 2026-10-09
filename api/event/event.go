@@ -229,11 +229,11 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 	return postCommand(ac, commandRequest)
 }
 
-// SubmitFileCommand submits a verified file execution (ADR 0053): the same
-// endpoint as SubmitCommand, selected onto the file lane by the file object. The
-// body carries no line, data or env—the server derives the first two and
-// refuses all three by key presence. A nil Args is sent as an empty list, which
-// is the server's default and the shape the contract names.
+// SubmitFileCommand submits a verified file execution: the same endpoint as
+// SubmitCommand, selected onto the file lane by the file object. The body
+// carries no line, data or env—the server derives the first two and refuses
+// all three by key presence. A nil Args is sent as an empty list, which is the
+// server's default and the shape the contract names.
 func SubmitFileCommand(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -280,7 +280,7 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 }
 
 // AnswerPurposeDemand states what a parked command is for and sends it back
-// through verification (ADR 0052). The server re-judges it once with the purpose
+// through verification. The server re-judges it once with the purpose
 // in hand; whatever that second verdict is—run, hold for a human, or deny—is
 // reached by exactly the path an un-parked command takes.
 //
@@ -322,7 +322,7 @@ func execTimeout() time.Duration {
 
 // isPollWaitStatus reports a status the poll keeps waiting on: running, or—when
 // resuming through an approval hold—the hold itself and the transient "error"
-// compute_status the server emits in the approve→deliver window.
+// status the server reports between approval and delivery to the agent.
 func isPollWaitStatus(status string, waitApproval bool) bool {
 	return IsRunningStatus(status) ||
 		(waitApproval && (IsAwaitingApprovalStatus(status) || status == "error"))
@@ -411,7 +411,7 @@ func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command
 	return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
-// RunFileCommandStreaming is RunCommandStreaming for the file lane (ADR 0053).
+// RunFileCommandStreaming is RunCommandStreaming for the file lane.
 // Only the submission differs: the command it creates is followed, polled and
 // read like any other.
 func RunFileCommandStreaming(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {

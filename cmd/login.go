@@ -28,7 +28,7 @@ const (
 )
 
 // knownCloudRegions are the Alpacon Cloud regions shown when --region is omitted.
-// Source: 10-alpacon-web constants.ts, 06-account settings.py. Update on release.
+// Add a region here when it launches.
 var knownCloudRegions = []string{"us1", "ap1"}
 
 var (
@@ -162,6 +162,14 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			}
 
 		}
+
+		// CreateConfig above stored only the host label; the schema name is what
+		// stays fixed when the workspace's URL slug is renamed.
+		if err := config.SetSchemaName(envInfo.Auth0.SchemaName); err != nil {
+			utils.CliWarning("Could not save the workspace identity: %s. Run 'alpacon login' again if workspace commands fail.", err)
+		}
+		persistKubernetesSurface(workspaceURL, envInfo)
+
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
@@ -193,6 +201,18 @@ func init() {
 	loginCmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Do not open the browser automatically")
 	loginCmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace name for Alpacon Cloud login")
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
+}
+
+// persistKubernetesSurface records surfaces.kubernetes after every branch's CreateConfig reset it.
+// A failed write only keeps 'alpacon kube' hidden, so it warns rather than failing the login.
+func persistKubernetesSurface(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
+	err := config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
+	switch {
+	case errors.Is(err, config.ErrWorkspaceChanged):
+		utils.CliWarning("Did not save Kubernetes support for %s: %s since this login started.", workspaceURL, err)
+	case err != nil:
+		utils.CliWarning("Could not save whether this workspace supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login.", err)
+	}
 }
 
 func promptForLoginTarget(cfg config.Config) (workspaceURL, workspaceName, baseDomain string, err error) {

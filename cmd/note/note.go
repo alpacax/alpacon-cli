@@ -1,8 +1,7 @@
 package note
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var NoteCmd = &cobra.Command{
 	Aliases: []string{"notes"},
 	Short:   "Manage notes attached to servers",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon note list', 'alpacon note create', 'alpacon note describe', 'alpacon note update', or 'alpacon note delete'. Run 'alpacon note --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

@@ -57,8 +57,8 @@ func newFileLaneCaptureServer(t *testing.T, capture *fileLaneBodyCapture) *httpt
 	}))
 }
 
-// TestCommandRequestMarshal_FileLaneOmitsRefusedKeys pins the wire contract of
-// ADR 0053: the server refuses a file-lane body carrying line, data or env by
+// TestCommandRequestMarshal_FileLaneOmitsRefusedKeys pins the wire contract: the
+// server refuses a file-lane body carrying line, data or env by
 // key presence—an empty string counts—so the keys must be absent, not empty.
 func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 	t.Parallel()
@@ -101,6 +101,62 @@ func TestCommandRequestMarshal_FileLaneOmitsRefusedKeys(t *testing.T) {
 			"content": "#!/bin/bash\nset -euo pipefail\n"
 		}
 	}`, string(body))
+}
+
+func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
+	t.Parallel()
+	file := func(reuseDays int) *CommandRequest {
+		return &CommandRequest{
+			Server:   "srv-1",
+			RunAfter: []string{},
+			File: &FileExecution{
+				Path:        "/opt/deploy.sh",
+				Interpreter: "/bin/bash",
+				Args:        []string{},
+				Content:     "#!/bin/bash\n",
+				ReuseDays:   reuseDays,
+			},
+		}
+	}
+
+	t.Run("absent without a proposal", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(file(0))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"username": "",
+			"groupname": "",
+			"scheduled_at": null,
+			"server": "srv-1",
+			"run_after": [],
+			"file": {
+				"path": "/opt/deploy.sh",
+				"interpreter": "/bin/bash",
+				"args": [],
+				"content": "#!/bin/bash\n"
+			}
+		}`, string(body))
+	})
+
+	t.Run("an integer under reuse_days with one", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(file(30))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"username": "",
+			"groupname": "",
+			"scheduled_at": null,
+			"server": "srv-1",
+			"run_after": [],
+			"file": {
+				"path": "/opt/deploy.sh",
+				"interpreter": "/bin/bash",
+				"args": [],
+				"content": "#!/bin/bash\n",
+				"reuse_days": 30
+			}
+		}`, string(body))
+	})
 }
 
 // TestFileLaneRequestMirrorsCommandRequest guards the hand-copied field list:

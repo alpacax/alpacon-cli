@@ -1,8 +1,7 @@
 package authority
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -10,11 +9,7 @@ var AuthorityCmd = &cobra.Command{
 	Use:   "authority",
 	Short: "Manage private certificate authorities",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon authority create', 'alpacon authority list', 'alpacon authority describe', 'alpacon authority update', 'alpacon authority download-crt', 'alpacon authority download-crl', or 'alpacon authority delete'. Run 'alpacon authority --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

@@ -235,3 +235,47 @@ func TestExitCodeUsageError_IsTwoAndDistinct(t *testing.T) {
 	assert.NotEqual(t, ExitCodeServerBusy, ExitCodeUsageError)
 	assert.NotEqual(t, ExitCodeNotApproved, ExitCodeUsageError)
 }
+
+// codedStub stands in for client.apiError, whose message carries no code.
+type codedStub struct{ code string }
+
+func (e *codedStub) Error() string       { return "denied by the server" }
+func (e *codedStub) ErrorCode() string   { return e.code }
+func (e *codedStub) ErrorSource() string { return "" }
+
+func TestInteractiveOnly_RewritesTokenRefusal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"token access control refusal", &codedStub{code: APITokenACLNotAllowed}},
+		{"token scope refusal", &codedStub{code: APITokenScopeMissing}},
+		{"wrapped token refusal", fmt.Errorf("failed to create tunnel session: %w", &codedStub{code: APITokenACLNotAllowed})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := InteractiveOnly(tt.err, "open a tunnel")
+			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t and try again")
+		})
+	}
+}
+
+func TestInteractiveOnly_PassesOtherErrorsThrough(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{"no error", nil},
+		{"another coded refusal", &codedStub{code: WorkSessionRequired}},
+		{"uncoded error", errors.New("connection refused")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.err, InteractiveOnly(tt.err, "open a tunnel"))
+		})
+	}
+}

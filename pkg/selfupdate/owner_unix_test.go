@@ -26,9 +26,24 @@ func TestExecRunnerSeparatesAnAnswerFromAQueryThatCouldNotAnswer(t *testing.T) {
 	_, stalled := ExecRunner("/bin/sh", "-c", "sleep 5")
 	require.ErrorIs(t, stalled, ErrOwnerUnknown, "rpm is killed mid-query exactly when another transaction holds its database")
 
+	_, missing := ExecRunner("alpacon-no-such-package-manager", "-qf", "/usr/local/bin/alpacon")
+	require.Error(t, missing)
+	assert.NotErrorIs(t, missing, ErrOwnerUnknown, "a manager that is not installed here has answered too")
+}
+
+func TestExecRunnerReadsANonZeroExitAsAnAnswer(t *testing.T) {
+	t.Parallel()
 	_, notOwned := ExecRunner("/bin/sh", "-c", "exit 1")
+
 	require.Error(t, notOwned)
-	require.NotErrorIs(t, notOwned, ErrOwnerUnknown, "a non-zero exit is the answer 'this manager does not own it'")
+	assert.NotErrorIs(t, notOwned, ErrOwnerUnknown, "a non-zero exit is the answer 'this manager does not own it'")
+}
+
+func TestExecRunnerAnswersForAMissingManagerEvenPastItsDeadline(t *testing.T) {
+	original := packageQueryTimeout
+	t.Cleanup(func() { packageQueryTimeout = original })
+	// Expired before the exec, as on a runner too slow to start one in time.
+	packageQueryTimeout = 0
 
 	_, missing := ExecRunner("alpacon-no-such-package-manager", "-qf", "/usr/local/bin/alpacon")
 	require.Error(t, missing)
