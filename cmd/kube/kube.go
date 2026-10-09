@@ -1,8 +1,7 @@
 package kube
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -20,10 +19,7 @@ support is enabled for the workspace; 'alpacon login' and
 	// instead of falling through to the help below.
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := cmd.Help(); err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon kube ls' or 'alpacon kube describe'. Run 'alpacon kube --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 
