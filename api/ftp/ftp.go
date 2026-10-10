@@ -1061,16 +1061,15 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 		if werr != nil {
 			return werr
 		}
-		if waited {
-			if probe == nil {
-				// The retried request was the step itself, and it went through.
-				return nil
-			}
-			return step()
+		if waited && probe == nil {
+			// The retried request was the step itself, and it went through.
+			return nil
 		}
-		// Another request's successful wait covered this refusal, yet the step is
-		// refused again: MFA lapsed since. Run it again; a refusal now starts
-		// after that wait and gets a wait of its own.
+		// The wait that ran only proved MFA through the probe, or another
+		// request's successful wait covered this refusal. Run the step again
+		// through the same refusal handling: if MFA lapsed since, the refusal
+		// starts after that wait and gets a wait of its own. Each further wait
+		// needs the user to complete MFA, and a failed one returns above.
 		refusedAt = time.Now()
 	}
 }
