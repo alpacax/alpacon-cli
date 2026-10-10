@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -49,7 +50,10 @@ type mfaRequiredError struct{}
 
 // unprocessedResponseError marks a retried response the server did not act on
 // (429 or 503), so the MFA wait rides through it.
-type unprocessedResponseError struct{ status int }
+type unprocessedResponseError struct {
+	status     int
+	retryAfter time.Duration
+}
 
 type fieldFlag struct {
 	fields *[]fieldInput
@@ -70,6 +74,9 @@ func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.statu
 
 func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
 func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
+
+// RetryAfter is the delay the response asked for; the MFA wait honors it, bounded.
+func (e unprocessedResponseError) RetryAfter() time.Duration { return e.retryAfter }
 
 func (mfaRequiredError) Error() string       { return "MFA required" }
 func (mfaRequiredError) ErrorCode() string   { return utils.AuthMFARequired }
@@ -244,20 +251,20 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			retried, sendErr := sendAPIRequest(ac, opts, request, &lastAttempt)
 			noResponse = sendErr != nil
 			if sendErr != nil {
-				return sendErr
+				return utils.MarkSubmission(sendErr)
 			}
 			response = retried
 			if isMFARequiredResponse(response) {
-				return mfaRequiredError{}
+				return utils.MarkSubmission(mfaRequiredError{})
 			}
 			// SendRawRequest returns every status without an error, so a 429 or 503
 			// has to be named here for the wait to ride through it.
 			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
-				return unprocessedResponseError{status: response.StatusCode}
+				return utils.MarkSubmission(unprocessedResponseError{status: response.StatusCode, retryAfter: utils.RetryAfterFromHeader(response.Header)})
 			}
 			return nil
 		}
-		handleErr := utils.HandleCommonErrors(mfaRequiredError{}, "", mfa.WorkspaceErrorCallbacks(ac, retry))
+		handleErr := utils.HandleCommonErrors(utils.MarkSubmission(mfaRequiredError{}), "", mfa.WorkspaceErrorCallbacks(ac, retry))
 		if _, err := stderr.Write(lastAttempt.Bytes()); err != nil {
 			return utils.ExitCodeGeneralError, err
 		}

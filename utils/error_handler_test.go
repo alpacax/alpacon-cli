@@ -73,13 +73,13 @@ func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
 	t.Parallel()
 	t.Run("no callback returns original error", func(t *testing.T) {
 		err := errors.New(`{"code": "user_username_required", "source": ""}`)
-		result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{})
+		result := HandleCommonErrors(MarkSubmission(err), "server1", ErrorHandlerCallbacks{})
 		assert.Equal(t, err, result)
 	})
 
 	t.Run("callback succeeds with retry", func(t *testing.T) {
 		err := errors.New(`{"code": "user_username_required", "source": ""}`)
-		result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
+		result := HandleCommonErrors(MarkSubmission(err), "server1", ErrorHandlerCallbacks{
 			OnUsernameRequired: func() error { return nil },
 			RetryOperation:     func() error { return nil },
 		})
@@ -89,7 +89,7 @@ func TestHandleCommonErrors_UsernameRequired(t *testing.T) {
 	t.Run("callback fails", func(t *testing.T) {
 		err := errors.New(`{"code": "user_username_required", "source": ""}`)
 		cbErr := errors.New("username prompt failed")
-		result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
+		result := HandleCommonErrors(MarkSubmission(err), "server1", ErrorHandlerCallbacks{
 			OnUsernameRequired: func() error { return cbErr },
 		})
 		assert.Equal(t, cbErr, result)
@@ -120,11 +120,11 @@ func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
 	withFastRetry(t)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) < 3 {
-				return typedMFARefusal()
+				return MarkSubmission(typedMFARefusal())
 			}
 			return nil
 		},
@@ -142,11 +142,11 @@ func TestHandleCommonErrors_MFA_AnotherErrorEndsTheWait(t *testing.T) {
 	retryErr := errors.New("session creation failed")
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) == 1 {
-				return typedMFARefusal()
+				return MarkSubmission(typedMFARefusal())
 			}
 			return retryErr
 		},
@@ -161,11 +161,11 @@ func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 	withFastTimeout(t)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
-			return typedMFARefusal()
+			return MarkSubmission(typedMFARefusal())
 		},
 	})
 
@@ -180,7 +180,7 @@ func TestHandleCommonErrors_MFA_NoRetryReturnsTheRefusal(t *testing.T) {
 	err := errors.New(mfaRefusal)
 	var prompted atomic.Bool
 
-	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(err), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { prompted.Store(true); return nil },
 	})
 
@@ -199,14 +199,14 @@ func TestHandleCommonErrors_MFA_RidesThroughUnprocessedAttempts(t *testing.T) {
 	withFastRetry(t)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			switch retryCount.Add(1) {
 			case 1, 2:
-				return statusError(http.StatusServiceUnavailable)
+				return MarkSubmission(statusError(http.StatusServiceUnavailable))
 			case 3:
-				return typedMFARefusal()
+				return MarkSubmission(typedMFARefusal())
 			default:
 				return nil
 			}
@@ -223,11 +223,11 @@ func TestHandleCommonErrors_MFA_EndsAfterConsecutiveUnprocessedAttempts(t *testi
 	withFastRetry(t)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
-			return statusError(http.StatusTooManyRequests)
+			return MarkSubmission(statusError(http.StatusTooManyRequests))
 		},
 	})
 
@@ -241,11 +241,11 @@ func TestHandleCommonErrors_MFA_GatewayErrorEndsTheWait(t *testing.T) {
 	withFastRetry(t)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
-			return statusError(http.StatusBadGateway)
+			return MarkSubmission(statusError(http.StatusBadGateway))
 		},
 	})
 
@@ -264,17 +264,20 @@ func TestIsUnprocessedRequestError(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"dial failure", dial, true},
-		{"wrapped dial failure", fmt.Errorf("submit: %w", dial), true},
-		{"read failure after sending", read, false},
-		{"429", statusError(http.StatusTooManyRequests), true},
-		{"503", statusError(http.StatusServiceUnavailable), true},
-		{"502", statusError(http.StatusBadGateway), false},
-		{"504", statusError(http.StatusGatewayTimeout), false},
-		{"403", statusError(http.StatusForbidden), false},
-		{"plain error", errors.New("boom"), false},
-		{"503 after the side effect", MarkProcessed(statusError(http.StatusServiceUnavailable)), false},
-		{"dial failure after the side effect", fmt.Errorf("read output: %w", MarkProcessed(dial)), false},
+		{"dial failure", MarkSubmission(dial), true},
+		{"wrapped dial failure", MarkSubmission(fmt.Errorf("submit: %w", dial)), true},
+		{"read failure after sending", MarkSubmission(read), false},
+		{"429", MarkSubmission(statusError(http.StatusTooManyRequests)), true},
+		{"503", MarkSubmission(statusError(http.StatusServiceUnavailable)), true},
+		{"502", MarkSubmission(statusError(http.StatusBadGateway)), false},
+		{"504", MarkSubmission(statusError(http.StatusGatewayTimeout)), false},
+		{"403", MarkSubmission(statusError(http.StatusForbidden)), false},
+		{"plain error", MarkSubmission(errors.New("boom")), false},
+		// Without the tag an error is a later request's: the operation already
+		// took effect, whatever the status or dial failure says.
+		{"untagged 503", statusError(http.StatusServiceUnavailable), false},
+		{"untagged dial failure", dial, false},
+		{"tag hidden by wrapping", fmt.Errorf("read output: %w", MarkSubmission(statusError(http.StatusServiceUnavailable))), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -291,7 +294,7 @@ func TestHandleCommonErrors_MFA_UntypedRefusalEndsTheWait(t *testing.T) {
 	untyped := errors.New(mfaRefusal)
 	var retryCount atomic.Int32
 
-	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
@@ -303,9 +306,10 @@ func TestHandleCommonErrors_MFA_UntypedRefusalEndsTheWait(t *testing.T) {
 	assert.Equal(t, int32(1), retryCount.Load())
 }
 
-// An error raised after the operation took effect ends the wait whatever it
-// carries, a 503 or even a typed MFA refusal: the operation must not run again.
-func TestHandleCommonErrors_MFA_ProcessedErrorEndsTheWait(t *testing.T) {
+// An error from a request after the side-effecting one is untagged and ends the
+// wait whatever it carries, a 503 or even a typed MFA refusal: the operation
+// must not run again.
+func TestHandleCommonErrors_MFA_UntaggedErrorEndsTheWait(t *testing.T) {
 	withFastRetry(t)
 	cases := []struct {
 		name string
@@ -313,31 +317,33 @@ func TestHandleCommonErrors_MFA_ProcessedErrorEndsTheWait(t *testing.T) {
 	}{
 		{"503", statusError(http.StatusServiceUnavailable)},
 		{"typed MFA refusal", typedMFARefusal()},
+		{"tag hidden by wrapping", fmt.Errorf("read output: %w", MarkSubmission(statusError(http.StatusServiceUnavailable)))},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			processed := MarkProcessed(fmt.Errorf("read output: %w", tc.err))
+			late := fmt.Errorf("read output: %w", tc.err)
 			var retryCount atomic.Int32
 
-			result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+			result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 				OnMFARequired: func(string) error { return nil },
 				RetryOperation: func() error {
 					retryCount.Add(1)
-					return processed
+					return late
 				},
 			})
 
-			assert.Equal(t, processed, result)
+			assert.Equal(t, late, result)
 			assert.Equal(t, int32(1), retryCount.Load())
 		})
 	}
 }
 
-// An operation whose very first attempt took effect is never re-run, even when
-// what failed after it reads as an MFA refusal.
-func TestHandleCommonErrors_ProcessedErrorRunsNoCallback(t *testing.T) {
+// An error that is not the side-effecting request's own is returned as is, with
+// no callback run: the operation already took effect, even when the error reads
+// as an MFA refusal.
+func TestHandleCommonErrors_UntaggedErrorRunsNoCallback(t *testing.T) {
 	t.Parallel()
-	err := MarkProcessed(typedMFARefusal())
+	err := typedMFARefusal()
 	var called atomic.Bool
 	mark := func() { called.Store(true) }
 
@@ -348,7 +354,19 @@ func TestHandleCommonErrors_ProcessedErrorRunsNoCallback(t *testing.T) {
 	})
 
 	assert.Equal(t, err, result)
-	assert.False(t, called.Load(), "no callback may run on a processed error")
+	assert.False(t, called.Load(), "no callback may run on an untagged error")
+}
+
+// The error HandleCommonErrors returns carries no tag, so an enclosing retry
+// loop cannot take it for a refused request.
+func TestHandleCommonErrors_ReturnsNoTag(t *testing.T) {
+	t.Parallel()
+	inner := statusError(http.StatusServiceUnavailable)
+
+	result := HandleCommonErrors(MarkSubmission(inner), "server1", ErrorHandlerCallbacks{})
+
+	assert.Equal(t, inner, result)
+	assert.False(t, IsSubmissionError(result))
 }
 
 type retryAfterTestError struct {
@@ -376,12 +394,12 @@ func TestHandleCommonErrors_MFA_HonorsRetryAfter(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				var attempts []time.Time
-				result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+				result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 					OnMFARequired: func(string) error { return nil },
 					RetryOperation: func() error {
 						attempts = append(attempts, time.Now())
 						if len(attempts) == 1 {
-							return retryAfterTestError{statusError(http.StatusTooManyRequests), tc.after}
+							return MarkSubmission(retryAfterTestError{statusError(http.StatusTooManyRequests), tc.after})
 						}
 						return nil
 					},
@@ -403,15 +421,15 @@ func TestHandleCommonErrors_MFA_SendsNoAttemptPastTheDeadline(t *testing.T) {
 		start := time.Now()
 		var last time.Time
 		var attempts int
-		result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
 			OnMFARequired: func(string) error { return nil },
 			RetryOperation: func() error {
 				attempts++
 				last = time.Now()
 				if time.Since(start) >= maxRetryDuration-30*time.Second {
-					return retryAfterTestError{statusError(http.StatusTooManyRequests), time.Minute}
+					return MarkSubmission(retryAfterTestError{statusError(http.StatusTooManyRequests), time.Minute})
 				}
-				return typedMFARefusal()
+				return MarkSubmission(typedMFARefusal())
 			},
 		})
 
@@ -422,4 +440,23 @@ func TestHandleCommonErrors_MFA_SendsNoAttemptPastTheDeadline(t *testing.T) {
 		assert.Equal(t, 150, attempts)
 		assert.Equal(t, last, time.Now(), "the wait ends without sitting out a gap nothing follows")
 	})
+}
+
+// A multi-step operation behind a retry callback that tags nothing must never
+// be replayed: whatever its later requests answer, a transient 503 included,
+// the wait does not take it for a refused submission.
+func TestHandleCommonErrors_UntaggedOperationIsNeverReplayed(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+
+	result := HandleCommonErrors(typedMFARefusal(), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return MarkSubmission(statusError(http.StatusServiceUnavailable))
+		},
+	})
+
+	require.Error(t, result)
+	assert.Zero(t, retryCount.Load(), "an operation that tagged no request must not be retried at all")
 }

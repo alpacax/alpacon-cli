@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -219,45 +221,58 @@ func IsFatalClientError(status int) bool {
 	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
-// processedError marks an error raised after the server accepted the request
-// that carries an operation's side effect. See MarkProcessed.
-type processedError struct{ err error }
+// submissionError tags an error as the response or dial failure of the one
+// request that carries an operation's side effect. See MarkSubmission.
+type submissionError struct{ err error }
 
-func (e *processedError) Error() string { return e.err.Error() }
-func (e *processedError) Unwrap() error { return e.err }
+func (e *submissionError) Error() string { return e.err.Error() }
+func (e *submissionError) Unwrap() error { return e.err }
 
-// MarkProcessed marks err, if any, as raised after the server accepted the
-// request that carries the operation's side effect: the command submission,
-// the upload or download create, the session or tunnel create. From there on
-// the operation has taken effect, so whatever fails after it is the
-// operation's result, never a reason to send it again. An operation that
-// makes more requests after that one returns their errors through here.
+// MarkSubmission tags err, if any, as the error of the request that carries the
+// operation's side effect itself (the command submission, an upload or download
+// create, a session create, a one-request change), including whatever lookup
+// precedes that request. Only such an error says the server did or did not act,
+// so only it can be retried after MFA or ridden through when it is unprocessed.
 //
-// The status and dial error underneath stay readable, but
-// IsUnprocessedRequestError reports false for the whole chain, and
-// HandleCommonErrors does not re-run the operation on it.
-func MarkProcessed(err error) error {
-	if err == nil {
-		return nil
+// The tag is read off the error exactly as returned, never through wrapping: an
+// operation that makes further requests after the one it tagged returns their
+// errors untagged, and a caller that wraps a tagged error hides the tag. An
+// untagged error is therefore the safe default, "the operation already took
+// effect": HandleCommonErrors passes it through and the wait ends on it. The
+// status and dial error underneath stay readable through the tag.
+func MarkSubmission(err error) error {
+	if err == nil || IsSubmissionError(err) {
+		return err
 	}
-	return &processedError{err: err}
+	return &submissionError{err: err}
 }
 
-// IsProcessedError reports whether err went through MarkProcessed.
-func IsProcessedError(err error) bool {
-	var processed *processedError
-	return errors.As(err, &processed)
+// IsSubmissionError reports whether err, as returned and not through any
+// wrapping, is the tagged error of an operation's side-effecting request.
+func IsSubmissionError(err error) bool {
+	_, ok := err.(*submissionError)
+	return ok
+}
+
+// endSubmission drops the tag HandleCommonErrors consumed, so an error leaving it
+// cannot make an enclosing retry loop take a later result for a refused request.
+func endSubmission(err error) error {
+	if tagged, ok := err.(*submissionError); ok {
+		return tagged.err
+	}
+	return err
 }
 
 // IsUnprocessedRequestError reports whether err shows the server did not act on
 // the request: the connection never opened, or the server answered 429 or 503.
 // Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
 // which can follow a request that already ran, so a request that is not
-// idempotent may be sent again on it. An error marked by MarkProcessed is never
-// unprocessed, whatever status it carries: it came from a later request of an
-// operation the server already acted on.
+// idempotent may be sent again on it. Only the tagged error of the
+// side-effecting request itself (MarkSubmission) can be unprocessed: any other
+// error came from a later request of an operation the server already acted on,
+// whatever status it carries.
 func IsUnprocessedRequestError(err error) bool {
-	if err == nil || IsProcessedError(err) {
+	if err == nil || !IsSubmissionError(err) {
 		return false
 	}
 	switch HTTPStatusCode(err) {
@@ -283,6 +298,19 @@ func IsTransientRequestError(err error) bool {
 		return true
 	}
 	return !IsFatalClientError(status)
+}
+
+// RetryAfterFromHeader reads a Retry-After header as delta-seconds, the form a
+// throttled response sends. An HTTP-date, a non-positive or an unrepresentable
+// value reads as no hint, since misreading one would stall a wait.
+func RetryAfterFromHeader(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	// The upper bound is what a time.Duration can hold: past it the
+	// multiplication wraps, and a wrapped delay is worse than no hint at all.
+	if err != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 // StructuredErrorCode returns the code a typed error in err's chain carries, or

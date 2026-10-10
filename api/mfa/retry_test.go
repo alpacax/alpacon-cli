@@ -79,7 +79,7 @@ func TestMFACallbacks_RetryTheRefusedRequestUntilItPasses(t *testing.T) {
 			ac := stub.client()
 			gated := func() error {
 				_, err := ac.SendGetRequest(gatedPath)
-				return err
+				return utils.MarkSubmission(err)
 			}
 
 			var err error
@@ -109,7 +109,7 @@ func TestMFACallbacks_StopRetryingAtTheTimeout(t *testing.T) {
 			ac := stub.client()
 			gated := func() error {
 				_, err := ac.SendGetRequest(gatedPath)
-				return err
+				return utils.MarkSubmission(err)
 			}
 
 			var err error

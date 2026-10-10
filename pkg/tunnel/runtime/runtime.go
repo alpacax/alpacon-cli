@@ -94,24 +94,24 @@ func Start(opts StartOptions) (*Runtime, error) {
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
+		return nil, utils.MarkSubmission(fmt.Errorf("failed to create tunnel session: %w", err))
 	}
 
-	// The tunnel session exists from here on, so a failure after it must not
-	// create another: a refused dial would otherwise read as a refused create.
+	// The tunnel session exists from here on; what fails after it is returned
+	// untagged, so a refused dial never reads as a refused create.
 	smuxConfig := config.GetSmuxConfig()
 	headers := alpaconClient.SetWebsocketHeader()
 	wsConn, _, err := newTunnelDialer(smuxConfig.MaxFrameSize).Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		_ = listener.Close()
-		return nil, utils.MarkProcessed(fmt.Errorf("failed to connect to proxy server: %w", err))
+		return nil, fmt.Errorf("failed to connect to proxy server: %w", err)
 	}
 
 	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)
 	if err != nil {
 		_ = listener.Close()
 		_ = wsConn.Close()
-		return nil, utils.MarkProcessed(fmt.Errorf("failed to create smux session: %w", err))
+		return nil, fmt.Errorf("failed to create smux session: %w", err)
 	}
 
 	runtime := &Runtime{

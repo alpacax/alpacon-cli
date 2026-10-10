@@ -378,7 +378,7 @@ func (sl *SudoListener) verifySudoGrant(grantID string) error {
 
 	_, err := sl.ac.SendPostRequest(endpoint, struct{}{})
 	if err != nil {
-		return fmt.Errorf("failed to verify sudo grant: %w", err)
+		return utils.MarkSubmission(fmt.Errorf("failed to verify sudo grant: %w", err))
 	}
 
 	return nil
