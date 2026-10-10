@@ -836,3 +836,25 @@ func TestRunExecWithApprovalWait_StatusHoldAfterApprovalWarnsWithoutReentering(t
 	assert.NotContains(t, stderr, "Re-run the command",
 		"a held job needs no re-run, and the pending text that follows says so")
 }
+
+func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
+	t.Parallel()
+
+	stderrLine, exitCode := remoteCommandOutcome(&event.RemoteCommandError{
+		ExitCode:   1,
+		ErrorPhase: "file_hash_mismatch",
+	})
+	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, 1, strings.Count(stderrLine, "file_hash_mismatch"),
+		"the code must appear once, in brackets: %q", stderrLine)
+	assert.Contains(t, stderrLine, event.DescribePhase("file_hash_mismatch"))
+	assert.Contains(t, stderrLine, "Hint: "+event.PhaseHint("file_hash_mismatch"))
+	assert.Contains(t, stderrLine, "alpacon exec --file")
+
+	// A non-file phase renders exactly as before: no hint line.
+	stderrLine, _ = remoteCommandOutcome(&event.RemoteCommandError{
+		ExitCode:   1,
+		ErrorPhase: "agent_timeout",
+	})
+	assert.Equal(t, utils.Red("Error")+": [agent_timeout] "+event.DescribePhase("agent_timeout")+"\n", stderrLine)
+}

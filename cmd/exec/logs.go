@@ -143,7 +143,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
-				utils.Red("Error"), phase, desc, details.Status)
+				utils.Red("Error"), phase, desc, details.Status) +
+				phaseHintLine(*details.ErrorPhase)
 		} else {
 			stderrLine = fmt.Sprintf("%s: command failed with status: %s\n",
 				utils.Red("Error"), details.Status)
@@ -158,7 +159,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		}
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
-			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
+			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc) +
+				phaseHintLine(*details.ErrorPhase)
 		}
 		return details.Result, stderrLine, exitCode
 	}

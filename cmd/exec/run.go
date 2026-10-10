@@ -950,13 +950,24 @@ func sanitizedPhaseParts(phase string) (id, desc string) {
 		utils.SanitizeTerminalText(event.DescribePhase(phase))
 }
 
+// phaseHintLine returns the indented hint line for a phase, including its
+// trailing newline, or "" when the phase has no hint.
+func phaseHintLine(phase string) string {
+	hint := event.PhaseHint(phase)
+	if hint == "" {
+		return ""
+	}
+	return fmt.Sprintf("Hint: %s\n", utils.SanitizeTerminalText(hint))
+}
+
 // remoteCommandOutcome renders the stderr phase line and exit code for a remote
 // command failure. The command's stdout was already streamed during execution,
 // so it is not re-emitted here. stderrLine already includes its trailing newline.
 func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
 	if remoteErr.ErrorPhase != "" {
 		phase, desc := sanitizedPhaseParts(remoteErr.ErrorPhase)
-		stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
+		stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc) +
+			phaseHintLine(remoteErr.ErrorPhase)
 	}
 	return stderrLine, remoteErr.ExitCode
 }
