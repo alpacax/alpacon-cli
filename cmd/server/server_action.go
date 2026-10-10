@@ -33,10 +33,6 @@ func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 			OnMFARequired: func(srv string) error {
 				return mfa.HandleMFAError(alpaconClient, srv)
 			},
-			CheckMFACompleted: func() (bool, error) {
-				return mfa.CheckMFACompletion(alpaconClient)
-			},
-			RefreshToken: alpaconClient.RefreshToken,
 			RetryOperation: func() error {
 				return server.RequestServerAction(alpaconClient, serverName, action, force)
 			},
