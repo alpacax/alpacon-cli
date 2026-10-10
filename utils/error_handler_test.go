@@ -360,3 +360,40 @@ func TestMarkProcessed(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, HTTPStatusCode(marked), "status stays readable through the marker")
 	assert.ErrorIs(t, marked, inner)
 }
+
+// An error that carries MarkProcessed ends the wait even when its cause is a
+// coded MFA refusal: the operation got past its submission, and another attempt
+// would run it again. The same holds for the first error, which must not start
+// a wait or a retry.
+func TestHandleCommonErrors_ProcessedErrorWithMFACodeStartsNoRetry(t *testing.T) {
+	withFastRetry(t)
+
+	t.Run("first error", func(t *testing.T) {
+		var retryCount atomic.Int32
+		first := MarkProcessed(fmt.Errorf("share failed: %w", codedMFARefusal{}))
+
+		result := HandleCommonErrors(first, "server1", ErrorHandlerCallbacks{
+			OnMFARequired:  func(string) error { return nil },
+			RetryOperation: func() error { retryCount.Add(1); return nil },
+		})
+
+		assert.Equal(t, first, result)
+		assert.Zero(t, retryCount.Load())
+	})
+
+	t.Run("error during the wait", func(t *testing.T) {
+		var retryCount atomic.Int32
+		late := MarkProcessed(fmt.Errorf("status check: %w", codedMFARefusal{}))
+
+		result := HandleCommonErrors(codedMFARefusal{}, "server1", ErrorHandlerCallbacks{
+			OnMFARequired: func(string) error { return nil },
+			RetryOperation: func() error {
+				retryCount.Add(1)
+				return late
+			},
+		})
+
+		assert.Equal(t, late, result)
+		assert.Equal(t, int32(1), retryCount.Load())
+	})
+}

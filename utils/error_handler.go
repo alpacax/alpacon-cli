@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -33,6 +32,13 @@ type ErrorHandlerCallbacks struct {
 // HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
 // Returns nil if error was handled successfully, otherwise returns the original or new error
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
+	// The server already accepted the request this error came after, and the
+	// retry would run the whole operation again, so no code the error carries
+	// (a refusal on a later step included) starts a wait or a retry.
+	if IsProcessedError(err) {
+		return err
+	}
+
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
@@ -118,6 +124,10 @@ func retryUntilMFAAccepted(retry func() error) error {
 		}
 		wait = retryInterval
 		switch {
+		case IsProcessedError(err):
+			// The retried operation got past its submission; running it
+			// again would repeat what the server already did.
+			return err
 		case ErrorCodeOf(err) == AuthMFARequired:
 			failures = 0
 		case IsUnprocessedRequestError(err):
@@ -125,9 +135,7 @@ func retryUntilMFAAccepted(retry func() error) error {
 			if failures >= MaxConsecutivePollFailures {
 				return err
 			}
-			if HTTPStatusCode(err) == http.StatusTooManyRequests {
-				wait = NextPollBackoff(retryInterval, 0, RetryAfter(err))
-			}
+			wait = MFAWaitDelay(err, retryInterval)
 		default:
 			return err
 		}

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -233,8 +235,7 @@ func IsUnprocessedRequestError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var processed *processedError
-	if errors.As(err, &processed) {
+	if IsProcessedError(err) {
 		return false
 	}
 	switch HTTPStatusCode(err) {
@@ -263,6 +264,37 @@ func MarkProcessed(err error) error {
 		return nil
 	}
 	return &processedError{err: err}
+}
+
+// IsProcessedError reports whether err carries MarkProcessed: the server had
+// already accepted the request, so repeating the operation would repeat its
+// side effects, whatever else the error says.
+func IsProcessedError(err error) bool {
+	var processed *processedError
+	return errors.As(err, &processed)
+}
+
+// RetryAfterFromHeader reads a Retry-After header as delta-seconds, the form a
+// throttled response sends; an HTTP-date, a non-positive or an unrepresentable
+// value reads as no hint, since misreading one would stall a wait.
+func RetryAfterFromHeader(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	// The upper bound is what a time.Duration can hold: past it the
+	// multiplication wraps, and a wrapped delay is worse than no hint at all.
+	if err != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// MFAWaitDelay is the gap before the next attempt of an MFA wait that ticks
+// every base: base, except after a 429 that sent a Retry-After, whose delay
+// wins up to a bound (NextPollBackoff).
+func MFAWaitDelay(err error, base time.Duration) time.Duration {
+	if HTTPStatusCode(err) == http.StatusTooManyRequests {
+		return NextPollBackoff(base, 0, RetryAfter(err))
+	}
+	return base
 }
 
 // ErrorCodeOf returns the code a structured server error carries, or "" for an

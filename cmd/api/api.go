@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -49,7 +50,10 @@ type mfaRequiredError struct{}
 
 // unprocessedResponseError marks a retried response the server did not act on
 // (429 or 503), so the MFA wait rides through it.
-type unprocessedResponseError struct{ status int }
+type unprocessedResponseError struct {
+	status     int
+	retryAfter time.Duration
+}
 
 type fieldFlag struct {
 	fields *[]fieldInput
@@ -70,6 +74,9 @@ func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.statu
 
 func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
 func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
+
+// RetryAfter is the delay the response asked for, so the MFA wait honors it on a 429.
+func (e unprocessedResponseError) RetryAfter() time.Duration { return e.retryAfter }
 
 func (mfaRequiredError) Error() string       { return "MFA required" }
 func (mfaRequiredError) ErrorCode() string   { return utils.AuthMFARequired }
@@ -248,7 +255,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 			// SendRawRequest returns every status without an error, so a 429 or 503
 			// has to be named here for the wait to ride through it.
 			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
-				return unprocessedResponseError{status: response.StatusCode}
+				return unprocessedResponseError{status: response.StatusCode, retryAfter: utils.RetryAfterFromHeader(response.Header)}
 			}
 			return nil
 		}

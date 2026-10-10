@@ -330,6 +330,7 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 	ticker := time.NewTicker(sl.pollInterval)
 	defer ticker.Stop()
 
+	tick := sl.pollInterval
 	failures := 0
 	for {
 		select {
@@ -342,16 +343,23 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 			if err == nil {
 				return nil
 			}
-			switch code, _ := utils.ParseErrorResponse(err); {
-			case code == utils.AuthMFARequired:
+			next := sl.pollInterval
+			switch {
+			case utils.ErrorCodeOf(err) == utils.AuthMFARequired:
 				failures = 0
 			case utils.IsUnprocessedRequestError(err):
 				failures++
 				if failures >= utils.MaxConsecutivePollFailures {
 					return err
 				}
+				// A 429 waits the Retry-After the server sent, bounded.
+				next = utils.MFAWaitDelay(err, sl.pollInterval)
 			default:
 				return err
+			}
+			if next != tick {
+				ticker.Reset(next)
+				tick = next
 			}
 		}
 	}
