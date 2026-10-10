@@ -530,8 +530,11 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
 		return runWithPresenceStepUp(ac, serverName, func() error {
+			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
+			stream := event.NewCommandStream(ac)
+			defer stream.Close()
 			return runWithRetry(ac, serverName, func() error {
-				return event.RunFileCommandStreaming(ac, serverName, file, username, groupname, workSessionID, purpose, out)
+				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
 			})
 		})
 	}, waitTimeout, out)
@@ -803,9 +806,15 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 // RunCommandWithRetry executes a remote command with MFA/username-required error
 // handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
+//
+// The attempt and its retries share one output stream: the MFA wait retries a
+// refused submission once a second for minutes, and a stream per attempt would
+// open an event session and a WebSocket each time.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	stream := event.NewCommandStream(ac)
+	defer stream.Close()
 	return runWithRetry(ac, serverName, func() error {
-		return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 	})
 }
 

@@ -256,9 +256,16 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	if err != nil {
 		return SessionResponse{}, err
 	}
+	// The session exists from here on, so a failure after it must not create another.
+	response, err := shareCreatedSession(ac, responseBody, share, readOnly)
+	return response, utils.MarkProcessed(err)
+}
 
+// shareCreatedSession reads the session the server created and, with share,
+// asks for its share link.
+func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, readOnly bool) (SessionResponse, error) {
 	var response SessionResponse
-	err = json.Unmarshal(responseBody, &response)
+	err := json.Unmarshal(responseBody, &response)
 	if err != nil {
 		return SessionResponse{}, err
 	}

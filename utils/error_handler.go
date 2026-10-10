@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// mfaWaitMessage labels the MFA wait. The new flow animates it and the legacy
-// flow prints it once, so it lives here rather than in either branch.
+// mfaWaitMessage labels the wait between showing the MFA link and the retried
+// operation going through.
 const mfaWaitMessage = "Waiting for MFA authentication..."
 
 var maxRetryDuration = 3 * time.Minute
@@ -22,22 +22,22 @@ type ErrorHandlerCallbacks struct {
 	// OnUsernameRequired is called when username is required
 	OnUsernameRequired func() error
 
-	// CheckMFACompleted is called to poll for MFA completion via a lightweight endpoint.
-	// If nil, falls back to the legacy RefreshToken+RetryOperation loop.
-	CheckMFACompleted func() (bool, error)
-
-	// RefreshToken is called before each MFA retry to refresh the access token
-	// so the server can see the latest MFA completion state
-	RefreshToken func() error
-
-	// RetryOperation is called to retry the original operation after error handling
-	// Should return nil on success, error on failure
+	// RetryOperation re-runs the operation that failed. After an MFA prompt it is
+	// called repeatedly until it stops failing with auth_mfa_required, so the
+	// server's refusal is what tells the wait that MFA has not completed yet.
+	// Should return nil on success, error on failure.
 	RetryOperation func() error
 }
 
 // HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
 // Returns nil if error was handled successfully, otherwise returns the original or new error
+//
+// An error marked by MarkProcessed is returned as is: the operation already took
+// effect on the server, so nothing here may run it again.
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
+	if IsProcessedError(err) {
+		return err
+	}
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
@@ -51,80 +51,10 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 			CliErrorWithExit("MFA authentication failed: %s", err)
 		}
 
-		startTime := time.Now()
-
-		if callbacks.CheckMFACompleted != nil {
-			// New flow: poll lightweight completion endpoint, then retry once
-			spinner := NewSpinner(mfaWaitMessage)
-			spinner.Start()
-			for {
-				if time.Since(startTime) > maxRetryDuration {
-					spinner.Stop()
-					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
-				}
-
-				time.Sleep(retryInterval)
-
-				completed, err := callbacks.CheckMFACompleted()
-				if err != nil {
-					// Non-fatal: endpoint may not be deployed yet, keep polling
-					continue
-				}
-				if !completed {
-					continue
-				}
-
-				// The wait the spinner reported is over, so it stops here rather
-				// than at each exit below: RetryOperation can stream a command's
-				// output to stdout, and a frame drawn over that output is erased
-				// with it when the spinner clears its line.
-				spinner.Stop()
-
-				// MFA completed — refresh token and retry once
-				if callbacks.RefreshToken != nil {
-					if err := callbacks.RefreshToken(); err != nil {
-						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
-					}
-				}
-
-				if callbacks.RetryOperation != nil {
-					if err := callbacks.RetryOperation(); err != nil {
-						return err
-					}
-				}
-
-				CliSuccess("MFA authentication completed")
-				return nil
-			}
-		} else {
-			// Legacy flow: RefreshToken + RetryOperation loop. A static line
-			// instead of a spinner: every tick retries the operation, which can
-			// stream to stdout, so there is no stretch of this loop where an
-			// animation would be safe.
-			CliInfo(mfaWaitMessage)
-			for {
-				if time.Since(startTime) > maxRetryDuration {
-					return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
-				}
-
-				time.Sleep(retryInterval)
-
-				if callbacks.RefreshToken != nil {
-					if err := callbacks.RefreshToken(); err != nil {
-						return fmt.Errorf("failed to refresh token; please run 'alpacon login' to re-authenticate: %w", err)
-					}
-				}
-
-				if callbacks.RetryOperation != nil {
-					if err := callbacks.RetryOperation(); err == nil {
-						CliSuccess("MFA authentication completed")
-						return nil
-					}
-				} else {
-					break
-				}
-			}
+		if callbacks.RetryOperation == nil {
+			return err
 		}
+		return retryUntilMFAAccepted(callbacks.RetryOperation)
 
 	case UsernameRequired:
 		if callbacks.OnUsernameRequired == nil {
@@ -146,6 +76,69 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 		// Unknown error code, return original error
 		return err
 	}
+}
 
-	return err
+// retryUntilMFAAccepted re-runs retry once per retryInterval until the server
+// stops refusing it for MFA. The step-up link the user opened names this
+// client, so completing MFA in the browser credits the client the request
+// already comes from: the next attempt passes with the same access token, and
+// no separate completion probe or token refresh is needed to notice.
+//
+// Only a typed auth_mfa_required keeps the wait going, never one read out of
+// message text, and so does an attempt the server never acted on
+// (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
+// brief outage while the user is still in the browser does not end it. A
+// Retry-After on that answer sets the next gap, capped like any poll backoff;
+// a gap that would carry the next attempt past the deadline ends the wait. An error marked by MarkProcessed came after
+// the operation took effect and ends the wait whatever it carries. Any other
+// answer, success or failure, is the operation's own result and ends the wait.
+// The deadline bounds the attempts to about maxRetryDuration / retryInterval.
+func retryUntilMFAAccepted(retry func() error) error {
+	spinner := NewSpinner(mfaWaitMessage)
+	spinner.Start()
+	defer spinner.Stop()
+
+	startTime := time.Now()
+	failures := 0
+	delay := retryInterval
+	for {
+		// An attempt that would start past the deadline is never sent: the wait
+		// ends instead, without sitting out a gap nothing follows.
+		if remaining := maxRetryDuration - time.Since(startTime); delay > remaining {
+			return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
+		}
+
+		time.Sleep(delay)
+
+		// Any attempt may be the one that goes through and streams the
+		// command's output to stdout, and a frame drawn over that output is
+		// erased with it when the spinner clears its line. So the spinner is
+		// off for every attempt and comes back only after a refusal.
+		spinner.Stop()
+		err := retry()
+		if err == nil {
+			CliSuccess("MFA authentication completed")
+			return nil
+		}
+		switch {
+		case IsProcessedError(err):
+			return err
+		case StructuredErrorCode(err) == AuthMFARequired:
+			failures = 0
+			delay = retryInterval
+		case IsUnprocessedRequestError(err):
+			failures++
+			if failures >= MaxConsecutivePollFailures {
+				return err
+			}
+			delay = max(retryInterval, NextPollBackoff(retryInterval, 0, RetryAfter(err)))
+		default:
+			return err
+		}
+		// Off a TTY Start prints a static line rather than animating, and once
+		// is enough for a log.
+		if spinner.enabled {
+			spinner.Start()
+		}
+	}
 }

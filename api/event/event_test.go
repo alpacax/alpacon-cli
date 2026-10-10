@@ -1503,6 +1503,17 @@ type streamingServerConfig struct {
 	heldStatus   string // status the held responses carry; "awaiting_approval" when empty
 	runningPolls int
 	terminal     EventDetails // returned by the detail poll once held+running elapse
+	// submitRefusals is how many leading command submissions are refused with
+	// 403 auth_mfa_required before one is accepted.
+	submitRefusals int
+	// sessionStatus, when set, answers every event session request with it.
+	sessionStatus int
+	sessions      *atomic.Int32 // counts event session requests when set
+	submits       *atomic.Int32 // counts command submissions when set
+	// subscribeStatus, when set, answers every subscription request with it.
+	subscribeStatus int
+	// chunkStatus, when set, answers every chunk request with it.
+	chunkStatus int
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -1549,7 +1560,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	t.Cleanup(wsServer.Close)
 	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
 
-	var pollCount, failCount int
+	var pollCount, failCount, submitN int
 	var mu sync.Mutex
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1557,8 +1568,28 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + cfg.serverID + `","name":"srv"}]}`))
 		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
+			if cfg.sessions != nil {
+				cfg.sessions.Add(1)
+			}
+			if cfg.sessionStatus != 0 {
+				w.WriteHeader(cfg.sessionStatus)
+				_, _ = w.Write([]byte(`{"detail":"refused"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
 		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
+			mu.Lock()
+			submitN++
+			n := submitN
+			mu.Unlock()
+			if cfg.submits != nil {
+				cfg.submits.Add(1)
+			}
+			if n <= cfg.submitRefusals {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"command"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `","server":{"id":"` + cfg.serverID + `"}}]`))
 		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
 			if cfg.onSubscribe != nil {
@@ -1567,9 +1598,19 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				cfg.onSubscribe(string(req.EventType), req.TargetID)
 			}
 			subOnce.Do(func() { close(subscribed) })
+			if cfg.subscribeStatus != 0 {
+				w.WriteHeader(cfg.subscribeStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/chunks/" && r.Method == http.MethodGet:
+			if cfg.chunkStatus != 0 {
+				w.WriteHeader(cfg.chunkStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			fromSeq, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
 			var results []Chunk
 			if cfg.chunksFor != nil {
@@ -2341,4 +2382,66 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A submission refused for MFA is retried once a second for minutes. The stream
+// keeps its one connected listener across those refusals, so the whole wait
+// opens a single event session, and the accepted submission still streams.
+func TestCommandStream_RefusedSubmissionsShareOneSession(t *testing.T) {
+	t.Parallel()
+	var sessions, submits atomic.Int32
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:          "cmd-uuid",
+		serverID:       "srv-uuid",
+		wsChunks:       []ChunkEvent{{Seq: 0, Content: "hello\n"}},
+		terminal:       EventDetails{Status: "completed", Success: boolPtr(true)},
+		submitRefusals: 3,
+		sessions:       &sessions,
+		submits:        &submits,
+	})
+
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	for range 3 {
+		err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+		code, _ := utils.ParseErrorResponse(err)
+		require.Equal(t, utils.AuthMFARequired, code, "got %v", err)
+	}
+	require.NoError(t, stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf))
+
+	assert.Equal(t, "hello\n", stdoutBuf.String())
+	assert.Equal(t, int32(4), submits.Load())
+	assert.Equal(t, int32(1), sessions.Load(), "one event session for the attempt and all its retries")
+}
+
+// A listener that could not connect is not dialed again for the next
+// submission: the stream goes straight to polling.
+func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
+	t.Parallel()
+	var sessions, submits atomic.Int32
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:          "cmd-uuid",
+		serverID:       "srv-uuid",
+		terminal:       EventDetails{Status: "completed", Success: boolPtr(true), Result: "hello\n"},
+		submitRefusals: 1,
+		// A 403 is fatal before the first subscribe, so the connect gives up at once.
+		sessionStatus: http.StatusForbidden,
+		sessions:      &sessions,
+		submits:       &submits,
+	})
+
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	stdoutBuf := &bytes.Buffer{}
+	err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	code, _ := utils.ParseErrorResponse(err)
+	require.Equal(t, utils.AuthMFARequired, code, "got %v", err)
+	sessionsAfterFirst := sessions.Load()
+
+	require.NoError(t, stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf))
+
+	assert.Equal(t, "hello\n", stdoutBuf.String())
+	assert.Equal(t, int32(2), submits.Load())
+	assert.Equal(t, sessionsAfterFirst, sessions.Load(), "the failed listener must not be dialed again")
 }

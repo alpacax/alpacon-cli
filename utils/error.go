@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -218,6 +219,58 @@ func IsFatalClientError(status int) bool {
 	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
+// processedError marks an error raised after the server accepted the request
+// that carries an operation's side effect. See MarkProcessed.
+type processedError struct{ err error }
+
+func (e *processedError) Error() string { return e.err.Error() }
+func (e *processedError) Unwrap() error { return e.err }
+
+// MarkProcessed marks err, if any, as raised after the server accepted the
+// request that carries the operation's side effect: the command submission,
+// the upload or download create, the session or tunnel create. From there on
+// the operation has taken effect, so whatever fails after it is the
+// operation's result, never a reason to send it again. An operation that
+// makes more requests after that one returns their errors through here.
+//
+// The status and dial error underneath stay readable, but
+// IsUnprocessedRequestError reports false for the whole chain, and
+// HandleCommonErrors does not re-run the operation on it.
+func MarkProcessed(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &processedError{err: err}
+}
+
+// IsProcessedError reports whether err went through MarkProcessed.
+func IsProcessedError(err error) bool {
+	var processed *processedError
+	return errors.As(err, &processed)
+}
+
+// IsUnprocessedRequestError reports whether err shows the server did not act on
+// the request: the connection never opened, or the server answered 429 or 503.
+// Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
+// which can follow a request that already ran, so a request that is not
+// idempotent may be sent again on it. An error marked by MarkProcessed is never
+// unprocessed, whatever status it carries: it came from a later request of an
+// operation the server already acted on.
+func IsUnprocessedRequestError(err error) bool {
+	if err == nil || IsProcessedError(err) {
+		return false
+	}
+	switch HTTPStatusCode(err) {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	case 0:
+		var opErr *net.OpError
+		return errors.As(err, &opErr) && opErr.Op == "dial"
+	default:
+		return false
+	}
+}
+
 // IsTransientRequestError reports whether err may not repeat on the next
 // attempt. A missing status covers a request that never reached the server and
 // a response that failed to decode, so a caller must bound its retries.
@@ -230,6 +283,21 @@ func IsTransientRequestError(err error) bool {
 		return true
 	}
 	return !IsFatalClientError(status)
+}
+
+// StructuredErrorCode returns the code a typed error in err's chain carries, or
+// "" if none does. Unlike ParseErrorResponse it never reads a code out of
+// message text, so a code that only appears inside a message, such as an
+// agent's transfer report, does not count.
+func StructuredErrorCode(err error) string {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if coded, ok := e.(codedError); ok {
+			if code := coded.ErrorCode(); code != "" {
+				return code
+			}
+		}
+	}
+	return ""
 }
 
 func ParseErrorResponse(err error) (string, string) {
