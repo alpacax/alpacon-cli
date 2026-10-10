@@ -353,7 +353,7 @@ func TestHandleCommonErrors_MFA_HonorsRetryAfterOn429(t *testing.T) {
 
 func TestMarkProcessed(t *testing.T) {
 	t.Parallel()
-	assert.NoError(t, MarkProcessed(nil))
+	require.NoError(t, MarkProcessed(nil))
 	inner := statusError(http.StatusServiceUnavailable)
 	marked := MarkProcessed(fmt.Errorf("wrapped: %w", inner))
 	assert.False(t, IsUnprocessedRequestError(marked))
