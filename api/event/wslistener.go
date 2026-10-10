@@ -153,7 +153,9 @@ func (w *wsListener) connectAndListen() bool {
 	conn, _, dialErr := dialer.Dial(wsURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
-			w.onDialFailed(dialErr)
+			// The URL carries a channel token in its path, which a URL error prints
+			// whole, so only the host is kept.
+			w.onDialFailed(utils.RedactURLErrorHostOnly(dialErr))
 		}
 		return false
 	}

@@ -104,7 +104,9 @@ func Start(opts StartOptions) (*Runtime, error) {
 	wsConn, _, err := newTunnelDialer(smuxConfig.MaxFrameSize).Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("failed to connect to proxy server: %w", err)
+		// The URL carries a channel token in its path, which a URL error prints
+		// whole, so only the host is kept.
+		return nil, fmt.Errorf("failed to connect to proxy server: %w", utils.RedactURLErrorHostOnly(err))
 	}
 
 	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)
