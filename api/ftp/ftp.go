@@ -1044,9 +1044,16 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 	if retry == nil {
 		retry = step
 	}
+	waits := 0
 	for {
 		err := step()
 		if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
+			return err
+		}
+		// A step still refused after this many waits of its own is not a lapse
+		// but a refusal MFA does not clear; end it instead of issuing links
+		// without limit.
+		if waits >= utils.MaxConsecutivePollFailures {
 			return err
 		}
 
@@ -1060,6 +1067,9 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 		})
 		if werr != nil {
 			return werr
+		}
+		if waited {
+			waits++
 		}
 		if waited && probe == nil {
 			// The retried request was the step itself, and it went through.

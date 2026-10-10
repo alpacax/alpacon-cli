@@ -6,9 +6,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,4 +136,36 @@ func TestTransfer_MFALapsingDuringTheRerunAfterAWaitPromptsAgain(t *testing.T) {
 			assert.Equal(t, tc.wantHits, tc.stub.hits.Load())
 		})
 	}
+}
+
+// A status poll that stays refused after its probe passes, wait after wait,
+// ends with the refusal instead of issuing links without limit.
+func TestPollTransfer_RefusedAfterEveryWaitEnds(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	t.Setenv("HOME", t.TempDir())
+	var links, hits atomic.Int32
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			if r.URL.Path == "/api/auth0/mfa/" {
+				links.Add(1)
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			}
+			// Only the one-request probe passes; the full poll never does.
+			if hits.Add(1)%2 == 0 {
+				return http.StatusOK, `{"success": true, "message": "done"}`
+			}
+			return http.StatusForbidden, mfaRefusal
+		}),
+	}
+
+	var err error
+	synctest.Test(t, func(t *testing.T) {
+		_, _, err = pollTransfer(ac, "srv-id", "upload", "t-1", 30*time.Second, time.Time{})
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "may already have completed")
+	assert.Equal(t, int32(utils.MaxConsecutivePollFailures), links.Load(), "waits are bounded")
 }
