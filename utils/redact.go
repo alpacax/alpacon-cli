@@ -15,7 +15,18 @@ func RedactURL(raw string) string {
 		return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: parsed.Path}).String()
 	}
 	if i := strings.IndexAny(raw, "?#"); i >= 0 {
-		return raw[:i]
+		raw = raw[:i]
+	}
+	// Userinfo sits in the authority, between "://" and the next '/'.
+	if scheme := strings.Index(raw, "://"); scheme >= 0 {
+		start := scheme + len("://")
+		end := len(raw)
+		if slash := strings.IndexByte(raw[start:], '/'); slash >= 0 {
+			end = start + slash
+		}
+		if at := strings.LastIndexByte(raw[start:end], '@'); at >= 0 {
+			raw = raw[:start] + raw[start+at+1:]
+		}
 	}
 	return raw
 }

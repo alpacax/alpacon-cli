@@ -19,6 +19,9 @@ func TestRedactURL(t *testing.T) {
 	assert.Equal(t, "https://bucket.example.com/path/file.zip", RedactURL(signedURL))
 	assert.Equal(t, "wss://host/ws", RedactURL("wss://user:pw@host/ws?token=secret"))
 	assert.Equal(t, "not a url", RedactURL("not a url?token=secret"))
+	// A URL that does not parse still loses its query and its userinfo.
+	assert.Equal(t, "https://host/%zz", RedactURL("https://user:password@host/%zz?token=secret"))
+	assert.Equal(t, "https://host", RedactURL("https://user:password@host?token=secret"))
 }
 
 func TestRedactURLError(t *testing.T) {

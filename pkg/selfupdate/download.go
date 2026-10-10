@@ -101,7 +101,7 @@ func downloadTo(assetURL, destPath string, maxBytes int64) error {
 	client := newHTTPClient(archiveDownloadTimeout)
 	req, err := http.NewRequest(http.MethodGet, assetURL, nil)
 	if err != nil {
-		return err
+		return utils.RedactURLError(err)
 	}
 	req.Header.Set("User-Agent", utils.GetUserAgent())
 
@@ -125,7 +125,7 @@ func downloadTo(assetURL, destPath string, maxBytes int64) error {
 		return err
 	}
 	if overLimit {
-		return fmt.Errorf("downloading %s exceeded %d bytes", assetURL, maxBytes)
+		return fmt.Errorf("downloading %s exceeded %d bytes", utils.RedactURL(assetURL), maxBytes)
 	}
 	return nil
 }
