@@ -1092,7 +1092,7 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 			// ridden through as the full poll rides through it, so a flaky read
 			// does not end the wait.
 			var probeErr error
-			for failures := 0; failures < utils.MaxConsecutivePollFailures; failures++ {
+			for failures := range utils.MaxConsecutivePollFailures {
 				_, probeErr = ac.SendGetRequest(transferStatusURL(transferType, id))
 				if probeErr == nil || !utils.IsTransientRequestError(probeErr) {
 					break
