@@ -169,6 +169,7 @@ func TestDownload_MFAWaitDoesNotDownloadAgainAfterAnAcceptedDownload(t *testing.
 		{
 			name: "bulk",
 			blob: func(t *testing.T) string {
+				t.Helper()
 				return string(createTestZip(t, map[string]string{"a.txt": "a", "b.txt": "b"}))
 			},
 			download: func(ac *client.AlpaconClient, dest string) error {
