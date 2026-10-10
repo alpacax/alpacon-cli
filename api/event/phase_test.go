@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var filePhases = []string{
@@ -48,7 +49,7 @@ func TestStatusOnlyFailureCarriesFilePhaseHint(t *testing.T) {
 	t.Parallel()
 	phase := "file_too_large"
 	err := errorFromDetails(EventDetails{Status: "error", ErrorPhase: &phase})
-	assert.ErrorContains(t, err, "Hint: "+PhaseHint(phase))
+	require.ErrorContains(t, err, "Hint: "+PhaseHint(phase))
 
 	other := "agent_timeout"
 	err = errorFromDetails(EventDetails{Status: "stuck", ErrorPhase: &other})
