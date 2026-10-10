@@ -744,7 +744,11 @@ func errorFromDetails(d EventDetails) error {
 		if phase == "" {
 			return fmt.Errorf("command failed with status: %s", d.Status)
 		}
-		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+		msg := fmt.Sprintf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+		if hint := PhaseHint(phase); hint != "" {
+			msg += "\nHint: " + hint
+		}
+		return errors.New(msg)
 	}
 	switch d.Status {
 	case "completed", "success", "failed":
