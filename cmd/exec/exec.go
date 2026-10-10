@@ -116,6 +116,8 @@ Flags:
   --wait-approval DURATION      Like --wait with a custom wait timeout (e.g. 30m;
                                 default 5m). Implies --wait.
 
+A command admitted by a standing file-execution grant is marked in the result.
+
 Exit code 3 indicates a WorkSession gate denial; run with --output json to
 parse a machine-readable diagnostic on stderr.
 Exit code 4 indicates the sudo command is pending human approval (approve it in

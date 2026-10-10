@@ -101,30 +101,32 @@ type AwaitingPurposeError struct {
 }
 
 type EventAttributes struct {
-	Server      string `json:"server"`
-	Shell       string `json:"shell"`
-	Command     string `json:"command"`
-	Result      string `json:"result"`
-	Status      string `json:"status"`
-	Operator    string `json:"operator"`
-	RequestedAt string `json:"requested_at" table:"Requested At"`
+	Server                string           `json:"server"`
+	Shell                 string           `json:"shell"`
+	Command               string           `json:"command"`
+	Result                string           `json:"result"`
+	Status                string           `json:"status"`
+	Operator              string           `json:"operator"`
+	RequestedAt           string           `json:"requested_at" table:"Requested At"`
+	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
 }
 
 type EventDetails struct {
-	ID            string              `json:"id"`
-	Shell         string              `json:"shell"`
-	Line          string              `json:"line"`
-	Success       *bool               `json:"success"`
-	ExitCode      *int                `json:"exit_code"`
-	ErrorPhase    *string             `json:"error_phase"`
-	Result        string              `json:"result"`
-	Status        string              `json:"status"`
-	Cancellable   bool                `json:"cancellable"`
-	ResponseDelay float64             `json:"response_delay"`
-	ElapsedTime   float64             `json:"elapsed_time"`
-	AddedAt       time.Time           `json:"added_at"`
-	Server        types.ServerSummary `json:"server"`
-	RequestedBy   types.UserSummary   `json:"requested_by"`
+	ID                    string              `json:"id"`
+	Shell                 string              `json:"shell"`
+	Line                  string              `json:"line"`
+	Success               *bool               `json:"success"`
+	ExitCode              *int                `json:"exit_code"`
+	ErrorPhase            *string             `json:"error_phase"`
+	Result                string              `json:"result"`
+	Status                string              `json:"status"`
+	Cancellable           bool                `json:"cancellable"`
+	ResponseDelay         float64             `json:"response_delay"`
+	ElapsedTime           float64             `json:"elapsed_time"`
+	AddedAt               time.Time           `json:"added_at"`
+	Server                types.ServerSummary `json:"server"`
+	RequestedBy           types.UserSummary   `json:"requested_by"`
+	ApprovedFileExecution *json.RawMessage    `json:"approved_file_execution,omitempty"`
 	// What the requester said this command is for, and when the ask expires.
 	// Both are absent on a server predating the read exposure, and on any
 	// command nobody was asked—which is every command until the gate is

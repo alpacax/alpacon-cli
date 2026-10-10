@@ -100,6 +100,26 @@ func TestPrintTable_TableOutput(t *testing.T) {
 	assert.Contains(t, got, "1")
 }
 
+func TestPrintTable_HiddenTableFieldRemainsInJSON(t *testing.T) {
+	type item struct {
+		Name  string `json:"name" table:"Name"`
+		Grant string `json:"grant" table:"-"`
+	}
+	items := []item{{Name: "alpha", Grant: "grant-1"}}
+	var table string
+	withFormat("table", func() {
+		table = testutil.CaptureStdout(t, func() { PrintTable(items) })
+	})
+	assert.Contains(t, table, "alpha")
+	assert.NotContains(t, table, "GRANT")
+	assert.NotContains(t, table, "grant-1")
+	var body string
+	withFormat("json", func() {
+		body = testutil.CaptureStdout(t, func() { PrintTable(items) })
+	})
+	assert.JSONEq(t, `[{"name":"alpha","grant":"grant-1"}]`, body)
+}
+
 func TestPrintTable_TableOutput_StripsControlSequences(t *testing.T) {
 	// Each payload hides the second command behind a control sequence.
 	// cell pins the join: the separator drops, it does not become a space.
