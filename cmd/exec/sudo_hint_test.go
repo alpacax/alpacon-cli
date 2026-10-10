@@ -74,11 +74,11 @@ func TestSudoDenialHint(t *testing.T) {
 			name: "workspace-mfa-disabled points at the workspace setting, not the session",
 			code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 			wantContains: []string{
-				"workspace access-control update",
+				"web console (Settings \u2192 Access control)",
 				"self-hosted server without MFA sign-in",
 				"server administrator has to change it",
 			},
-			wantNotContains: []string{"work-session update"},
+			wantNotContains: []string{"work-session update", "alpacon workspace access-control update"},
 		},
 		{
 			name:            "session-missing reads as retryable, not as a policy problem",

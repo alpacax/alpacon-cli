@@ -29,6 +29,14 @@ const (
 	// no MFA sign-in. Retrying or completing MFA cannot lift it.
 	WorkspaceSudoWithMFAStepUpUnavailable = "workspace_sudo_with_mfa_step_up_unavailable"
 
+	// WorkspaceExecutionControlConsoleOnly rides a 403: the edit loosens
+	// execution control, which the server accepts from the web console only.
+	WorkspaceExecutionControlConsoleOnly = "workspace_execution_control_console_only"
+
+	// ApprovalPolicyConsoleOnly rides a 403: approval policies are written from
+	// the web console only.
+	ApprovalPolicyConsoleOnly = "approval_policy_console_only"
+
 	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
 	// the credential is an API token, a service token or a non-interactive token,
 	// so it cannot complete sudo MFA. Signing in interactively can.

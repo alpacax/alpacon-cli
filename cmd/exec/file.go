@@ -76,12 +76,12 @@ var fileExecRefusals = []struct {
 	{
 		code:    "file_exec_invalid_reuse_days",
 		message: fmt.Sprintf("the server refused the reuse proposal: a reuse duration must be %d to %d days", reuseDaysMin, reuseDaysMax),
-		hint:    "propose a duration in that range, or omit --reuse-days to propose none; an opted-in grant then lasts until the workspace ceiling, or indefinitely without one.\n",
+		hint:    "propose a duration in that range, or omit --reuse-days to propose none; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90).\n",
 	},
 	{
 		code:    "file_exec_reuse_exceeds_max",
 		message: "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
-		hint:    "resubmit with a shorter --reuse-days, or omit it; an opted-in grant then lasts until the workspace ceiling.\n",
+		hint:    "resubmit with a shorter --reuse-days, or omit it; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90).\n",
 	},
 	{
 		code:      "file_exec_line_not_allowed",
