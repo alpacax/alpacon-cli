@@ -75,7 +75,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 	tests := []struct {
 		name     string
 		stub     func(t *testing.T) *stepStub
-		run      func(ac *client.AlpaconClient, t *testing.T) error
+		run      func(t *testing.T, ac *client.AlpaconClient) error
 		wantHits int32
 	}{
 		{
