@@ -1,6 +1,9 @@
 package approval
 
 import (
+	"fmt"
+	"strings"
+
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -67,6 +70,64 @@ work session details that are omitted from the table view.`,
 			{"Reviewed at", reviewedAt},
 			{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
 		}
+		var script string
+		var hasScript bool
+		if fe := fileExecutionOf(req); fe != nil {
+			rows = append(rows, fileExecutionRows(fe)...)
+			script, hasScript = fileExecutionScript(fe)
+		}
 		utils.PrintTable(rows)
+		if hasScript {
+			fmt.Println()
+			fmt.Println(script)
+		}
 	},
+}
+
+func fileExecutionOf(req *approvalapi.ApprovalRequest) *approvalapi.FileExecution {
+	if req.Command == nil {
+		return nil
+	}
+	return req.Command.FileExecution
+}
+
+// fileExecutionRows are the "File execution" rows of the describe table. The
+// server controls every value, so each is stripped of terminal escapes.
+func fileExecutionRows(fe *approvalapi.FileExecution) []describeRow {
+	clean := utils.SanitizeTerminalText
+	args := make([]string, len(fe.Args))
+	for i, a := range fe.Args {
+		args[i] = clean(a)
+	}
+	rows := []describeRow{
+		{"File execution", ""},
+		{"  Interpreter", clean(fe.Interpreter)},
+		{"  Path", clean(fe.Path)},
+		{"  Arguments", strings.Join(args, " ")},
+	}
+	if fe.RunAs != "" {
+		rows = append(rows, describeRow{"  Run as", clean(fe.RunAs)})
+	}
+	if fe.RunAsGroup != "" {
+		rows = append(rows, describeRow{"  Run as group", clean(fe.RunAsGroup)})
+	}
+	rows = append(rows, describeRow{"  SHA-256", clean(fe.SHA256)})
+	if fe.ReuseDays != nil {
+		rows = append(rows, describeRow{"  Proposed reuse days", fmt.Sprintf("%d", *fe.ReuseDays)})
+	}
+	if fe.GrantDays != nil {
+		rows = append(rows, describeRow{"  Reuse days if approved", fmt.Sprintf("%d", *fe.GrantDays)})
+	}
+	return rows
+}
+
+// fileExecutionScript renders the script the approver is asked to clear. When
+// the server omits the content, only the SHA-256 above identifies the file, and
+// the text says so instead of showing an empty script.
+func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
+	if fe.Content == nil {
+		return "Script: not included in this response; the SHA-256 above identifies the file.", true
+	}
+	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
+	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
 }
