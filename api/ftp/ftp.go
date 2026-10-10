@@ -953,13 +953,26 @@ func parseRefusal(body []byte) (code, source string) {
 	return refusal.Code, refusal.Source
 }
 
-// mfaGate serializes the MFA step of a transfer's requests: the bulk status
-// polls run concurrently, and one MFA prompt covers all of them. mfaDoneAt is
-// when the last wait ended with the server accepting a request again.
-var (
-	mfaGate   sync.Mutex
-	mfaDoneAt time.Time
-)
+// mfaGate serializes the MFA step of the requests of transfers on one client
+// and server: the bulk status polls run concurrently, and one MFA prompt covers
+// all of them. doneAt is when the last wait ended with the server accepting a
+// request again. Transfers of another client or server have their own gate.
+type mfaGate struct {
+	mu     sync.Mutex
+	doneAt time.Time
+}
+
+type mfaGateKey struct {
+	ac       *client.AlpaconClient
+	serverID string
+}
+
+var mfaGates sync.Map // mfaGateKey -> *mfaGate
+
+func gateFor(ac *client.AlpaconClient, serverID string) *mfaGate {
+	gate, _ := mfaGates.LoadOrStore(mfaGateKey{ac: ac, serverID: serverID}, &mfaGate{})
+	return gate.(*mfaGate)
+}
 
 // transferStep sends one request of a transfer the server already created, as
 // its own retry unit. If MFA freshness lapsed and the server refuses it for
@@ -974,13 +987,14 @@ func transferStep(ac *client.AlpaconClient, serverID string, step func() error) 
 		return err
 	}
 
-	mfaGate.Lock()
-	defer mfaGate.Unlock()
+	gate := gateFor(ac, serverID)
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
 	err = utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(string) error {
 			// A sibling request completed MFA while this one waited its turn:
 			// the link is already done, so only this request is retried.
-			if mfaDoneAt.After(started) {
+			if gate.doneAt.After(started) {
 				return nil
 			}
 			return mfa.HandleMFAErrorForServerID(ac, serverID)
@@ -990,7 +1004,7 @@ func transferStep(ac *client.AlpaconClient, serverID string, step func() error) 
 		},
 	})
 	if err == nil {
-		mfaDoneAt = time.Now()
+		gate.doneAt = time.Now()
 	}
 	return err
 }

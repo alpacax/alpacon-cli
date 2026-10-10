@@ -458,5 +458,5 @@ func TestHandleCommonErrors_UntaggedOperationIsNeverReplayed(t *testing.T) {
 	})
 
 	require.Error(t, result)
-	assert.LessOrEqual(t, retryCount.Load(), int32(1), "an operation that tagged no request must not be sent again on a 503")
+	assert.Zero(t, retryCount.Load(), "an operation that tagged no request must not be retried at all")
 }
