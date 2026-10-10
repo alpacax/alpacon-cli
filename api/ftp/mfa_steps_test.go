@@ -98,7 +98,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				t.Helper()
 				return UploadLocalFileAs(ac, writeTempFile(t, "a.txt"), "my-server", "/home/alice/a.txt", "", "", "")
 			},
-			wantHits: 2,
+			wantHits: 3, // refused, the wait's one-request probe, then the poll
 		},
 		{
 			name: "bulk upload trigger",
@@ -121,7 +121,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 				return err
 			},
-			wantHits: 2,
+			wantHits: 3, // refused, the wait's one-request probe, then the poll
 		},
 		{
 			name: "download fetch",

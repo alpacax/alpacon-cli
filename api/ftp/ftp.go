@@ -2,6 +2,7 @@ package ftp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -78,13 +79,16 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 	return pollTransferStatus(ac, transferType, id, timeout, pollTick)
 }
 
-func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
-	var statusURL string
+// transferStatusURL is the status endpoint of an upload or download transfer.
+func transferStatusURL(transferType, id string) string {
 	if transferType == "upload" {
-		statusURL = fmt.Sprintf(uploadStatusURL, id)
-	} else {
-		statusURL = fmt.Sprintf(downloadStatusURL, id)
+		return fmt.Sprintf(uploadStatusURL, id)
 	}
+	return fmt.Sprintf(downloadStatusURL, id)
+}
+
+func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
+	statusURL := transferStatusURL(transferType, id)
 
 	start := time.Now()
 	deadline := start.Add(timeout)
@@ -515,6 +519,20 @@ func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
 	})
 }
 
+// checkFolderReadable fails for a path that does not exist or whose entries
+// cannot be listed.
+func checkFolderReadable(folderPath string) error {
+	dir, err := os.Open(folderPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.Close() }()
+	if _, err := dir.Readdirnames(1); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
 // UploadFolder uploads local folders to a remote server.
 // Each folder is zipped before upload and extracted on the server side.
 // Uses the single upload API for one folder, or the bulk API for multiple folders.
@@ -536,9 +554,10 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		return utils.MarkSubmission(err)
 	}
 
-	// A missing folder fails here, before the server is asked for an upload slot.
+	// A folder that is missing or cannot be listed fails here, before the server
+	// is asked for an upload slot it would then leave orphaned.
 	for _, folderPath := range src {
-		if _, err := os.Stat(folderPath); err != nil {
+		if err := checkFolderReadable(folderPath); err != nil {
 			return err
 		}
 	}
@@ -953,13 +972,16 @@ func parseRefusal(body []byte) (code, source string) {
 	return refusal.Code, refusal.Source
 }
 
-// mfaGate serializes the MFA step of the requests of transfers on one client
-// and server: the bulk status polls run concurrently, and one MFA prompt covers
-// all of them. doneAt is when the last wait ended with the server accepting a
-// request again. Transfers of another client or server have their own gate.
+// mfaGate lets the requests of transfers on one client and server share one MFA
+// wait: the bulk status polls run concurrently and are refused together. The
+// lock is held only for the wait itself. endedAt and endErr record when the
+// last wait ended and how, so a request refused before that moment takes its
+// outcome instead of starting another wait. Transfers of another client or
+// server have their own gate.
 type mfaGate struct {
-	mu     sync.Mutex
-	doneAt time.Time
+	mu      sync.Mutex
+	endedAt time.Time
+	endErr  error
 }
 
 type mfaGateKey struct {
@@ -974,39 +996,62 @@ func gateFor(ac *client.AlpaconClient, serverID string) *mfaGate {
 	return gate.(*mfaGate)
 }
 
+// await runs wait unless one ended after refusedAt, in which case it returns
+// that wait's outcome. waited reports whether this call ran the wait.
+func (g *mfaGate) await(refusedAt time.Time, wait func() error) (waited bool, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.endedAt.After(refusedAt) {
+		return false, g.endErr
+	}
+	err = wait()
+	g.endedAt, g.endErr = time.Now(), err
+	return true, err
+}
+
 // transferStep sends one request of a transfer the server already created, as
 // its own retry unit. If MFA freshness lapsed and the server refuses it for
 // MFA, the user is prompted and only that request is sent again once MFA
 // completes; the transfer is never created a second time. Any other result is
 // returned as is, untagged: a request after the create is never a submission
-// that may be resent.
+// that may be resent. Refusals that arrive together share one MFA wait, and
+// when it fails each of them returns its error without prompting again.
 func transferStep(ac *client.AlpaconClient, serverID string, step func() error) error {
-	started := time.Now()
+	return transferStepProbed(ac, serverID, step, nil)
+}
+
+// transferStepProbed is transferStep for a step that is a whole loop of
+// requests, a status poll: the MFA wait retries probe, one request, and the
+// step runs again in full only after the wait, outside the gate, so the
+// refused steps of sibling transfers proceed in parallel. A nil probe is the
+// step itself.
+func transferStepProbed(ac *client.AlpaconClient, serverID string, step, probe func() error) error {
+	refusedAt := time.Now()
 	err := step()
 	if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
 		return err
 	}
 
-	gate := gateFor(ac, serverID)
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	err = utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
-		OnMFARequired: func(string) error {
-			// A sibling request completed MFA while this one waited its turn:
-			// the link is already done, so only this request is retried.
-			if gate.doneAt.After(started) {
-				return nil
-			}
-			return mfa.HandleMFAErrorForServerID(ac, serverID)
-		},
-		RetryOperation: func() error {
-			return utils.MarkSubmission(step())
-		},
-	})
-	if err == nil {
-		gate.doneAt = time.Now()
+	retry := probe
+	if retry == nil {
+		retry = step
 	}
-	return err
+	waited, werr := gateFor(ac, serverID).await(refusedAt, func() error {
+		return utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
+			OnMFARequired: func(string) error { return mfa.HandleMFAErrorForServerID(ac, serverID) },
+			RetryOperation: func() error {
+				return utils.MarkSubmission(retry())
+			},
+		})
+	})
+	if werr != nil {
+		return werr
+	}
+	if waited && probe == nil {
+		// The retried request was the step itself, and it went through.
+		return nil
+	}
+	return step()
 }
 
 // pollTransfer is PollTransferStatus with the poll as a retry unit. A poll
@@ -1015,14 +1060,24 @@ func transferStep(ac *client.AlpaconClient, serverID string, step func() error) 
 // have completed.
 func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, timeout time.Duration) (success bool, message string, err error) {
 	refused := false
-	err = transferStep(ac, serverID, func() error {
-		var stepErr error
-		success, message, stepErr = PollTransferStatus(ac, transferType, id, timeout)
+	note := func(stepErr error) error {
 		if utils.StructuredErrorCode(stepErr) == utils.AuthMFARequired {
 			refused = true
 		}
 		return stepErr
-	})
+	}
+	err = transferStepProbed(ac, serverID,
+		func() error {
+			var stepErr error
+			success, message, stepErr = PollTransferStatus(ac, transferType, id, timeout)
+			return note(stepErr)
+		},
+		func() error {
+			// One status read: it tells whether MFA went through without
+			// running the whole poll under the gate.
+			_, probeErr := ac.SendGetRequest(transferStatusURL(transferType, id))
+			return note(probeErr)
+		})
 	if err != nil && refused {
 		err = fmt.Errorf("%w (the %s may already have completed on the server; check before running it again)", err, transferType)
 	}
