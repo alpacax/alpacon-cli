@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -216,6 +217,26 @@ func IsFatalClientError(status int) bool {
 		return false
 	}
 	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
+}
+
+// IsUnprocessedRequestError reports whether err shows the server did not act on
+// the request: the connection never opened, or the server answered 429 or 503.
+// Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
+// which can follow a request that already ran, so a request that is not
+// idempotent may be sent again on it.
+func IsUnprocessedRequestError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch HTTPStatusCode(err) {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	case 0:
+		var opErr *net.OpError
+		return errors.As(err, &opErr) && opErr.Op == "dial"
+	default:
+		return false
+	}
 }
 
 // IsTransientRequestError reports whether err may not repeat on the next

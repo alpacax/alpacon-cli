@@ -15,6 +15,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -917,8 +918,6 @@ func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, str
 				return apiTestResponse(status, ct, body), nil
 			case "/api/auth0/mfa/":
 				return apiTestResponse(http.StatusOK, "application/json", `{"mfa_url": "https://example.com/mfa"}`), nil
-			case "/api/auth0/mfa/completion/":
-				return apiTestResponse(http.StatusOK, "application/json", `{"completed": true}`), nil
 			case "/api/auth/env/":
 				return apiTestResponse(http.StatusOK, "application/json", `{"auth0": {"domain": "auth0.example", "client_id": "cid", "audience": "aud", "schema_name": "acme"}}`), nil
 			case "/oauth/token/":
@@ -948,6 +947,87 @@ func TestRunAPI_MFARequiredOpensLinkAndRetriesOnce(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.JSONEq(t, `{"ok":true}`, stdout.String())
 	assert.Equal(t, int32(2), atomic.LoadInt32(calls), "the endpoint must be hit exactly twice")
+}
+
+// The MFA wait is the retried request itself: it keeps going while the endpoint
+// still refuses for MFA and ends on the first answer that is not that refusal.
+// mfaTestServer fails any completion probe as an unexpected request.
+func TestRunAPI_MFARequiredRetriesUntilTheEndpointStopsRefusing(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n <= 2 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusOK, "application/json", `{"ok":true}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.JSONEq(t, `{"ok":true}`, stdout.String())
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls), "the first call, one refused retry, and the one that passes")
+}
+
+// Under -v the refused attempts in between are not printed: stderr shows the
+// first exchange and the one that ended the wait.
+func TestRunAPI_MFAVerboseShowsOnlyTheFirstAndLastAttempt(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n <= 2 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusOK, "application/json", `{"ok":true}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x", Verbose: true}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.Equal(t, 2, strings.Count(stderr.String(), "GET /x HTTP/1.1"), stderr.String())
+}
+
+// A 503 while the user is still in the browser does not end the MFA wait.
+func TestRunAPI_MFAWaitRidesThroughA503(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		switch n {
+		case 1:
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		case 2:
+			return http.StatusServiceUnavailable, "application/json", `{"detail":"unavailable"}`
+		default:
+			return http.StatusOK, "application/json", `{"ok":true}`
+		}
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, code)
+	assert.JSONEq(t, `{"ok":true}`, stdout.String())
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+}
+
+// A wait that runs out on 503s reports the last one like any non-2xx answer:
+// its body on stdout and its status as the error, printed once.
+func TestRunAPI_MFAWaitEndingOn503sReportsTheResponse(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n == 1 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return http.StatusServiceUnavailable, "application/json", `{"detail":"unavailable"}`
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusServiceUnavailable))
+	assert.Equal(t, 1, code)
+	assert.JSONEq(t, `{"detail":"unavailable"}`, stdout.String())
+	assert.NotContains(t, stderr.String(), "HTTP 503", "the caller prints the status, not runAPI")
+	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), atomic.LoadInt32(calls))
 }
 
 func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {
