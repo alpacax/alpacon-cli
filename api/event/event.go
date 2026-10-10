@@ -220,7 +220,7 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	commandRequest := newCommandRequest(serverID, username, groupname, workSessionID, purpose)
 	commandRequest.Shell = "system"
@@ -237,7 +237,7 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 func SubmitFileCommand(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	if file.Args == nil {
 		file.Args = []string{}
@@ -267,7 +267,7 @@ func newCommandRequest(serverID, username, groupname, workSessionID, purpose str
 func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (CommandResponse, error) {
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	var cmdResponse []CommandResponse
 	if err = json.Unmarshal(respBody, &cmdResponse); err != nil {
@@ -485,11 +485,11 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 		return err
 	}
 
-	// The command exists now and may already be running, so nothing that fails
-	// from here on may submit it again.
+	// The command exists now and may already be running; what fails from here on
+	// is returned untagged, so it never submits the command again.
 	listener := s.listener
 	s.listener = nil
-	return utils.MarkProcessed(streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false))
+	return streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -772,8 +772,9 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err
 	}
-	// The command exists now; a failed poll or output read must not submit it again.
-	return utils.MarkProcessed(runCommandFallbackFromID(ac, cmdResp.ID, out, false, cause))
+	// The command exists now; a failed poll or output read is returned untagged,
+	// so it never submits the command again.
+	return runCommandFallbackFromID(ac, cmdResp.ID, out, false, cause)
 }
 
 // runCommandFallbackFromID polls an already-submitted command by ID (instead of

@@ -32,12 +32,18 @@ type ErrorHandlerCallbacks struct {
 // HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
 // Returns nil if error was handled successfully, otherwise returns the original or new error
 //
-// An error marked by MarkProcessed is returned as is: the operation already took
-// effect on the server, so nothing here may run it again.
+// Only the tagged error of the operation's side-effecting request (MarkSubmission)
+// is handled; any other error is returned as is, because it came after the
+// operation took effect on the server and nothing here may run it again. The
+// error it returns carries no tag.
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
-	if IsProcessedError(err) {
+	if !IsSubmissionError(err) {
 		return err
 	}
+	return endSubmission(handleSubmissionError(err, serverName, callbacks))
+}
+
+func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
@@ -89,9 +95,11 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 // (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
 // brief outage while the user is still in the browser does not end it. A
 // Retry-After on that answer sets the next gap, capped like any poll backoff;
-// a gap that would carry the next attempt past the deadline ends the wait. An error marked by MarkProcessed came after
-// the operation took effect and ends the wait whatever it carries. Any other
-// answer, success or failure, is the operation's own result and ends the wait.
+// a gap that would carry the next attempt past the deadline ends the wait. Only
+// the retried request's own tagged error (MarkSubmission) can keep it going; an
+// untagged one came after the operation took effect and ends the wait whatever
+// it carries. Any other answer, success or failure, is the operation's own
+// result and ends the wait.
 // The deadline bounds the attempts to about maxRetryDuration / retryInterval.
 func retryUntilMFAAccepted(retry func() error) error {
 	spinner := NewSpinner(mfaWaitMessage)
@@ -121,7 +129,7 @@ func retryUntilMFAAccepted(retry func() error) error {
 			return nil
 		}
 		switch {
-		case IsProcessedError(err):
+		case !IsSubmissionError(err):
 			return err
 		case StructuredErrorCode(err) == AuthMFARequired:
 			failures = 0

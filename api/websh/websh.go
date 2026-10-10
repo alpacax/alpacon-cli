@@ -242,7 +242,7 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return SessionResponse{}, err
+		return SessionResponse{}, utils.MarkSubmission(err)
 	}
 
 	rows, cols, err := terminalSize()
@@ -254,11 +254,11 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 
 	responseBody, err := ac.SendPostRequest(sessionsBaseURL, sessionRequest)
 	if err != nil {
-		return SessionResponse{}, err
+		return SessionResponse{}, utils.MarkSubmission(err)
 	}
-	// The session exists from here on, so a failure after it must not create another.
-	response, err := shareCreatedSession(ac, responseBody, share, readOnly)
-	return response, utils.MarkProcessed(err)
+	// The session exists from here on; a failure after it is returned untagged,
+	// so it never creates another.
+	return shareCreatedSession(ac, responseBody, share, readOnly)
 }
 
 // shareCreatedSession reads the session the server created and, with share,

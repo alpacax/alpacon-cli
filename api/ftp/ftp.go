@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -215,21 +216,43 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 }
 
 func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
+	return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
+		return file, size, func() {}, nil
+	})
+}
+
+// uploadSource produces what an upload sends once the server has accepted the
+// create request, so a create the server refuses (an MFA step-up the caller
+// retries, say) costs no preparation. cleanup runs when the upload ends.
+type uploadSource func() (file io.Reader, size int64, cleanup func(), err error)
+
+// bulkUploadSource is uploadSource for several files.
+type bulkUploadSource func() (files []io.Reader, sizes []int64, cleanup func(), err error)
+
+func executeSingleUploadFrom(ac *client.AlpaconClient, request *UploadRequest, open uploadSource) error {
 	respBody, err := ac.SendPostRequest(uploadAPIURL, request)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
-	// The server accepted the upload; a failure after it must not upload again.
-	return utils.MarkProcessed(completeSingleUpload(ac, respBody, file, size))
+	// The server accepted the upload; what fails after it is returned untagged,
+	// so it never uploads again.
+	return completeSingleUpload(ac, request.Server, respBody, open)
 }
 
 // completeSingleUpload sends the file to the slot the server created, starts
-// the transfer and waits for it.
-func completeSingleUpload(ac *client.AlpaconClient, respBody []byte, file io.Reader, size int64) error {
+// the transfer and waits for it. Each request after the create is its own retry
+// unit (transferStep): an MFA refusal of one is retried alone.
+func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []byte, open uploadSource) error {
 	var response UploadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
+
+	file, size, cleanup, err := open()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if response.UploadURL != "" {
 		if err := uploadToS3(ac.HTTPClient, response.UploadURL, file, size); err != nil {
@@ -238,12 +261,15 @@ func completeSingleUpload(ac *client.AlpaconClient, respBody []byte, file io.Rea
 	}
 
 	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", response.ID), nil)
-	if _, err := ac.SendGetRequest(triggerURL); err != nil {
+	if err := transferStep(ac, serverID, func() error {
+		_, err := ac.SendGetRequest(triggerURL)
+		return err
+	}); err != nil {
 		return err
 	}
 
 	timeout := calcPollTimeout(1, size)
-	success, message, err := PollTransferStatus(ac, "upload", response.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "upload", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -255,21 +281,35 @@ func completeSingleUpload(ac *client.AlpaconClient, respBody []byte, file io.Rea
 }
 
 func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, files []io.Reader, sizes []int64) error {
+	return executeBulkUploadFrom(ac, request, func() ([]io.Reader, []int64, func(), error) {
+		return files, sizes, func() {}, nil
+	})
+}
+
+func executeBulkUploadFrom(ac *client.AlpaconClient, request *BulkUploadRequest, open bulkUploadSource) error {
 	respBody, err := ac.SendPostRequest(uploadBulkAPIURL, request)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
-	// The server accepted the uploads; a failure after it must not upload again.
-	return utils.MarkProcessed(completeBulkUpload(ac, respBody, files, sizes))
+	// The server accepted the uploads; what fails after it is returned untagged,
+	// so it never uploads again.
+	return completeBulkUpload(ac, request.Server, respBody, open)
 }
 
 // completeBulkUpload sends each file to the slot the server created for it,
-// starts the transfers and waits for them.
-func completeBulkUpload(ac *client.AlpaconClient, respBody []byte, files []io.Reader, sizes []int64) error {
+// starts the transfers and waits for them. Each request after the create is its
+// own retry unit (transferStep).
+func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []byte, open bulkUploadSource) error {
 	var responses []UploadResponse
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
 	}
+
+	files, sizes, cleanup, err := open()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if len(responses) != len(files) {
 		return fmt.Errorf("server returned %d upload slots but %d files were provided", len(responses), len(files))
@@ -296,7 +336,10 @@ func completeBulkUpload(ac *client.AlpaconClient, respBody []byte, files []io.Re
 
 	// Trigger server-side processing
 	triggerRequest := &BulkUploadTriggerRequest{IDs: ids}
-	if _, err := ac.SendPostRequest(uploadBulkTriggerURL, triggerRequest); err != nil {
+	if err := transferStep(ac, serverID, func() error {
+		_, err := ac.SendPostRequest(uploadBulkTriggerURL, triggerRequest)
+		return err
+	}); err != nil {
 		return err
 	}
 
@@ -309,7 +352,7 @@ func completeBulkUpload(ac *client.AlpaconClient, respBody []byte, files []io.Re
 
 	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) string {
 		resp := responses[i]
-		success, message, err := PollTransferStatus(ac, "upload", resp.ID, timeout)
+		success, message, err := pollTransfer(ac, serverID, "upload", resp.ID, timeout)
 		if err != nil {
 			return fmt.Sprintf("%s: %v", uploadResponseLabel(resp), err)
 		}
@@ -336,7 +379,7 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
 
 	if len(src) == 1 {
@@ -440,7 +483,7 @@ func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePa
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
 
 	f, err := os.Open(localPath)
@@ -490,16 +533,19 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
 
-	if len(src) == 1 {
-		zipFile, size, err := createFolderZipTempFile(src[0])
-		if err != nil {
+	// A missing folder fails here, before the server is asked for an upload slot.
+	for _, folderPath := range src {
+		if _, err := os.Stat(folderPath); err != nil {
 			return err
 		}
-		defer utils.CleanupTempFile(zipFile)
+	}
 
+	// The zip is built only after the server accepts the create request: an
+	// attempt it refuses, such as one an MFA step-up retries, zips nothing.
+	if len(src) == 1 {
 		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
 		spinner.Start()
 		defer spinner.Stop()
@@ -514,27 +560,18 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 			AllowUnzip:     true,
 			WorkSession:    workSessionID,
 		}
-		return executeSingleUpload(ac, request, readOnly{zipFile}, size)
+		return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
+			zipFile, size, err := createFolderZipTempFile(src[0])
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			return readOnly{zipFile}, size, func() { utils.CleanupTempFile(zipFile) }, nil
+		})
 	}
 
 	names := make([]string, len(src))
-	readers := make([]io.Reader, len(src))
-	sizes := make([]int64, len(src))
-	zipFiles := make([]*os.File, len(src))
-	defer func() {
-		for _, f := range zipFiles {
-			utils.CleanupTempFile(f)
-		}
-	}()
 	for i, folderPath := range src {
-		zipFile, size, err := createFolderZipTempFile(folderPath)
-		if err != nil {
-			return err
-		}
-		zipFiles[i] = zipFile
 		names[i] = filepath.Base(folderPath) + ".zip"
-		readers[i] = readOnly{zipFile}
-		sizes[i] = size
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
@@ -552,7 +589,27 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		WorkSession:    workSessionID,
 	}
 
-	return executeBulkUpload(ac, request, readers, sizes)
+	return executeBulkUploadFrom(ac, request, func() ([]io.Reader, []int64, func(), error) {
+		readers := make([]io.Reader, len(src))
+		sizes := make([]int64, len(src))
+		zipFiles := make([]*os.File, len(src))
+		cleanup := func() {
+			for _, f := range zipFiles {
+				utils.CleanupTempFile(f)
+			}
+		}
+		for i, folderPath := range src {
+			zipFile, size, err := createFolderZipTempFile(folderPath)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, err
+			}
+			zipFiles[i] = zipFile
+			readers[i] = readOnly{zipFile}
+			sizes[i] = size
+		}
+		return readers, sizes, cleanup, nil
+	})
 }
 
 func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttempts int) (int64, error) {
@@ -569,12 +626,17 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 			break
 		}
 		// An unread body keeps net/http from reusing the connection, so every retry
-		// would open a new one.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDrainedErrorBody))
+		// would open a new one. A refusal's body names why, which is how an MFA
+		// refusal is told from any other 4xx.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxDrainedErrorBody))
 		_ = resp.Body.Close()
+		var refusalCode, refusalSource string
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			refusalCode, refusalSource = parseRefusal(body)
+		}
 
 		if utils.IsFatalClientError(resp.StatusCode) {
-			return 0, fmt.Errorf("download failed with client error: %d", resp.StatusCode)
+			return 0, fetchStatusError{status: resp.StatusCode, code: refusalCode, source: refusalSource}
 		}
 
 		budget := maxAttempts
@@ -674,24 +736,27 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 
 	postBody, err := ac.SendPostRequest(downloadAPIURL, downloadRequest)
 	if err != nil {
-		return DownloadedFile{}, err
+		return DownloadedFile{}, utils.MarkSubmission(err)
 	}
-	// The server accepted the download and runs it; a failure after it must not
-	// start another.
-	downloaded, err := completeSingleDownload(ac, postBody, remotePath, dest, recursive)
-	return downloaded, utils.MarkProcessed(err)
+	// The server accepted the download and runs it; what fails after it is
+	// returned untagged, so it never starts another.
+	return completeSingleDownload(ac, serverID, postBody, remotePath, dest, recursive)
 }
 
 // completeSingleDownload waits for the download the server started, fetches
-// the file and confirms the transfer.
-func completeSingleDownload(ac *client.AlpaconClient, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
+// the file and confirms the transfer. Each request after the create is its own
+// retry unit (transferStep).
+func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
 		return DownloadedFile{}, err
 	}
 
-	status, err := event.PollCommandExecution(ac, downloadResponse.Command)
-	if err != nil {
+	var status event.EventDetails
+	if err := transferStep(ac, serverID, func() (err error) {
+		status, err = event.PollCommandExecution(ac, downloadResponse.Command)
+		return err
+	}); err != nil {
 		return DownloadedFile{}, err
 	}
 
@@ -702,13 +767,19 @@ func completeSingleDownload(ac *client.AlpaconClient, postBody []byte, remotePat
 		return DownloadedFile{}, fmt.Errorf("%s", status.Result)
 	}
 
-	localPath, written, err := saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, downloadMaxAttempts)
-	if err != nil {
+	var (
+		localPath string
+		written   int64
+	)
+	if err := transferStep(ac, serverID, func() (err error) {
+		localPath, written, err = saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, downloadMaxAttempts)
+		return err
+	}); err != nil {
 		return DownloadedFile{}, err
 	}
 
 	timeout := calcPollTimeout(1, written)
-	success, message, err := PollTransferStatus(ac, "download", downloadResponse.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "download", downloadResponse.ID, timeout)
 	if err != nil {
 		return DownloadedFile{}, fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -737,23 +808,27 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 
 	respBody, err := ac.SendPostRequest(downloadBulkAPIURL, request)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
-	// The server accepted the download and runs it; a failure after it must not
-	// start another.
-	return utils.MarkProcessed(completeBulkDownload(ac, respBody, remotePaths, dest))
+	// The server accepted the download and runs it; what fails after it is
+	// returned untagged, so it never starts another.
+	return completeBulkDownload(ac, serverID, respBody, remotePaths, dest)
 }
 
 // completeBulkDownload waits for the archive the server builds, fetches and
-// extracts it, and confirms the transfer.
-func completeBulkDownload(ac *client.AlpaconClient, respBody []byte, remotePaths []string, dest string) error {
+// extracts it, and confirms the transfer. Each request after the create is its
+// own retry unit (transferStep).
+func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []byte, remotePaths []string, dest string) error {
 	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
 
-	status, err := event.PollCommandExecution(ac, response.Command)
-	if err != nil {
+	var status event.EventDetails
+	if err := transferStep(ac, serverID, func() (err error) {
+		status, err = event.PollCommandExecution(ac, response.Command)
+		return err
+	}); err != nil {
 		return err
 	}
 
@@ -769,8 +844,11 @@ func completeBulkDownload(ac *client.AlpaconClient, respBody []byte, remotePaths
 		return err
 	}
 	defer func() { _ = utils.DeleteFile(zipPath) }()
-	written, err := fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, downloadMaxAttempts)
-	if err != nil {
+	var written int64
+	if err := transferStep(ac, serverID, func() (err error) {
+		written, err = fetchFromURLToFile(ac.HTTPClient, response.DownloadURL, zipPath, downloadMaxAttempts)
+		return err
+	}); err != nil {
 		return fmt.Errorf("failed to save downloaded archive: %w", err)
 	}
 
@@ -779,7 +857,7 @@ func completeBulkDownload(ac *client.AlpaconClient, respBody []byte, remotePaths
 	}
 
 	timeout := calcPollTimeout(len(remotePaths), written)
-	success, message, err := PollTransferStatus(ac, "download", response.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "download", response.ID, timeout)
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -820,7 +898,7 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return err
+		return utils.MarkSubmission(err)
 	}
 
 	if len(remotePaths) > 1 {
@@ -839,7 +917,7 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 func DownloadFileToPath(ac *client.AlpaconClient, serverName, remotePath, localPath, username, groupname, workSessionID string) (DownloadedFile, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return DownloadedFile{}, err
+		return DownloadedFile{}, utils.MarkSubmission(err)
 	}
 	return downloadSingleFileWithResult(ac, remotePath, localPath, serverID, username, groupname, "file", workSessionID, false)
 }
@@ -851,4 +929,88 @@ func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
 		time.Duration(fileCount)*perFilePollTimeout +
 		time.Duration(totalBytes/(1024*1024))*perMBPollTimeout
 	return timeout
+}
+
+// fetchStatusError is the refusal a download URL answered with. It carries the
+// code the response body named, so an MFA refusal reads as one.
+type fetchStatusError struct {
+	status       int
+	code, source string
+}
+
+func (e fetchStatusError) Error() string {
+	return fmt.Sprintf("download failed with client error: %d", e.status)
+}
+func (e fetchStatusError) HTTPStatusCode() int { return e.status }
+func (e fetchStatusError) ErrorCode() string   { return e.code }
+func (e fetchStatusError) ErrorSource() string { return e.source }
+
+func parseRefusal(body []byte) (code, source string) {
+	var refusal utils.ErrorResponse
+	if json.Unmarshal(body, &refusal) != nil {
+		return "", ""
+	}
+	return refusal.Code, refusal.Source
+}
+
+// mfaGate serializes the MFA step of a transfer's requests: the bulk status
+// polls run concurrently, and one MFA prompt covers all of them. mfaDoneAt is
+// when the last wait ended with the server accepting a request again.
+var (
+	mfaGate   sync.Mutex
+	mfaDoneAt time.Time
+)
+
+// transferStep sends one request of a transfer the server already created, as
+// its own retry unit. If MFA freshness lapsed and the server refuses it for
+// MFA, the user is prompted and only that request is sent again once MFA
+// completes; the transfer is never created a second time. Any other result is
+// returned as is, untagged: a request after the create is never a submission
+// that may be resent.
+func transferStep(ac *client.AlpaconClient, serverID string, step func() error) error {
+	started := time.Now()
+	err := step()
+	if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
+		return err
+	}
+
+	mfaGate.Lock()
+	defer mfaGate.Unlock()
+	err = utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error {
+			// A sibling request completed MFA while this one waited its turn:
+			// the link is already done, so only this request is retried.
+			if mfaDoneAt.After(started) {
+				return nil
+			}
+			return mfa.HandleMFAErrorForServerID(ac, serverID)
+		},
+		RetryOperation: func() error {
+			return utils.MarkSubmission(step())
+		},
+	})
+	if err == nil {
+		mfaDoneAt = time.Now()
+	}
+	return err
+}
+
+// pollTransfer is PollTransferStatus with the poll as a retry unit. A poll
+// refused for MFA cannot say how the transfer ended, so when it is refused and
+// the wait does not end in an answer, the error says the transfer may already
+// have completed.
+func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, timeout time.Duration) (success bool, message string, err error) {
+	refused := false
+	err = transferStep(ac, serverID, func() error {
+		var stepErr error
+		success, message, stepErr = PollTransferStatus(ac, transferType, id, timeout)
+		if utils.StructuredErrorCode(stepErr) == utils.AuthMFARequired {
+			refused = true
+		}
+		return stepErr
+	})
+	if err != nil && refused {
+		err = fmt.Errorf("%w (the %s may already have completed on the server; check before running it again)", err, transferType)
+	}
+	return success, message, err
 }

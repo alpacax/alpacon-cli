@@ -47,6 +47,23 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 	return nil
 }
 
+// HandleMFAErrorForServerID is HandleMFAError for a caller that holds the
+// server's ID, such as a transfer already created on it.
+func HandleMFAErrorForServerID(ac *client.AlpaconClient, serverID string) error {
+	if err := requireWorkspace(ac); err != nil {
+		return err
+	}
+	mfaURL, err := GetMFALink(ac, serverID)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\nMFA authentication required. Please visit:\n%s\n\n", mfaURL)
+	utils.OpenBrowser(mfaURL)
+
+	return nil
+}
+
 // CheckMFACompletion reports whether the server has recorded a fresh MFA for
 // this client. Only the exec sudo step-up still polls it: the request that
 // failed there is a command that already ran, so re-running it to find out

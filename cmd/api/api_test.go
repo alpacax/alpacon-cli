@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -1087,4 +1089,40 @@ func TestRunAPI_DifferentCodeSkipsMFA(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.JSONEq(t, `{"code":"auth_authentication_failed"}`, stdout.String())
 	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "the endpoint must be hit exactly once")
+}
+
+// A 429 during the MFA wait waits the Retry-After the response carried before
+// the next attempt, not the usual one-second interval.
+func TestRunAPI_MFAWaitHonorsRetryAfterOn429(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		switch n {
+		case 1:
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		case 2:
+			return http.StatusTooManyRequests, "application/json", `{"code":"api_rate_limited"}`
+		default:
+			return http.StatusOK, "application/json", `{"ok":true}`
+		}
+	})
+	inner := ac.HTTPClient.Transport
+	ac.HTTPClient.Transport = apiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		resp, err := inner.RoundTrip(r)
+		if err == nil && resp.StatusCode == http.StatusTooManyRequests {
+			resp.Header = http.Header{"Retry-After": []string{"7"}}
+		}
+		return resp, err
+	})
+	var stdout, stderr bytes.Buffer
+
+	var elapsed time.Duration
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+		elapsed = time.Since(start)
+		require.NoError(t, err)
+		assert.Equal(t, 0, code)
+	})
+
+	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.GreaterOrEqual(t, elapsed, 8*time.Second, "one interval before the retry that is throttled, then its Retry-After")
 }
