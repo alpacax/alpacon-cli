@@ -18,10 +18,12 @@ import (
 const mfaRefusal = `{"code": "auth_mfa_required", "source": "webftp"}`
 
 // transferStub refuses the first create (single or bulk) for MFA and accepts
-// the rest. Every read after an accepted create answers 503, the answer that
-// would also mean "not processed" had it come from the create itself.
+// the rest. The bulk upload trigger and every transfer status read answer 503,
+// the answer that would also mean "not processed" had it come from the create
+// itself. blob is what the download URL serves.
 type transferStub struct {
 	creates atomic.Int32
+	blob    string
 }
 
 func (s *transferStub) client() *client.AlpaconClient {
@@ -45,14 +47,19 @@ func (s *transferStub) client() *client.AlpaconClient {
 					return http.StatusForbidden, mfaRefusal
 				}
 				return http.StatusCreated, `[{"id": "t-1"}, {"id": "t-2"}]`
-			case r.URL.Path == "/api/webftp/uploads/t-1/upload/" || r.URL.Path == uploadBulkTriggerURL:
+			case r.Method == http.MethodPost && r.URL.Path == downloadBulkAPIURL:
+				if s.creates.Add(1) == 1 {
+					return http.StatusForbidden, mfaRefusal
+				}
+				return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
+			case r.URL.Path == "/api/webftp/uploads/t-1/upload/":
 				return http.StatusOK, `{}`
 			case r.URL.Path == "/api/events/commands/cmd-1/":
 				return http.StatusOK, `{"id": "cmd-1", "status": "completed", "success": true}`
 			case r.URL.Path == "/blob":
-				return http.StatusOK, `content`
+				return http.StatusOK, s.blob
 			default:
-				// The transfer status.
+				// The transfer status, and the bulk upload trigger.
 				return unavailable()
 			}
 		}),
@@ -89,30 +96,35 @@ func mfaWait(t *testing.T, op func() error) error {
 func TestUpload_MFAWaitDoesNotUploadAgainAfterAnAcceptedUpload(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		upload func(ac *client.AlpaconClient, files []string) error
-		files  int
+		name    string
+		upload  func(ac *client.AlpaconClient, files []string) error
+		files   int
+		wantErr string
 	}{
 		{
 			name: "edit single file",
 			upload: func(ac *client.AlpaconClient, files []string) error {
 				return UploadLocalFileAs(ac, files[0], "my-server", "/home/alice/a.txt", "", "", "")
 			},
-			files: 1,
+			files:   1,
+			wantErr: "failed to check transfer status",
 		},
 		{
 			name: "cp single file",
 			upload: func(ac *client.AlpaconClient, files []string) error {
 				return UploadFile(ac, files, "my-server:/home/alice/", "", "", false, "")
 			},
-			files: 1,
+			files:   1,
+			wantErr: "failed to check transfer status",
 		},
 		{
+			// The trigger that starts the transfers answers 503.
 			name: "cp bulk",
 			upload: func(ac *client.AlpaconClient, files []string) error {
 				return UploadFile(ac, files, "my-server:/home/alice/", "", "", false, "")
 			},
-			files: 2,
+			files:   2,
+			wantErr: "unavailable",
 		},
 	}
 	for _, tc := range tests {
@@ -130,8 +142,7 @@ func TestUpload_MFAWaitDoesNotUploadAgainAfterAnAcceptedUpload(t *testing.T) {
 				err = mfaWait(t, func() error { return tc.upload(ac, files) })
 			})
 
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "failed to check transfer status")
+			require.ErrorContains(t, err, tc.wantErr)
 			assert.Equal(t, int32(1), stub.acceptedCreates(), "the file must be uploaded once")
 		})
 	}
@@ -142,18 +153,43 @@ func TestUpload_MFAWaitDoesNotUploadAgainAfterAnAcceptedUpload(t *testing.T) {
 // download.
 func TestDownload_MFAWaitDoesNotDownloadAgainAfterAnAcceptedDownload(t *testing.T) {
 	t.Parallel()
-	stub := &transferStub{}
-	ac := stub.client()
-	localPath := filepath.Join(t.TempDir(), "a.txt")
+	tests := []struct {
+		name     string
+		blob     func(t *testing.T) string
+		download func(ac *client.AlpaconClient, dest string) error
+	}{
+		{
+			name: "single file",
+			blob: func(*testing.T) string { return "content" },
+			download: func(ac *client.AlpaconClient, dest string) error {
+				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(dest, "a.txt"), "", "", "")
+				return err
+			},
+		},
+		{
+			name: "bulk",
+			blob: func(t *testing.T) string {
+				return string(createTestZip(t, map[string]string{"a.txt": "a", "b.txt": "b"}))
+			},
+			download: func(ac *client.AlpaconClient, dest string) error {
+				return DownloadFile(ac, []string{"my-server:/home/alice/a.txt", "my-server:/home/alice/b.txt"}, dest, "", "", false, "")
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stub := &transferStub{blob: tc.blob(t)}
+			ac := stub.client()
+			dest := t.TempDir()
 
-	var err error
-	synctest.Test(t, func(t *testing.T) {
-		err = mfaWait(t, func() error {
-			_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", localPath, "", "", "")
-			return err
+			var err error
+			synctest.Test(t, func(t *testing.T) {
+				err = mfaWait(t, func() error { return tc.download(ac, dest) })
+			})
+
+			require.ErrorContains(t, err, "download transfer status check failed")
+			assert.Equal(t, int32(1), stub.acceptedCreates(), "the files must be downloaded once")
 		})
-	})
-
-	require.ErrorContains(t, err, "download transfer status check failed")
-	assert.Equal(t, int32(1), stub.acceptedCreates(), "the file must be downloaded once")
+	}
 }
