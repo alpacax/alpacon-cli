@@ -25,6 +25,7 @@ type lapseStub struct {
 
 	hits, links, creates, other atomic.Int32
 	blob                        string
+	okBody                      string // body of a passing answer, when not the default
 }
 
 func (s *lapseStub) client() *client.AlpaconClient {
@@ -40,6 +41,9 @@ func (s *lapseStub) client() *client.AlpaconClient {
 				}
 				if r.URL.Path == "/blob" {
 					return code, s.blob
+				}
+				if s.okBody != "" {
+					return code, s.okBody
 				}
 				return code, `{"success": true, "message": "done"}`
 			}
