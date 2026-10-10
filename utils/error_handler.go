@@ -31,7 +31,13 @@ type ErrorHandlerCallbacks struct {
 
 // HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
 // Returns nil if error was handled successfully, otherwise returns the original or new error
+//
+// An error marked by MarkProcessed is returned as is: the operation already took
+// effect on the server, so nothing here may run it again.
 func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCallbacks) error {
+	if IsProcessedError(err) {
+		return err
+	}
 	code, _ := ParseErrorResponse(err)
 
 	switch code {
@@ -78,12 +84,15 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 // already comes from: the next attempt passes with the same access token, and
 // no separate completion probe or token refresh is needed to notice.
 //
-// auth_mfa_required keeps the wait going, and so does an attempt the server
-// never acted on (IsUnprocessedRequestError), up to MaxConsecutivePollFailures
-// in a row, so a brief outage while the user is still in the browser does not
-// end it. Any other answer, success or failure, is the operation's own result
-// and ends the wait. The deadline bounds the attempts to about
-// maxRetryDuration / retryInterval.
+// Only a typed auth_mfa_required keeps the wait going, never one read out of
+// message text, and so does an attempt the server never acted on
+// (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
+// brief outage while the user is still in the browser does not end it. A
+// Retry-After on that answer sets the next gap, capped like any poll backoff
+// and by the wait's own deadline. An error marked by MarkProcessed came after
+// the operation took effect and ends the wait whatever it carries. Any other
+// answer, success or failure, is the operation's own result and ends the wait.
+// The deadline bounds the attempts to about maxRetryDuration / retryInterval.
 func retryUntilMFAAccepted(retry func() error) error {
 	spinner := NewSpinner(mfaWaitMessage)
 	spinner.Start()
@@ -91,12 +100,14 @@ func retryUntilMFAAccepted(retry func() error) error {
 
 	startTime := time.Now()
 	failures := 0
+	delay := retryInterval
 	for {
-		if time.Since(startTime) > maxRetryDuration {
+		remaining := maxRetryDuration - time.Since(startTime)
+		if remaining <= 0 {
 			return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 		}
 
-		time.Sleep(retryInterval)
+		time.Sleep(min(delay, remaining))
 
 		// Any attempt may be the one that goes through and streams the
 		// command's output to stdout, and a frame drawn over that output is
@@ -108,14 +119,18 @@ func retryUntilMFAAccepted(retry func() error) error {
 			CliSuccess("MFA authentication completed")
 			return nil
 		}
-		switch code, _ := ParseErrorResponse(err); {
-		case code == AuthMFARequired:
+		switch {
+		case IsProcessedError(err):
+			return err
+		case StructuredErrorCode(err) == AuthMFARequired:
 			failures = 0
+			delay = retryInterval
 		case IsUnprocessedRequestError(err):
 			failures++
 			if failures >= MaxConsecutivePollFailures {
 				return err
 			}
+			delay = max(retryInterval, NextPollBackoff(retryInterval, 0, RetryAfter(err)))
 		default:
 			return err
 		}

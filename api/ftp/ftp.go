@@ -219,7 +219,13 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file 
 	if err != nil {
 		return err
 	}
+	// The server accepted the upload; a failure after it must not upload again.
+	return utils.MarkProcessed(completeSingleUpload(ac, respBody, file, size))
+}
 
+// completeSingleUpload sends the file to the slot the server created, starts
+// the transfer and waits for it.
+func completeSingleUpload(ac *client.AlpaconClient, respBody []byte, file io.Reader, size int64) error {
 	var response UploadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
@@ -253,7 +259,13 @@ func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, fil
 	if err != nil {
 		return err
 	}
+	// The server accepted the uploads; a failure after it must not upload again.
+	return utils.MarkProcessed(completeBulkUpload(ac, respBody, files, sizes))
+}
 
+// completeBulkUpload sends each file to the slot the server created for it,
+// starts the transfers and waits for them.
+func completeBulkUpload(ac *client.AlpaconClient, respBody []byte, files []io.Reader, sizes []int64) error {
 	var responses []UploadResponse
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
@@ -664,7 +676,15 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 	if err != nil {
 		return DownloadedFile{}, err
 	}
+	// The server accepted the download and runs it; a failure after it must not
+	// start another.
+	downloaded, err := completeSingleDownload(ac, postBody, remotePath, dest, recursive)
+	return downloaded, utils.MarkProcessed(err)
+}
 
+// completeSingleDownload waits for the download the server started, fetches
+// the file and confirms the transfer.
+func completeSingleDownload(ac *client.AlpaconClient, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
 		return DownloadedFile{}, err
@@ -719,7 +739,14 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	if err != nil {
 		return err
 	}
+	// The server accepted the download and runs it; a failure after it must not
+	// start another.
+	return utils.MarkProcessed(completeBulkDownload(ac, respBody, remotePaths, dest))
+}
 
+// completeBulkDownload waits for the archive the server builds, fetches and
+// extracts it, and confirms the transfer.
+func completeBulkDownload(ac *client.AlpaconClient, respBody []byte, remotePaths []string, dest string) error {
 	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err

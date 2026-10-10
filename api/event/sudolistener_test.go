@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -729,4 +730,62 @@ func TestSudoListener_RetryVerifyUntilMFA_RidesThroughUnprocessedAttempts(t *tes
 		})
 		assert.Equal(t, int32(utils.MaxConsecutivePollFailures), verifies.Load())
 	})
+}
+
+// retryAfterTransport answers the first request 429 with a Retry-After and every
+// later one 200, recording when each arrived.
+type retryAfterTransport struct {
+	retryAfter string
+	mu         sync.Mutex
+	arrivals   []time.Time
+}
+
+func (rt *retryAfterTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.mu.Lock()
+	rt.arrivals = append(rt.arrivals, time.Now())
+	first := len(rt.arrivals) == 1
+	rt.mu.Unlock()
+	status, header := http.StatusOK, http.Header{"Content-Type": []string{"application/json"}}
+	if first {
+		status = http.StatusTooManyRequests
+		header.Set("Retry-After", rt.retryAfter)
+	}
+	return &http.Response{
+		StatusCode: status,
+		Status:     http.StatusText(status),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(`{}`)),
+		Request:    req,
+	}, nil
+}
+
+// A throttled verification that names a Retry-After holds the next one back
+// that long, capped like any poll backoff, rather than a tick later.
+func TestSudoListener_RetryVerifyUntilMFA_HonorsRetryAfter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		retryAfter string
+		wantGap    time.Duration
+	}{
+		{"short", "3", 3 * time.Second},
+		{"capped", "3600", time.Duration(utils.PollMaxBackoffTick) * defaultMFAPollInterval},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt := &retryAfterTransport{retryAfter: tc.retryAfter}
+			ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: &http.Client{Transport: rt}}
+			synctest.Test(t, func(t *testing.T) {
+				sl := NewSudoListener(ac, "", "")
+				sl.pollTimeout = 10 * time.Minute
+				require.NoError(t, sl.retryVerifyUntilMFA("grant-1"))
+			})
+			require.Len(t, rt.arrivals, 2)
+			assert.Equal(t, tc.wantGap, rt.arrivals[1].Sub(rt.arrivals[0]))
+		})
+	}
 }

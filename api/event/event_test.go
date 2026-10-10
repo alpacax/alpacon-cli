@@ -1510,6 +1510,10 @@ type streamingServerConfig struct {
 	sessionStatus int
 	sessions      *atomic.Int32 // counts event session requests when set
 	submits       *atomic.Int32 // counts command submissions when set
+	// subscribeStatus, when set, answers every subscription request with it.
+	subscribeStatus int
+	// chunkStatus, when set, answers every chunk request with it.
+	chunkStatus int
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -1594,9 +1598,19 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				cfg.onSubscribe(string(req.EventType), req.TargetID)
 			}
 			subOnce.Do(func() { close(subscribed) })
+			if cfg.subscribeStatus != 0 {
+				w.WriteHeader(cfg.subscribeStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/chunks/" && r.Method == http.MethodGet:
+			if cfg.chunkStatus != 0 {
+				w.WriteHeader(cfg.chunkStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			fromSeq, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
 			var results []Chunk
 			if cfg.chunksFor != nil {

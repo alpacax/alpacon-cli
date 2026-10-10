@@ -317,10 +317,12 @@ var errMFAWaitEnded = errors.New("MFA verification did not complete in time")
 // next verification passes on the same access token, with no completion probe
 // or token refresh in between.
 //
-// auth_mfa_required keeps the wait going, and so does a verification the
-// server never acted on (utils.IsUnprocessedRequestError), up to
-// utils.MaxConsecutivePollFailures in a row. Any other answer is returned as is.
-// The attempts are bounded by pollTimeout / pollInterval.
+// A typed auth_mfa_required keeps the wait going, never one read out of message
+// text, and so does a verification the server never acted on
+// (utils.IsUnprocessedRequestError), up to utils.MaxConsecutivePollFailures in a
+// row; a Retry-After on that answer holds the next attempt back, capped like any
+// poll backoff. Any other answer is returned as is. The attempts are bounded by
+// pollTimeout / pollInterval.
 func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
 	// keeps over the server's pending-grant expiry is what this wait is built on,
@@ -342,13 +344,25 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 			if err == nil {
 				return nil
 			}
-			switch code, _ := utils.ParseErrorResponse(err); {
-			case code == utils.AuthMFARequired:
+			switch {
+			case utils.StructuredErrorCode(err) == utils.AuthMFARequired:
 				failures = 0
 			case utils.IsUnprocessedRequestError(err):
 				failures++
 				if failures >= utils.MaxConsecutivePollFailures {
 					return err
+				}
+				// A longer Retry-After waits out all but one interval, and the
+				// ticker restarts so the next attempt lands one interval later.
+				if wait := utils.NextPollBackoff(sl.pollInterval, 0, utils.RetryAfter(err)); wait > sl.pollInterval {
+					select {
+					case <-sl.done:
+						return errMFAWaitEnded
+					case <-timeout:
+						return errMFAWaitEnded
+					case <-time.After(wait - sl.pollInterval):
+						ticker.Reset(sl.pollInterval)
+					}
 				}
 			default:
 				return err

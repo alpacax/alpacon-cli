@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -104,6 +105,17 @@ func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
 
 const mfaRefusal = `{"code": "auth_mfa_required", "source": "command"}`
 
+// codedTestError is a refusal as the API client returns it: the code is a typed
+// field, not text to be parsed.
+type codedTestError struct{ code string }
+
+func (e codedTestError) Error() string       { return "refused: " + e.code }
+func (e codedTestError) ErrorCode() string   { return e.code }
+func (e codedTestError) ErrorSource() string { return "" }
+
+// typedMFARefusal is the refusal a retried attempt gets while MFA is pending.
+func typedMFARefusal() error { return codedTestError{code: AuthMFARequired} }
+
 func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
 	withFastRetry(t)
 	var retryCount atomic.Int32
@@ -112,7 +124,7 @@ func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) < 3 {
-				return errors.New(mfaRefusal)
+				return typedMFARefusal()
 			}
 			return nil
 		},
@@ -134,7 +146,7 @@ func TestHandleCommonErrors_MFA_AnotherErrorEndsTheWait(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) == 1 {
-				return errors.New(mfaRefusal)
+				return typedMFARefusal()
 			}
 			return retryErr
 		},
@@ -153,7 +165,7 @@ func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
-			return errors.New(mfaRefusal)
+			return typedMFARefusal()
 		},
 	})
 
@@ -194,7 +206,7 @@ func TestHandleCommonErrors_MFA_RidesThroughUnprocessedAttempts(t *testing.T) {
 			case 1, 2:
 				return statusError(http.StatusServiceUnavailable)
 			case 3:
-				return errors.New(mfaRefusal)
+				return typedMFARefusal()
 			default:
 				return nil
 			}
@@ -261,11 +273,124 @@ func TestIsUnprocessedRequestError(t *testing.T) {
 		{"504", statusError(http.StatusGatewayTimeout), false},
 		{"403", statusError(http.StatusForbidden), false},
 		{"plain error", errors.New("boom"), false},
+		{"503 after the side effect", MarkProcessed(statusError(http.StatusServiceUnavailable)), false},
+		{"dial failure after the side effect", fmt.Errorf("read output: %w", MarkProcessed(dial)), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.want, IsUnprocessedRequestError(tc.err))
+		})
+	}
+}
+
+// A refusal that names auth_mfa_required only in its text, such as an agent's
+// transfer report, is not the server's MFA refusal and ends the wait.
+func TestHandleCommonErrors_MFA_UntypedRefusalEndsTheWait(t *testing.T) {
+	withFastRetry(t)
+	untyped := errors.New(mfaRefusal)
+	var retryCount atomic.Int32
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return untyped
+		},
+	})
+
+	assert.Equal(t, untyped, result)
+	assert.Equal(t, int32(1), retryCount.Load())
+}
+
+// An error raised after the operation took effect ends the wait whatever it
+// carries, a 503 or even a typed MFA refusal: the operation must not run again.
+func TestHandleCommonErrors_MFA_ProcessedErrorEndsTheWait(t *testing.T) {
+	withFastRetry(t)
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"503", statusError(http.StatusServiceUnavailable)},
+		{"typed MFA refusal", typedMFARefusal()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			processed := MarkProcessed(fmt.Errorf("read output: %w", tc.err))
+			var retryCount atomic.Int32
+
+			result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+				OnMFARequired: func(string) error { return nil },
+				RetryOperation: func() error {
+					retryCount.Add(1)
+					return processed
+				},
+			})
+
+			assert.Equal(t, processed, result)
+			assert.Equal(t, int32(1), retryCount.Load())
+		})
+	}
+}
+
+// An operation whose very first attempt took effect is never re-run, even when
+// what failed after it reads as an MFA refusal.
+func TestHandleCommonErrors_ProcessedErrorRunsNoCallback(t *testing.T) {
+	t.Parallel()
+	err := MarkProcessed(typedMFARefusal())
+	var called atomic.Bool
+	mark := func() { called.Store(true) }
+
+	result := HandleCommonErrors(err, "server1", ErrorHandlerCallbacks{
+		OnMFARequired:      func(string) error { mark(); return nil },
+		OnUsernameRequired: func() error { mark(); return nil },
+		RetryOperation:     func() error { mark(); return nil },
+	})
+
+	assert.Equal(t, err, result)
+	assert.False(t, called.Load(), "no callback may run on a processed error")
+}
+
+type retryAfterTestError struct {
+	statusError
+	after time.Duration
+}
+
+func (e retryAfterTestError) RetryAfter() time.Duration { return e.after }
+
+// A throttled attempt that names a Retry-After holds the next one back that
+// long, capped like any poll backoff, instead of retrying a second later.
+func TestHandleCommonErrors_MFA_HonorsRetryAfter(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		after   time.Duration
+		wantGap time.Duration
+	}{
+		{"short", 5 * time.Second, 5 * time.Second},
+		{"capped", time.Hour, time.Duration(PollMaxBackoffTick) * time.Second},
+		{"none", 0, time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				var attempts []time.Time
+				result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+					OnMFARequired: func(string) error { return nil },
+					RetryOperation: func() error {
+						attempts = append(attempts, time.Now())
+						if len(attempts) == 1 {
+							return retryAfterTestError{statusError(http.StatusTooManyRequests), tc.after}
+						}
+						return nil
+					},
+				})
+
+				require.NoError(t, result)
+				require.Len(t, attempts, 2)
+				assert.Equal(t, tc.wantGap, attempts[1].Sub(attempts[0]))
+			})
 		})
 	}
 }
