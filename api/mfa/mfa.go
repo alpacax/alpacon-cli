@@ -47,6 +47,11 @@ func HandleMFAError(ac *client.AlpaconClient, serverName string) error {
 	return nil
 }
 
+// CheckMFACompletion reports whether the server has recorded a fresh MFA for
+// this client. Only the exec sudo step-up still polls it: the request that
+// failed there is a command that already ran, so re-running it to find out
+// would repeat its side effects. Every other MFA wait retries the refused
+// request instead (utils.HandleCommonErrors, the websh sudo listener).
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
 	if err != nil {
@@ -62,9 +67,9 @@ func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 }
 
 // ErrorCallbacks returns the standard callback set commands hand to
-// utils.HandleCommonErrors: MFA and username-required handling, MFA completion
-// polling, and a token refresh once MFA completes. The retry function re-runs
-// the operation that failed.
+// utils.HandleCommonErrors: MFA and username-required handling. The retry
+// function re-runs the operation that failed, and after an MFA prompt it is
+// also what tells the wait that MFA went through.
 func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHandlerCallbacks {
 	return utils.ErrorHandlerCallbacks{
 		OnMFARequired: func(serverName string) error {
@@ -74,10 +79,6 @@ func ErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils.ErrorHan
 			_, err := iam.HandleUsernameRequired()
 			return err
 		},
-		CheckMFACompleted: func() (bool, error) {
-			return CheckMFACompletion(ac)
-		},
-		RefreshToken:   ac.RefreshToken,
 		RetryOperation: retry,
 	}
 }
@@ -97,10 +98,6 @@ func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils
 			utils.OpenBrowser(mfaURL)
 			return nil
 		},
-		CheckMFACompleted: func() (bool, error) {
-			return CheckMFACompletion(ac)
-		},
-		RefreshToken:   ac.RefreshToken,
 		RetryOperation: retry,
 	}
 }
@@ -195,8 +192,7 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 				continue
 			}
 			spinner.Stop()
-			// Refresh the token so the server sees the updated MFA state on
-			// retry, mirroring the websh sudo listener.
+			// Refresh the token before the command is re-run.
 			if rerr := ac.RefreshToken(); rerr != nil {
 				return fmt.Errorf(
 					"failed to refresh token after MFA; run 'alpacon login' to re-authenticate: %w",
@@ -208,8 +204,8 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	}
 }
 
-// GetWorkspaceSecurityMFALink uses location "cli" so the mfa-success page notifies
-// the backend, which is what CheckMFACompletion polls for.
+// GetWorkspaceSecurityMFALink uses location "cli" so the mfa-success page credits
+// the MFA to this client, which is what the retried request is then checked against.
 func GetWorkspaceSecurityMFALink(ac *client.AlpaconClient) (string, error) {
 	return fetchMFALink(ac, map[string]string{
 		"location":  "cli",

@@ -406,37 +406,88 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
-		return SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
-	}, out)
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
 // RunFileCommandStreaming is RunCommandStreaming for the file lane.
 // Only the submission differs: the command it creates is followed, polled and
 // read like any other.
 func RunFileCommandStreaming(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {
-	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
-		return SubmitFileCommand(ac, serverName, file, username, groupname, workSessionID, purpose)
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
+}
+
+// CommandStream runs submissions over one output listener. A submission the
+// server refuses leaves the listener connected for the next one, so a caller
+// that retries a refused command, as the MFA wait does once a second, opens one
+// event session rather than one per attempt. A listener that could not connect
+// is not dialed again: later submissions go straight to polling. Close releases
+// a listener no submission used. A CommandStream is not safe for concurrent use.
+type CommandStream struct {
+	ac       *client.AlpaconClient
+	listener *CommandOutputListener
+	// unavailable is why the listener could not connect, once that happened.
+	unavailable error
+}
+
+// NewCommandStream returns a CommandStream that connects on its first submission.
+func NewCommandStream(ac *client.AlpaconClient) *CommandStream {
+	return &CommandStream{ac: ac}
+}
+
+// RunCommand is RunCommandStreaming over this stream's listener.
+func (s *CommandStream) RunCommand(serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	return s.run(func() (CommandResponse, error) {
+		return SubmitCommand(s.ac, serverName, command, username, groupname, env, workSessionID, purpose)
 	}, out)
 }
 
-// runSubmittedStreaming opens the output stream, submits through submit, and
-// streams the command it created; the lane is the closure's business.
-func runSubmittedStreaming(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer) error {
-	listener := NewCommandOutputListener(ac)
-	listener.Start()
-	if !listener.WaitConnected(commandOutputConnectTimeout) {
-		listener.Stop()
-		return runCommandFallback(ac, submit, out, listenerFailure(listener))
+// RunFileCommand is RunFileCommandStreaming over this stream's listener.
+func (s *CommandStream) RunFileCommand(serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {
+	return s.run(func() (CommandResponse, error) {
+		return SubmitFileCommand(s.ac, serverName, file, username, groupname, workSessionID, purpose)
+	}, out)
+}
+
+// Close stops a listener that no submission went on to use.
+func (s *CommandStream) Close() {
+	if s.listener != nil {
+		s.listener.Stop()
+		s.listener = nil
+	}
+}
+
+// run opens the output stream unless one is already waiting, submits through
+// submit, and streams the command it created; the lane is the closure's business.
+// The listener subscribes only after a submission names a command, so one left
+// idle across a refused attempt serves the next as if it had just connected, and
+// the warm-fire read in streamSubscribed covers any reconnect in between.
+func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
+	if s.unavailable != nil {
+		return runCommandFallback(s.ac, submit, out, s.unavailable)
+	}
+	if s.listener == nil {
+		listener := NewCommandOutputListener(s.ac)
+		listener.Start()
+		if !listener.WaitConnected(commandOutputConnectTimeout) {
+			listener.Stop()
+			s.unavailable = listenerFailure(listener)
+			return runCommandFallback(s.ac, submit, out, s.unavailable)
+		}
+		s.listener = listener
 	}
 
 	cmdResp, err := submit()
 	if err != nil {
-		listener.Stop()
 		return err
 	}
 
-	return streamSubscribed(ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
+	listener := s.listener
+	s.listener = nil
+	return streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams

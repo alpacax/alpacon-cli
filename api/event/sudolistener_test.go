@@ -14,6 +14,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,13 +195,13 @@ func TestSudoListener_VerifySudoGrant_ServerError(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
+func TestSudoListener_RetryVerifyUntilMFA_EndsOnStop(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		// The client is nil, so the stop has to land before the first poll tick.
+		// The client is nil, so the stop has to land before the first retry tick.
 		const stopAfter = 100 * time.Millisecond
 		sl := NewSudoListener(nil, "", "")
-		require.Greater(t, sl.pollInterval, stopAfter, "a poll before the stop would dereference the nil client")
+		require.Greater(t, sl.pollInterval, stopAfter, "a retry before the stop would dereference the nil client")
 
 		start := time.Now()
 		go func() {
@@ -208,25 +209,25 @@ func TestSudoListener_PollMFACompletion_Timeout(t *testing.T) {
 			sl.Stop()
 		}()
 
-		result := sl.pollMFACompletion()
+		err := sl.retryVerifyUntilMFA("grant-1")
 		elapsed := time.Since(start)
 
-		assert.False(t, result, "should return false when stopped")
-		assert.Equal(t, stopAfter, elapsed, "the stop must land on Stop(), not a poll tick later")
+		require.ErrorIs(t, err, errMFAWaitEnded, "a stopped listener ends the wait unverified")
+		assert.Equal(t, stopAfter, elapsed, "the stop must land on Stop(), not a retry tick later")
 	})
 }
 
-func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
+func TestSudoListener_RetryVerifyUntilMFA_RetriesAtAFixedInterval(t *testing.T) {
 	const tick = 10 * time.Millisecond
 	// Long enough that a widening schedule would have reached its widest gap
 	// twice over, and off the tick grid: a deadline landing on the same instant as
-	// a poll leaves the select to pick between them.
+	// a retry leaves the select to pick between them.
 	const waitFor = 125*tick + tick/2
 
 	var polls testutil.PollRecorder
 	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		polls.Record()
-		return http.StatusOK, `{"completed":false}`
+		return http.StatusForbidden, `{"code": "auth_mfa_required", "source": "sudo"}`
 	})}
 
 	synctest.Test(t, func(t *testing.T) {
@@ -234,13 +235,33 @@ func TestSudoListener_PollMFACompletion_PollsAtAFixedInterval(t *testing.T) {
 		sl.pollInterval = tick
 		sl.pollTimeout = waitFor
 
-		assert.False(t, sl.pollMFACompletion(), "the wait must end unverified once pollTimeout elapses with no completion")
+		assert.ErrorIs(t, sl.retryVerifyUntilMFA("grant-1"), errMFAWaitEnded,
+			"the wait must end unverified once pollTimeout elapses with MFA still refused")
 	})
 
 	// The buffer this timeout keeps over the server's pending-grant expiry is only
 	// worth having while the gap stays fixed, so a widened tail must fail here.
 	assert.Equal(t, tick, polls.WidestGap(),
-		"no poll may sit out longer than the base tick")
+		"no retry may sit out longer than the base tick")
+}
+
+// Only auth_mfa_required means MFA has not landed yet; any other refusal is the
+// server's answer to the grant, returned unretried.
+func TestSudoListener_RetryVerifyUntilMFA_AnotherRefusalEndsTheWait(t *testing.T) {
+	t.Parallel()
+	var verifies atomic.Int32
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+		verifies.Add(1)
+		return http.StatusBadRequest, `{"code": "sudo_grant_not_pending", "source": "sudo"}`
+	})}
+
+	synctest.Test(t, func(t *testing.T) {
+		sl := NewSudoListener(ac, "", "")
+		err := sl.retryVerifyUntilMFA("grant-1")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, errMFAWaitEnded)
+	})
+	assert.Equal(t, int32(1), verifies.Load())
 }
 
 func TestSudoListener_CreatesANewSessionOnReconnect(t *testing.T) {
@@ -667,4 +688,45 @@ func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *tes
 	assert.NotContains(t, stderr, "Opening browser")
 	assert.Equal(t, int32(1), verifies.Load(), "the refusal must not start a retry loop")
 	assert.Zero(t, others.Load(), "no MFA link lookup or poll after the refusal")
+}
+
+// A verification the server never acted on (a 503 here) does not end the wait,
+// but that many in a row do.
+func TestSudoListener_RetryVerifyUntilMFA_RidesThroughUnprocessedAttempts(t *testing.T) {
+	t.Parallel()
+	stubVerify := func(answers func(n int32) (int, string)) (*client.AlpaconClient, *atomic.Int32) {
+		var verifies atomic.Int32
+		return &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+			return answers(verifies.Add(1))
+		})}, &verifies
+	}
+
+	t.Run("recovers", func(t *testing.T) {
+		ac, verifies := stubVerify(func(n int32) (int, string) {
+			switch n {
+			case 1, 2:
+				return http.StatusServiceUnavailable, `{}`
+			case 3:
+				return http.StatusForbidden, `{"code": "auth_mfa_required", "source": "sudo"}`
+			default:
+				return http.StatusOK, `{}`
+			}
+		})
+		synctest.Test(t, func(t *testing.T) {
+			assert.NoError(t, NewSudoListener(ac, "", "").retryVerifyUntilMFA("grant-1"))
+		})
+		assert.Equal(t, int32(4), verifies.Load())
+	})
+
+	t.Run("bounded", func(t *testing.T) {
+		ac, verifies := stubVerify(func(int32) (int, string) {
+			return http.StatusServiceUnavailable, `{}`
+		})
+		synctest.Test(t, func(t *testing.T) {
+			err := NewSudoListener(ac, "", "").retryVerifyUntilMFA("grant-1")
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, errMFAWaitEnded)
+		})
+		assert.Equal(t, int32(utils.MaxConsecutivePollFailures), verifies.Load())
+	})
 }
