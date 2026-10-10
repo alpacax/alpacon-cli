@@ -3,6 +3,7 @@ package ftp
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,6 +115,8 @@ type bulkGateStub struct {
 	arrived  atomic.Int32
 	release  chan struct{}
 	afterMFA func() (int, string)
+	// statusOverride, when set, may answer a status read before the default.
+	statusOverride func(path string) (status int, body string, ok bool)
 }
 
 func (s *bulkGateStub) client() *client.AlpaconClient {
@@ -146,6 +149,11 @@ func (s *bulkGateStub) client() *client.AlpaconClient {
 					}
 					<-s.release
 					return http.StatusForbidden, mfaRefusal
+				}
+				if s.statusOverride != nil {
+					if status, body, ok := s.statusOverride(r.URL.Path); ok {
+						return status, body
+					}
 				}
 				return s.afterMFA()
 			}
@@ -226,4 +234,26 @@ func TestPollTransfer_ProbeRidesThroughATransientError(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), links.Load())
+}
+
+// MFA that lapses again after a successful wait is handled afresh: the polls
+// queued behind the first batch that meet a new refusal prompt once more
+// instead of reporting it as a failed upload.
+func TestBulkUpload_MFALapsingAgainPromptsAgain(t *testing.T) {
+	t.Setenv("ALPACON_NO_BROWSER", "1")
+	t.Setenv("HOME", t.TempDir())
+	stub := &bulkGateStub{release: make(chan struct{})}
+	stub.statusOverride = func(path string) (int, string, bool) {
+		// The first batch (t-0..t-7) is served once MFA completes; the queued
+		// ones meet MFA that has lapsed again until a second link was issued.
+		id, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(path, "/api/webftp/uploads/t-"), "/status/"))
+		if stub.links.Load() == 1 && id >= bulkPollConcurrency {
+			return http.StatusForbidden, mfaRefusal, true
+		}
+		return 0, "", false
+	}
+	stub.afterMFA = func() (int, string) { return http.StatusOK, `{"success": true, "message": "done"}` }
+
+	require.NoError(t, runBulkUpload(t, stub))
+	assert.Equal(t, int32(2), stub.links.Load(), "one link per lapse of MFA")
 }

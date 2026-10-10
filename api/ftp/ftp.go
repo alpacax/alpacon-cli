@@ -1039,31 +1039,39 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 	if refusedAt.IsZero() {
 		refusedAt = time.Now()
 	}
-	err := step()
-	if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
-		return err
-	}
-
 	retry := probe
 	if retry == nil {
 		retry = step
 	}
-	waited, werr := gateFor(ac, serverID).await(refusedAt, func() error {
-		return utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
-			OnMFARequired: func(string) error { return mfa.HandleMFAErrorForServerID(ac, serverID) },
-			RetryOperation: func() error {
-				return utils.MarkSubmission(retry())
-			},
+	for {
+		err := step()
+		if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
+			return err
+		}
+
+		waited, werr := gateFor(ac, serverID).await(refusedAt, func() error {
+			return utils.HandleCommonErrors(utils.MarkSubmission(err), "", utils.ErrorHandlerCallbacks{
+				OnMFARequired: func(string) error { return mfa.HandleMFAErrorForServerID(ac, serverID) },
+				RetryOperation: func() error {
+					return utils.MarkSubmission(retry())
+				},
+			})
 		})
-	})
-	if werr != nil {
-		return werr
+		if werr != nil {
+			return werr
+		}
+		if waited {
+			if probe == nil {
+				// The retried request was the step itself, and it went through.
+				return nil
+			}
+			return step()
+		}
+		// Another request's successful wait covered this refusal, yet the step is
+		// refused again: MFA lapsed since. Run it again; a refusal now starts
+		// after that wait and gets a wait of its own.
+		refusedAt = time.Now()
 	}
-	if waited && probe == nil {
-		// The retried request was the step itself, and it went through.
-		return nil
-	}
-	return step()
 }
 
 // pollTransfer is PollTransferStatus with the poll as a retry unit. refusedAt is
