@@ -83,7 +83,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 			stub: func(*testing.T) *stepStub {
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/uploads/t-1/upload/", refusals: 1}
 			},
-			run: func(ac *client.AlpaconClient, t *testing.T) error {
+			run: func(t *testing.T, ac *client.AlpaconClient) error {
 				return UploadLocalFileAs(ac, writeTempFile(t, "a.txt"), "my-server", "/home/alice/a.txt", "", "", "")
 			},
 			wantHits: 2,
@@ -93,7 +93,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 			stub: func(*testing.T) *stepStub {
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/uploads/t-1/status/", refusals: 1}
 			},
-			run: func(ac *client.AlpaconClient, t *testing.T) error {
+			run: func(t *testing.T, ac *client.AlpaconClient) error {
 				return UploadLocalFileAs(ac, writeTempFile(t, "a.txt"), "my-server", "/home/alice/a.txt", "", "", "")
 			},
 			wantHits: 2,
@@ -103,7 +103,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 			stub: func(*testing.T) *stepStub {
 				return &stepStub{refuseMethod: http.MethodPost, refusePath: uploadBulkTriggerURL, refusals: 1}
 			},
-			run: func(ac *client.AlpaconClient, t *testing.T) error {
+			run: func(t *testing.T, ac *client.AlpaconClient) error {
 				return UploadFile(ac, []string{writeTempFile(t, "a.txt"), writeTempFile(t, "b.txt")}, "my-server:/home/alice/", "", "", false, "")
 			},
 			wantHits: 2,
@@ -113,7 +113,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 			stub: func(*testing.T) *stepStub {
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/downloads/t-1/status/", refusals: 1, blob: "content"}
 			},
-			run: func(ac *client.AlpaconClient, t *testing.T) error {
+			run: func(t *testing.T, ac *client.AlpaconClient) error {
 				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 				return err
 			},
@@ -124,7 +124,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 			stub: func(*testing.T) *stepStub {
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/blob", refusals: 1, blob: "content"}
 			},
-			run: func(ac *client.AlpaconClient, t *testing.T) error {
+			run: func(t *testing.T, ac *client.AlpaconClient) error {
 				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 				return err
 			},
@@ -138,7 +138,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 
 			var err error
 			synctest.Test(t, func(t *testing.T) {
-				err = tc.run(ac, t)
+				err = tc.run(t, ac)
 			})
 
 			require.NoError(t, err)
