@@ -344,8 +344,8 @@ func TestSendRequest_403SudoWithMFAStepUpUnavailableExplainsServerAdmin(t *testi
 func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ code, want string }{
-		{"workspace_execution_control_console_only", "This change loosens execution control and can only be made from the web console."},
-		{"approval_policy_console_only", "Approval policies can only be created, changed or deleted from the web console."},
+		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
+		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
