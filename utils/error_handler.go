@@ -88,8 +88,8 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 // message text, and so does an attempt the server never acted on
 // (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
 // brief outage while the user is still in the browser does not end it. A
-// Retry-After on that answer sets the next gap, capped like any poll backoff
-// and by the wait's own deadline. An error marked by MarkProcessed came after
+// Retry-After on that answer sets the next gap, capped like any poll backoff;
+// a gap that would carry the next attempt past the deadline ends the wait. An error marked by MarkProcessed came after
 // the operation took effect and ends the wait whatever it carries. Any other
 // answer, success or failure, is the operation's own result and ends the wait.
 // The deadline bounds the attempts to about maxRetryDuration / retryInterval.
@@ -102,12 +102,13 @@ func retryUntilMFAAccepted(retry func() error) error {
 	failures := 0
 	delay := retryInterval
 	for {
-		remaining := maxRetryDuration - time.Since(startTime)
-		if remaining <= 0 {
+		// An attempt that would start past the deadline is never sent: the wait
+		// ends instead, without sitting out a gap nothing follows.
+		if remaining := maxRetryDuration - time.Since(startTime); delay > remaining {
 			return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 		}
 
-		time.Sleep(min(delay, remaining))
+		time.Sleep(delay)
 
 		// Any attempt may be the one that goes through and streams the
 		// command's output to stdout, and a frame drawn over that output is

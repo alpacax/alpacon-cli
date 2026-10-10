@@ -394,3 +394,32 @@ func TestHandleCommonErrors_MFA_HonorsRetryAfter(t *testing.T) {
 		})
 	}
 }
+
+// No attempt starts past the deadline: a Retry-After that reaches beyond it
+// ends the wait at once instead of sending one more request when it runs out.
+func TestHandleCommonErrors_MFA_SendsNoAttemptPastTheDeadline(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var last time.Time
+		var attempts int
+		result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+			OnMFARequired: func(string) error { return nil },
+			RetryOperation: func() error {
+				attempts++
+				last = time.Now()
+				if time.Since(start) >= maxRetryDuration-30*time.Second {
+					return retryAfterTestError{statusError(http.StatusTooManyRequests), time.Minute}
+				}
+				return typedMFARefusal()
+			},
+		})
+
+		require.ErrorContains(t, result, "MFA authentication timed out")
+		// Attempts go once a second; the one at 150s is told to wait a minute,
+		// which runs past the 3-minute deadline, so it is the last.
+		assert.Equal(t, maxRetryDuration-30*time.Second, last.Sub(start))
+		assert.Equal(t, 150, attempts)
+		assert.Equal(t, last, time.Now(), "the wait ends without sitting out a gap nothing follows")
+	})
+}
