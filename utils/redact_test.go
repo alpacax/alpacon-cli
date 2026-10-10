@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,4 +60,40 @@ func TestRedactURLError(t *testing.T) {
 		clean := &url.Error{Op: "Get", URL: "https://h/p", Err: plain}
 		assert.Equal(t, error(clean), RedactURLError(clean))
 	})
+}
+
+// net/http puts the Location it could not parse, quoted, in the inner error of
+// the *url.Error, so the URL appears twice in the message.
+func TestRedactURLError_RedactsAQuotedURLInTheInnerError(t *testing.T) {
+	t.Parallel()
+	inner := fmt.Errorf("failed to parse Location header %q: invalid URL escape", "https://bucket.example.com/f?X-Amz-Signature=secret123&x=%zz")
+	err := &url.Error{Op: "Get", URL: "https://api.example.com/download/", Err: inner}
+
+	got := RedactURLError(err)
+
+	assert.NotContains(t, got.Error(), "secret123")
+	assert.Contains(t, got.Error(), "failed to parse Location header")
+	require.ErrorIs(t, got, inner)
+}
+
+// The wrapper reports a timeout the way the *url.Error it replaces does.
+func TestRedactURLError_KeepsTimeoutBehavior(t *testing.T) {
+	t.Parallel()
+	got := RedactURLError(&url.Error{Op: "Get", URL: signedURL, Err: context.DeadlineExceeded})
+
+	assert.True(t, os.IsTimeout(got))
+	var netErr net.Error
+	require.ErrorAs(t, got, &netErr)
+	assert.True(t, netErr.Timeout())
+}
+
+// The websocket channel token is a path segment, so these keep the host only.
+func TestRedactURLHostOnly(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "wss://proxy.example.com", RedactURLHostOnly("wss://proxy.example.com/ws/websh/sid/cid/PATHTOKEN/?q=1"))
+	assert.Equal(t, "wss://proxy.example.com", RedactURLHostOnly("wss://user:pw@proxy.example.com/ws/websh/sid/cid/PATHTOKEN/%zz"))
+
+	got := RedactURLErrorHostOnly(&url.Error{Op: "parse", URL: "wss://proxy.example.com/ws/websh/sid/cid/PATHTOKEN/%zz", Err: errors.New("invalid URL escape")})
+	assert.NotContains(t, got.Error(), "PATHTOKEN")
+	assert.Contains(t, got.Error(), "invalid URL escape")
 }
