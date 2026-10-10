@@ -57,7 +57,7 @@ type Runtime struct {
 }
 
 // Start initializes a TCP tunnel runtime and starts accepting local TCP connections.
-func Start(opts StartOptions) (*Runtime, error) {
+func Start(opts StartOptions) (_ *Runtime, err error) {
 	if opts.ServerName == "" {
 		return nil, errors.New("server name is required")
 	}
@@ -96,6 +96,9 @@ func Start(opts StartOptions) (*Runtime, error) {
 		_ = listener.Close()
 		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
 	}
+	// The server created the session; a failure to reach the proxy from here on
+	// is not a refused creation, and the caller must not create another.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	smuxConfig := config.GetSmuxConfig()
 	headers := alpaconClient.SetWebsocketHeader()

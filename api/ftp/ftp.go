@@ -215,15 +215,35 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 }
 
 func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
+	return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
+		return file, size, func() {}, nil
+	})
+}
+
+// uploadSource produces what an upload sends once the server has accepted the
+// request, so a request the server refuses (an MFA step-up the caller retries,
+// say) costs no preparation. cleanup runs when the upload ends.
+type uploadSource func() (file io.Reader, size int64, cleanup func(), err error)
+
+func executeSingleUploadFrom(ac *client.AlpaconClient, request *UploadRequest, open uploadSource) (err error) {
 	respBody, err := ac.SendPostRequest(uploadAPIURL, request)
 	if err != nil {
 		return err
 	}
+	// The server has accepted the request; a failure from here on is not a
+	// refused submission, and the caller must not send it again.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	var response UploadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
+
+	file, size, cleanup, err := open()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if response.UploadURL != "" {
 		if err := uploadToS3(ac.HTTPClient, response.UploadURL, file, size); err != nil {
@@ -249,15 +269,33 @@ func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file 
 }
 
 func executeBulkUpload(ac *client.AlpaconClient, request *BulkUploadRequest, files []io.Reader, sizes []int64) error {
+	return executeBulkUploadFrom(ac, request, func() ([]io.Reader, []int64, func(), error) {
+		return files, sizes, func() {}, nil
+	})
+}
+
+// bulkUploadSource is uploadSource for several files.
+type bulkUploadSource func() (files []io.Reader, sizes []int64, cleanup func(), err error)
+
+func executeBulkUploadFrom(ac *client.AlpaconClient, request *BulkUploadRequest, open bulkUploadSource) (err error) {
 	respBody, err := ac.SendPostRequest(uploadBulkAPIURL, request)
 	if err != nil {
 		return err
 	}
+	// The server has accepted the request; a failure from here on is not a
+	// refused submission, and the caller must not send it again.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	var responses []UploadResponse
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
 	}
+
+	files, sizes, cleanup, err := open()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
 	if len(responses) != len(files) {
 		return fmt.Errorf("server returned %d upload slots but %d files were provided", len(responses), len(files))
@@ -481,13 +519,16 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		return err
 	}
 
-	if len(src) == 1 {
-		zipFile, size, err := createFolderZipTempFile(src[0])
-		if err != nil {
+	// A missing folder fails here, before the server is asked for an upload slot.
+	for _, folderPath := range src {
+		if _, err := os.Stat(folderPath); err != nil {
 			return err
 		}
-		defer utils.CleanupTempFile(zipFile)
+	}
 
+	// The zip is built only after the server accepts the request: an attempt it
+	// refuses, such as one an MFA step-up retries, zips nothing.
+	if len(src) == 1 {
 		spinner := utils.NewSpinner(fmt.Sprintf("Uploading %s...", filepath.Base(src[0])))
 		spinner.Start()
 		defer spinner.Stop()
@@ -502,27 +543,18 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 			AllowUnzip:     true,
 			WorkSession:    workSessionID,
 		}
-		return executeSingleUpload(ac, request, readOnly{zipFile}, size)
+		return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
+			zipFile, size, err := createFolderZipTempFile(src[0])
+			if err != nil {
+				return nil, 0, nil, err
+			}
+			return readOnly{zipFile}, size, func() { utils.CleanupTempFile(zipFile) }, nil
+		})
 	}
 
 	names := make([]string, len(src))
-	readers := make([]io.Reader, len(src))
-	sizes := make([]int64, len(src))
-	zipFiles := make([]*os.File, len(src))
-	defer func() {
-		for _, f := range zipFiles {
-			utils.CleanupTempFile(f)
-		}
-	}()
 	for i, folderPath := range src {
-		zipFile, size, err := createFolderZipTempFile(folderPath)
-		if err != nil {
-			return err
-		}
-		zipFiles[i] = zipFile
 		names[i] = filepath.Base(folderPath) + ".zip"
-		readers[i] = readOnly{zipFile}
-		sizes[i] = size
 	}
 
 	spinner := utils.NewSpinner(fmt.Sprintf("Uploading %d folders...", len(src)))
@@ -540,7 +572,27 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		WorkSession:    workSessionID,
 	}
 
-	return executeBulkUpload(ac, request, readers, sizes)
+	return executeBulkUploadFrom(ac, request, func() ([]io.Reader, []int64, func(), error) {
+		readers := make([]io.Reader, len(src))
+		sizes := make([]int64, len(src))
+		zipFiles := make([]*os.File, len(src))
+		cleanup := func() {
+			for _, f := range zipFiles {
+				utils.CleanupTempFile(f)
+			}
+		}
+		for i, folderPath := range src {
+			zipFile, size, err := createFolderZipTempFile(folderPath)
+			if err != nil {
+				cleanup()
+				return nil, nil, nil, err
+			}
+			zipFiles[i] = zipFile
+			readers[i] = readOnly{zipFile}
+			sizes[i] = size
+		}
+		return readers, sizes, cleanup, nil
+	})
 }
 
 func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttempts int) (int64, error) {
@@ -645,7 +697,7 @@ func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, re
 	return filePath, written, err
 }
 
-func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (DownloadedFile, error) {
+func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (_ DownloadedFile, err error) {
 	downloadRequest := &DownloadRequest{
 		Path:         remotePath,
 		Name:         filepath.Base(remotePath),
@@ -664,6 +716,9 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 	if err != nil {
 		return DownloadedFile{}, err
 	}
+	// The server has accepted the request; a failure from here on is not a
+	// refused submission, and the caller must not send it again.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
@@ -702,7 +757,7 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 }
 
 // downloadBulk downloads multiple remote files as a single zip archive using the bulk API.
-func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID, username, groupname, workSessionID string) error {
+func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID, username, groupname, workSessionID string) (err error) {
 	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %d files...", len(remotePaths)))
 	spinner.Start()
 	defer spinner.Stop()
@@ -719,6 +774,9 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 	if err != nil {
 		return err
 	}
+	// The server has accepted the request; a failure from here on is not a
+	// refused submission, and the caller must not send it again.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {

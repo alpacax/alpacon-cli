@@ -102,6 +102,14 @@ func TestHandleCommonErrors_MFA_NoCallback(t *testing.T) {
 	assert.Equal(t, err, result)
 }
 
+// codedMFARefusal is the refusal as a structured server error carries it; the wait
+// keeps going only on this form, never on text that merely quotes the code.
+type codedMFARefusal struct{}
+
+func (codedMFARefusal) Error() string       { return mfaRefusal }
+func (codedMFARefusal) ErrorCode() string   { return AuthMFARequired }
+func (codedMFARefusal) ErrorSource() string { return "command" }
+
 const mfaRefusal = `{"code": "auth_mfa_required", "source": "command"}`
 
 func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
@@ -112,7 +120,7 @@ func TestHandleCommonErrors_MFA_RetriesUntilTheRequestPasses(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) < 3 {
-				return errors.New(mfaRefusal)
+				return codedMFARefusal{}
 			}
 			return nil
 		},
@@ -134,7 +142,7 @@ func TestHandleCommonErrors_MFA_AnotherErrorEndsTheWait(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			if retryCount.Add(1) == 1 {
-				return errors.New(mfaRefusal)
+				return codedMFARefusal{}
 			}
 			return retryErr
 		},
@@ -153,7 +161,7 @@ func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 		OnMFARequired: func(string) error { return nil },
 		RetryOperation: func() error {
 			retryCount.Add(1)
-			return errors.New(mfaRefusal)
+			return codedMFARefusal{}
 		},
 	})
 
@@ -194,7 +202,7 @@ func TestHandleCommonErrors_MFA_RidesThroughUnprocessedAttempts(t *testing.T) {
 			case 1, 2:
 				return statusError(http.StatusServiceUnavailable)
 			case 3:
-				return errors.New(mfaRefusal)
+				return codedMFARefusal{}
 			default:
 				return nil
 			}
@@ -268,4 +276,87 @@ func TestIsUnprocessedRequestError(t *testing.T) {
 			assert.Equal(t, tc.want, IsUnprocessedRequestError(tc.err))
 		})
 	}
+}
+
+// A message that only quotes the code, such as a transfer failure an agent
+// reported, is the operation's own answer and ends the wait.
+func TestHandleCommonErrors_MFA_QuotedCodeInTextEndsTheWait(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+	quoted := fmt.Errorf("transfer failed: %s", mfaRefusal)
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			retryCount.Add(1)
+			return quoted
+		},
+	})
+
+	assert.Equal(t, quoted, result)
+	assert.Equal(t, int32(1), retryCount.Load())
+}
+
+// An error after the server accepted the submission is never read as a refused
+// one, whatever status or dial failure it carries, so the operation is not sent again.
+func TestHandleCommonErrors_MFA_ProcessedErrorEndsTheWait(t *testing.T) {
+	withFastRetry(t)
+	dial := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+	for name, cause := range map[string]error{"503": statusError(http.StatusServiceUnavailable), "429": statusError(http.StatusTooManyRequests), "dial": dial} {
+		t.Run(name, func(t *testing.T) {
+			var retryCount atomic.Int32
+			late := MarkProcessed(fmt.Errorf("failed to read command output: %w", cause))
+
+			result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+				OnMFARequired: func(string) error { return nil },
+				RetryOperation: func() error {
+					retryCount.Add(1)
+					return late
+				},
+			})
+
+			assert.Equal(t, late, result)
+			assert.Equal(t, int32(1), retryCount.Load(), "the accepted submission must not be sent again")
+			assert.EqualError(t, late, "failed to read command output: "+cause.Error(), "marking must not change the message")
+		})
+	}
+}
+
+type retryAfterStatusError struct {
+	statusError
+	after time.Duration
+}
+
+func (e retryAfterStatusError) RetryAfter() time.Duration { return e.after }
+
+// A 429 waits the Retry-After the server sent, not the usual interval.
+func TestHandleCommonErrors_MFA_HonorsRetryAfterOn429(t *testing.T) {
+	withFastRetry(t)
+	var retryCount atomic.Int32
+	var stamps []time.Time
+
+	result := HandleCommonErrors(errors.New(mfaRefusal), "server1", ErrorHandlerCallbacks{
+		OnMFARequired: func(string) error { return nil },
+		RetryOperation: func() error {
+			stamps = append(stamps, time.Now())
+			if retryCount.Add(1) == 1 {
+				return retryAfterStatusError{statusError(http.StatusTooManyRequests), 150 * time.Millisecond}
+			}
+			return nil
+		},
+	})
+
+	require.NoError(t, result)
+	require.Len(t, stamps, 2)
+	assert.GreaterOrEqual(t, stamps[1].Sub(stamps[0]), 150*time.Millisecond)
+}
+
+func TestMarkProcessed(t *testing.T) {
+	t.Parallel()
+	assert.NoError(t, MarkProcessed(nil))
+	inner := statusError(http.StatusServiceUnavailable)
+	marked := MarkProcessed(fmt.Errorf("wrapped: %w", inner))
+	assert.False(t, IsUnprocessedRequestError(marked))
+	assert.Equal(t, http.StatusServiceUnavailable, HTTPStatusCode(marked), "status stays readable through the marker")
+	assert.ErrorIs(t, marked, inner)
 }

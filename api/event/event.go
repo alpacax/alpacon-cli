@@ -487,7 +487,8 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 
 	listener := s.listener
 	s.listener = nil
-	return streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
+	// The command exists from here on; nothing that fails now was a refused submission.
+	return utils.MarkProcessed(streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false))
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -770,7 +771,8 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err
 	}
-	return runCommandFallbackFromID(ac, cmdResp.ID, out, false, cause)
+	// The command exists from here on; nothing that fails now was a refused submission.
+	return utils.MarkProcessed(runCommandFallbackFromID(ac, cmdResp.ID, out, false, cause))
 }
 
 // runCommandFallbackFromID polls an already-submitted command by ID (instead of

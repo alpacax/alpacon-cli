@@ -239,7 +239,7 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 }
 
 // Create new websh session
-func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
+func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (_ SessionResponse, err error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
 		return SessionResponse{}, err
@@ -256,6 +256,10 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 	if err != nil {
 		return SessionResponse{}, err
 	}
+
+	// The session exists from here on; a failure to share it is not a refused
+	// creation, and the caller must not create another.
+	defer func() { err = utils.MarkProcessed(err) }()
 
 	var response SessionResponse
 	err = json.Unmarshal(responseBody, &response)

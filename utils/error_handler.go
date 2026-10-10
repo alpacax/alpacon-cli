@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -78,11 +79,17 @@ func HandleCommonErrors(err error, serverName string, callbacks ErrorHandlerCall
 // already comes from: the next attempt passes with the same access token, and
 // no separate completion probe or token refresh is needed to notice.
 //
-// auth_mfa_required keeps the wait going, and so does an attempt the server
-// never acted on (IsUnprocessedRequestError), up to MaxConsecutivePollFailures
-// in a row, so a brief outage while the user is still in the browser does not
-// end it. Any other answer, success or failure, is the operation's own result
-// and ends the wait. The deadline bounds the attempts to about
+// A coded auth_mfa_required keeps the wait going (a message that only quotes the
+// code does not), and so does an attempt the server never acted on
+// (IsUnprocessedRequestError), up to MaxConsecutivePollFailures in a row, so a
+// brief outage while the user is still in the browser does not end it. A 429
+// waits the Retry-After the server sent instead of the usual interval. Any
+// other answer, success or failure, is the operation's own result and ends the
+// wait.
+//
+// Whether an attempt was unprocessed is the retried operation's to say: its
+// errors after the server accepted the submission carry MarkProcessed, so a
+// failed later read is never mistaken for a refused submission and replayed. The deadline bounds the attempts to about
 // maxRetryDuration / retryInterval.
 func retryUntilMFAAccepted(retry func() error) error {
 	spinner := NewSpinner(mfaWaitMessage)
@@ -91,12 +98,13 @@ func retryUntilMFAAccepted(retry func() error) error {
 
 	startTime := time.Now()
 	failures := 0
+	wait := retryInterval
 	for {
 		if time.Since(startTime) > maxRetryDuration {
 			return fmt.Errorf("MFA authentication timed out after %v", maxRetryDuration)
 		}
 
-		time.Sleep(retryInterval)
+		time.Sleep(wait)
 
 		// Any attempt may be the one that goes through and streams the
 		// command's output to stdout, and a frame drawn over that output is
@@ -108,13 +116,17 @@ func retryUntilMFAAccepted(retry func() error) error {
 			CliSuccess("MFA authentication completed")
 			return nil
 		}
-		switch code, _ := ParseErrorResponse(err); {
-		case code == AuthMFARequired:
+		wait = retryInterval
+		switch {
+		case ErrorCodeOf(err) == AuthMFARequired:
 			failures = 0
 		case IsUnprocessedRequestError(err):
 			failures++
 			if failures >= MaxConsecutivePollFailures {
 				return err
+			}
+			if HTTPStatusCode(err) == http.StatusTooManyRequests {
+				wait = NextPollBackoff(retryInterval, 0, RetryAfter(err))
 			}
 		default:
 			return err

@@ -224,8 +224,17 @@ func IsFatalClientError(status int) bool {
 // Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
 // which can follow a request that already ran, so a request that is not
 // idempotent may be sent again on it.
+//
+// Only the side-effecting request's own response can show that. An error from
+// anything that ran after the server accepted the submission (a status poll, an
+// output read, a later dial) is wrapped with MarkProcessed, and this returns
+// false for it whatever status or dial error it carries.
 func IsUnprocessedRequestError(err error) bool {
 	if err == nil {
+		return false
+	}
+	var processed *processedError
+	if errors.As(err, &processed) {
 		return false
 	}
 	switch HTTPStatusCode(err) {
@@ -237,6 +246,38 @@ func IsUnprocessedRequestError(err error) bool {
 	default:
 		return false
 	}
+}
+
+// processedError marks an error that came after the server accepted a
+// side-effecting request. Its text is the wrapped error's own.
+type processedError struct{ err error }
+
+func (e *processedError) Error() string { return e.err.Error() }
+func (e *processedError) Unwrap() error { return e.err }
+
+// MarkProcessed wraps an error that occurred after a submit, create or trigger
+// request succeeded, so IsUnprocessedRequestError never reads it as "the server
+// did not act". A nil error stays nil.
+func MarkProcessed(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &processedError{err: err}
+}
+
+// ErrorCodeOf returns the code a structured server error carries, or "" for an
+// error that only mentions one in its text. ParseErrorResponse also recovers a
+// code from free text; use this where a message that merely quotes a code must
+// not be taken for the server's answer.
+func ErrorCodeOf(err error) string {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if coded, ok := e.(codedError); ok {
+			if code := coded.ErrorCode(); code != "" {
+				return code
+			}
+		}
+	}
+	return ""
 }
 
 // IsTransientRequestError reports whether err may not repeat on the next
