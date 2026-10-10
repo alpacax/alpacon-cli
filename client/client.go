@@ -294,6 +294,10 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
 	case utils.WorkspaceSudoWithMFAStepUpUnavailable:
 		return "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", true
+	case utils.WorkspaceExecutionControlConsoleOnly:
+		return "This change loosens execution control and can only be made from the web console.", true
+	case utils.ApprovalPolicyConsoleOnly:
+		return "Approval policies can only be created, changed or deleted from the web console.", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
