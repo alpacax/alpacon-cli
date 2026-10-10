@@ -62,6 +62,9 @@ type pollSeams struct {
 	cancel <-chan struct{}
 	now    func() time.Time
 	after  func(time.Duration) <-chan time.Time
+	// surfaceMFA returns an MFA refusal of the poll to the caller at once, for
+	// a caller that runs the MFA wait itself and polls again after it.
+	surfaceMFA bool
 }
 
 func (s pollSeams) Now() time.Time {
@@ -306,8 +309,11 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 }
 
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
+// An MFA refusal (auth_mfa_required) of the poll is returned at once as the
+// typed error, so the caller can wait for MFA and poll again; the poll only
+// reads, so polling again is safe. Any other GET error is retried with backoff.
 func PollCommandExecution(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{})
+	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{surfaceMFA: true})
 }
 
 func execTimeout() time.Duration {
@@ -364,6 +370,9 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 		if err != nil {
+			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {
+				return response, err
+			}
 			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {

@@ -2445,3 +2445,38 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 	assert.Equal(t, int32(2), submits.Load())
 	assert.Equal(t, sessionsAfterFirst, sessions.Load(), "the failed listener must not be dialed again")
 }
+
+// A caller that runs the MFA wait itself gets the typed refusal at once; the
+// default poll keeps treating it like any other failed GET.
+func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		surfaceMFA bool
+		wantCode   bool
+	}{
+		{name: "surfaced", surfaceMFA: true, wantCode: true},
+		{name: "retried until the deadline", surfaceMFA: false, wantCode: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			require.Error(t, err)
+			if tc.wantCode {
+				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
+				return
+			}
+			var clientTimeout *ClientTimeoutError
+			require.ErrorAs(t, err, &clientTimeout)
+		})
+	}
+}
