@@ -52,7 +52,7 @@ func TestRedactURLError(t *testing.T) {
 	t.Run("others pass through", func(t *testing.T) {
 		plain := errors.New("boom")
 		assert.Equal(t, plain, RedactURLError(plain))
-		assert.NoError(t, RedactURLError(nil))
+		require.NoError(t, RedactURLError(nil))
 		clean := &url.Error{Op: "Get", URL: "https://h/p", Err: plain}
 		assert.Equal(t, error(clean), RedactURLError(clean))
 	})
