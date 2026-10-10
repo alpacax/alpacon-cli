@@ -273,7 +273,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(1, size)
-	success, message, err := pollTransfer(ac, serverID, "upload", response.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "upload", response.ID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -354,9 +354,12 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	}
 	timeout := calcPollTimeout(len(files), totalBytes)
 
+	// One start time for the whole batch: the polls queue behind the concurrency
+	// limit, and all of them belong to this command's MFA wait.
+	batchStart := time.Now()
 	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) string {
 		resp := responses[i]
-		success, message, err := pollTransfer(ac, serverID, "upload", resp.ID, timeout)
+		success, message, err := pollTransfer(ac, serverID, "upload", resp.ID, timeout, batchStart)
 		if err != nil {
 			return fmt.Sprintf("%s: %v", uploadResponseLabel(resp), err)
 		}
@@ -798,7 +801,7 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 	}
 
 	timeout := calcPollTimeout(1, written)
-	success, message, err := pollTransfer(ac, serverID, "download", downloadResponse.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "download", downloadResponse.ID, timeout, time.Time{})
 	if err != nil {
 		return DownloadedFile{}, fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -876,7 +879,7 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(len(remotePaths), written)
-	success, message, err := pollTransfer(ac, serverID, "download", response.ID, timeout)
+	success, message, err := pollTransfer(ac, serverID, "download", response.ID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -1017,7 +1020,7 @@ func (g *mfaGate) await(refusedAt time.Time, wait func() error) (waited bool, er
 // that may be resent. Refusals that arrive together share one MFA wait, and
 // when it fails each of them returns its error without prompting again.
 func transferStep(ac *client.AlpaconClient, serverID string, step func() error) error {
-	return transferStepProbed(ac, serverID, step, nil)
+	return transferStepProbed(ac, serverID, time.Time{}, step, nil)
 }
 
 // transferStepProbed is transferStep for a step that is a whole loop of
@@ -1025,8 +1028,17 @@ func transferStep(ac *client.AlpaconClient, serverID string, step func() error) 
 // step runs again in full only after the wait, outside the gate, so the
 // refused steps of sibling transfers proceed in parallel. A nil probe is the
 // step itself.
-func transferStepProbed(ac *client.AlpaconClient, serverID string, step, probe func() error) error {
-	refusedAt := time.Now()
+//
+// A refusal that began before the last wait ended takes that wait's outcome. For
+// a step of its own that moment is when the step started (a zero refusedAt). The
+// polls of one bulk command are queued behind a concurrency limit, so some start
+// only after a wait ended; the command passes the time it began so all of them
+// count as refused before it. A refusal from a separate, later command starts
+// after and still prompts.
+func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt time.Time, step, probe func() error) error {
+	if refusedAt.IsZero() {
+		refusedAt = time.Now()
+	}
 	err := step()
 	if utils.StructuredErrorCode(err) != utils.AuthMFARequired {
 		return err
@@ -1054,11 +1066,13 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, step, probe f
 	return step()
 }
 
-// pollTransfer is PollTransferStatus with the poll as a retry unit. A poll
+// pollTransfer is PollTransferStatus with the poll as a retry unit. refusedAt is
+// the time the command began, for polls queued behind a concurrency limit; the
+// zero time means the poll's own start (see transferStepProbed). A poll
 // refused for MFA cannot say how the transfer ended, so when it is refused and
 // the wait does not end in an answer, the error says the transfer may already
 // have completed.
-func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, timeout time.Duration) (success bool, message string, err error) {
+func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, timeout time.Duration, refusedAt time.Time) (success bool, message string, err error) {
 	refused := false
 	note := func(stepErr error) error {
 		if utils.StructuredErrorCode(stepErr) == utils.AuthMFARequired {
@@ -1066,7 +1080,7 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 		}
 		return stepErr
 	}
-	err = transferStepProbed(ac, serverID,
+	err = transferStepProbed(ac, serverID, refusedAt,
 		func() error {
 			var stepErr error
 			success, message, stepErr = PollTransferStatus(ac, transferType, id, timeout)
@@ -1074,8 +1088,17 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 		},
 		func() error {
 			// One status read: it tells whether MFA went through without
-			// running the whole poll under the gate.
-			_, probeErr := ac.SendGetRequest(transferStatusURL(transferType, id))
+			// running the whole poll under the gate. A transient failure is
+			// ridden through as the full poll rides through it, so a flaky read
+			// does not end the wait.
+			var probeErr error
+			for failures := 0; failures < utils.MaxConsecutivePollFailures; failures++ {
+				_, probeErr = ac.SendGetRequest(transferStatusURL(transferType, id))
+				if probeErr == nil || !utils.IsTransientRequestError(probeErr) {
+					break
+				}
+				time.Sleep(utils.NextPollBackoff(pollTick, failures, utils.RetryAfter(probeErr)))
+			}
 			return note(probeErr)
 		})
 	if err != nil && refused {
