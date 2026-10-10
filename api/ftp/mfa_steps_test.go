@@ -84,6 +84,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/uploads/t-1/upload/", refusals: 1}
 			},
 			run: func(t *testing.T, ac *client.AlpaconClient) error {
+				t.Helper()
 				return UploadLocalFileAs(ac, writeTempFile(t, "a.txt"), "my-server", "/home/alice/a.txt", "", "", "")
 			},
 			wantHits: 2,
@@ -94,6 +95,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/uploads/t-1/status/", refusals: 1}
 			},
 			run: func(t *testing.T, ac *client.AlpaconClient) error {
+				t.Helper()
 				return UploadLocalFileAs(ac, writeTempFile(t, "a.txt"), "my-server", "/home/alice/a.txt", "", "", "")
 			},
 			wantHits: 2,
@@ -104,6 +106,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				return &stepStub{refuseMethod: http.MethodPost, refusePath: uploadBulkTriggerURL, refusals: 1}
 			},
 			run: func(t *testing.T, ac *client.AlpaconClient) error {
+				t.Helper()
 				return UploadFile(ac, []string{writeTempFile(t, "a.txt"), writeTempFile(t, "b.txt")}, "my-server:/home/alice/", "", "", false, "")
 			},
 			wantHits: 2,
@@ -114,6 +117,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/api/webftp/downloads/t-1/status/", refusals: 1, blob: "content"}
 			},
 			run: func(t *testing.T, ac *client.AlpaconClient) error {
+				t.Helper()
 				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 				return err
 			},
@@ -125,6 +129,7 @@ func TestTransfer_MFARefusalAfterTheCreateRetriesOnlyTheRefusedRequest(t *testin
 				return &stepStub{refuseMethod: http.MethodGet, refusePath: "/blob", refusals: 1, blob: "content"}
 			},
 			run: func(t *testing.T, ac *client.AlpaconClient) error {
+				t.Helper()
 				_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 				return err
 			},
