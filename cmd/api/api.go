@@ -235,9 +235,14 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		// the attempt that ends it is shown: the refused ones in between repeat the
 		// first exchange, which is already on stderr.
 		var lastAttempt bytes.Buffer
+		// Whether the attempt that ended the wait got no response at all: then the
+		// response held from an earlier attempt answers a different request and
+		// must not be rendered as this one's.
+		var noResponse bool
 		retry := func() error {
 			lastAttempt.Reset()
 			retried, sendErr := sendAPIRequest(ac, opts, request, &lastAttempt)
+			noResponse = sendErr != nil
 			if sendErr != nil {
 				return sendErr
 			}
@@ -259,6 +264,9 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		// A wait that ended on the server's own 429 or 503 reports that response
 		// the way any other non-2xx answer is reported, below.
 		var unprocessed unprocessedResponseError
+		if handleErr != nil && noResponse {
+			return utils.ExitCodeGeneralError, handleErr
+		}
 		if handleErr != nil && !errors.As(handleErr, &unprocessed) {
 			if writeErr := writeAPIResponse(opts, response, stdout); writeErr != nil {
 				return utils.ExitCodeGeneralError, writeErr

@@ -2,8 +2,10 @@ package apicmd
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -915,6 +917,10 @@ func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, str
 			case "/x":
 				n := int(atomic.AddInt32(&endpointCalls, 1))
 				status, ct, body := endpointResponses(n)
+				if status == 0 {
+					// No response at all: the connection was refused.
+					return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+				}
 				return apiTestResponse(status, ct, body), nil
 			case "/api/auth0/mfa/":
 				return apiTestResponse(http.StatusOK, "application/json", `{"mfa_url": "https://example.com/mfa"}`), nil
@@ -1027,6 +1033,27 @@ func TestRunAPI_MFAWaitEndingOn503sReportsTheResponse(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.JSONEq(t, `{"detail":"unavailable"}`, stdout.String())
 	assert.NotContains(t, stderr.String(), "HTTP 503", "the caller prints the status, not runAPI")
+	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), atomic.LoadInt32(calls))
+}
+
+// A wait that ends on an attempt with no response at all reports that failure
+// alone: the MFA refusal held from the first attempt answered another request
+// and is not printed as this one's.
+func TestRunAPI_MFAWaitEndingWithoutAResponsePrintsNoStaleResponse(t *testing.T) {
+	ac, calls := mfaTestServer(t, func(n int) (int, string, string) {
+		if n == 1 {
+			return http.StatusForbidden, "application/json", `{"code":"auth_mfa_required"}`
+		}
+		return 0, "", ""
+	})
+	var stdout, stderr bytes.Buffer
+
+	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+
+	require.ErrorContains(t, err, "connection refused")
+	assert.Equal(t, 1, code)
+	assert.Empty(t, stdout.String())
+	assert.NotContains(t, stderr.String(), "HTTP 403")
 	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), atomic.LoadInt32(calls))
 }
 
