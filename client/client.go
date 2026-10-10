@@ -478,7 +478,7 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 		// in again but not why the renewal behind it failed. Without this line
 		// a long wait that dies on a rejected refresh token leaves no trace of
 		// the rejection.
-		utils.CliDebug("access token renewal failed: %v", err)
+		utils.CliDebug("access token renewal failed: %v", utils.RedactURLError(err))
 		return false
 	}
 	return true
@@ -541,7 +541,7 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, utils.RedactURLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -955,7 +955,8 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		// A download URL may be presigned, and a transport error prints it whole.
+		return nil, utils.RedactURLError(err)
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {

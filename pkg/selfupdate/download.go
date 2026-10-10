@@ -84,7 +84,7 @@ func assetOrigin(parsed *url.URL) string {
 func checkAssetOrigin(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("release asset url %q cannot be read: %w", rawURL, err)
+		return fmt.Errorf("release asset url %q cannot be read: %w", utils.RedactURL(rawURL), utils.RedactURLError(err))
 	}
 	origin := assetOrigin(parsed)
 	if !slices.Contains(allowedAssetOrigins, origin) {
@@ -107,12 +107,13 @@ func downloadTo(assetURL, destPath string, maxBytes int64) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		// A redirect to signed storage makes the error name that URL.
+		return utils.RedactURLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("downloading %s returned %s", assetURL, resp.Status)
+		return fmt.Errorf("downloading %s returned %s", utils.RedactURL(assetURL), resp.Status)
 	}
 
 	file, err := os.Create(destPath)

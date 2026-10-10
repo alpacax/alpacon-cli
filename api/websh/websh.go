@@ -301,6 +301,8 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
 	if err != nil {
 		// The handshake response carries the reason a bad handshake alone never names.
+		// The URL carries a channel token in its query, which a URL error prints.
+		err = utils.RedactURLError(err)
 		if resp == nil {
 			return fmt.Errorf("websocket connection failed: %w", err)
 		}

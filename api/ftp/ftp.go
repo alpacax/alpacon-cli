@@ -156,7 +156,8 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		// The URL is presigned: its query holds a live signature.
+		return utils.RedactURLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -641,7 +642,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 	for count := range maxAttempts {
 		resp, err = httpClient.Get(url)
 		if err != nil {
-			return 0, fmt.Errorf("network error while downloading: %w", err)
+			return 0, fmt.Errorf("network error while downloading: %w", utils.RedactURLError(err))
 		}
 
 		if resp.StatusCode == http.StatusOK {
