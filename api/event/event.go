@@ -208,13 +208,14 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 	eventList := make([]EventAttributes, 0, len(events))
 	for _, event := range events {
 		eventList = append(eventList, EventAttributes{
-			Server:      event.Server.Name,
-			Shell:       event.Shell,
-			Command:     event.Line,
-			Result:      utils.TruncateString(event.Result, 70),
-			Status:      utils.BoolPointerToString(event.Success),
-			Operator:    event.RequestedBy.Name,
-			RequestedAt: utils.TimeUtils(event.AddedAt),
+			Server:                event.Server.Name,
+			Shell:                 event.Shell,
+			Command:               event.Line,
+			Result:                utils.TruncateString(event.Result, 70),
+			Status:                utils.BoolPointerToString(event.Success),
+			Operator:              event.RequestedBy.Name,
+			RequestedAt:           utils.TimeUtils(event.AddedAt),
+			ApprovedFileExecution: event.ApprovedFileExecution,
 		})
 	}
 	return eventList, nil
@@ -587,6 +588,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		if lastSeq < 0 && details.Result != "" {
 			_, _ = fmt.Fprint(out, details.Result)
 		}
+		printStandingGrant(details)
 		// Output is already streamed; errorFromDetails keeps it on the error
 		// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
 		return errorFromDetails(details)
@@ -804,6 +806,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if output != "" {
 		_, _ = fmt.Fprint(out, output)
 	}
+	printStandingGrant(details)
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.

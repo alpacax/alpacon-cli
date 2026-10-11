@@ -149,25 +149,29 @@ func PrintTable(slice any) {
 
 	tw := tabwriter.NewWriter(writer, 0, 0, 3, ' ', 0)
 
-	numFields := s.Type().Elem().NumField()
-	headers := make([]string, numFields)
-	for i := range numFields {
+	var fields []int
+	var headers []string
+	for i := range s.Type().Elem().NumField() {
 		field := s.Type().Elem().Field(i)
+		if field.Tag.Get("table") == "-" {
+			continue
+		}
+		fields = append(fields, i)
 		if tag := field.Tag.Get("table"); tag != "" {
-			headers[i] = strings.ToUpper(tag)
+			headers = append(headers, strings.ToUpper(tag))
 		} else {
-			headers[i] = strings.ToUpper(camelToWords(field.Name))
+			headers = append(headers, strings.ToUpper(camelToWords(field.Name)))
 		}
 	}
 	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
 
 	for i := range s.Len() {
-		row := make([]string, numFields)
-		for j := range numFields {
+		row := make([]string, len(fields))
+		for j, field := range fields {
 			// API values are untrusted: a control sequence here rewrites the reader's terminal.
 			// Newlines drop instead of becoming spaces as in cmd/event/render.go: a cell must
 			// not spill into a second row. --output json returns the value whole.
-			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(j)))
+			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(field)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
 	}

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"text/tabwriter"
-	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -237,18 +236,7 @@ func projectTimelineAttributes(item *wsapi.TimelineItem, serverMap map[string]st
 }
 
 func formatTimestamp(ts string) string {
-	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
-		return t.Local().Format("2006-01-02 15:04:05")
-	}
-	// fallback for non-RFC-3339 formats
-	date, rest, found := strings.Cut(ts, "T")
-	if !found {
-		return ts
-	}
-	if idx := strings.IndexAny(rest, ".+Z"); idx != -1 {
-		rest = rest[:idx]
-	}
-	return date + " " + rest
+	return utils.FormatTimestamp(ts)
 }
 
 func formatType(t string) string {

@@ -42,6 +42,9 @@ Run the command again later to check for completion.`,
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}
+		if line := event.StandingGrantLine(details); line != "" {
+			fmt.Fprintln(os.Stderr, line)
+		}
 
 		// Ahead of the approval hold: a parked command has no approval request,
 		// so reporting one would name a queue it is not in. This is the detach
