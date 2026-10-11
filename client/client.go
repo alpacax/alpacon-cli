@@ -16,6 +16,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -358,7 +359,8 @@ func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, c
 // SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
 // User-Agent of its own, so a client assembled without one—every client outside
 // NewAlpaconAPIClient—would dial anonymously; fall back to the same string the
-// HTTP requests carry.
+// HTTP requests carry. The handshake declares a detected AI agent the same way
+// every HTTP request does.
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	userAgent := ac.UserAgent
 	if userAgent == "" {
@@ -368,6 +370,7 @@ func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	headers := http.Header{}
 	headers.Set("Origin", ac.BaseURL)
 	headers.Set("User-Agent", userAgent)
+	aiagent.FromEnvironment().SetHeaders(headers)
 
 	return headers
 }
@@ -386,8 +389,11 @@ func (ac *AlpaconClient) SetWebsocketHeaderWithCapabilities(capabilities ...stri
 	return headers
 }
 
+// setHTTPHeader signs req and declares a detected AI agent. Every request the
+// client sends passes through here, the stale-token replay included.
 func (ac *AlpaconClient) setHTTPHeader(req *http.Request) *http.Request {
 	req.Header.Set("User-Agent", ac.UserAgent)
+	aiagent.FromEnvironment().SetHeaders(req.Header)
 	if accessToken := ac.AccessToken(); accessToken != "" {
 		req.Header.Set("Authorization", bearerPrefix+accessToken)
 	} else if ac.Token != "" {
@@ -733,6 +739,9 @@ func (ac *AlpaconClient) SendRawRequest(method, path string, body io.Reader, hea
 	for name, values := range header {
 		setHeaderValues(req.Header, name, values)
 	}
+	// A caller-supplied header does not replace the declaration: an agent could
+	// otherwise send itself as a person through a raw request.
+	aiagent.FromEnvironment().SetHeaders(req.Header)
 	return ac.sendRawRequest(req, header)
 }
 
@@ -1351,6 +1360,8 @@ func codeOnlyMessage(code string) string {
 		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
 	case utils.ServerPAMInstallInProgress:
 		return "an alpamon-pam install is already pending on this server—wait for it to finish"
+	case utils.WorkSessionAgentSessionRequired:
+		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}

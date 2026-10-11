@@ -14,6 +14,7 @@ import (
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -45,6 +46,7 @@ var (
 	useAfterCreate   bool
 	createSudo       []string
 	createSudoReason string
+	createAccount    string
 )
 
 var workSessionCreateCmd = &cobra.Command{
@@ -67,11 +69,20 @@ prompt. The 'sudo' scope is added automatically, and the policies are submitted 
 approval together with the session. If a sudo command is later denied, add it to the
 session with 'alpacon work-session update <id> --sudo "<command>"'.
 
-When an AI agent (rather than a human) drives the session, pass --requester-type agent
-so it is recorded and scoped accordingly. An agent session refuses --use and the websh
-scope, so pass --work-session SESSION_ID before the server on each command instead, as
-in 'alpacon exec --work-session SESSION_ID web-01 -- uptime'. --wait still waits for
-approval.`,
+When an AI agent drives the CLI, the session is an agent session. The CLI detects
+Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose from the
+environment variables they set in the shells they run, and names the agent on every
+request. For an agent the CLI does not detect (for example Aider), set
+AI_AGENT=<name> in the agent's environment. --requester-type agent opens an agent
+session without naming an agent; --requester-type user is refused while an agent is
+detected.
+
+An agent session refuses --use and the websh scope, so pass --work-session SESSION_ID
+before the server on each command instead, as in 'alpacon exec --work-session
+SESSION_ID web-01 -- uptime'. --wait still waits for approval.
+
+Pass --account to name the account the work runs as on the servers (for example
+root), so the approver sees it with the request.`,
 	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
@@ -81,6 +92,7 @@ approval.`,
   # AI agent: no --use and no websh scope; name the session on each command instead
   alpacon work-session create --scope command --server web-01 --expires-in 2h --purpose "auto-remediate disk-full alert on web-01: rotate logs, restart rsyslog" --requester-type agent --wait
   alpacon exec --work-session SESSION_ID web-01 -- df -h
+  alpacon work-session create --scope command,sudo --server web-01 --expires-in 1h --purpose "restart nginx" --account root
 
   alpacon work-session create --server web-01 --expires-in 2h --purpose "nginx hotfix" \
     --sudo "systemctl restart nginx,systemctl reload nginx" --sudo "tail -f /var/log/nginx/*.log"`,
@@ -124,6 +136,15 @@ approval.`,
 		if requesterType != "user" && requesterType != "agent" {
 			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --requester-type %q: must be \"user\" or \"agent\".", requesterType)
 		}
+		detected := aiagent.FromEnvironment()
+		sessionRequesterType, err := resolveRequesterType(requesterType, cmd.Flags().Changed("requester-type"), detected)
+		if err != nil {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "%s", err)
+		}
+		account, err := normalizeAccount(createAccount, cmd.Flags().Changed("account"))
+		if err != nil {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "%s", err)
+		}
 
 		waitTimeout, werr := resolveWaitTimeout(wait, waitApproval, cmd.Flags().Changed("wait-approval"))
 		if werr != nil {
@@ -134,8 +155,8 @@ approval.`,
 		// Pre-validate --use to avoid creating an orphan server-side session that we
 		// can't attach to the workspace.
 		if useAfterCreate {
-			if requesterType == "agent" {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with --requester-type=agent (agent sessions are not workspace-attachable).")
+			if sessionRequesterType == "agent" {
+				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
 			}
 			cfg, err := config.LoadConfig()
 			if err != nil || cfg.WorkspaceName == "" {
@@ -166,8 +187,8 @@ approval.`,
 		if err := validateScopeEnum(scopeList); err != nil {
 			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --scope: %s", err)
 		}
-		if err := validateAgentScopes(requesterType, scopeList); err != nil {
-			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --scope: %s", err)
+		if err := validateAgentScopes(sessionRequesterType, scopeList); err != nil {
+			utils.CliUsageErrorEnvelopeWithExit(opCreate, "Invalid --scope: %s.%s", err, detectedAgentSuffix(detected))
 		}
 
 		ac, err := client.NewAlpaconAPIClient()
@@ -185,12 +206,13 @@ approval.`,
 		}
 
 		req := wsapi.WorkSessionCreateRequest{
-			Description:   purpose,
-			RequesterType: requesterType,
-			Scopes:        scopeList,
-			Servers:       serverIDs,
-			ExpiresAt:     expiresAtVal,
-			SudoPolicies:  sudoPolicies,
+			Description:           purpose,
+			RequesterType:         sessionRequesterType,
+			Scopes:                scopeList,
+			Servers:               serverIDs,
+			ExpiresAt:             expiresAtVal,
+			SudoPolicies:          sudoPolicies,
+			TargetAccountUsername: account,
 		}
 
 		session, err := wsapi.CreateWorkSession(ac, req)
@@ -474,6 +496,42 @@ func decideUseAction(status string, useEnabled bool) useDecision {
 	}
 }
 
+// resolveRequesterType picks the session's requester_type. --requester-type
+// sets the mode only; the agent's name always comes from the environment. A
+// detected agent gets an agent session, and an explicit --requester-type user
+// while one is detected is refused: the server holds a declared agent to an
+// agent session anyway, and a person taken for an agent needs to learn why
+// here rather than from a refused session later.
+func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detection) (string, error) {
+	if !detected.Detected() {
+		return flagValue, nil
+	}
+	if flagSet && flagValue == "user" {
+		return "", fmt.Errorf("--requester-type user is refused: this shell runs under the AI agent %s. Unset those variables, or run the command from your own terminal", detected.Describe())
+	}
+	return "agent", nil
+}
+
+// detectedAgentSuffix explains, after a refusal that applies to agent sessions,
+// that the session is one because an agent was detected. It is empty when no
+// agent was detected.
+func detectedAgentSuffix(detected aiagent.Detection) string {
+	if !detected.Detected() {
+		return ""
+	}
+	return fmt.Sprintf(" This shell runs under the AI agent %s; not an AI agent? Unset those variables, or run the command from your own terminal.", detected.Describe())
+}
+
+// normalizeAccount trims --account and refuses a value that names nothing,
+// which the server would otherwise read as no declaration at all.
+func normalizeAccount(raw string, set bool) (string, error) {
+	account := strings.TrimSpace(raw)
+	if set && account == "" {
+		return "", errors.New("--account must name an account, such as root")
+	}
+	return account, nil
+}
+
 // validateAgentScopes returns an error when requester_type is "agent" and
 // scopes contains "websh", which the server disallows.
 func validateAgentScopes(requesterType string, scopes []string) error {
@@ -635,11 +693,12 @@ func init() {
 	workSessionCreateCmd.Flags().StringSliceVar(&createServers, "server", nil, "Target server names (repeatable; comma-separated values also accepted)")
 	workSessionCreateCmd.Flags().StringVar(&expiresIn, "expires-in", "", "Session duration (e.g. 1h, 2h, 4h)")
 	workSessionCreateCmd.Flags().StringVar(&expiresAt, "expires-at", "", "Absolute expiry time (RFC3339)")
-	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent' (set when an AI agent drives the session)")
+	workSessionCreateCmd.Flags().StringVar(&requesterType, "requester-type", "user", "Requester type: 'user' (default) or 'agent'. A detected AI agent always gets 'agent'; set AI_AGENT=<name> for an agent the CLI does not detect")
 	workSessionCreateCmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
 	workSessionCreateCmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
 	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
+	workSessionCreateCmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }

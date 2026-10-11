@@ -122,6 +122,9 @@ const (
 	WorkSessionScopeNotAllowed  = "work_session_scope_not_allowed"
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
+	// WorkSessionAgentSessionRequired: the CLI declared an AI agent, and the
+	// session it named is a user session. Only an agent session serves it.
+	WorkSessionAgentSessionRequired = "work_session_agent_session_required"
 
 	// Refusals of a kube session the server names itself. An AI agent's
 	// WorkSession cannot open one yet; the cluster's agent is not connected;

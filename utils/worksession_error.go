@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 )
 
 // Operations HandleWorkSessionError reports; each but OperationKube is also the WorkSession scope it requires.
@@ -25,13 +27,14 @@ type workSessionErrorCtx struct {
 }
 
 var workSessionReasonMap = map[string]string{
-	WorkSessionRequired:         "no WorkSession selected for this shell",
-	WorkSessionNotUsable:        "session is no longer usable",
-	WorkSessionNotActive:        "selected session is not active",
-	WorkSessionExpired:          "selected session has expired",
-	WorkSessionScopeNotAllowed:  "session does not include this scope",
-	WorkSessionServerNotAllowed: "target server is not in this session",
-	WorkSessionAssigneeMismatch: "this session is assigned to another principal",
+	WorkSessionRequired:             "no WorkSession selected for this shell",
+	WorkSessionNotUsable:            "session is no longer usable",
+	WorkSessionNotActive:            "selected session is not active",
+	WorkSessionExpired:              "selected session has expired",
+	WorkSessionScopeNotAllowed:      "session does not include this scope",
+	WorkSessionServerNotAllowed:     "target server is not in this session",
+	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",
+	WorkSessionAgentSessionRequired: "this CLI runs under an AI agent, and an AI agent cannot use a user session",
 }
 
 func isWorkSessionCode(code string) bool {
@@ -80,6 +83,9 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
+	if code == WorkSessionAgentSessionRequired {
+		fmt.Fprintln(&sb, agentSessionNote(aiagent.FromEnvironment()))
+	}
 	fmt.Fprint(&sb, workSessionTokenNote(operation))
 	return sb.String()
 }
@@ -97,6 +103,15 @@ func workSessionRequiredScope(operation string) string {
 		return ""
 	}
 	return operation
+}
+
+// agentSessionNote tells a person taken for an agent which variables made the
+// CLI think so, and how to get out of it.
+func agentSessionNote(d aiagent.Detection) string {
+	if !d.Detected() {
+		return "Note: Not an AI agent? Run the command from your own terminal."
+	}
+	return fmt.Sprintf("Note: Detected AI agent %s. Not an AI agent? Unset those variables, or run the command from your own terminal.", d.Describe())
 }
 
 func workSessionTokenNote(operation string) string {
@@ -174,6 +189,12 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentHint + ")"},
 	}
 	switch code {
+	case WorkSessionAgentSessionRequired:
+		// The selected session is a person's; only an agent session serves an agent.
+		return []NextAction{
+			{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by prefixing the gated command with --work-session <ID>"},
+			{Command: agentCreateCmd, Description: "none active? create an agent session (prefix the gated command with --work-session <ID>)"},
+		}
 	case WorkSessionRequired:
 		return createOrReuse
 	case WorkSessionNotActive:
