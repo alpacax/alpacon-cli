@@ -42,11 +42,11 @@ func StandingGrantLine(details EventDetails) string {
 	if grant.ApprovedBy != nil {
 		approver = utils.SanitizeTerminalText(grant.ApprovedBy.Username)
 	}
-	expires := "never recorded"
+	expiry := "no expiry"
 	if grant.ExpiresAt != nil {
-		expires = utils.FormatTimestamp(*grant.ExpiresAt)
+		expiry = "expires " + utils.SanitizeTerminalText(utils.FormatTimestamp(*grant.ExpiresAt))
 	}
-	line += fmt.Sprintf(" approved by %s, expires %s", approver, utils.SanitizeTerminalText(expires))
+	line += fmt.Sprintf(" approved by %s, %s", approver, expiry)
 	if grant.RevokedAt != nil {
 		line += "; revoked " + utils.SanitizeTerminalText(utils.FormatTimestamp(*grant.RevokedAt))
 		if grant.RevokeReason != nil && *grant.RevokeReason != "" {

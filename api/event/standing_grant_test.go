@@ -53,8 +53,8 @@ func TestStandingGrantLine(t *testing.T) {
 		{name: "nil"},
 		{name: "id only", grant: `{"id":"grant-1"}`, want: "Allowed by a standing grant (grant-1)"},
 		{name: "full", grant: `{"id":"grant-1","expires_at":"2026-01-02T03:04:05Z","approved_by":{"id":"user-1","username":"alice"},"approval_request":{"id":"request-1"},"revoked_at":null,"revoke_reason":null}`, want: "Allowed by a standing grant (grant-1) approved by alice, expires " + utils.FormatTimestamp(expires)},
-		{name: "full without expiry or approver", grant: `{"id":"grant-1","expires_at":null,"approved_by":null,"approval_request":null,"revoked_at":null,"revoke_reason":null}`, want: "Allowed by a standing grant (grant-1) approved by unknown, expires never recorded"},
-		{name: "revoked", grant: `{"id":"grant-1","expires_at":null,"approved_by":{"id":"user-1","username":"alice"},"approval_request":null,"revoked_at":"2026-02-03T04:05:06Z","revoke_reason":"superseded"}`, want: "Allowed by a standing grant (grant-1) approved by alice, expires never recorded; revoked " + utils.FormatTimestamp(revoked) + ": superseded"},
+		{name: "full without expiry or approver", grant: `{"id":"grant-1","expires_at":null,"approved_by":null,"approval_request":null,"revoked_at":null,"revoke_reason":null}`, want: "Allowed by a standing grant (grant-1) approved by unknown, no expiry"},
+		{name: "revoked", grant: `{"id":"grant-1","expires_at":null,"approved_by":{"id":"user-1","username":"alice"},"approval_request":null,"revoked_at":"2026-02-03T04:05:06Z","revoke_reason":"superseded"}`, want: "Allowed by a standing grant (grant-1) approved by alice, no expiry; revoked " + utils.FormatTimestamp(revoked) + ": superseded"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
