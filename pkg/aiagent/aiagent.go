@@ -58,7 +58,9 @@ func (d Detection) Describe() string {
 }
 
 // SetHeaders adds the declaration headers to h. It adds nothing when no agent
-// was detected, and no version header when the version is unknown.
+// was detected. When the version is unknown it sends no version header and
+// removes one a caller supplied, so the version is only ever the one the
+// environment stated.
 func (d Detection) SetHeaders(h http.Header) {
 	if !d.Detected() {
 		return
@@ -66,7 +68,9 @@ func (d Detection) SetHeaders(h http.Header) {
 	h.Set(NameHeader, d.Name)
 	if d.Version != "" {
 		h.Set(VersionHeader, d.Version)
+		return
 	}
+	h.Del(VersionHeader)
 }
 
 // LookupFunc reads one environment variable, like os.LookupEnv.

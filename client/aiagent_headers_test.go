@@ -127,6 +127,24 @@ func TestDeclaredAgentHeaders_SentOnHTTPRequestAndWebsocketHandshake(t *testing.
 	}
 }
 
+func TestSendRawRequest_CallerVersionDroppedWhenAgentVersionUnknown(t *testing.T) {
+	setAgentEnv(t, map[string]string{"GEMINI_CLI": "1"})
+	ts, rec := newHeaderRecorderServer(t)
+	defer ts.Close()
+	ac := newTestClient(ts.URL)
+
+	header := http.Header{}
+	header.Set(aiagent.VersionHeader, "9.9.9")
+	resp, err := ac.SendRawRequest(http.MethodGet, "/api/test/", nil, header)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	httpHeader, _ := rec.headers()
+	require.NotNil(t, httpHeader)
+	assertDeclaredHeader(t, "raw request", httpHeader, aiagent.NameHeader, "gemini-cli")
+	assertDeclaredHeader(t, "raw request", httpHeader, aiagent.VersionHeader, "")
+}
+
 func TestSendRawRequest_CallerHeaderDoesNotReplaceDeclaredAgent(t *testing.T) {
 	setAgentEnv(t, map[string]string{"GEMINI_CLI": "1"})
 	ts, rec := newHeaderRecorderServer(t)
