@@ -57,6 +57,32 @@ func (rec *requestRecorder) queried(key string) []string {
 	return values
 }
 
+// FetchAllCursorPages has no bound, so it stops only where the server does: it
+// keeps asking for a full page and follows next to the end of the chain.
+func TestFetchAllCursorPages_WalksToTheEndOfTheChain(t *testing.T) {
+	t.Parallel()
+	rec := &requestRecorder{}
+	pages := map[string]CursorListResponse[cursorItem]{
+		"":       {Next: "TOKEN2", Results: []cursorItem{{Name: "a"}}},
+		"TOKEN2": {Next: "TOKEN3", Results: []cursorItem{{Name: "b"}}},
+		"TOKEN3": {Results: []cursorItem{{Name: "c"}}},
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(pages[r.URL.Query().Get("cursor")])
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	items, err := FetchAllCursorPages[cursorItem](ac, "/api/history/logs/", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"", "TOKEN2", "TOKEN3"}, rec.queried("cursor"))
+	assert.Equal(t, []string{"100", "100", "100"}, rec.queried("page_size"))
+	require.Len(t, items, 3)
+	assert.Equal(t, "c", items[2].Name)
+}
+
 func TestFetchCursorPages_SinglePageNullNext(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}

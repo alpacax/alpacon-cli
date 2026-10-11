@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -301,42 +303,236 @@ func TestCancelWorkSession(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// timelineSessionID is the session every timeline contract server answers for,
+// so the handler can pin the whole path instead of its tail.
+const timelineSessionID = "ses-abc"
+
+// newTimelineContractServer serves the timeline route's two response shapes.
+// Naming `cursor` or `page_size` selects the paginated one, whose `next` is an
+// opaque string and whose pages carry no recordings whatever `include_records`
+// asked for; naming neither serves the whole timeline under `results`, with the
+// recordings embedded when `include_records` is not false. A read that opts
+// into pagination without meaning to therefore loses its recordings here, the
+// way it does against the server.
+func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/"+timelineSessionID+"/timeline/", r.URL.Path)
+		query := r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+
+		if query.Get("cursor") == "" && query.Get("page_size") == "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"results": filterTimelineRecords(items, query.Get("include_records") != "false"),
+			})
+			return
+		}
+
+		paged := filterTimelineRecords(items, false)
+		start := 0
+		if cursor := query.Get("cursor"); cursor != "" {
+			parsed, err := strconv.Atoi(cursor)
+			if err != nil || parsed < 0 || parsed > len(paged) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code": "api_invalid_cursor"}`))
+				return
+			}
+			start = parsed
+		}
+		end := min(start+pageSize, len(paged))
+		next := ""
+		if end < len(paged) {
+			next = strconv.Itoa(end)
+		}
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[TimelineItem]{Next: next, Results: paged[start:end]})
+	}))
+}
+
+func filterTimelineRecords(items []TimelineItem, keepRecords bool) []TimelineItem {
+	out := make([]TimelineItem, 0, len(items))
+	for _, item := range items {
+		if item.Type == "websh_record" && !keepRecords {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func timelineFixture() []TimelineItem {
+	ts := newString("2024-01-15T10:30:00Z")
+	return []TimelineItem{
+		{Type: "command", Timestamp: ts, Line: "ls -la"},
+		{Type: "websh_session", Timestamp: ts, ID: "wsh-1"},
+		{Type: "command", Timestamp: ts, Line: "systemctl status nginx"},
+		{Type: "websh_record", Timestamp: ts, SessionID: "wsh-1", MaskedRecord: "ls -la\n"},
+	}
+}
+
 func TestGetWorkSessionTimeline(t *testing.T) {
 	t.Parallel()
-	ts := newString("2024-01-15T10:30:00Z")
-	items := []TimelineItem{
-		{Type: "command", Timestamp: ts, Line: "ls -la"},
-		{Type: "websh_session", Timestamp: ts},
-	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/timeline/", r.URL.Path)
-		assert.Equal(t, "true", r.URL.Query().Get("include_records"))
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 2, Results: items})
-	}))
+	srv := newTimelineContractServer(t, timelineFixture(), 2)
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-abc", true)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
 	require.NoError(t, err)
-	assert.Len(t, result, 2)
+	require.Len(t, result, 4)
 	assert.Equal(t, "command", result[0].Type)
 	assert.Equal(t, "ls -la", result[0].Line)
 }
 
-func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
+// The recordings a read asked for only exist in the unpaginated shape, so a
+// request that names page_size or cursor reports a session with recordings as
+// having none—which is what 'work-session recording' prints.
+func TestGetWorkSessionTimeline_WithRecordsKeepsTheRecordings(t *testing.T) {
 	t.Parallel()
+	srv := newTimelineContractServer(t, timelineFixture(), 2)
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+	require.NoError(t, err)
+
+	var records []TimelineItem
+	for _, item := range result {
+		if item.Type == "websh_record" {
+			records = append(records, item)
+		}
+	}
+	require.Len(t, records, 1)
+	assert.Equal(t, "wsh-1", records[0].SessionID)
+	assert.Equal(t, "ls -la\n", records[0].MaskedRecord)
+}
+
+// The paginated shape answers `next` as an opaque string, and its pages have to
+// be followed to the end rather than read as one page-number walk's first page.
+func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
+	t.Parallel()
+	srv := newTimelineContractServer(t, timelineFixture(), 1)
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	require.NoError(t, err)
+	require.Len(t, result, 3)
+	assert.Equal(t, "ls -la", result[0].Line)
+	assert.Equal(t, "wsh-1", result[1].ID)
+	assert.Equal(t, "systemctl status nginx", result[2].Line)
+	for _, item := range result {
+		assert.NotEqual(t, "websh_record", item.Type)
+	}
+}
+
+// The shape switch in `newTimelineContractServer` already fails a read that
+// forgets to opt in: it would answer one unpaginated page, carrying the
+// recording and one item more than the paginated walk returns. This asserts
+// the opt-in on the wire as well, so what the requests name is legible without
+// reading the fake. `page_size` is checked for presence rather than for its
+// value, which belongs to `api.FetchCursorPages` and not to this read.
+func TestGetWorkSessionTimeline_ExcludeRecordsNamesPageSizeThenTheCursor(t *testing.T) {
+	t.Parallel()
+	var sent []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/work-sessions/sessions/ses-xyz/timeline/", r.URL.Path)
-		assert.Equal(t, "false", r.URL.Query().Get("include_records"))
+		sent = append(sent, r.URL.Query())
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 0, Results: nil})
+		var next any
+		if len(sent) == 1 {
+			next = "page-2"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"next":    next,
+			"results": []TimelineItem{{Type: "command", Line: "ls"}},
+		})
 	}))
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-xyz", false)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
 	require.NoError(t, err)
-	assert.Empty(t, result)
+	require.Len(t, result, 2)
+
+	require.Len(t, sent, 2)
+	assert.NotEmpty(t, sent[0].Get("page_size"))
+	assert.Empty(t, sent[0].Get("cursor"))
+	assert.NotEmpty(t, sent[1].Get("page_size"))
+	assert.Equal(t, "page-2", sent[1].Get("cursor"))
+}
+
+// A server that does not paginate this route answers the whole list whatever
+// the request names, so include_records is the only thing keeping recordings
+// out of a read that asked for none. It rides on the paginated request for
+// that reason alone.
+func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T) {
+	t.Parallel()
+	items := timelineFixture()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/"+timelineSessionID+"/timeline/", r.URL.Path)
+		keepRecords := r.URL.Query().Get("include_records") != "false"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": filterTimelineRecords(items, keepRecords)})
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	require.NoError(t, err)
+	require.Len(t, result, 3)
+	for _, item := range result {
+		assert.NotEqual(t, "websh_record", item.Type)
+	}
+}
+
+// The route serving a page to a request that named neither cursor nor
+// page_size is the next step of the server change this read is written
+// against: the unpaginated shape stops existing. Results alone would decode
+// that page as a whole session—recordings gone, nothing said—so the read
+// refuses it instead and names what to upgrade.
+func TestGetWorkSessionTimeline_RefusesAPageWhenItAskedForTheWholeTimeline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "more pages to come",
+			body: `{"next":"TOKEN2","results":[{"type":"command","line":"ls -la"}]}`,
+		},
+		{
+			// A paginator's last page carries next as null, and a session short
+			// enough to fit one page is nothing but a last page. Reading null as
+			// the unpaginated shape would let exactly those sessions lose their
+			// recordings in silence, which is the failure this guard exists for.
+			name: "null next on a single page",
+			body: `{"next":null,"results":[{"type":"command","line":"ls -la"}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+			require.ErrorIs(t, err, ErrTimelinePaginated)
+			assert.Empty(t, result)
+			assert.Contains(t, err.Error(), "alpacon update")
+		})
+	}
+}
+
+// The counterpart: today's unpaginated answer carries no next at all, and the
+// guard has to stay off it or every whole-timeline read fails.
+func TestGetWorkSessionTimeline_AcceptsAnAnswerWithNoNextKey(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"type":"command","line":"ls -la"},{"type":"websh_record","masked_record":"ls -la\n"}]}`))
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "websh_record", result[1].Type)
 }
 
 func TestUpdateWorkSession(t *testing.T) {
