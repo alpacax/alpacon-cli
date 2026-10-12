@@ -68,7 +68,7 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 	}
 }
 
-func TestCreateWebhook_OmitsOwner(t *testing.T) {
+func TestCreateWebhook_SendsOwner(t *testing.T) {
 	t.Parallel()
 	var sent map[string]any
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,10 +88,11 @@ func TestCreateWebhook_OmitsOwner(t *testing.T) {
 		Provider:  "slack",
 		SSLVerify: true,
 		Enabled:   true,
+		Owner:     "user-1",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "my-webhook", sent["name"])
-	assert.NotContains(t, sent, "owner")
+	assert.Equal(t, "user-1", sent["owner"])
 }
 
 func TestGetWebhookList_HasNoOwner(t *testing.T) {

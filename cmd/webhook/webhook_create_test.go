@@ -1,17 +1,6 @@
 package webhook
 
-import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
-
-func TestOwnerFlagIsDeprecated(t *testing.T) {
-	flag := webhookCreateCmd.Flags().Lookup("owner")
-	require.NotNil(t, flag)
-	assert.NotEmpty(t, flag.Deprecated)
-}
+import "testing"
 
 func TestDetectProviderFromURL(t *testing.T) {
 	t.Parallel()

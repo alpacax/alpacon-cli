@@ -26,4 +26,5 @@ type WebhookCreateRequest struct {
 	Provider  string `json:"provider,omitempty"`
 	SSLVerify bool   `json:"ssl_verify"`
 	Enabled   bool   `json:"enabled"`
+	Owner     string `json:"owner"`
 }
