@@ -1644,6 +1644,8 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			term.ID = cfg.cmdID
 			term.Server.ID = cfg.serverID
 			_ = json.NewEncoder(w).Encode(term)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/events/sessions/"):
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)

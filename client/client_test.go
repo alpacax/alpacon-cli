@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1798,6 +1799,45 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 
 	close(release)
 	assert.True(t, <-renewed, "the stubbed grant installs a token: %q", "fresh")
+}
+
+func TestSendDeleteRequestWithContext_SendsADelete(t *testing.T) {
+	t.Parallel()
+	var method, path string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := ac.SendDeleteRequestWithContext(t.Context(), "/api/test/1/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodDelete, method)
+	assert.Equal(t, "/api/test/1/", path)
+}
+
+// The event session close in api/event depends on this: a server that never answers
+// must not hold the caller past its deadline.
+func TestSendDeleteRequestWithContext_GivesUpAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
+		}
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ac.SendDeleteRequestWithContext(ctx, "/api/test/1/")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
 }
 
 // Everything below cmd/ reads the workspace off the client, so dropping either
