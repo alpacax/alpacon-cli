@@ -16,16 +16,16 @@ type ApprovalRequest struct {
 	ReviewedBy  *types.UserSummary `json:"reviewed_by"`
 	ReviewedAt  *time.Time         `json:"reviewed_at"`
 	AddedAt     time.Time          `json:"added_at"`
-	Metadata    *ApprovalMetadata  `json:"metadata,omitempty"`
+	Metadata    *ApprovalMetadata  `json:"metadata"`
 }
 
 // ApprovalMetadata is the part of an approval's metadata the CLI renders.
 type ApprovalMetadata struct {
-	Command     *CommandDetail  `json:"command,omitempty"`
-	Sudo        *SudoDetail     `json:"sudo"`
-	Intent      string          `json:"intent"`
-	WorkSession *WorkSessionRef `json:"work_session"`
-	Changes     *Changes        `json:"changes"`
+	Command     *CommandDetail    `json:"command"`
+	Sudo        *SudoDetail       `json:"sudo"`
+	Intent      string            `json:"intent"`
+	WorkSession *WorkSessionRef   `json:"work_session"`
+	Changes     *RequestedChanges `json:"changes"`
 }
 
 // CommandDetail is the part of a command_exec approval's detail payload the
@@ -41,7 +41,7 @@ type CommandDetail struct {
 	ReviewSummary  string         `json:"review_summary"`
 	Tier2Reasoning string         `json:"tier2_reasoning"`
 	Factors        []RiskFactor   `json:"factors"`
-	FileExecution  *FileExecution `json:"file_execution,omitempty"`
+	FileExecution  *FileExecution `json:"file_execution"`
 }
 
 type RiskFactor struct {
@@ -67,7 +67,7 @@ type WorkSessionRef struct {
 	Status string `json:"status"`
 }
 
-type Changes struct {
+type RequestedChanges struct {
 	Title                 string       `json:"title"`
 	Description           string       `json:"description"`
 	Scopes                []string     `json:"scopes"`
