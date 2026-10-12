@@ -338,6 +338,64 @@ func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
 	}
 }
 
+// agentCreateAction returns the recommended agent-session create, which every
+// work-session code offers.
+func agentCreateAction(t *testing.T, actions []NextAction) NextAction {
+	t.Helper()
+	for _, a := range actions {
+		if strings.HasPrefix(a.Command, "alpacon work-session create ") && strings.Contains(a.Command, "--requester-type agent") {
+			return a
+		}
+	}
+	t.Fatalf("no agent create among %v", actions)
+	return NextAction{}
+}
+
+// An agent session cannot hold websh, so the recovery for websh never asks for
+// that combination; it offers a command-scoped session run through exec.
+func TestWorkSessionNextActions_AgentRecoveryAvoidsForbiddenScope(t *testing.T) {
+	t.Parallel()
+	for code := range workSessionReasonMap {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			actions := workSessionNextActions(code, OperationWebsh, "prod-1", "")
+			agent := agentCreateAction(t, actions)
+			assert.Contains(t, agent.Command, "--scope "+OperationCommand+" ")
+			assert.NotContains(t, agent.Command, "--scope "+OperationWebsh)
+			assert.Contains(t, agent.Description, "alpacon exec --work-session <ID>")
+			for _, a := range actions {
+				if strings.Contains(a.Command, "--requester-type agent") {
+					assert.NotContains(t, a.Command, OperationWebsh)
+				}
+			}
+		})
+	}
+
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationWebsh, "prod-1", "Browser login", "")
+	assert.Contains(t, got, "--scope command --server prod-1")
+	assert.NotContains(t, got, "--scope websh")
+	assert.Contains(t, got, "an agent session cannot hold websh")
+}
+
+func TestWorkSessionNextActions_AgentRecoveryKeepsAllowedScope(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{OperationCommand, OperationWebFTP} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			actions := workSessionNextActions(WorkSessionAgentSessionRequired, operation, "prod-1", "")
+			assert.Equal(t, []NextAction{
+				{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by prefixing the gated command with --work-session <ID>"},
+				{Command: `alpacon work-session create --scope ` + operation + ` --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent`, Description: "none active? create an agent session (prefix the gated command with --work-session <ID>)"},
+			}, actions)
+			for code := range workSessionReasonMap {
+				agent := agentCreateAction(t, workSessionNextActions(code, operation, "prod-1", ""))
+				assert.Contains(t, agent.Command, "--scope "+operation+" ")
+				assert.NotContains(t, agent.Description, "alpacon exec")
+			}
+		})
+	}
+}
+
 func TestBuildWorkSessionErrorEnvelope_KubeKeepsRequiredScopeField(t *testing.T) {
 	t.Parallel()
 	body, err := json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationKube, "", "Browser login", ""))

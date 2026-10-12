@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
@@ -16,6 +17,24 @@ const (
 	// OperationKube names no scope: any active WorkSession of the caller qualifies.
 	OperationKube = "kube"
 )
+
+// agentForbiddenScopes are the scopes an agent session cannot hold.
+var agentForbiddenScopes = []string{OperationWebsh}
+
+// IsAgentForbiddenScope reports whether an agent session cannot hold scope.
+func IsAgentForbiddenScope(scope string) bool {
+	return slices.Contains(agentForbiddenScopes, scope)
+}
+
+// AgentSessionScope is the scope an agent session requests for operation. An
+// agent cannot hold websh, so its work on the server runs through exec under
+// the command scope instead.
+func AgentSessionScope(operation string) string {
+	if IsAgentForbiddenScope(operation) {
+		return OperationCommand
+	}
+	return operation
+}
 
 type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
@@ -167,33 +186,36 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
 		operation, serverArg,
 	)
-	agentScope := operation
-	agentHint := "prefix the gated command with --work-session <ID>"
-	agentDescription := ""
-	if operation == OperationWebsh {
-		agentScope = OperationCommand
-		agentHint = "agent sessions refuse websh, so run the command with 'alpacon exec --work-session <ID>'"
-		agentDescription = "AI agent; " + agentHint
-	}
+	agentScope := AgentSessionScope(operation)
 	agentCreateCmd := fmt.Sprintf(
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
 		agentScope, serverArg,
 	)
-	agentCreate := NextAction{Command: agentCreateCmd, Description: agentDescription}
+	// How an agent runs the work once it has a session: the gated command takes
+	// --work-session <ID>. An agent session cannot hold websh, so that work goes
+	// through exec instead.
+	agentReuse := "prefixing the gated command with --work-session <ID>"
+	agentNext := "prefix the gated command with --work-session <ID>"
+	agentCreate := NextAction{Command: agentCreateCmd}
+	if agentScope != operation {
+		agentReuse = fmt.Sprintf("running the work with 'alpacon exec --work-session <ID>' (an agent session cannot hold %s)", operation)
+		agentNext = fmt.Sprintf("run the work with 'alpacon exec --work-session <ID>'; an agent session cannot hold %s", operation)
+		agentCreate.Description = "AI agent: " + agentNext
+	}
 	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
 	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
 	createOrReuse := []NextAction{
-		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>"},
+		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by " + agentReuse},
 		{Command: "alpacon work-session use <ID>", Description: "human: attach an existing session (rejects agent sessions)"},
 		{Command: createCmd, Description: "none active? create a new one (human)"},
-		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentHint + ")"},
+		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentNext + ")"},
 	}
 	switch code {
 	case WorkSessionAgentSessionRequired:
 		// The selected session is a person's; only an agent session serves an agent.
 		return []NextAction{
-			{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by prefixing the gated command with --work-session <ID>"},
-			{Command: agentCreateCmd, Description: "none active? create an agent session (prefix the gated command with --work-session <ID>)"},
+			{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by " + agentReuse},
+			{Command: agentCreateCmd, Description: "none active? create an agent session (" + agentNext + ")"},
 		}
 	case WorkSessionRequired:
 		return createOrReuse

@@ -270,7 +270,7 @@ root), so the approver sees it with the request.`,
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
 					session.ApprovalRequestID,
-					utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", session.ID), Description: "after approval"},
+					afterApprovalAction(sessionRequesterType, session.ID),
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -302,7 +302,7 @@ root), so the approver sees it with the request.`,
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 					session.ApprovalRequestID,
-					utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", session.ID), Description: "after approval"},
+					afterApprovalAction(sessionRequesterType, session.ID),
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -512,6 +512,16 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 	return "agent", nil
 }
 
+// afterApprovalAction is the follow-up for a session still waiting on approval.
+// A user session is attached with 'work-session use'; an agent session cannot
+// be, so its ID goes to each subsequent command with --work-session instead.
+func afterApprovalAction(requesterType, id string) utils.NextAction {
+	if requesterType == "agent" {
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)", id)}
+	}
+	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval"}
+}
+
 // detectedAgentSuffix explains, after a refusal that applies to agent sessions,
 // that the session is one because an agent was detected. It is empty when no
 // agent was detected.
@@ -533,13 +543,16 @@ func normalizeAccount(raw string, set bool) (string, error) {
 }
 
 // validateAgentScopes returns an error when requester_type is "agent" and
-// scopes contains "websh", which the server disallows.
+// scopes contains one an agent session cannot hold (websh), which the server
+// disallows.
 func validateAgentScopes(requesterType string, scopes []string) error {
 	if requesterType != "agent" {
 		return nil
 	}
-	if slices.Contains(scopes, "websh") {
-		return errors.New("\"websh\" is not allowed for agent sessions")
+	for _, scope := range scopes {
+		if utils.IsAgentForbiddenScope(scope) {
+			return fmt.Errorf("%q is not allowed for agent sessions", scope)
+		}
 	}
 	return nil
 }

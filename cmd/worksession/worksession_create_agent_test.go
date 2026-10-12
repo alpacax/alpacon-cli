@@ -190,3 +190,96 @@ func TestWorkSessionCreate_BlankAccountRefused(t *testing.T) {
 		})
 	}
 }
+
+// newPendingCreateServer answers a work-session create with a session that
+// stays pending, on the create and on every poll.
+func newPendingCreateServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	const pending = `{"id":"ses-x","status":"pending","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(pending))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-x/":
+			_, _ = w.Write([]byte(pending))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// An agent session cannot be attached with 'work-session use', so the
+// follow-up for a pending agent session names --work-session <ID> instead,
+// whether the agent was detected or declared and whether or not it waited.
+func TestWorkSessionCreate_PendingFollowUpMatchesRequesterType(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		env     []string
+		extra   []string
+		want    string
+		notWant string
+	}{
+		{name: "detected agent", env: agentHelperEnv("CODEX_THREAD_ID=thread-1"),
+			want: "--work-session ses-x", notWant: "work-session use"},
+		{name: "detected agent, wait expired", env: agentHelperEnv("CODEX_THREAD_ID=thread-1"), extra: []string{"--wait-approval", "1ms"},
+			want: "--work-session ses-x", notWant: "work-session use"},
+		{name: "declared agent", env: agentHelperEnv(), extra: []string{"--requester-type", "agent"},
+			want: "--work-session ses-x", notWant: "work-session use"},
+		{name: "user", env: agentHelperEnv(),
+			want: "alpacon work-session use ses-x", notWant: "--work-session ses-x"},
+		{name: "user, wait expired", env: agentHelperEnv(), extra: []string{"--wait-approval", "1ms"},
+			want: "alpacon work-session use ses-x", notWant: "--work-session ses-x"},
+	}
+	for _, tt := range tests {
+		for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+			t.Run(tt.name+"/"+outputFormat, func(t *testing.T) {
+				t.Parallel()
+				ts := newPendingCreateServer(t)
+
+				stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env, outputFormat, ts.URL,
+					createArgs(tt.extra...)...)
+
+				require.Equal(t, utils.ExitCodePendingApproval, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+				guidance := stderr
+				if outputFormat == utils.OutputFormatJSON {
+					var envelope struct {
+						Status      string             `json:"status"`
+						NextActions []utils.NextAction `json:"next_actions"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
+					assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
+					require.NotEmpty(t, envelope.NextActions)
+					raw, err := json.Marshal(envelope.NextActions)
+					require.NoError(t, err)
+					guidance = string(raw)
+				}
+				assert.Contains(t, guidance, tt.want)
+				assert.NotContains(t, guidance, tt.notWant)
+			})
+		}
+	}
+}
+
+// Every scope the work-session gate recommends to an agent must pass the same
+// check 'work-session create' runs, or following the recovery fails locally.
+func TestAgentSessionScope_PassesValidateAgentScopes(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{utils.OperationCommand, utils.OperationWebFTP, utils.OperationWebsh} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			scope := utils.AgentSessionScope(operation)
+			require.NoError(t, validateAgentScopes("agent", []string{scope}))
+			if utils.IsAgentForbiddenScope(operation) {
+				assert.Error(t, validateAgentScopes("agent", []string{operation}))
+			} else {
+				assert.Equal(t, operation, scope, "an allowed scope is recommended as is")
+			}
+		})
+	}
+}
