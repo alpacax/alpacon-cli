@@ -138,7 +138,7 @@ var aliases = map[string]string{
 // versionedAgent matches the "<name>_<version>_agent" form Claude Code puts in
 // AI_AGENT, such as claude-code_2-1-120_agent. The version starts with a digit,
 // so github_copilot_vscode_agent is not read as one.
-var versionedAgent = regexp.MustCompile(`^(.+?)_([0-9][^_]*)_agent$`)
+var versionedAgent = regexp.MustCompile(`^(.+?)_([0-9][^_]*)_(?i:agent)$`)
 
 // dashedVersion is a version written with dashes for dots (2-1-120).
 var dashedVersion = regexp.MustCompile(`^[0-9]+(-[0-9]+)+$`)
@@ -187,13 +187,15 @@ func Detect(lookup LookupFunc) Detection {
 }
 
 // parseAIAgent turns an AI_AGENT value into a canonical name and, where the
-// value carries one, a version. An empty name means the value names nothing.
+// value carries one, a version. Only the name is canonicalized; the version
+// keeps the case it was written in. An empty name means the value names
+// nothing.
 func parseAIAgent(value string) (name, version string) {
-	value = strings.ToLower(clean(value, len(value)))
+	value = clean(value, len(value))
 	if value == "" {
 		return "", ""
 	}
-	if canonical, ok := aliases[value]; ok {
+	if canonical, ok := aliases[strings.ToLower(value)]; ok {
 		return canonical, ""
 	}
 	if m := versionedAgent.FindStringSubmatch(value); m != nil {
@@ -206,7 +208,7 @@ func parseAIAgent(value string) (name, version string) {
 	if dashedVersion.MatchString(version) {
 		version = strings.ReplaceAll(version, "-", ".")
 	}
-	name = clean(name, maxNameLength)
+	name = strings.ToLower(clean(name, maxNameLength))
 	if canonical, ok := aliases[name]; ok {
 		name = canonical
 	}

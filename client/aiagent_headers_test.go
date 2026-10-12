@@ -90,6 +90,12 @@ func TestDeclaredAgentHeaders_SentOnHTTPRequestAndWebsocketHandshake(t *testing.
 			wantVersion: "2.1.120",
 		},
 		{
+			name:        "version keeps its case",
+			env:         map[string]string{aiagent.EnvAIAgent: "My-Agent/1.0.0-Beta.1"},
+			wantName:    "my-agent",
+			wantVersion: "1.0.0-Beta.1",
+		},
+		{
 			name:     "marker without a version",
 			env:      map[string]string{"CODEX_THREAD_ID": "thread-1"},
 			wantName: "codex",
