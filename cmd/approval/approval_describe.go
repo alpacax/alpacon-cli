@@ -85,10 +85,10 @@ work session details that are omitted from the table view.`,
 }
 
 func fileExecutionOf(req *approvalapi.ApprovalRequest) *approvalapi.FileExecution {
-	if req.Command == nil {
+	if req.Metadata == nil || req.Metadata.Command == nil {
 		return nil
 	}
-	return req.Command.FileExecution
+	return req.Metadata.Command.FileExecution
 }
 
 // fileExecutionRows are the "File execution" rows of the describe table. The

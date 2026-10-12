@@ -15,19 +15,21 @@ const fileExecutionFixture = `{
   "id": "apr-1",
   "request_type": "command_exec",
   "status": "pending",
-  "command": {
-    "command_id": "c-1",
-    "shell": "file",
-    "file_execution": {
-      "content": "#!/bin/sh\necho hello\n",
-      "sha256": "abc123",
-      "path": "/tmp/deploy.sh",
-      "interpreter": "/bin/sh",
-      "args": ["--env", "prod"],
-      "runas": "deploy",
-      "runas_group": null,
-      "reuse_days": 30,
-      "grant_days": 14
+  "metadata": {
+    "command": {
+      "command_id": "c-1",
+      "line": "/bin/sh /tmp/deploy.sh --env prod",
+      "file_execution": {
+        "content": "#!/bin/sh\necho hello\n",
+        "sha256": "abc123",
+        "path": "/tmp/deploy.sh",
+        "interpreter": "/bin/sh",
+        "args": ["--env", "prod"],
+        "runas": "deploy",
+        "runas_group": null,
+        "reuse_days": 30,
+        "grant_days": 14
+      }
     }
   }
 }`
@@ -69,16 +71,18 @@ func TestFileExecutionRows(t *testing.T) {
 
 func TestFileExecutionOmitsAbsentReuseDays(t *testing.T) {
 	t.Parallel()
-	req := decodeFixture(t, `{"command":{"file_execution":{"content":"x","sha256":"h","path":"/p","interpreter":"/bin/sh","args":null,"reuse_days":null}}}`)
-	m := rowMap(fileExecutionRows(fileExecutionOf(req)))
+	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":"x","sha256":"h","path":"/p","interpreter":"/bin/sh","args":null,"reuse_days":null}}}}`))
+	require.NotNil(t, fe)
+	m := rowMap(fileExecutionRows(fe))
 	assert.NotContains(t, m, "Proposed reuse days")
 	assert.NotContains(t, m, "Reuse days if approved")
 }
 
 func TestFileExecutionScriptWithheld(t *testing.T) {
 	t.Parallel()
-	req := decodeFixture(t, `{"command":{"file_execution":{"content":null,"sha256":"h","path":"/p","interpreter":"/bin/sh"}}}`)
-	script, ok := fileExecutionScript(fileExecutionOf(req))
+	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":null,"sha256":"h","path":"/p","interpreter":"/bin/sh"}}}}`))
+	require.NotNil(t, fe)
+	script, ok := fileExecutionScript(fe)
 	require.True(t, ok)
 	assert.Contains(t, script, "not included")
 	assert.Contains(t, script, "SHA-256")
@@ -86,8 +90,8 @@ func TestFileExecutionScriptWithheld(t *testing.T) {
 
 func TestFileExecutionStripsEscapes(t *testing.T) {
 	t.Parallel()
-	req := decodeFixture(t, `{"command":{"file_execution":{"content":"echo \u001b[2Kgone","sha256":"h","path":"/p\u001b[31m","interpreter":"/bin/sh","args":["a\u202eb"]}}}`)
-	fe := fileExecutionOf(req)
+	fe := fileExecutionOf(decodeFixture(t, `{"metadata":{"command":{"file_execution":{"content":"echo \u001b[2Kgone","sha256":"h","path":"/p\u001b[31m","interpreter":"/bin/sh","args":["a\u202eb"]}}}}`))
+	require.NotNil(t, fe)
 	for _, r := range fileExecutionRows(fe) {
 		assert.NotContains(t, r.Value, "\x1b")
 		assert.NotContains(t, r.Value, "\u202e")
@@ -100,5 +104,5 @@ func TestOtherRequestTypesHaveNoFileExecution(t *testing.T) {
 	t.Parallel()
 	assert.Nil(t, fileExecutionOf(decodeFixture(t, `{"id":"a","request_type":"sudo"}`)))
 	// A command_exec request that is not a file execution.
-	assert.Nil(t, fileExecutionOf(decodeFixture(t, `{"request_type":"command_exec","command":{"line":"ls"}}`)))
+	assert.Nil(t, fileExecutionOf(decodeFixture(t, `{"request_type":"command_exec","metadata":{"command":{"line":"ls"}}}`)))
 }
