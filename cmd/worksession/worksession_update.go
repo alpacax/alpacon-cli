@@ -226,20 +226,47 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 	if err != nil {
 		return nil, err
 	}
-	if checkTime && !timesApplied(updated, req) {
-		if updated.Status == pendingWorkSessionStatus {
-			return nil, fmt.Errorf("work session %s is still pending, but the server stored different times than the --starts-at and --expires-at sent (expiry %s); the other fields in this update were still sent", updated.ID, updated.ExpiresAt.UTC().Format(time.RFC3339))
+	if checkTime {
+		if stored := unappliedTimes(updated, req); len(stored) > 0 {
+			if updated.Status == pendingWorkSessionStatus {
+				return nil, fmt.Errorf("work session %s is still pending, but the server stored different times than sent: %s; the other fields in this update were still sent", updated.ID, strings.Join(stored, ", "))
+			}
+			flags := sentTimeFlags(req)
+			verb := "was"
+			if len(flags) > 1 {
+				verb = "were"
+			}
+			return nil, fmt.Errorf("work session %s became %s before the update reached it, so %s %s not applied; the other fields in this update were still sent", updated.ID, updated.Status, strings.Join(flags, " and "), verb)
 		}
-		return nil, fmt.Errorf("work session %s became %s before the update reached it, so --starts-at and --expires-at were not applied; the other fields in this update were still sent", updated.ID, updated.Status)
 	}
 	return updated, nil
 }
 
-func timesApplied(session *wsapi.WorkSession, req wsapi.WorkSessionUpdateRequest) bool {
-	if req.StartsAt != "" && (session.StartsAt == nil || !sameInstant(*session.StartsAt, req.StartsAt)) {
-		return false
+func sentTimeFlags(req wsapi.WorkSessionUpdateRequest) []string {
+	var flags []string
+	if req.StartsAt != "" {
+		flags = append(flags, "--starts-at")
 	}
-	return req.ExpiresAt == "" || sameInstant(session.ExpiresAt, req.ExpiresAt)
+	if req.ExpiresAt != "" {
+		flags = append(flags, "--expires-at")
+	}
+	return flags
+}
+
+func unappliedTimes(session *wsapi.WorkSession, req wsapi.WorkSessionUpdateRequest) []string {
+	var stored []string
+	if req.StartsAt != "" {
+		switch {
+		case session.StartsAt == nil:
+			stored = append(stored, "--starts-at stored as none")
+		case !sameInstant(*session.StartsAt, req.StartsAt):
+			stored = append(stored, "--starts-at stored as "+session.StartsAt.UTC().Format(time.RFC3339))
+		}
+	}
+	if req.ExpiresAt != "" && !sameInstant(session.ExpiresAt, req.ExpiresAt) {
+		stored = append(stored, "--expires-at stored as "+session.ExpiresAt.UTC().Format(time.RFC3339))
+	}
+	return stored
 }
 
 func sameInstant(got time.Time, flagValue string) bool {

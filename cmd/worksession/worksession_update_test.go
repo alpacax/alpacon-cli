@@ -184,6 +184,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 		name         string
 		status       string
 		patchStatus  string // status the PATCH answers with; empty means unchanged since the GET
+		storedStart  string // start the PATCH answers with while still pending; empty means the one sent
 		storedExpiry string // expiry the PATCH answers with while still pending; empty means the one sent
 		req          wsapi.WorkSessionUpdateRequest
 		wantErr      []string
@@ -226,7 +227,16 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 			status:      "pending",
 			patchStatus: "approved",
 			req:         wsapi.WorkSessionUpdateRequest{Title: "deploy v2", ExpiresAt: "2027-01-15T12:00:00Z"},
-			wantErr:     []string{"ses-1", "approved", "not applied"},
+			wantErr:     []string{"ses-1", "approved", "--expires-at was not applied"},
+			notWant:     []string{"--starts-at"},
+			wantPatch:   true,
+		},
+		{
+			name:        "session approved with both times sent names both flags",
+			status:      "pending",
+			patchStatus: "approved",
+			req:         wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z", ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr:     []string{"ses-1", "--starts-at and --expires-at were not applied"},
 			wantPatch:   true,
 		},
 		{
@@ -234,9 +244,18 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 			status:       "pending",
 			storedExpiry: "2027-01-15T11:00:00Z",
 			req:          wsapi.WorkSessionUpdateRequest{ExpiresAt: "2027-01-15T12:00:00Z"},
-			wantErr:      []string{"ses-1", "still pending", "2027-01-15T11:00:00Z"},
-			notWant:      []string{"became"},
+			wantErr:      []string{"ses-1", "still pending", "--expires-at stored as 2027-01-15T11:00:00Z"},
+			notWant:      []string{"became", "--starts-at"},
 			wantPatch:    true,
+		},
+		{
+			name:        "pending session whose stored start differs names only the start",
+			status:      "pending",
+			storedStart: "2027-01-15T09:00:00Z",
+			req:         wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z"},
+			wantErr:     []string{"ses-1", "still pending", "--starts-at stored as 2027-01-15T09:00:00Z"},
+			notWant:     []string{"became", "--expires-at"},
+			wantPatch:   true,
 		},
 	}
 
@@ -258,7 +277,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 						resp.Status = tt.patchStatus
 					}
 					if resp.Status == pendingWorkSessionStatus { // the server drops the time fields otherwise
-						if startsAt, err := time.Parse(time.RFC3339, tt.req.StartsAt); err == nil {
+						if startsAt, err := time.Parse(time.RFC3339, cmp.Or(tt.storedStart, tt.req.StartsAt)); err == nil {
 							startsAt = startsAt.Truncate(time.Microsecond)
 							resp.StartsAt = &startsAt
 						}
