@@ -308,12 +308,14 @@ func TestCancelWorkSession(t *testing.T) {
 const timelineSessionID = "ses-abc"
 
 // newTimelineContractServer serves the timeline route's two response shapes.
-// Naming `cursor` or `page_size` selects the paginated one, whose `next` is an
-// opaque string and whose pages carry no recordings whatever `include_records`
-// asked for; naming neither serves the whole timeline under `results`, with the
-// recordings embedded when `include_records` is not false. A read that opts
-// into pagination without meaning to therefore loses its recordings here, the
-// way it does against the server.
+// Naming `cursor`, an empty value included, selects the paginated one, whose
+// `next` is an opaque string and whose pages carry no recordings whatever
+// `include_records` asked for; `page_size` alone selects nothing, and a request
+// naming no `cursor` is served the whole timeline under `results`, with the
+// recordings embedded when `include_records` is not false. So a read that opts
+// in without meaning to loses its recordings here, and a walk that forgets to
+// opt in is answered the whole list in one response and never pages, the way
+// both do against the server.
 func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +323,7 @@ func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int)
 		query := r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 
-		if query.Get("cursor") == "" && query.Get("page_size") == "" {
+		if !query.Has("cursor") {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"results": filterTimelineRecords(items, query.Get("include_records") != "false"),
 			})
@@ -382,7 +384,7 @@ func TestGetWorkSessionTimeline(t *testing.T) {
 }
 
 // The recordings a read asked for only exist in the unpaginated shape, so a
-// request that names page_size or cursor reports a session with recordings as
+// request that names `cursor` reports a session with recordings as
 // having none—which is what 'work-session recording' prints.
 func TestGetWorkSessionTimeline_WithRecordsKeepsTheRecordings(t *testing.T) {
 	t.Parallel()
@@ -421,13 +423,15 @@ func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// The shape switch in `newTimelineContractServer` already fails a read that
-// forgets to opt in: it would answer one unpaginated page, carrying the
-// recording and one item more than the paginated walk returns. This asserts
-// the opt-in on the wire as well, so what the requests name is legible without
-// reading the fake. `page_size` is checked for presence rather than for its
-// value, which belongs to `api.FetchCursorPages` and not to this read.
-func TestGetWorkSessionTimeline_ExcludeRecordsNamesPageSizeThenTheCursor(t *testing.T) {
+// The opt-in is the `cursor` key on the first request, with an empty value. A
+// walk that leaves it off is answered the whole list in one response—which,
+// with `include_records=false` honoured there, holds exactly the items the
+// paginated walk would have collected, so no item assertion can tell the two
+// apart. Only the requests can, and `Get` cannot either, since it reads an
+// absent key and an empty value alike; `Has` is what is asserted. `page_size`
+// is checked for presence rather than for its value, which belongs to
+// `api.FetchCursorPages` and not to this read.
+func TestGetWorkSessionTimeline_ExcludeRecordsNamesAnEmptyCursorThenTheMintedOne(t *testing.T) {
 	t.Parallel()
 	var sent []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -449,10 +453,11 @@ func TestGetWorkSessionTimeline_ExcludeRecordsNamesPageSizeThenTheCursor(t *test
 	require.Len(t, result, 2)
 
 	require.Len(t, sent, 2)
-	assert.NotEmpty(t, sent[0].Get("page_size"))
+	assert.True(t, sent[0].Has("cursor"), "first request must name cursor to opt in, sent %q", sent[0].Encode())
 	assert.Empty(t, sent[0].Get("cursor"))
-	assert.NotEmpty(t, sent[1].Get("page_size"))
+	assert.NotEmpty(t, sent[0].Get("page_size"))
 	assert.Equal(t, "page-2", sent[1].Get("cursor"))
+	assert.NotEmpty(t, sent[1].Get("page_size"))
 }
 
 // A server that does not paginate this route answers the whole list whatever
@@ -478,9 +483,9 @@ func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T
 	}
 }
 
-// The route serving a page to a request that named neither cursor nor
-// page_size is the next step of the server change this read is written
-// against: the unpaginated shape stops existing. Results alone would decode
+// The route serving a page to a request that named no cursor is the next step
+// of the server change this read is written against: the unpaginated shape
+// stops existing. Results alone would decode
 // that page as a whole session—recordings gone, nothing said—so the read
 // refuses it instead and names what to upgrade.
 func TestGetWorkSessionTimeline_RefusesAPageWhenItAskedForTheWholeTimeline(t *testing.T) {

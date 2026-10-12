@@ -46,6 +46,20 @@ func (rec *requestRecorder) count() int {
 	return len(rec.requests)
 }
 
+// named reports, per request, whether key was on the query at all. Get cannot
+// tell an absent key from an empty value, and for cursor that is the whole
+// question.
+func (rec *requestRecorder) named(key string) []bool {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	present := make([]bool, 0, len(rec.requests))
+	for _, q := range rec.requests {
+		present = append(present, q.Has(key))
+	}
+	return present
+}
+
 func (rec *requestRecorder) queried(key string) []string {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
@@ -81,6 +95,31 @@ func TestFetchAllCursorPages_WalksToTheEndOfTheChain(t *testing.T) {
 	assert.Equal(t, []string{"100", "100", "100"}, rec.queried("page_size"))
 	require.Len(t, items, 3)
 	assert.Equal(t, "c", items[2].Name)
+}
+
+// The cursor key goes on the first request with an empty value. A route where
+// paging is an opt-in reads the key as the opt-in, so a first request without
+// it is answered with the whole list and the walk ends after one response.
+func TestFetchCursorPages_NamesAnEmptyCursorOnTheFirstRequest(t *testing.T) {
+	t.Parallel()
+	rec := &requestRecorder{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Next: "TOKEN2", Results: []cursorItem{{Name: "a"}}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(CursorListResponse[cursorItem]{Results: []cursorItem{{Name: "b"}}})
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
+	require.NoError(t, err)
+	assert.Len(t, items, 2)
+	assert.Equal(t, []bool{true, true}, rec.named("cursor"))
+	assert.Equal(t, []string{"", "TOKEN2"}, rec.queried("cursor"))
 }
 
 func TestFetchCursorPages_SinglePageNullNext(t *testing.T) {
@@ -434,10 +473,12 @@ func TestFetchCursorPages_IgnoresStaleCursorParam(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	// A caller-supplied cursor must not leak into the first request.
+	// A caller-supplied cursor must not leak into the first request: the key is
+	// still named there, overwritten with the empty value that means first page.
 	items, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", map[string]string{"cursor": "STALE"}, 10)
 	require.NoError(t, err)
 	assert.Len(t, items, 1)
+	assert.Equal(t, []bool{true}, rec.named("cursor"))
 	assert.Equal(t, []string{""}, rec.queried("cursor"))
 }
 
