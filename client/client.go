@@ -863,11 +863,7 @@ func (ac *AlpaconClient) SendPostRequestWithStatus(url string, body any) ([]byte
 }
 
 func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
-	req, err := ac.createRequest(http.MethodDelete, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	return ac.sendRequest(req)
+	return ac.SendDeleteRequestWithContext(context.Background(), url)
 }
 
 // SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx. A token renewal the
