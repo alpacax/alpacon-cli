@@ -16,8 +16,7 @@ type ApprovalRequest struct {
 	ReviewedBy  *types.UserSummary `json:"reviewed_by"`
 	ReviewedAt  *time.Time         `json:"reviewed_at"`
 	AddedAt     time.Time          `json:"added_at"`
-	// Metadata.Command is the command_exec detail payload; nil for other request types.
-	Metadata *ApprovalMetadata `json:"metadata,omitempty"`
+	Metadata    *ApprovalMetadata  `json:"metadata,omitempty"`
 }
 
 // ApprovalMetadata is the part of an approval's metadata the CLI renders.
