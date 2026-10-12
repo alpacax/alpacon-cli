@@ -295,18 +295,73 @@ func TestCreateUser_SetsIsActive(t *testing.T) {
 			t.Errorf("failed to decode request body: %v", err)
 		}
 		gotIsActive = req.IsActive
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(createdUserResponse))
 	}))
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	// Pass IsActive=false intentionally; CreateUser must override it to true.
-	err := CreateUser(ac, UserCreateRequest{Username: "newuser", IsActive: false})
+	_, err := CreateUser(ac, UserCreateRequest{Username: "newuser", IsActive: false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !gotIsActive {
 		t.Error("expected IsActive=true to be sent in request body, got false")
+	}
+}
+
+// The server ignores a password on create, generates one, and returns it once.
+const createdUserResponse = `{"id":"user-uuid-333","username":"newuser","is_active":true,"is_ldap_user":false,"password":"Gen3rated-Pw!x"}`
+
+func TestCreateUser_OmitsPassword(t *testing.T) {
+	t.Parallel()
+	var sent map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("failed to decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(createdUserResponse))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := CreateUser(ac, UserCreateRequest{Username: "newuser"})
+	require.NoError(t, err)
+	assert.Equal(t, "newuser", sent["username"])
+	assert.NotContains(t, sent, "password")
+}
+
+func TestCreateUser_ReturnsGeneratedPassword(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		response string
+		want     string
+	}{
+		{"server returns the generated password", createdUserResponse, "Gen3rated-Pw!x"},
+		{"server returns no password", `{"id":"user-uuid-333","username":"newuser","is_active":true,"is_ldap_user":false}`, ""},
+		{"server returns an empty body", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			password, err := CreateUser(ac, UserCreateRequest{Username: "newuser"})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, password)
+		})
 	}
 }
 
