@@ -15,7 +15,7 @@ var installPAMCmd = &cobra.Command{
 	By default it asks for confirmation; pass -y to skip the prompt.
 	It is not disruptive, so it does not check for active user work and has no --force.
 	The server refuses it on a host with no alpamon-pam package (macOS, Windows, or an unknown package manager),
-	while the workspace's "Use sudo with MFA" setting is off, and while an install is already pending on the server.
+	while the workspace's "Use sudo with MFA" setting is off or the deployment cannot complete the MFA step-up, and while an install is already pending on the server.
 	`,
 	Example: `
 	alpacon agent install-pam myserver

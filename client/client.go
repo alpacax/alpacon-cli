@@ -1321,7 +1321,7 @@ func codeOnlyMessage(code string) string {
 	case utils.ServerPAMInstallUnsupported:
 		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
 	case utils.ServerPAMInstallRequiresSudoWithMFA:
-		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again"
+		return "alpamon-pam needs sudo with MFA: turn on \"Use sudo with MFA\" in the workspace security settings and try again; on a deployment that cannot complete the MFA step-up (no Auth0), the module cannot be installed from Alpacon"
 	case utils.ServerPAMInstallInProgress:
 		return "an alpamon-pam install is already pending on this server—wait for it to finish"
 	default:
