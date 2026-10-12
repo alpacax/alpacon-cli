@@ -2637,7 +2637,7 @@ func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
 			name:   "sudo with MFA off",
 			status: http.StatusBadRequest,
 			code:   utils.ServerPAMInstallRequiresSudoWithMFA,
-			want:   "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again",
+			want:   "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon",
 		},
 		{
 			name:   "install already pending",
