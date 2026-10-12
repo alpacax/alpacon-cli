@@ -205,7 +205,7 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		"user":  memberID,
 		"group": groupID,
 	}
-	memberDetails, err := api.FetchAllPages[MemberDetailResponse](ac, membershipURL, params)
+	memberDetails, err := api.FetchPagesUpTo[MemberDetailResponse](ac, membershipURL, params, 1)
 	if err != nil {
 		return err
 	}
