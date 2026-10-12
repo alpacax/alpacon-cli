@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -867,6 +868,16 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 		return nil, err
 	}
 	return ac.sendRequest(req)
+}
+
+// SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx. A token renewal the
+// request runs is not: it waits out the grant as any other request does.
+func (ac *AlpaconClient) SendDeleteRequestWithContext(ctx context.Context, url string) ([]byte, error) {
+	req, err := ac.createRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // SendDeleteRequestWithBody sends a DELETE carrying a JSON body: an endpoint wanting a
