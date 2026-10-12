@@ -101,17 +101,17 @@ func (sl *SudoListener) Err() error {
 	return sl.err
 }
 
-func (sl *SudoListener) provisionSession() (string, error) {
+func (sl *SudoListener) provisionSession() (*EventSessionResponse, error) {
 	session, err := CreateEventSession(sl.ac)
 	if err != nil {
-		return "", sl.fail(err)
+		return nil, sl.fail(err)
 	}
 
 	sl.stateMu.Lock()
 	sl.channelID = session.ChannelID
 	sl.stateMu.Unlock()
 
-	return session.WebsocketURL, nil
+	return session, nil
 }
 
 func (sl *SudoListener) subscribe() error {
