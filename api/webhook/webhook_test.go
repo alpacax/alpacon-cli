@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api"
-	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,17 +32,15 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 		case "1", "":
 			for i := range 100 {
 				results = append(results, WebhookResponse{
-					ID:    fmt.Sprintf("wh-id-%d", i),
-					Name:  fmt.Sprintf("webhook-%d", i),
-					Owner: types.UserSummary{Name: "admin"},
+					ID:   fmt.Sprintf("wh-id-%d", i),
+					Name: fmt.Sprintf("webhook-%d", i),
 				})
 			}
 		case "2":
 			for i := range 40 {
 				results = append(results, WebhookResponse{
-					ID:    fmt.Sprintf("wh-p2-%d", i),
-					Name:  fmt.Sprintf("webhook-p2-%d", i),
-					Owner: types.UserSummary{Name: "admin"},
+					ID:   fmt.Sprintf("wh-p2-%d", i),
+					Name: fmt.Sprintf("webhook-p2-%d", i),
 				})
 			}
 		}
@@ -69,6 +66,49 @@ func TestGetWebhookList_Pagination(t *testing.T) {
 	if len(webhooks) != 140 {
 		t.Errorf("expected 140 webhooks, got %d", len(webhooks))
 	}
+}
+
+func TestCreateWebhook_OmitsOwner(t *testing.T) {
+	t.Parallel()
+	var sent map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Errorf("failed to decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"wh-1","name":"my-webhook","url":"https://hooks.slack.com/services/T00/B00/xxx","provider":"slack","ssl_verify":true,"enabled":true}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	err := CreateWebhook(ac, WebhookCreateRequest{
+		Name:      "my-webhook",
+		URL:       "https://hooks.slack.com/services/T00/B00/xxx",
+		Provider:  "slack",
+		SSLVerify: true,
+		Enabled:   true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "my-webhook", sent["name"])
+	assert.NotContains(t, sent, "owner")
+}
+
+func TestGetWebhookList_HasNoOwner(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"current":1,"next":null,"previous":null,"last":1,"results":[{"id":"wh-1","name":"my-webhook","url":"https://hooks.slack.com/services/T00/B00/xxx","provider":"slack","ssl_verify":true,"enabled":true,"added_at":"2026-10-01T00:00:00Z","updated_at":"2026-10-01T00:00:00Z"}]}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	webhooks, err := GetWebhookList(ac)
+	require.NoError(t, err)
+	require.Len(t, webhooks, 1)
+	row, err := json.Marshal(webhooks[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(row), "owner")
 }
 
 // TestGetWebhookIDByName puts the decoy first, so a dropped or wrong-key filter answers with it.
