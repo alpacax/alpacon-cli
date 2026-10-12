@@ -227,6 +227,9 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 		return nil, err
 	}
 	if checkTime && !timesApplied(updated, req) {
+		if updated.Status == pendingWorkSessionStatus {
+			return nil, fmt.Errorf("work session %s is still pending, but the server stored different times than the --starts-at and --expires-at sent (expiry %s); the other fields in this update were still sent", updated.ID, updated.ExpiresAt.UTC().Format(time.RFC3339))
+		}
 		return nil, fmt.Errorf("work session %s became %s before the update reached it, so --starts-at and --expires-at were not applied; the other fields in this update were still sent", updated.ID, updated.Status)
 	}
 	return updated, nil

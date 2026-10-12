@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -180,13 +181,14 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		status      string
-		patchStatus string // status the PATCH answers with; empty means unchanged since the GET
-		req         wsapi.WorkSessionUpdateRequest
-		wantErr     []string
-		notWant     []string
-		wantPatch   bool
+		name         string
+		status       string
+		patchStatus  string // status the PATCH answers with; empty means unchanged since the GET
+		storedExpiry string // expiry the PATCH answers with while still pending; empty means the one sent
+		req          wsapi.WorkSessionUpdateRequest
+		wantErr      []string
+		notWant      []string
+		wantPatch    bool
 	}{
 		{
 			name:    "expires-at on an active session is refused",
@@ -227,6 +229,15 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 			wantErr:     []string{"ses-1", "approved", "not applied"},
 			wantPatch:   true,
 		},
+		{
+			name:         "pending session whose stored expiry differs is not blamed on an approval",
+			status:       "pending",
+			storedExpiry: "2027-01-15T11:00:00Z",
+			req:          wsapi.WorkSessionUpdateRequest{ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr:      []string{"ses-1", "still pending", "2027-01-15T11:00:00Z"},
+			notWant:      []string{"became"},
+			wantPatch:    true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -251,7 +262,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 							startsAt = startsAt.Truncate(time.Microsecond)
 							resp.StartsAt = &startsAt
 						}
-						if expiresAt, err := time.Parse(time.RFC3339, tt.req.ExpiresAt); err == nil {
+						if expiresAt, err := time.Parse(time.RFC3339, cmp.Or(tt.storedExpiry, tt.req.ExpiresAt)); err == nil {
 							resp.ExpiresAt = expiresAt.Truncate(time.Microsecond)
 						}
 					}
