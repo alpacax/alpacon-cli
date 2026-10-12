@@ -525,7 +525,7 @@ func TestSudoListener_FirstSessionFailureStopsAndSurfaces(t *testing.T) {
 }
 
 func TestSudoListener_StopsOnAnUnauthorizedFirstSession(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // a refresh, if one came back, must not reach the real config
+	t.Parallel()
 	alwaysUnauthorized := func(int32) int { return http.StatusUnauthorized }
 	ts, sessions, _ := newWatcherTestServer(t, alwaysUnauthorized, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -545,7 +545,6 @@ func TestSudoListener_StopsOnAnUnauthorizedFirstSession(t *testing.T) {
 }
 
 func TestSudoListener_RetriesAnUnauthorizedSessionAfterTheFirstSubscribe(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // a refresh, if one came back, must not reach the real config
 	createThenUnauthorized := func(attempt int32) int {
 		if attempt == 1 {
 			return http.StatusCreated

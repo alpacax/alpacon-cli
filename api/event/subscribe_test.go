@@ -184,39 +184,31 @@ func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }
 
-func TestCloseEventSession_SendsADeleteForTheSession(t *testing.T) {
-	t.Parallel()
-	var method, uri string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		method, uri = r.Method, r.RequestURI
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	err := CloseEventSession(t.Context(), ac, "session-1")
-
-	require.NoError(t, err)
-	assert.Equal(t, http.MethodDelete, method)
-	assert.Equal(t, "/api/events/sessions/session-1/", uri)
-}
-
 // The id comes from a server response, so a slash in it must stay inside its own
 // path segment instead of reaching another route.
-func TestCloseEventSession_KeepsTheIDInOneSegment(t *testing.T) {
+func TestCloseEventSession_SendsADeleteForTheSession(t *testing.T) {
 	t.Parallel()
-	var uri string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		uri = r.RequestURI
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	for _, tc := range []struct{ name, id, uri string }{
+		{name: "plain_id", id: "session-1", uri: "/api/events/sessions/session-1/"},
+		{name: "id_with_slashes", id: "../iam/users/-", uri: "/api/events/sessions/..%2Fiam%2Fusers%2F-/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var method, uri string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				method, uri = r.Method, r.RequestURI
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	err := CloseEventSession(t.Context(), ac, "../iam/users/-")
+			err := CloseEventSession(t.Context(), ac, tc.id)
 
-	require.NoError(t, err)
-	assert.Equal(t, "/api/events/sessions/..%2Fiam%2Fusers%2F-/", uri)
+			require.NoError(t, err)
+			assert.Equal(t, http.MethodDelete, method)
+			assert.Equal(t, tc.uri, uri)
+		})
+	}
 }
 
 // url.PathEscape keeps "." and "..", which a server or proxy may resolve to another
@@ -277,7 +269,9 @@ func TestCloseSession_TriesAFailedCloseOnce(t *testing.T) {
 
 func TestCloseSession_GivesUpAtItsDeadline(t *testing.T) {
 	t.Parallel()
+	arrived := make(chan struct{}, 1)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arrived <- struct{}{}
 		select {
 		case <-r.Context().Done():
 		case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
@@ -290,36 +284,39 @@ func TestCloseSession_GivesUpAtItsDeadline(t *testing.T) {
 	closeSession(ac, "session-1", 50*time.Millisecond)
 
 	assert.Less(t, time.Since(start), 2*time.Second)
-}
-
-func TestCloseSession_LeavesADebugLineWhenTheCloseFails(t *testing.T) {
-	t.Setenv(utils.DebugEnvVar, "1")
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	_, stderr := testutil.CaptureOutput(t, func() {
-		closeSession(ac, "session-1", time.Second)
-	})
-
-	assert.Contains(t, stderr, "could not close unopened event session session-1")
+	select {
+	case <-arrived:
+	default:
+		t.Error("the close never reached the server, so the deadline was not what ended it")
+	}
 }
 
 // Websh holds the terminal in raw mode, so a failed close must print nothing
 // unless debug output was asked for.
-func TestCloseSession_StaysQuietWithoutTheDebugSwitch(t *testing.T) {
-	t.Setenv(utils.DebugEnvVar, "")
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+func TestCloseSession_PrintsAFailureOnlyWithTheDebugSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name, debug, want string
+	}{
+		{name: "debug_on", debug: "1", want: "could not close unopened event session session-1"},
+		{name: "debug_off", debug: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(utils.DebugEnvVar, tc.debug)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		closeSession(ac, "session-1", time.Second)
-	})
+			_, stderr := testutil.CaptureOutput(t, func() {
+				closeSession(ac, "session-1", time.Second)
+			})
 
-	assert.Empty(t, stderr)
+			if tc.want == "" {
+				assert.Empty(t, stderr)
+				return
+			}
+			assert.Contains(t, stderr, tc.want)
+		})
+	}
 }
