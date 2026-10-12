@@ -385,6 +385,27 @@ func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testi
 	assert.Equal(t, "sudo_verify_credential_cannot_prove_mfa", code)
 }
 
+func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
+	t.Parallel()
+	// The server's refusal of an interactive channel to a token (alpacon-server
+	// #3496). It used to arrive as api_token_acl_not_allowed, whose message sends
+	// the user to the token's ACL rules, which cannot lift this refusal.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "auth_interactive_channel_requires_presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "a token cannot open an interactive session (a Websh terminal, a tunnel or a WebFTP session)—sign in with 'alpacon login' without -t (add --no-browser on a machine without a browser)", err.Error())
+	assert.NotContains(t, err.Error(), "alpacon token acl")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "auth_interactive_channel_requires_presence", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface

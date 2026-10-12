@@ -81,6 +81,15 @@ const (
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
+	// AuthInteractiveChannelRequiresPresence rides a 403: the credential carries no
+	// present human—an API token, a service token, or an MCP connection—so the
+	// server refuses to open a Websh terminal, an editor tunnel or a file-transfer
+	// session for it, whatever its scopes and ACL rules say. Permanent for that
+	// credential: widening its rules cannot lift it. Signing in with 'alpacon login'
+	// without -t can. Servers before alpacon-server#3496 sent APITokenACLNotAllowed
+	// for the same refusal, which is why InteractiveOnly still reads both.
+	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
+
 	// The token-scope gate's refusals: the token's scopes do not cover this call, or
 	// the server could not resolve the call's action to a scope at all.
 	APITokenScopeMissing          = "api_token_scope_missing"
@@ -376,10 +385,12 @@ func ParseErrorResponse(err error) (string, string) {
 
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may
 // take; a scope refusal counts, since granting the scope only reaches the ACL refusal.
+// AuthInteractiveChannelRequiresPresence is the refusal's own code; APITokenACLNotAllowed
+// is what a server before alpacon-server#3496 sent for it.
 func InteractiveOnly(err error, action string) error {
 	switch code, _ := ParseErrorResponse(err); code {
-	case APITokenACLNotAllowed, APITokenScopeMissing:
-		return fmt.Errorf("a token cannot %s; run 'alpacon login' without -t and try again", action)
+	case AuthInteractiveChannelRequiresPresence, APITokenACLNotAllowed, APITokenScopeMissing:
+		return fmt.Errorf("a token cannot %s; run 'alpacon login' without -t (add --no-browser on a machine without a browser) and try again", action)
 	}
 	return err
 }
