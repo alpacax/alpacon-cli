@@ -17,7 +17,7 @@ func TestAgentSubcommands(t *testing.T) {
 		}
 		names = append(names, c.Name())
 	}
-	assert.ElementsMatch(t, []string{"restart", "upgrade"}, names)
+	assert.ElementsMatch(t, []string{"restart", "upgrade", "install-pam"}, names)
 }
 
 func TestAgentDisruptiveFlags(t *testing.T) {
@@ -31,4 +31,15 @@ func TestAgentDisruptiveFlags(t *testing.T) {
 			assert.NotNil(t, cmd.Flags().Lookup("force"))
 		})
 	}
+}
+
+// install-pam is not disruptive: the server applies no busy guard to it, so
+// the command offers no --force to override one.
+func TestAgentInstallPAMFlags(t *testing.T) {
+	cmd, _, err := AgentCmd.Find([]string{"install-pam"})
+	require.NoError(t, err)
+	yes := cmd.Flags().Lookup("yes")
+	require.NotNil(t, yes)
+	assert.Equal(t, "y", yes.Shorthand)
+	assert.Nil(t, cmd.Flags().Lookup("force"))
 }

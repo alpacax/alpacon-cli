@@ -2590,6 +2590,58 @@ func TestSendRawRequest_RenewalPreservesCustomUserAgent(t *testing.T) {
 	assert.Equal(t, []string{"custom-agent", "custom-agent"}, agents)
 }
 
+// The install_pam refusals arrive with no detail, so each message has to say
+// what lifts it—a host that lacks the package, a workspace setting to turn on,
+// or an install to wait for—rather than echo the code.
+func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		want   string
+	}{
+		{
+			name:   "unsupported host",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallUnsupported,
+			want:   "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package",
+		},
+		{
+			name:   "sudo with MFA off",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallRequiresSudoWithMFA,
+			want:   "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again",
+		},
+		{
+			name:   "install already pending",
+			status: http.StatusConflict,
+			code:   utils.ServerPAMInstallInProgress,
+			want:   "an alpamon-pam install is already pending on this server—wait for it to finish",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, tt.code)
+			}))
+			defer ts.Close()
+
+			_, err := newTestClient(ts.URL).SendPostRequest("/api/servers/servers/my-server-id/actions/", map[string]string{"action": "install_pam"})
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+		})
+	}
+}
+
 // The cursor-paginator codes reach a user only after api.FetchCursorPages has spent
 // its restarts, so the message has to name the remedy rather than echo the code.
 func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {

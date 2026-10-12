@@ -562,6 +562,7 @@ func TestRequestServerAction(t *testing.T) {
 		{"restart agent with force", ActionRestartAgent, true},
 		{"upgrade agent without force", ActionUpgradeAgent, false},
 		{"refresh without force", ActionUpdateInformation, false},
+		{"install pam without force", ActionInstallPAM, false},
 	}
 
 	for _, tt := range tests {

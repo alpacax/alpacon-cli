@@ -26,6 +26,7 @@ const (
 	ActionUpdateInformation = "update_information"
 	ActionUpgradeAgent      = "upgrade_agent"
 	ActionRestartAgent      = "restart_agent"
+	ActionInstallPAM        = "install_pam"
 )
 
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
