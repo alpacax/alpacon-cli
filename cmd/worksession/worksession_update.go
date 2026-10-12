@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -35,7 +36,9 @@ Only the flags you pass are changed; the rest are left untouched. Which fields
 the server accepts depends on the session status (e.g. --starts-at/--expires-at
 on a pending session; --sudo on an approved/active one). The CLI sends what you
 provide and surfaces the server's validation error if a field isn't editable for
-the current status (--sudo is also validated locally before the request).
+the current status. --sudo, --starts-at and --expires-at are also checked locally
+before the request. To change the expiry of an approved or active session, use
+'alpacon work-session extend'.
 
 --scope and --server replace the whole list (not append). --sudo adds MFA-bypass
 sudo command patterns to the session's existing policies; this is the recovery
@@ -179,13 +182,34 @@ func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) e
 	return nil
 }
 
+func validateSessionForTimeUpdate(session *wsapi.WorkSession, req wsapi.WorkSessionUpdateRequest) error {
+	if session.Status == pendingWorkSessionStatus {
+		return nil
+	}
+	msg := fmt.Sprintf("work session %s is %s; --starts-at and --expires-at can only change while the session is pending", session.ID, session.Status)
+	extendable := session.Status == approvedWorkSessionStatus || session.Status == activeWorkSessionStatus
+	if req.ExpiresAt != "" && extendable {
+		msg += fmt.Sprintf(". To change the expiry, run 'alpacon work-session extend %s --expires-at <time> --reason <reason>'", session.ID)
+	}
+	return errors.New(msg)
+}
+
 // sudo_policies is PUT-style: echo existing policies back so adding doesn't delete them.
 func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsapi.WorkSessionUpdateRequest, newSudo []wsapi.SudoPolicyInline) (*wsapi.WorkSession, error) {
-	if len(newSudo) > 0 {
-		session, err := wsapi.GetWorkSession(ac, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
+	checkTime := req.StartsAt != "" || req.ExpiresAt != ""
+	if len(newSudo) == 0 && !checkTime {
+		return wsapi.UpdateWorkSession(ac, sessionID, req)
+	}
+	session, err := wsapi.GetWorkSession(ac, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load work session %s: %w", sessionID, err)
+	}
+	if checkTime {
+		if err := validateSessionForTimeUpdate(session, req); err != nil {
+			return nil, err
 		}
+	}
+	if len(newSudo) > 0 {
 		effectiveScopes := session.Scopes
 		if len(req.Scopes) > 0 {
 			effectiveScopes = req.Scopes
@@ -198,7 +222,26 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 		desired = append(desired, newSudo...)
 		req.SudoPolicies = desired
 	}
-	return wsapi.UpdateWorkSession(ac, sessionID, req)
+	updated, err := wsapi.UpdateWorkSession(ac, sessionID, req)
+	if err != nil {
+		return nil, err
+	}
+	if checkTime && !timesApplied(updated, req) {
+		return nil, fmt.Errorf("work session %s became %s before the update reached it, so --starts-at and --expires-at were not applied; the other fields in this update were still sent", updated.ID, updated.Status)
+	}
+	return updated, nil
+}
+
+func timesApplied(session *wsapi.WorkSession, req wsapi.WorkSessionUpdateRequest) bool {
+	if req.StartsAt != "" && (session.StartsAt == nil || !sameInstant(*session.StartsAt, req.StartsAt)) {
+		return false
+	}
+	return req.ExpiresAt == "" || sameInstant(session.ExpiresAt, req.ExpiresAt)
+}
+
+func sameInstant(got time.Time, flagValue string) bool {
+	want, err := time.Parse(time.RFC3339, flagValue)
+	return err == nil && got.Equal(want.Truncate(time.Microsecond)) // the server keeps microseconds
 }
 
 func parseRFC3339Flag(flag, val string) (string, error) {
