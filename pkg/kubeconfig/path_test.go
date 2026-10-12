@@ -57,6 +57,71 @@ func TestResolvePath(t *testing.T) {
 	}
 }
 
+// SearchPaths lists what kubectl merges, and ReadByDefault answers whether a
+// file is among them without --kubeconfig. Serial: it sets KUBECONFIG and HOME.
+func TestSearchPathsAndReadByDefault(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	first, second, other := filepath.Join(dir, "first"), filepath.Join(dir, "second"), filepath.Join(dir, "other")
+	defaultFile := filepath.Join(home, ".kube", "config")
+	sep := string(os.PathListSeparator)
+
+	cases := []struct {
+		name       string
+		flag       string
+		env        string
+		want       []string
+		readByDflt map[string]bool
+	}{
+		{name: "flag alone", flag: other, env: first, want: []string{other}, readByDflt: map[string]bool{other: false, first: true}},
+		{name: "every KUBECONFIG entry", env: first + sep + second + sep + first, want: []string{first, second},
+			readByDflt: map[string]bool{first: true, second: true, other: false, defaultFile: false}},
+		{name: "home without KUBECONFIG", want: []string{defaultFile}, readByDflt: map[string]bool{defaultFile: true, other: false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KUBECONFIG", tc.env)
+			t.Setenv("HOME", home)
+			t.Setenv("USERPROFILE", home)
+
+			got, err := SearchPaths(tc.flag)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+			for path, want := range tc.readByDflt {
+				assert.Equal(t, want, ReadByDefault(path), path)
+			}
+		})
+	}
+}
+
+// kubectl reads no file at all when KUBECONFIG holds only separators; it does
+// not fall back to the home file. Serial: it sets KUBECONFIG and HOME.
+func TestSearchPathsRefusesAKubeconfigNamingNoFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	sep := string(os.PathListSeparator)
+	t.Setenv("KUBECONFIG", sep+sep)
+
+	got, err := SearchPaths("")
+
+	require.Error(t, err)
+	assert.Empty(t, got)
+	assert.False(t, ReadByDefault(filepath.Join(home, ".kube", "config")))
+}
+
+// A relative spelling names the same file. Serial: it changes the working
+// directory and sets KUBECONFIG.
+func TestReadByDefaultComparesRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("KUBECONFIG", filepath.Join(dir, "kc"))
+
+	assert.True(t, ReadByDefault(filepath.Join(".", "sub", "..", "kc")), "a relative path to the same file")
+	assert.False(t, ReadByDefault("other"))
+}
+
 // Without a home, kubectl would fall back to a .kube/config relative to the
 // working directory; this refuses instead. Serial: it clears the home variables.
 func TestResolvePathWithoutHomeIsAnError(t *testing.T) {

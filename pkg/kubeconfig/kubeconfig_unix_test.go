@@ -37,7 +37,7 @@ func TestSaveWritesThroughSymlink(t *testing.T) {
 	info, err := os.Lstat(link)
 	require.NoError(t, err)
 	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link must survive the write")
-	server, _, err := Lookup(target, testName)
+	server, _, err := Lookup([]string{target}, testName)
 	require.NoError(t, err)
 	assert.Equal(t, testServer, server)
 	assert.NoFileExists(t, link+".lock")

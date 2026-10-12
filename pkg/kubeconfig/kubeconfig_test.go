@@ -383,7 +383,7 @@ func TestOpenAcceptsEmptyShapes(t *testing.T) {
 
 			applyAndSave(t, path, testEntry())
 
-			server, proxyURL, err := Lookup(path, testName)
+			server, proxyURL, err := Lookup([]string{path}, testName)
 			require.NoError(t, err)
 			assert.Equal(t, testServer, server)
 			assert.Equal(t, testProxy, proxyURL)
@@ -549,7 +549,7 @@ func TestLookup(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server, proxyURL, err := Lookup(tc.path, tc.context)
+			server, proxyURL, err := Lookup([]string{tc.path}, tc.context)
 			if tc.wantMsg != "" {
 				require.EqualError(t, err, tc.wantMsg)
 				assert.NotErrorIs(t, err, ErrClusterNotFound)
@@ -567,12 +567,59 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+// kubectl merges every file it is given, taking each name from the first file
+// that defines it; Lookup has to find what kubectl would use.
+func TestLookupMergesFilesLikeKubectl(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		writeFile(t, path, content)
+		return path
+	}
+	unrelated := write("unrelated", "contexts:\n- context:\n    cluster: other\n  name: other\nclusters:\n- cluster:\n    server: https://other.example.com\n  name: other\n")
+	contextOnly := write("context-only", "contexts:\n- context:\n    cluster: split\n  name: alpacon-split\n")
+	clusterOnly := write("cluster-only", "clusters:\n- cluster:\n    server: https://split.example.com\n  name: split\n")
+	early := write("early", "contexts:\n- context:\n    cluster: early\n  name: alpacon-both\nclusters:\n- cluster:\n    server: https://early.example.com\n  name: early\n")
+	late := write("late", "contexts:\n- context:\n    cluster: late\n  name: alpacon-both\nclusters:\n- cluster:\n    server: https://late.example.com\n  name: late\n")
+	malformed := write("malformed", "contexts: nope\n")
+	missing := filepath.Join(dir, "missing")
+
+	cases := []struct {
+		name    string
+		paths   []string
+		context string
+		wantSrv string
+		wantErr error
+	}{
+		{name: "context in a later file", paths: []string{unrelated, early}, context: "alpacon-both", wantSrv: "https://early.example.com"},
+		{name: "context and cluster in different files", paths: []string{contextOnly, unrelated, clusterOnly}, context: "alpacon-split", wantSrv: "https://split.example.com"},
+		{name: "first file wins", paths: []string{late, early}, context: "alpacon-both", wantSrv: "https://late.example.com"},
+		{name: "missing file skipped", paths: []string{missing, early}, context: "alpacon-both", wantSrv: "https://early.example.com"},
+		{name: "malformed file after a hit still fails", paths: []string{early, malformed}, context: "alpacon-both", wantErr: ErrMalformed},
+		{name: "found nowhere", paths: []string{unrelated, missing}, context: "alpacon-both", wantErr: ErrContextNotFound},
+		{name: "cluster found nowhere", paths: []string{contextOnly, unrelated}, context: "alpacon-split", wantErr: ErrClusterNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server, _, err := Lookup(tc.paths, tc.context)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantSrv, server)
+		})
+	}
+}
+
 func TestLookupRefusesMalformedFile(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config")
 	writeFile(t, path, "contexts: nope\n")
 
-	_, _, err := Lookup(path, testName)
+	_, _, err := Lookup([]string{path}, testName)
 
 	require.ErrorIs(t, err, ErrMalformed)
 }
@@ -584,7 +631,7 @@ func TestLookupReadsAppliedEntry(t *testing.T) {
 	writeFile(t, path, kubectlFixture)
 	applyAndSave(t, path, testEntry())
 
-	server, proxyURL, err := Lookup(path, testName)
+	server, proxyURL, err := Lookup([]string{path}, testName)
 
 	require.NoError(t, err)
 	assert.Equal(t, testServer, server)

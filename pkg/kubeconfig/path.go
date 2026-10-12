@@ -32,16 +32,62 @@ func ResolvePath(flag string) (string, error) {
 	return filepath.Join(home, ".kube", "config"), nil
 }
 
+// SearchPaths returns the files kubectl reads, in the order it merges them:
+// the explicit path alone when one is given, else every $KUBECONFIG entry,
+// else <home>/.kube/config. A $KUBECONFIG that is set but names no file is an
+// error: kubectl then reads nothing and does not fall back to the home file.
+func SearchPaths(flag string) ([]string, error) {
+	if flag != "" {
+		return []string{flag}, nil
+	}
+	if os.Getenv(envVar) != "" {
+		files := envFiles()
+		if len(files) == 0 {
+			return nil, errors.New("KUBECONFIG is set but names no file")
+		}
+		return files, nil
+	}
+	home, err := homeDir()
+	if err != nil {
+		return nil, err
+	}
+	return []string{filepath.Join(home, ".kube", "config")}, nil
+}
+
+// ReadByDefault reports whether kubectl, run without --kubeconfig, reads path.
+func ReadByDefault(path string) bool {
+	files, err := SearchPaths("")
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if samePath(f, path) {
+			return true
+		}
+	}
+	return false
+}
+
 // Shadowed reports whether path is a $KUBECONFIG entry listed after another
 // one. kubectl takes current-context and each name from the first file that
 // sets it, so what was written to path may not be what kubectl ends up using.
 func Shadowed(path string) bool {
 	for i, f := range envFiles() {
-		if filepath.Clean(f) == filepath.Clean(path) {
+		if samePath(f, path) {
 			return i > 0
 		}
 	}
 	return false
+}
+
+// samePath compares two spellings of a path, relative ones included.
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return absA == absB
 }
 
 // envFiles splits $KUBECONFIG the way kubectl does, deduplicated in order.

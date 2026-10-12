@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/alpacax/alpacon-cli/config"
@@ -52,7 +53,7 @@ Only one proxy per cluster and port runs at a time. Press Ctrl+C to stop it.`,
 
 func init() {
 	kubeProxyCmd.Flags().IntVar(&kubeProxyFlags.port, "port", defaultKubeProxyPort, "local port to listen on")
-	kubeProxyCmd.Flags().StringVar(&kubeProxyFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to read the context from (default: the file kubectl reads)")
+	kubeProxyCmd.Flags().StringVar(&kubeProxyFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to read the context from (default: the files kubectl reads)")
 }
 
 func runKubeProxy(cmd *cobra.Command, args []string) {
@@ -62,15 +63,15 @@ func runKubeProxy(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("--port %s.", err)
 	}
 
-	path, err := kubeconfig.ResolvePath(kubeProxyFlags.kubeconfig)
+	paths, err := kubeconfig.SearchPaths(kubeProxyFlags.kubeconfig)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to find the kubeconfig: %s.", err)
 	}
 	contextName := contextPrefix + clusterName
-	server, proxyURL, err := kubeconfig.Lookup(path, contextName)
+	server, proxyURL, err := kubeconfig.Lookup(paths, contextName)
 	if err != nil {
 		if errors.Is(err, kubeconfig.ErrContextNotFound) || errors.Is(err, kubeconfig.ErrClusterNotFound) {
-			utils.CliErrorWithExit("No usable context %q in %s. Run 'alpacon kube config %s' first.", contextName, path, clusterName)
+			utils.CliErrorWithExit("No usable context %q in %s. Run 'alpacon kube config %s' first.", contextName, strings.Join(paths, ", "), clusterName)
 		}
 		utils.CliErrorWithExit("Failed to read the kubeconfig: %s.", err)
 	}

@@ -489,48 +489,72 @@ func (ed *Editor) Close() error {
 }
 
 // Lookup returns the server and proxy-url of the cluster that contextName
-// points at. A missing file or context wraps ErrContextNotFound; a context
-// whose cluster is absent wraps ErrClusterNotFound.
-func Lookup(path, contextName string) (server, proxyURL string, err error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", "", fmt.Errorf("%w: %s does not exist", ErrContextNotFound, path)
+// points at, merging paths the way kubectl does: each name is taken from the
+// first file that defines it, a missing file is skipped, and a malformed one
+// fails the whole lookup. A context found nowhere wraps ErrContextNotFound; a
+// cluster found nowhere wraps ErrClusterNotFound.
+func Lookup(paths []string, contextName string) (server, proxyURL string, err error) {
+	type file struct {
+		path string
+		root *yaml.Node
 	}
-	if err != nil {
-		return "", "", fmt.Errorf("failed to read %s: %w", path, err)
+	var files []file
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", "", fmt.Errorf("failed to read %s: %w", path, err)
+		}
+		_, root, err := parse(path, data)
+		if err != nil {
+			return "", "", err
+		}
+		files = append(files, file{path: path, root: root})
 	}
-	_, root, err := parse(path, data)
-	if err != nil {
-		return "", "", err
+	searched := strings.Join(paths, ", ")
+
+	find := func(list, name string) (*yaml.Node, string, error) {
+		for _, f := range files {
+			item, err := uniqueItem(f.path, f.root, list, name)
+			if err != nil {
+				return nil, "", err
+			}
+			if item != nil {
+				return item, f.path, nil
+			}
+		}
+		return nil, "", nil
 	}
 
-	context, err := uniqueItem(path, root, "contexts", contextName)
+	context, contextPath, err := find("contexts", contextName)
 	if err != nil {
 		return "", "", err
 	}
 	if context == nil {
-		return "", "", fmt.Errorf("%w: no context %q in %s", ErrContextNotFound, contextName, path)
+		return "", "", fmt.Errorf("%w: no context %q in %s", ErrContextNotFound, contextName, searched)
 	}
 	clusterName := ""
 	if _, inner := lookup(context, "context"); inner != nil && inner.Kind == yaml.MappingNode {
 		clusterName = stringValue(inner, "cluster")
 	}
 	if clusterName == "" {
-		return "", "", fmt.Errorf("%w: context %q in %s names no cluster", ErrClusterNotFound, contextName, path)
+		return "", "", fmt.Errorf("%w: context %q in %s names no cluster", ErrClusterNotFound, contextName, contextPath)
 	}
 
-	cluster, err := uniqueItem(path, root, "clusters", clusterName)
+	cluster, clusterPath, err := find("clusters", clusterName)
 	if err != nil {
 		return "", "", err
 	}
 	if cluster == nil {
-		return "", "", fmt.Errorf("%w: no cluster %q (used by context %q) in %s", ErrClusterNotFound, clusterName, contextName, path)
+		return "", "", fmt.Errorf("%w: no cluster %q (used by context %q) in %s", ErrClusterNotFound, clusterName, contextName, searched)
 	}
 	if _, inner := lookup(cluster, "cluster"); inner != nil && inner.Kind == yaml.MappingNode {
 		server, proxyURL = stringValue(inner, "server"), stringValue(inner, "proxy-url")
 	}
 	if server == "" {
-		return "", "", fmt.Errorf("cluster %q in %s has no server", clusterName, path)
+		return "", "", fmt.Errorf("cluster %q in %s has no server", clusterName, clusterPath)
 	}
 	return server, proxyURL, nil
 }

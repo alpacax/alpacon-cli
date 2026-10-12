@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -352,5 +354,31 @@ func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
 	if result.PreviousContext != "" && result.PreviousContext != result.Context {
 		utils.CliInfo("Switched current-context from %q.", result.PreviousContext)
 	}
-	utils.CliInfo("Next: kubectl get pods -A")
+	if kubeconfig.ReadByDefault(result.Kubeconfig) {
+		utils.CliInfo("Next: kubectl get pods -A")
+	} else {
+		utils.CliInfo("Next: kubectl --kubeconfig %s get pods -A", shellQuote(result.Kubeconfig))
+	}
+}
+
+// shellQuote leaves a plain path as it is and quotes any other, so the printed
+// command can be pasted into the platform's usual shell.
+func shellQuote(s string) string {
+	return shellQuoteFor(runtime.GOOS, s)
+}
+
+// shellQuoteFor quotes for a POSIX shell, or on Windows with double quotes,
+// which both cmd.exe and PowerShell read; a Windows path cannot hold one.
+func shellQuoteFor(goos, s string) string {
+	const safe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:+=,@"
+	if goos == "windows" {
+		if s != "" && strings.Trim(s, safe+`\`) == "" {
+			return s
+		}
+		return `"` + s + `"`
+	}
+	if s != "" && strings.Trim(s, safe) == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

@@ -206,6 +206,60 @@ func TestKubeCommandNamesAndAliases(t *testing.T) {
 	}
 }
 
+// The suggested kubectl command must reach the file just written: one kubectl
+// does not read by default is named with --kubeconfig.
+func TestKubeConfigNextStepNamesAFileKubectlDoesNotRead(t *testing.T) {
+	dir := t.TempDir()
+	read := filepath.Join(dir, "read")
+	t.Setenv("KUBECONFIG", read)
+	withOutputFormat(t, utils.OutputFormatTable)
+
+	tests := []struct {
+		name    string
+		written string
+		want    string
+	}{
+		{name: "file kubectl reads", written: read, want: "Next: kubectl get pods -A"},
+		{name: "separate file", written: filepath.Join(dir, "alpacon"), want: "Next: kubectl --kubeconfig " + shellQuote(filepath.Join(dir, "alpacon")) + " get pods -A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr := testutil.CaptureOutput(t, func() {
+				printKubeConfigResult(&kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+			})
+
+			assert.Contains(t, stderr, tt.want)
+		})
+	}
+}
+
+func TestShellQuoteFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		goos string
+		in   string
+		want string
+	}{
+		{name: "plain path", goos: "linux", in: "/home/alice/.kube/alpacon", want: "/home/alice/.kube/alpacon"},
+		{name: "space", goos: "linux", in: "/tmp/my kube", want: "'/tmp/my kube'"},
+		{name: "single quote", goos: "darwin", in: "/tmp/it's", want: `'/tmp/it'\''s'`},
+		{name: "leading tilde stays literal", goos: "linux", in: "~/kc", want: "'~/kc'"},
+		{name: "dollar sign", goos: "linux", in: "/tmp/$HOME", want: "'/tmp/$HOME'"},
+		{name: "empty", goos: "linux", in: "", want: "''"},
+		{name: "windows plain path", goos: "windows", in: `C:\Users\alice\.kube\alpacon`, want: `C:\Users\alice\.kube\alpacon`},
+		{name: "windows space", goos: "windows", in: `C:\Users\Alice Kim\kc`, want: `"C:\Users\Alice Kim\kc"`},
+		{name: "windows apostrophe", goos: "windows", in: `C:\Users\o'brien\kc`, want: `"C:\Users\o'brien\kc"`},
+		{name: "windows empty", goos: "windows", in: "", want: `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, shellQuoteFor(tt.goos, tt.in))
+		})
+	}
+}
+
 // The warning names a real risk only when an earlier KUBECONFIG entry can
 // override what was written.
 func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
