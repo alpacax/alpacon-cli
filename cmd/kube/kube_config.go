@@ -228,8 +228,6 @@ type kubeConfigOptions struct {
 	interrupted   func() bool // nil when nothing can interrupt the command
 }
 
-// errInterrupted ends a command the user interrupted before the kubeconfig
-// was written.
 var errInterrupted = errors.New("interrupted before the kubeconfig was written")
 
 func (o kubeConfigOptions) isInterrupted() bool {

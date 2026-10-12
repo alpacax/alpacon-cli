@@ -64,7 +64,7 @@ type Editor struct {
 	path     string
 	lockPath string
 	locked   bool
-	doc      *yaml.Node // the document node
+	doc      *yaml.Node
 	root     *yaml.Node // its top-level mapping
 }
 

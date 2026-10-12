@@ -6,9 +6,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The helpers below edit a parsed document in place, so every key, comment and
-// value they do not name survives the rewrite.
-
 const (
 	strTag  = "!!str"
 	boolTag = "!!bool"
@@ -29,7 +26,6 @@ func isNull(n *yaml.Node) bool {
 	return n.Kind == yaml.ScalarNode && n.Tag == nullTag
 }
 
-// lookup returns the key and value nodes of key in mapping m, or nils.
 func lookup(m *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if k := m.Content[i]; k.Kind == yaml.ScalarNode && k.Value == key {
@@ -39,7 +35,6 @@ func lookup(m *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
 	return nil, nil
 }
 
-// stringValue returns key's scalar value in m, or "" when it is absent or null.
 func stringValue(m *yaml.Node, key string) string {
 	_, v := lookup(m, key)
 	if v == nil || v.Kind != yaml.ScalarNode || isNull(v) {
@@ -129,7 +124,6 @@ func appendBlock(key, seq, item *yaml.Node) {
 	seq.Content = append(seq.Content, item)
 }
 
-// itemsNamed returns the items of seq whose name is name, in file order.
 func itemsNamed(seq *yaml.Node, name string) []*yaml.Node {
 	var found []*yaml.Node
 	for _, item := range seq.Content {

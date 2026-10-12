@@ -27,12 +27,12 @@ const (
 	testProxyURL  = "https://my-workspace.us1.alpacon.io/kube/c-prod"
 )
 
-// sessionServer answers the cluster lookup, the session create, and the
-// session close the way the server does, and records what it was sent.
+// sessionServer answers the cluster lookup, session create and session close,
+// and records what it was sent.
 type sessionServer struct {
-	lookupStatus int    // 0 answers the lookup with prod-east
-	createStatus int    // 0 answers 201 with the session below
-	createCode   string // error code for a failing create
+	lookupStatus int // 0 answers the lookup with prod-east
+	createStatus int // 0 answers 201 with the session below
+	createCode   string
 	proxyURL     string
 	token        string
 	closeStatus  int // 0 answers 200
@@ -126,7 +126,6 @@ func openEditor(t *testing.T, path string) *kubeconfig.Editor {
 	return editor
 }
 
-// readKubeconfig decodes the file loosely enough to read what one entry holds.
 type testKubeconfig struct {
 	CurrentContext string `yaml:"current-context"`
 	Clusters       []struct {

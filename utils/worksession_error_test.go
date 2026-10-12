@@ -182,7 +182,6 @@ func TestHandleWorkSessionError_NilError(t *testing.T) {
 	HandleWorkSessionError(nil, "websh", "srv", "Browser login", "")
 }
 
-// kubeWorkSessionCases maps every WorkSession code to the commands kube suggests, in order.
 func kubeWorkSessionCases() []struct {
 	code     string
 	activeWS string
@@ -218,7 +217,7 @@ func kubeCaseName(code, activeWS string) string {
 	return code
 }
 
-// diagnosticNextCommands returns the commands listed under "Next:", in order, without their descriptions.
+// diagnosticNextCommands returns the commands under "Next:", in order, without their descriptions.
 func diagnosticNextCommands(t *testing.T, diagnostic string) []string {
 	t.Helper()
 	_, block, found := strings.Cut(diagnostic, "\nNext:\n")

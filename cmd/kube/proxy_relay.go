@@ -22,9 +22,7 @@ import (
 const (
 	// maxConnectHeaderBytes caps what a client may send before its CONNECT
 	// request ends; a larger header is refused with 431.
-	maxConnectHeaderBytes = 64 << 10
-	// defaultConnectHeaderTimeout bounds how long a client may take to send
-	// its CONNECT request.
+	maxConnectHeaderBytes       = 64 << 10
 	defaultConnectHeaderTimeout = 10 * time.Second
 	// upstreamDialTimeout bounds reaching the target, including the CONNECT
 	// exchange with an upstream proxy when one is configured.
@@ -39,8 +37,7 @@ const (
 // connectRelay is a CONNECT-only proxy that tunnels to exactly one target.
 // It never reads the tunneled bytes: once the CONNECT request is accepted,
 // the two connections are joined and every byte passes through unmodified,
-// so TLS runs end to end between the client and the target. The upstream
-// connection follows the same proxy environment as the rest of the CLI.
+// so TLS runs end to end between the client and the target.
 type connectRelay struct {
 	// target is the only authority a client may CONNECT to, as host:port.
 	target string
@@ -49,8 +46,7 @@ type connectRelay struct {
 	// dial opens every outbound TCP connection, to the target or to a proxy.
 	dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// proxyRootCAs verifies an https upstream proxy; nil means the system roots.
-	proxyRootCAs *x509.CertPool
-	// headerTimeout bounds reading a client's CONNECT request.
+	proxyRootCAs  *x509.CertPool
 	headerTimeout time.Duration
 
 	ctx    context.Context
@@ -446,8 +442,7 @@ func (r *connectRelay) dialThroughProxy(ctx context.Context, proxyURL *url.URL) 
 	if resp.StatusCode != http.StatusOK {
 		return fail(fmt.Errorf("proxy %s refused CONNECT to %s: %s", address, r.target, resp.Status))
 	}
-	// A 200 reply to CONNECT has no body.
-	_ = resp.Body.Close()
+	_ = resp.Body.Close() // a 200 reply to CONNECT has no body
 	if !stop() {
 		// ctx ended and closed the connection after the reply arrived.
 		return nil, fmt.Errorf("proxy %s: %w", address, ctx.Err())

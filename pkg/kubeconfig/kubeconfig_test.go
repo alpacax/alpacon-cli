@@ -41,7 +41,6 @@ func decode(t *testing.T, content string) map[string]any {
 	return m
 }
 
-// applyAndSave runs one whole edit and returns Apply's results.
 func applyAndSave(t *testing.T, path string, e Entry) (string, string) {
 	t.Helper()
 	ed, err := Open(path)
@@ -578,7 +577,7 @@ func TestLookupRefusesMalformedFile(t *testing.T) {
 	require.ErrorIs(t, err, ErrMalformed)
 }
 
-// Lookup reads what Apply wrote, which is the path kube proxy relies on.
+// Lookup reads what Apply wrote, which kube proxy relies on.
 func TestLookupReadsAppliedEntry(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config")

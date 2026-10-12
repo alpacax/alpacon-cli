@@ -101,8 +101,6 @@ func listenTCP(t *testing.T, handle func(net.Conn)) string {
 	return ln.Addr().String()
 }
 
-// waitForHandlers fails the test if a server goroutine it started is still
-// running after relayTestTimeout.
 func waitForHandlers(t *testing.T, handlers *sync.WaitGroup) {
 	t.Helper()
 	done := make(chan struct{})
@@ -117,7 +115,6 @@ func waitForHandlers(t *testing.T, handlers *sync.WaitGroup) {
 	}
 }
 
-// dialRelay opens a client connection to the relay under the test deadline.
 func dialRelay(t *testing.T, relayAddr string) *net.TCPConn {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", relayAddr, relayTestTimeout)
@@ -127,7 +124,6 @@ func dialRelay(t *testing.T, relayAddr string) *net.TCPConn {
 	return conn.(*net.TCPConn)
 }
 
-// sendRaw writes request to the relay and reads back its answer.
 func sendRaw(t *testing.T, relayAddr, request string) (*http.Response, *bufio.Reader) {
 	t.Helper()
 	conn := dialRelay(t, relayAddr)
@@ -140,8 +136,6 @@ func sendRaw(t *testing.T, relayAddr, request string) (*http.Response, *bufio.Re
 	return resp, br
 }
 
-// connectThrough opens a tunnel to target and checks the exact
-// established line, returning the connection and the reader past it.
 func connectThrough(t *testing.T, relayAddr, target string) (*net.TCPConn, *bufio.Reader) {
 	t.Helper()
 	conn := dialRelay(t, relayAddr)
@@ -656,7 +650,6 @@ func (p *fakeUpstreamProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(relayTestTimeout))
-	// One write carries both the reply and the target's first bytes.
 	if _, err := io.WriteString(conn, "HTTP/1.1 "+p.status+"\r\nContent-Length: 0\r\n\r\n"+p.greeting); err != nil {
 		return
 	}

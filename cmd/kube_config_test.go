@@ -21,8 +21,6 @@ import (
 
 const kubeConfigTestToken = "channel-token-value"
 
-// kubeSessionServer answers what 'kube config' asks: the cluster lookup and
-// the session create, either with a session or with createCode on a 403.
 type kubeSessionServer struct {
 	createCode string
 	lookups    atomic.Int32
