@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,9 +64,7 @@ func TestGetEventList_PassesTailAsTheLimit(t *testing.T) {
 	assert.Len(t, events, 250)
 }
 
-// The --server and --user filters are path segments, not query params, so a broken join
-// does not fail the request—it returns every command as if no filter had been given.
-func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
+func TestGetEventList_SendsTheResolvedFilterIDsAsQueryParams(t *testing.T) {
 	t.Parallel()
 	// Mirrors the lookup endpoints of api/server and api/iam, whose consts are unexported.
 	const (
@@ -74,34 +73,25 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 	)
 
 	tests := []struct {
-		name         string
-		serverName   string
-		userName     string
-		expectedPath string
+		name       string
+		serverName string
+		userName   string
+		wantQuery  url.Values
 	}{
+		{name: "no filter", wantQuery: url.Values{}},
+		{name: "server only", serverName: "my-server", wantQuery: url.Values{"server": {"srv-uuid"}}},
+		{name: "user only", userName: "admin", wantQuery: url.Values{"requested_by": {"usr-uuid"}}},
 		{
-			name:         "both filters",
-			serverName:   "my-server",
-			userName:     "admin",
-			expectedPath: getEventURL + "srv-uuid/usr-uuid/",
-		},
-		{
-			name:         "server only",
-			serverName:   "my-server",
-			expectedPath: getEventURL + "srv-uuid/",
-		},
-		{
-			// path.Join drops the empty server segment, so a lone user ID lands on the address
-			// the command detail route also answers on. Recorded as current behavior, not as
-			// the desired one—confirming it needs the server-side route (alpacax/alpacon-cli#363).
-			name:         "user only",
-			userName:     "admin",
-			expectedPath: getEventURL + "usr-uuid/",
+			name:       "both filters",
+			serverName: "my-server",
+			userName:   "admin",
+			wantQuery:  url.Values{"server": {"srv-uuid"}, "requested_by": {"usr-uuid"}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 
@@ -111,7 +101,11 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 				case strings.HasPrefix(r.URL.Path, userLookupURL):
 					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"usr-uuid"}]}`))
 				case strings.HasPrefix(r.URL.Path, getEventURL):
-					assert.Equal(t, tt.expectedPath, r.URL.Path)
+					q := r.URL.Query()
+					q.Del("page")
+					q.Del("page_size")
+					assert.Equal(t, getEventURL, r.URL.Path)
+					assert.Equal(t, tt.wantQuery, q)
 					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
 				default:
 					t.Errorf("unexpected request path %q", r.URL.Path)

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -184,23 +183,23 @@ func gapFillInterval(noProgress int) time.Duration {
 // GetEventList returns the newest tail commands. The endpoint sorts -scheduled_at,
 // so the newest ones arrive first and the walk stops as soon as tail is reached.
 func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userName string) ([]EventAttributes, error) {
-	var serverID, userID string
-	var err error
+	params := map[string]string{}
 	if serverName != "" {
-		serverID, err = server.GetServerIDByName(ac, serverName)
+		serverID, err := server.GetServerIDByName(ac, serverName)
 		if err != nil {
 			return nil, err
 		}
+		params["server"] = serverID
 	}
 	if userName != "" {
-		userID, err = iam.GetUserIDByName(ac, userName)
+		userID, err := iam.GetUserIDByName(ac, userName)
 		if err != nil {
 			return nil, err
 		}
+		params["requested_by"] = userID
 	}
 
-	endpoint := path.Join(getEventURL, serverID, userID)
-	events, err := api.FetchPagesUpTo[EventDetails](ac, endpoint, nil, tail)
+	events, err := api.FetchPagesUpTo[EventDetails](ac, getEventURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
