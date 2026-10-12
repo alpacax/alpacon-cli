@@ -115,7 +115,7 @@ func TestContextRows(t *testing.T) {
 	  "work_session": {"id": "ws-1", "title": "deploy v2", "description": "d", "status": "active", "assignee": {"id": "u-1", "name": "alice"}},
 	  "policy_decision": {"policy_id": 1, "layer": "custom", "lane": "single_approver", "reason": "touches production"},
 	  "command": {
-	    "line": "systemctl restart app", "server_name": "my-server", "risk_level": "high",
+	    "line": "systemctl restart app", "server_name": "my-server", "risk_level": "HIGH",
 	    "runs_with_sudo": true, "purpose": "restart after deploy", "declared_agent": "claude",
 	    "review_summary": "restarts a service", "tier2_reasoning": "matches the session purpose",
 	    "factors": [{"type": "privilege", "detail": "runs as root"}, {"type": "scope", "detail": "one server"}]
@@ -139,7 +139,7 @@ func TestContextRows(t *testing.T) {
 				{"Session purpose", "ship deploy v2"},
 				{"Command", "systemctl restart app"},
 				{"Server", "my-server"},
-				{"Risk level", "high"},
+				{"Risk level", "HIGH"},
 				{"Runs with sudo", "yes"},
 				{"Purpose", "restart after deploy"},
 				{"Declared agent", "claude"},
@@ -151,14 +151,14 @@ func TestContextRows(t *testing.T) {
 		{
 			name: "command request as a requester",
 			body: `{"metadata":{"intent":"ship deploy v2","work_session":null,"command":{
-	  "line": "systemctl restart app", "server_name": "my-server", "risk_level": "high",
+	  "line": "systemctl restart app", "server_name": "my-server", "risk_level": "HIGH",
 	  "runs_with_sudo": true, "purpose": "restart after deploy", "declared_agent": "claude",
 	  "review_summary": null, "tier2_reasoning": null, "factors": null}}}`,
 			want: []describeRow{
 				{"Session purpose", "ship deploy v2"},
 				{"Command", "systemctl restart app"},
 				{"Server", "my-server"},
-				{"Risk level", "high"},
+				{"Risk level", "HIGH"},
 				{"Runs with sudo", "yes"},
 				{"Purpose", "restart after deploy"},
 				{"Declared agent", "claude"},
