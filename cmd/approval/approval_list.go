@@ -17,11 +17,12 @@ var (
 	myRequests   bool
 )
 
-var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired"}
+var validStatuses = []string{"pending", "approved", "rejected", "cancelled", "expired", "recorded"}
 
 var validTypes = []string{
-	"sudo", "work_session", "username", "groupname", "service_token",
+	"sudo", "command_exec", "work_session", "username", "groupname", "service_token",
 	"svc_token_mod", "app_username", "work_session_mod", "sudo_policy",
+	"discovered_account_accept", "api_token_scope_expand",
 }
 
 var approvalListCmd = &cobra.Command{
@@ -62,8 +63,8 @@ requests you submitted.`,
 }
 
 func init() {
-	approvalListCmd.Flags().StringVar(&statusFilter, "status", "pending", "Filter by status: pending|approved|rejected|cancelled|expired")
-	approvalListCmd.Flags().StringVar(&typeFilter, "type", "", "Filter by request type: sudo|work_session|username|groupname|service_token|svc_token_mod|app_username|work_session_mod|sudo_policy")
+	approvalListCmd.Flags().StringVar(&statusFilter, "status", "pending", "Filter by status: "+strings.Join(validStatuses, "|"))
+	approvalListCmd.Flags().StringVar(&typeFilter, "type", "", "Filter by request type: "+strings.Join(validTypes, "|"))
 	approvalListCmd.Flags().BoolVar(&myRequests, "my", false, "Show only requests you submitted")
 }
 
