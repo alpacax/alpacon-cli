@@ -1,6 +1,7 @@
 package iam
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -54,8 +55,8 @@ var userCreateCmd = &cobra.Command{
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
-		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, utils.CliWarning, password); err != nil {
-			utils.CliErrorWithExit("The user was created, but writing the generated password failed: %s. Set a new password for the user before they can log in.", err)
+		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
+			utils.CliErrorWithExit("The user was created, but %s. Set a new password for the user before they can log in.", err)
 		}
 	},
 }
@@ -84,14 +85,12 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 }
 
 // printGeneratedPassword keeps stdout to the password line alone so a script can capture it.
-func printGeneratedPassword(stdout io.Writer, info, warn func(string, ...any), password string) error {
+func printGeneratedPassword(stdout io.Writer, info func(string, ...any), password string) error {
 	if password == "" {
-		warn("The server returned no password. Set one for the user before they can log in.")
-		return nil
+		return errors.New("the server returned no password")
 	}
 	if _, altered := utils.SanitizeTerminalLine(password); altered {
-		warn("The generated password contains characters that cannot be shown safely. Set a new password for the user before they can log in.")
-		return nil
+		return errors.New("the generated password contains characters that cannot be shown safely")
 	}
 	info("This is the generated password. It is shown only once; pass it to the user securely.")
 	_, err := fmt.Fprintln(stdout, password)
