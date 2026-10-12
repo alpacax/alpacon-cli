@@ -228,6 +228,11 @@ func TestContextRows(t *testing.T) {
 			want: []describeRow{{"Work session", "(active, ws-1)"}},
 		},
 		{
+			name: "work session title that sanitizes to nothing leaves no leading space",
+			body: "{\"metadata\":{\"work_session\":{\"id\":\"ws-1\",\"title\":\"\\u001b[0m\",\"status\":\"active\"}}}",
+			want: []describeRow{{"Work session", "(active, ws-1)"}},
+		},
+		{
 			name: "escape sequence in a value is stripped",
 			body: "{\"metadata\":{\"command\":{\"line\":\"ls \\u001b[31mred\\u001b[0m\"}}}",
 			want: []describeRow{{"Command", "ls red"}},

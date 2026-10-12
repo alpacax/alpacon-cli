@@ -143,31 +143,32 @@ func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
 }
 
 func joinClean(items []string, sep string) string {
-	kept := make([]string, 0, len(items))
-	for _, it := range items {
-		if it = utils.SanitizeTerminalText(it); it != "" {
-			kept = append(kept, it)
-		}
+	cleaned := make([]string, len(items))
+	for i, it := range items {
+		cleaned[i] = utils.SanitizeTerminalText(it)
 	}
-	return strings.Join(kept, sep)
+	return joinNonEmpty(cleaned, sep)
+}
+
+func joinNonEmpty(items []string, sep string) string {
+	return strings.Join(slices.DeleteFunc(slices.Clone(items), func(it string) bool { return it == "" }), sep)
 }
 
 func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	if meta == nil {
 		return nil
 	}
-	clean := utils.SanitizeTerminalText
 	var rows []describeRow
 	add := func(field, value string) {
-		if value = clean(value); value != "" {
+		if value = strings.TrimSpace(utils.SanitizeTerminalText(value)); value != "" {
 			rows = append(rows, describeRow{field, value})
 		}
 	}
 
 	if ws := meta.WorkSession; ws != nil {
-		value := clean(ws.Title)
+		value := ws.Title
 		if detail := joinClean([]string{ws.Status, ws.ID}, ", "); detail != "" {
-			value = strings.TrimSpace(value + " (" + detail + ")")
+			value += " (" + detail + ")"
 		}
 		add("Work session", value)
 	}
@@ -187,7 +188,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		for i, f := range c.Factors {
 			factors[i] = joinClean([]string{f.Type, f.Detail}, ": ")
 		}
-		add("Risk factors", joinClean(factors, "; "))
+		add("Risk factors", joinNonEmpty(factors, "; "))
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
@@ -218,7 +219,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		for i, p := range ch.SudoPolicies {
 			policies[i] = joinClean(p.Commands, ", ")
 		}
-		add("  Sudo policies", joinClean(policies, "; "))
+		add("  Sudo policies", joinNonEmpty(policies, "; "))
 		add("  Target account", ch.TargetAccountUsername)
 		if len(rows) > start {
 			rows = slices.Insert(rows, start, describeRow{"Requested changes", ""})
