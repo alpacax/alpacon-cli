@@ -107,8 +107,9 @@ func (w *Watcher) provisionSession() (*EventSessionResponse, error) {
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err
 		}
-		w.closeRejectedSession(session.ID)
-		return nil, w.fail(fmt.Errorf("server returned a malformed event channel URL: %w", err))
+		cause := fmt.Errorf("server returned a malformed event channel URL: %w", err)
+		w.closeRejectedSession(session.ID, cause)
+		return nil, w.fail(cause)
 	}
 
 	w.stateMu.Lock()
@@ -120,16 +121,21 @@ func (w *Watcher) provisionSession() (*EventSessionResponse, error) {
 
 // closeRejectedSession waits on the close only when the rejection stops the Watcher:
 // the command then exits through os.Exit, which would drop a background close unsent.
-func (w *Watcher) closeRejectedSession(id string) {
+func (w *Watcher) closeRejectedSession(id string, cause error) {
 	w.stateMu.Lock()
 	stops := w.failureStopsLocked()
+	if stops {
+		w.err = cause // before the close, which can outlast WaitConnected's window
+	}
 	w.stateMu.Unlock()
 
-	if stops && id != "" {
-		closeSession(w.ac, id, w.closeTimeout)
+	if !stops {
+		w.closeUnopenedSession(id)
 		return
 	}
-	w.closeUnopenedSession(id)
+	if id != "" {
+		closeSession(w.ac, id, eventSessionCloseTimeout)
+	}
 }
 
 func (w *Watcher) subscribe() error {
