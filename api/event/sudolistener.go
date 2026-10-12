@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"sync"
@@ -63,19 +62,16 @@ type SudoListener struct {
 	serverName string
 	sessionID  string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
-	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
-	refreshToken func() error
 	// pollInterval and pollTimeout bound retryVerifyUntilMFA. Fields rather than
 	// package vars: the poll runs on a goroutine that can outlive the test which
 	// started it, and a test shortening a shared knob would race the next one.
 	pollInterval time.Duration
 	pollTimeout  time.Duration
 
-	stateMu    sync.Mutex // guards channelID, subscribed, warned, refreshed, err
+	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
 	channelID  string
 	subscribed bool
 	warned     bool
-	refreshed  bool
 	err        error
 }
 
@@ -89,9 +85,6 @@ func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *Su
 		sessionID:    sessionID,
 		pollInterval: defaultMFAPollInterval,
 		pollTimeout:  defaultMFAPollTimeout,
-	}
-	if ac != nil {
-		sl.refreshToken = ac.RefreshToken
 	}
 	sl.wsListener = newProvisionedWSListener(ac, sl.provisionSession, sudoHandshakeTimeout)
 	sl.handleFrame = sl.handleMessage
@@ -151,21 +144,9 @@ func (sl *SudoListener) announceOutage(cause error) {
 // the reconnect loop. Every cause is recorded either way, so a caller reading Err()
 // after a timeout gets the transport's own words rather than nothing.
 func (sl *SudoListener) fail(cause error) error {
-	// refreshToken is assigned before Start and never reassigned, so no lock here.
-	expired := sl.refreshToken != nil && utils.HTTPStatusCode(cause) == http.StatusUnauthorized
-
 	sl.stateMu.Lock()
 	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
-	// websh created its own session on this token moments ago, so a 401 on the first
-	// attempt means it expired in between and a refresh would fix it. The allowance is
-	// spent here whether or not the refresh below lands, because what it bounds is the
-	// downgrade, not the refresh: a refresh that fails leaves the retry presenting the
-	// same token, and that second 401 is the one that has to stop us.
-	if fatal && expired && !sl.refreshed {
-		sl.refreshed = true
-		fatal = false
-	}
 	announce := sl.subscribed && !sl.warned
 	if announce {
 		sl.warned = true
@@ -187,27 +168,7 @@ func (sl *SudoListener) fail(cause error) error {
 		}
 	}
 
-	if expired {
-		sl.refreshExpiredToken()
-	}
-
 	return cause
-}
-
-// refreshExpiredToken renews the access token so the next dial stops presenting the one
-// that just came back 401. Past the first subscribe nothing else would: no status is
-// fatal there, so an access token that expires mid-session would be re-presented on
-// every dial until websh exits and sudo MFA would never come back.
-func (sl *SudoListener) refreshExpiredToken() {
-	// An MFA flow holds mfaMu across its own refresh; a second one would race it.
-	if !sl.mfaMu.TryLock() {
-		return
-	}
-	defer sl.mfaMu.Unlock()
-
-	// A failed refresh leaves the next attempt to the reconnect loop, which is
-	// where a recovery would land anyway.
-	_ = sl.refreshToken()
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {
