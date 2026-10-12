@@ -48,10 +48,11 @@ requested changes. Use --output json to print the full raw response.`,
 			utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
 		}
 
-		rows := describeRows(req)
+		fe := fileExecutionOf(req)
+		rows := describeRows(req, fe)
 		var script string
 		var hasScript bool
-		if fe := fileExecutionOf(req); fe != nil {
+		if fe != nil {
 			script, hasScript = fileExecutionScript(fe)
 		}
 		utils.PrintTable(rows)
@@ -62,7 +63,7 @@ requested changes. Use --output json to print the full raw response.`,
 	},
 }
 
-func describeRows(req *approvalapi.ApprovalRequest) []describeRow {
+func describeRows(req *approvalapi.ApprovalRequest, fe *approvalapi.FileExecution) []describeRow {
 	requestedBy := ""
 	if req.RequestedBy != nil {
 		requestedBy = req.RequestedBy.Name
@@ -88,7 +89,7 @@ func describeRows(req *approvalapi.ApprovalRequest) []describeRow {
 		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
 	}
 	rows = append(rows, contextRows(req.Metadata)...)
-	if fe := fileExecutionOf(req); fe != nil {
+	if fe != nil {
 		rows = append(rows, fileExecutionRows(fe)...)
 	}
 	return rows

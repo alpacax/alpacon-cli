@@ -254,7 +254,7 @@ func TestDescribeRowsPutContextBetweenBaseAndFileExecution(t *testing.T) {
 	t.Parallel()
 	req := decodeFixture(t, `{"id":"apr-1","request_type":"command_exec","status":"pending","added_at":"2030-01-01T00:00:00Z","metadata":{"intent":"deploy v2","command":{"line":"ls","file_execution":{"sha256":"abc","path":"/tmp/a.sh","interpreter":"/bin/sh","args":[]}}}}`)
 
-	rows := describeRows(req)
+	rows := describeRows(req, fileExecutionOf(req))
 
 	var fields []string
 	for _, r := range rows {
