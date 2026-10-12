@@ -19,10 +19,11 @@ var approvalDescribeCmd = &cobra.Command{
 	Use:     "describe REQUEST_ID",
 	Aliases: []string{"desc"},
 	Short:   "Show details of an approval request",
-	Long: `Show all fields of an approval request.
+	Long: `Show an approval request.
 
-Use --output json to see the full raw response including nested
-work session details that are omitted from the table view.`,
+The table shows the decision context the server sends for the request type:
+the command or sudo detail, its risk assessment, the work session and the
+requested changes. Use --output json to print the full raw response.`,
 	Args: cobra.ExactArgs(1),
 	Example: `  alpacon approval describe apr-abc123
   alpacon approval desc apr-abc123`,
@@ -46,34 +47,10 @@ work session details that are omitted from the table view.`,
 			utils.CliErrorWithExit("Failed to retrieve approval request: %s.", err)
 		}
 
-		requestedBy := ""
-		if req.RequestedBy != nil {
-			requestedBy = req.RequestedBy.Name
-		}
-		reviewedBy := ""
-		if req.ReviewedBy != nil {
-			reviewedBy = req.ReviewedBy.Name
-		}
-		reviewedAt := ""
-		if req.ReviewedAt != nil {
-			reviewedAt = req.ReviewedAt.Local().Format("2006-01-02 15:04")
-		}
-
-		rows := []describeRow{
-			{"ID", req.ID},
-			{"Type", req.RequestType},
-			{"Status", req.Status},
-			{"Request", req.RequestData},
-			{"Description", req.Description},
-			{"Requested by", requestedBy},
-			{"Reviewed by", reviewedBy},
-			{"Reviewed at", reviewedAt},
-			{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
-		}
+		rows := describeRows(req)
 		var script string
 		var hasScript bool
 		if fe := fileExecutionOf(req); fe != nil {
-			rows = append(rows, fileExecutionRows(fe)...)
 			script, hasScript = fileExecutionScript(fe)
 		}
 		utils.PrintTable(rows)
@@ -82,6 +59,38 @@ work session details that are omitted from the table view.`,
 			fmt.Println(script)
 		}
 	},
+}
+
+func describeRows(req *approvalapi.ApprovalRequest) []describeRow {
+	requestedBy := ""
+	if req.RequestedBy != nil {
+		requestedBy = req.RequestedBy.Name
+	}
+	reviewedBy := ""
+	if req.ReviewedBy != nil {
+		reviewedBy = req.ReviewedBy.Name
+	}
+	reviewedAt := ""
+	if req.ReviewedAt != nil {
+		reviewedAt = req.ReviewedAt.Local().Format("2006-01-02 15:04")
+	}
+
+	rows := []describeRow{
+		{"ID", req.ID},
+		{"Type", req.RequestType},
+		{"Status", req.Status},
+		{"Request", req.RequestData},
+		{"Description", req.Description},
+		{"Requested by", requestedBy},
+		{"Reviewed by", reviewedBy},
+		{"Reviewed at", reviewedAt},
+		{"Added at", req.AddedAt.Local().Format("2006-01-02 15:04")},
+	}
+	rows = append(rows, contextRows(req.Metadata)...)
+	if fe := fileExecutionOf(req); fe != nil {
+		rows = append(rows, fileExecutionRows(fe)...)
+	}
+	return rows
 }
 
 func fileExecutionOf(req *approvalapi.ApprovalRequest) *approvalapi.FileExecution {
@@ -130,4 +139,89 @@ func fileExecutionScript(fe *approvalapi.FileExecution) (string, bool) {
 	}
 	body, _ := utils.SanitizeTerminalBlock(*fe.Content)
 	return fmt.Sprintf("Script (%d bytes):\n%s", len(*fe.Content), body), true
+}
+
+func joinClean(items []string, sep string) string {
+	kept := make([]string, 0, len(items))
+	for _, it := range items {
+		if it = utils.SanitizeTerminalText(it); it != "" {
+			kept = append(kept, it)
+		}
+	}
+	return strings.Join(kept, sep)
+}
+
+func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
+	if meta == nil {
+		return nil
+	}
+	clean := utils.SanitizeTerminalText
+	var rows []describeRow
+	add := func(field, value string) {
+		if value = clean(value); value != "" {
+			rows = append(rows, describeRow{field, value})
+		}
+	}
+
+	if ws := meta.WorkSession; ws != nil {
+		value := clean(ws.Title)
+		if detail := joinClean([]string{ws.Status, ws.ID}, ", "); detail != "" {
+			value = strings.TrimSpace(value + " (" + detail + ")")
+		}
+		add("Work session", value)
+	}
+	add("Session purpose", meta.Intent)
+	if c := meta.Command; c != nil {
+		add("Command", c.Line)
+		add("Server", c.ServerName)
+		add("Risk level", c.RiskLevel)
+		if c.RunsWithSudo {
+			add("Runs with sudo", "yes")
+		}
+		add("Purpose", c.Purpose)
+		add("Declared agent", c.DeclaredAgent)
+		add("Review summary", c.ReviewSummary)
+		add("Reasoning", c.Tier2Reasoning)
+		factors := make([]string, len(c.Factors))
+		for i, f := range c.Factors {
+			factors[i] = joinClean([]string{f.Type, f.Detail}, ": ")
+		}
+		add("Risk factors", joinClean(factors, "; "))
+	}
+	if s := meta.Sudo; s != nil {
+		add("Sudo command", s.Command)
+		add("Server", s.ServerName)
+		add("Risk level", s.RiskLevel)
+		add("Grant status", s.GrantStatus)
+		add("Declared agent", s.DeclaredAgent)
+		add("Reasoning", s.Tier2Reasoning)
+		if s.DescriptionAligned != nil {
+			aligned := "no"
+			if *s.DescriptionAligned {
+				aligned = "yes"
+			}
+			add("Matches session purpose", aligned)
+		}
+	}
+	if ch := meta.Changes; ch != nil {
+		start := len(rows)
+		add("  Title", ch.Title)
+		add("  Description", ch.Description)
+		add("  Scopes", joinClean(ch.Scopes, ", "))
+		servers := make([]string, len(ch.Servers))
+		for i, sv := range ch.Servers {
+			servers[i] = sv.Name
+		}
+		add("  Servers", joinClean(servers, ", "))
+		policies := make([]string, len(ch.SudoPolicies))
+		for i, p := range ch.SudoPolicies {
+			policies[i] = joinClean(p.Commands, ", ")
+		}
+		add("  Sudo policies", joinClean(policies, "; "))
+		add("  Target account", ch.TargetAccountUsername)
+		if len(rows) > start {
+			rows = append(rows[:start], append([]describeRow{{"Requested changes", ""}}, rows[start:]...)...)
+		}
+	}
+	return rows
 }
