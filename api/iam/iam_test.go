@@ -456,8 +456,8 @@ func TestDeleteMember(t *testing.T) {
 		wantErr    string
 		wantDelete int32
 	}{
-		{"existing membership", `[{"id":"membership-1"}]`, "", 1},
-		{"empty list", `[]`, "no membership found for the given user and group", 0},
+		{"existing membership", `{"count":1,"current":1,"next":null,"previous":null,"last":1,"results":[{"id":"membership-1"}]}`, "", 1},
+		{"no membership", `{"count":0,"next":null,"previous":null,"results":[]}`, "no membership found for the given user and group", 0},
 		{"null list", `null`, "no membership found for the given user and group", 0},
 	}
 
