@@ -89,7 +89,11 @@ func printGeneratedPassword(stdout io.Writer, info, warn func(string, ...any), p
 		warn("The server returned no password. Set one for the user before they can log in.")
 		return nil
 	}
+	if _, altered := utils.SanitizeTerminalLine(password); altered {
+		warn("The generated password contains characters that cannot be shown safely. Set a new password for the user before they can log in.")
+		return nil
+	}
 	info("This is the generated password. It is shown only once; pass it to the user securely.")
-	_, err := fmt.Fprintln(stdout, utils.SanitizeTerminalText(password))
+	_, err := fmt.Fprintln(stdout, password)
 	return err
 }

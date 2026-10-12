@@ -20,7 +20,8 @@ func TestPrintGeneratedPassword(t *testing.T) {
 	}{
 		{"password present", "Gen3rated-Pw!x", "Gen3rated-Pw!x\n", "info: This is the generated password"},
 		{"password empty", "", "", "warn: The server returned no password"},
-		{"ANSI escape is stripped", "\x1b[31mpw\x1b[0m", "pw\n", "info: This is the generated password"},
+		{"password with an ANSI escape is withheld", "\x1b[31mpw\x1b[0m", "", "warn: The generated password contains characters that cannot be shown safely"},
+		{"password with a format character is withheld", "pw\u202eab", "", "warn: The generated password contains characters that cannot be shown safely"},
 	}
 
 	for _, tt := range tests {
