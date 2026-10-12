@@ -546,7 +546,7 @@ func TestWSListener_SendsTheCloseToTheServerWhenTheDialFails(t *testing.T) {
 	deleted := make(chan string, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
-	mux.HandleFunc("DELETE /api/events/sessions/{id}/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
 		deleted <- r.PathValue("id")
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -575,7 +575,7 @@ func TestWSListener_StopDoesNotWaitForAPendingClose(t *testing.T) {
 	release := make(chan struct{})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {}) // a 200, so the handshake fails
-	mux.HandleFunc("DELETE /api/events/sessions/{id}/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case arrived <- struct{}{}:
 		default:
