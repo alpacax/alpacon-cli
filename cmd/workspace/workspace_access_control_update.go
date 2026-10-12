@@ -13,7 +13,13 @@ var workspaceAccessControlUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update workspace access control settings",
 	Long: `Update workspace access control settings by opening the current settings in your editor.
-Modify the desired fields, save, and close the editor to apply changes.`,
+Modify the desired fields, save, and close the editor to apply changes.
+
+Settings that loosen execution control can only be changed from the web console:
+switching the mode to advisory, turning sudo with MFA on, turning direct root on,
+lifting the local sudo block, and lengthening the sudo timeout, the work session
+maximum TTL or the file execution grant ceiling. The server refuses such an edit
+from the CLI; edits that tighten these settings or leave them unchanged are saved.`,
 	Example: `
 	alpacon workspace access-control update
 	alpacon ws acl update`,

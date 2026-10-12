@@ -190,6 +190,21 @@ func SplitAndParseInt(input string) []int {
 	return intValues
 }
 
+// FormatTimestamp renders a server timestamp in the local zone.
+func FormatTimestamp(ts string) string {
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t.Local().Format("2006-01-02 15:04:05")
+	}
+	date, rest, found := strings.Cut(ts, "T")
+	if !found {
+		return ts
+	}
+	if idx := strings.IndexAny(rest, ".+Z"); idx != -1 {
+		rest = rest[:idx]
+	}
+	return date + " " + rest
+}
+
 func TimeUtils(t time.Time) string {
 	if t.IsZero() {
 		return "None"

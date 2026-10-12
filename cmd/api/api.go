@@ -3,6 +3,7 @@ package apicmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
@@ -46,6 +48,13 @@ type httpStatusError struct {
 
 type mfaRequiredError struct{}
 
+// unprocessedResponseError marks a retried response the server did not act on
+// (429 or 503), so the MFA wait rides through it.
+type unprocessedResponseError struct {
+	status     int
+	retryAfter time.Duration
+}
+
 type fieldFlag struct {
 	fields *[]fieldInput
 	typed  bool
@@ -62,6 +71,12 @@ type preparedRequest struct {
 }
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
+
+func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
+func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
+
+// RetryAfter is the delay the response asked for; the MFA wait honors it, bounded.
+func (e unprocessedResponseError) RetryAfter() time.Duration { return e.retryAfter }
 
 func (mfaRequiredError) Error() string       { return "MFA required" }
 func (mfaRequiredError) ErrorCode() string   { return utils.AuthMFARequired }
@@ -223,18 +238,43 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 	}
 
 	if isMFARequiredResponse(response) && request.Headers.Get("Authorization") == "" {
+		// The MFA wait retries the request once a second for minutes. Under -v only
+		// the attempt that ends it is shown: the refused ones in between repeat the
+		// first exchange, which is already on stderr.
+		var lastAttempt bytes.Buffer
+		// Whether the attempt that ended the wait got no response at all: then the
+		// response held from an earlier attempt answers a different request and
+		// must not be rendered as this one's.
+		var noResponse bool
 		retry := func() error {
-			retried, sendErr := sendAPIRequest(ac, opts, request, stderr)
+			lastAttempt.Reset()
+			retried, sendErr := sendAPIRequest(ac, opts, request, &lastAttempt)
+			noResponse = sendErr != nil
 			if sendErr != nil {
-				return sendErr
+				return utils.MarkSubmission(sendErr)
 			}
 			response = retried
 			if isMFARequiredResponse(response) {
-				return mfaRequiredError{}
+				return utils.MarkSubmission(mfaRequiredError{})
+			}
+			// SendRawRequest returns every status without an error, so a 429 or 503
+			// has to be named here for the wait to ride through it.
+			if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
+				return utils.MarkSubmission(unprocessedResponseError{status: response.StatusCode, retryAfter: utils.RetryAfterFromHeader(response.Header)})
 			}
 			return nil
 		}
-		if handleErr := utils.HandleCommonErrors(mfaRequiredError{}, "", mfa.WorkspaceErrorCallbacks(ac, retry)); handleErr != nil {
+		handleErr := utils.HandleCommonErrors(utils.MarkSubmission(mfaRequiredError{}), "", mfa.WorkspaceErrorCallbacks(ac, retry))
+		if _, err := stderr.Write(lastAttempt.Bytes()); err != nil {
+			return utils.ExitCodeGeneralError, err
+		}
+		// A wait that ended on the server's own 429 or 503 reports that response
+		// the way any other non-2xx answer is reported, below.
+		var unprocessed unprocessedResponseError
+		if handleErr != nil && noResponse {
+			return utils.ExitCodeGeneralError, handleErr
+		}
+		if handleErr != nil && !errors.As(handleErr, &unprocessed) {
 			if writeErr := writeAPIResponse(opts, response, stdout); writeErr != nil {
 				return utils.ExitCodeGeneralError, writeErr
 			}

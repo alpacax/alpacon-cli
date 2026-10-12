@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -62,6 +61,9 @@ type pollSeams struct {
 	cancel <-chan struct{}
 	now    func() time.Time
 	after  func(time.Duration) <-chan time.Time
+	// surfaceMFA returns an MFA refusal of the poll to the caller at once, for
+	// a caller that runs the MFA wait itself and polls again after it.
+	surfaceMFA bool
 }
 
 func (s pollSeams) Now() time.Time {
@@ -181,23 +183,23 @@ func gapFillInterval(noProgress int) time.Duration {
 // GetEventList returns the newest tail commands. The endpoint sorts -scheduled_at,
 // so the newest ones arrive first and the walk stops as soon as tail is reached.
 func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userName string) ([]EventAttributes, error) {
-	var serverID, userID string
-	var err error
+	params := map[string]string{}
 	if serverName != "" {
-		serverID, err = server.GetServerIDByName(ac, serverName)
+		serverID, err := server.GetServerIDByName(ac, serverName)
 		if err != nil {
 			return nil, err
 		}
+		params["server"] = serverID
 	}
 	if userName != "" {
-		userID, err = iam.GetUserIDByName(ac, userName)
+		userID, err := iam.GetUserIDByName(ac, userName)
 		if err != nil {
 			return nil, err
 		}
+		params["requested_by"] = userID
 	}
 
-	endpoint := path.Join(getEventURL, serverID, userID)
-	events, err := api.FetchPagesUpTo[EventDetails](ac, endpoint, nil, tail)
+	events, err := api.FetchPagesUpTo[EventDetails](ac, getEventURL, params, tail)
 	if err != nil {
 		return nil, err
 	}
@@ -205,13 +207,14 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 	eventList := make([]EventAttributes, 0, len(events))
 	for _, event := range events {
 		eventList = append(eventList, EventAttributes{
-			Server:      event.Server.Name,
-			Shell:       event.Shell,
-			Command:     event.Line,
-			Result:      utils.TruncateString(event.Result, 70),
-			Status:      utils.BoolPointerToString(event.Success),
-			Operator:    event.RequestedBy.Name,
-			RequestedAt: utils.TimeUtils(event.AddedAt),
+			Server:                event.Server.Name,
+			Shell:                 event.Shell,
+			Command:               event.Line,
+			Result:                utils.TruncateString(event.Result, 70),
+			Status:                utils.BoolPointerToString(event.Success),
+			Operator:              event.RequestedBy.Name,
+			RequestedAt:           utils.TimeUtils(event.AddedAt),
+			ApprovedFileExecution: event.ApprovedFileExecution,
 		})
 	}
 	return eventList, nil
@@ -220,7 +223,7 @@ func GetEventList(ac *client.AlpaconClient, tail int, serverName string, userNam
 func SubmitCommand(ac *client.AlpaconClient, serverName, command string, username, groupname string, env map[string]string, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	commandRequest := newCommandRequest(serverID, username, groupname, workSessionID, purpose)
 	commandRequest.Shell = "system"
@@ -237,7 +240,7 @@ func SubmitCommand(ac *client.AlpaconClient, serverName, command string, usernam
 func SubmitFileCommand(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string) (CommandResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	if file.Args == nil {
 		file.Args = []string{}
@@ -267,7 +270,7 @@ func newCommandRequest(serverID, username, groupname, workSessionID, purpose str
 func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (CommandResponse, error) {
 	respBody, err := ac.SendPostRequest(getEventURL, commandRequest)
 	if err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, utils.MarkSubmission(err)
 	}
 	var cmdResponse []CommandResponse
 	if err = json.Unmarshal(respBody, &cmdResponse); err != nil {
@@ -306,8 +309,11 @@ func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error
 }
 
 // PollCommandExecution polls with default timeout/tick; tests use pollCommandExecution directly.
+// An MFA refusal (auth_mfa_required) of the poll is returned at once as the
+// typed error, so the caller can wait for MFA and poll again; the poll only
+// reads, so polling again is safe. Any other GET error is retried with backoff.
 func PollCommandExecution(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{})
+	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{surfaceMFA: true})
 }
 
 func execTimeout() time.Duration {
@@ -364,6 +370,9 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 
 		responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 		if err != nil {
+			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {
+				return response, err
+			}
 			delay = utils.NextPollBackoff(tick, failures, utils.RetryAfter(err))
 			failures++
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
@@ -406,37 +415,90 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
-		return SubmitCommand(ac, serverName, command, username, groupname, env, workSessionID, purpose)
-	}, out)
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
 // RunFileCommandStreaming is RunCommandStreaming for the file lane.
 // Only the submission differs: the command it creates is followed, polled and
 // read like any other.
 func RunFileCommandStreaming(ac *client.AlpaconClient, serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {
-	return runSubmittedStreaming(ac, func() (CommandResponse, error) {
-		return SubmitFileCommand(ac, serverName, file, username, groupname, workSessionID, purpose)
+	stream := NewCommandStream(ac)
+	defer stream.Close()
+	return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
+}
+
+// CommandStream runs submissions over one output listener. A submission the
+// server refuses leaves the listener connected for the next one, so a caller
+// that retries a refused command, as the MFA wait does once a second, opens one
+// event session rather than one per attempt. A listener that could not connect
+// is not dialed again: later submissions go straight to polling. Close releases
+// a listener no submission used. A CommandStream is not safe for concurrent use.
+type CommandStream struct {
+	ac       *client.AlpaconClient
+	listener *CommandOutputListener
+	// unavailable is why the listener could not connect, once that happened.
+	unavailable error
+}
+
+// NewCommandStream returns a CommandStream that connects on its first submission.
+func NewCommandStream(ac *client.AlpaconClient) *CommandStream {
+	return &CommandStream{ac: ac}
+}
+
+// RunCommand is RunCommandStreaming over this stream's listener.
+func (s *CommandStream) RunCommand(serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	return s.run(func() (CommandResponse, error) {
+		return SubmitCommand(s.ac, serverName, command, username, groupname, env, workSessionID, purpose)
 	}, out)
 }
 
-// runSubmittedStreaming opens the output stream, submits through submit, and
-// streams the command it created; the lane is the closure's business.
-func runSubmittedStreaming(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer) error {
-	listener := NewCommandOutputListener(ac)
-	listener.Start()
-	if !listener.WaitConnected(commandOutputConnectTimeout) {
-		listener.Stop()
-		return runCommandFallback(ac, submit, out, listenerFailure(listener))
+// RunFileCommand is RunFileCommandStreaming over this stream's listener.
+func (s *CommandStream) RunFileCommand(serverName string, file FileExecution, username, groupname, workSessionID, purpose string, out io.Writer) error {
+	return s.run(func() (CommandResponse, error) {
+		return SubmitFileCommand(s.ac, serverName, file, username, groupname, workSessionID, purpose)
+	}, out)
+}
+
+// Close stops a listener that no submission went on to use.
+func (s *CommandStream) Close() {
+	if s.listener != nil {
+		s.listener.Stop()
+		s.listener = nil
+	}
+}
+
+// run opens the output stream unless one is already waiting, submits through
+// submit, and streams the command it created; the lane is the closure's business.
+// The listener subscribes only after a submission names a command, so one left
+// idle across a refused attempt serves the next as if it had just connected, and
+// the warm-fire read in streamSubscribed covers any reconnect in between.
+func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
+	if s.unavailable != nil {
+		return runCommandFallback(s.ac, submit, out, s.unavailable)
+	}
+	if s.listener == nil {
+		listener := NewCommandOutputListener(s.ac)
+		listener.Start()
+		if !listener.WaitConnected(commandOutputConnectTimeout) {
+			listener.Stop()
+			s.unavailable = listenerFailure(listener)
+			return runCommandFallback(s.ac, submit, out, s.unavailable)
+		}
+		s.listener = listener
 	}
 
 	cmdResp, err := submit()
 	if err != nil {
-		listener.Stop()
 		return err
 	}
 
-	return streamSubscribed(ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
+	// The command exists now and may already be running; what fails from here on
+	// is returned untagged, so it never submits the command again.
+	listener := s.listener
+	s.listener = nil
+	return streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), streamPollTick, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -525,6 +587,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 		if lastSeq < 0 && details.Result != "" {
 			_, _ = fmt.Fprint(out, details.Result)
 		}
+		printStandingGrant(details)
 		// Output is already streamed; errorFromDetails keeps it on the error
 		// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
 		return errorFromDetails(details)
@@ -691,7 +754,11 @@ func errorFromDetails(d EventDetails) error {
 		if phase == "" {
 			return fmt.Errorf("command failed with status: %s", d.Status)
 		}
-		return fmt.Errorf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+		msg := fmt.Sprintf("command failed: [%s] %s (status=%s)", phase, DescribePhase(phase), d.Status)
+		if hint := PhaseHint(phase); hint != "" {
+			msg += "\nHint: " + hint
+		}
+		return errors.New(msg)
 	}
 	switch d.Status {
 	case "completed", "success", "failed":
@@ -719,6 +786,8 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 		// Surface MFA/auth errors so RunCommandWithRetry's callbacks can handle them.
 		return err
 	}
+	// The command exists now; a failed poll or output read is returned untagged,
+	// so it never submits the command again.
 	return runCommandFallbackFromID(ac, cmdResp.ID, out, false, cause)
 }
 
@@ -736,6 +805,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 	if output != "" {
 		_, _ = fmt.Fprint(out, output)
 	}
+	printStandingGrant(details)
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.

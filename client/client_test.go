@@ -341,6 +341,32 @@ func TestSendRequest_403SudoWithMFAStepUpUnavailableExplainsServerAdmin(t *testi
 	assert.Equal(t, "workspace_sudo_with_mfa_step_up_unavailable", code)
 }
 
+func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ code, want string }{
+		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
+		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "` + tt.code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendPatchRequest("/api/test/", map[string]any{})
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+		})
+	}
+}
+
 func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

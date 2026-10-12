@@ -116,14 +116,14 @@ var sudoDenialHints = []struct {
 }{
 	{
 		// Checked before the websh/command branch split, so it answers every
-		// surface. Only a workspace admin can lift it, and on a self-hosted
-		// server without MFA sign-in the server refuses that change, so the
-		// guidance names both routes.
+		// surface. Turning sudo with MFA on loosens execution control, which the
+		// server accepts from the web console only, and on a self-hosted server
+		// without MFA sign-in it refuses that change, so the guidance names both
+		// routes.
 		code: "WORKSPACE_SUDO_WITH_MFA_DISABLED",
 		guidance: "sudo was denied: this workspace does not allow sudo with MFA at all, so no work session or policy can authorize it.\n" +
-			"A workspace admin lifts it (interactive terminal required):\n" +
-			"  alpacon workspace access-control update\n" +
-			"On a self-hosted server without MFA sign-in this setting cannot be changed from the CLI or the web; a server administrator has to change it.\n",
+			"A workspace administrator can turn sudo with MFA on from the web console (Settings \u2192 Access control); the CLI cannot make this change.\n" +
+			"On a self-hosted server without MFA sign-in this setting cannot be changed from the web console either; a server administrator has to change it.\n",
 	},
 	{
 		// The server cannot run sudo MFA at all (typically self-hosted without
@@ -530,8 +530,11 @@ func RunExecWithApprovalWait(ac *client.AlpaconClient, serverName, command, user
 func RunFileExecWithApprovalWait(ac *client.AlpaconClient, serverName string, file event.FileExecution, username, groupname, workSessionID, purpose string, waitTimeout time.Duration, out io.Writer) error {
 	return runWithApprovalWait(ac, func() error {
 		return runWithPresenceStepUp(ac, serverName, func() error {
+			// One stream for the attempt and its MFA retries; see RunCommandWithRetry.
+			stream := event.NewCommandStream(ac)
+			defer stream.Close()
 			return runWithRetry(ac, serverName, func() error {
-				return event.RunFileCommandStreaming(ac, serverName, file, username, groupname, workSessionID, purpose, out)
+				return stream.RunFileCommand(serverName, file, username, groupname, workSessionID, purpose, out)
 			})
 		})
 	}, waitTimeout, out)
@@ -803,9 +806,15 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 // RunCommandWithRetry executes a remote command with MFA/username-required error
 // handling and retry logic, streaming output to out.
 // workSessionID is forwarded as the work_session field; pass "" to omit it.
+//
+// The attempt and its retries share one output stream: the MFA wait retries a
+// refused submission once a second for minutes, and a stream per attempt would
+// open an event session and a WebSocket each time.
 func RunCommandWithRetry(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
+	stream := event.NewCommandStream(ac)
+	defer stream.Close()
 	return runWithRetry(ac, serverName, func() error {
-		return event.RunCommandStreaming(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
+		return stream.RunCommand(serverName, command, username, groupname, env, workSessionID, purpose, out)
 	})
 }
 
@@ -941,13 +950,24 @@ func sanitizedPhaseParts(phase string) (id, desc string) {
 		utils.SanitizeTerminalText(event.DescribePhase(phase))
 }
 
+// phaseHintLine returns the indented hint line for a phase, including its
+// trailing newline, or "" when the phase has no hint.
+func phaseHintLine(phase string) string {
+	hint := event.PhaseHint(phase)
+	if hint == "" {
+		return ""
+	}
+	return fmt.Sprintf("Hint: %s\n", utils.SanitizeTerminalText(hint))
+}
+
 // remoteCommandOutcome renders the stderr phase line and exit code for a remote
 // command failure. The command's stdout was already streamed during execution,
 // so it is not re-emitted here. stderrLine already includes its trailing newline.
 func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine string, exitCode int) {
 	if remoteErr.ErrorPhase != "" {
 		phase, desc := sanitizedPhaseParts(remoteErr.ErrorPhase)
-		stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
+		stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc) +
+			phaseHintLine(remoteErr.ErrorPhase)
 	}
 	return stderrLine, remoteErr.ExitCode
 }

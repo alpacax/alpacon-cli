@@ -6,12 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -296,6 +294,10 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
 	case utils.WorkspaceSudoWithMFAStepUpUnavailable:
 		return "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", true
+	case utils.WorkspaceExecutionControlConsoleOnly:
+		return "this change loosens execution control and can only be made from the web console", true
+	case utils.ApprovalPolicyConsoleOnly:
+		return "approval policies can only be created, changed or deleted from the web console", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
@@ -480,7 +482,7 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 		// in again but not why the renewal behind it failed. Without this line
 		// a long wait that dies on a rejected refresh token leaves no trace of
 		// the rejection.
-		utils.CliDebug("access token renewal failed: %v", err)
+		utils.CliDebug("access token renewal failed: %v", utils.RedactURLError(err))
 		return false
 	}
 	return true
@@ -543,7 +545,7 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, utils.RedactURLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -957,7 +959,8 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		// A download URL may be presigned, and a transport error prints it whole.
+		return nil, utils.RedactURLError(err)
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -1103,13 +1106,10 @@ func withRetryAfter(err error, header http.Header) error {
 	if err == nil {
 		return nil
 	}
-	seconds, convErr := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	// The upper bound is what a time.Duration can hold: past it the multiplication
-	// below wraps, and a wrapped delay is worse than no hint at all.
-	if convErr != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
+	retryAfter := utils.RetryAfterFromHeader(header)
+	if retryAfter == 0 {
 		return err
 	}
-	retryAfter := time.Duration(seconds) * time.Second
 	var ae *apiError
 	if errors.As(err, &ae) {
 		ae.retryAfter = retryAfter

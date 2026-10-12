@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,6 +28,14 @@ const (
 	// change to the workspace's sudo-with-MFA setting because this deployment has
 	// no MFA sign-in. Retrying or completing MFA cannot lift it.
 	WorkspaceSudoWithMFAStepUpUnavailable = "workspace_sudo_with_mfa_step_up_unavailable"
+
+	// WorkspaceExecutionControlConsoleOnly rides a 403: the edit loosens
+	// execution control, which the server accepts from the web console only.
+	WorkspaceExecutionControlConsoleOnly = "workspace_execution_control_console_only"
+
+	// ApprovalPolicyConsoleOnly rides a 403: approval policies are written from
+	// the web console only.
+	ApprovalPolicyConsoleOnly = "approval_policy_console_only"
 
 	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
 	// the credential is an API token, a service token or a non-interactive token,
@@ -233,6 +244,71 @@ func IsFatalClientError(status int) bool {
 	return status >= http.StatusBadRequest && status < http.StatusInternalServerError
 }
 
+// submissionError tags an error as the response or dial failure of the one
+// request that carries an operation's side effect. See MarkSubmission.
+type submissionError struct{ err error }
+
+func (e *submissionError) Error() string { return e.err.Error() }
+func (e *submissionError) Unwrap() error { return e.err }
+
+// MarkSubmission tags err, if any, as the error of the request that carries the
+// operation's side effect itself (the command submission, an upload or download
+// create, a session create, a one-request change), including whatever lookup
+// precedes that request. Only such an error says the server did or did not act,
+// so only it can be retried after MFA or ridden through when it is unprocessed.
+//
+// The tag is read off the error exactly as returned, never through wrapping: an
+// operation that makes further requests after the one it tagged returns their
+// errors untagged, and a caller that wraps a tagged error hides the tag. An
+// untagged error is therefore the safe default, "the operation already took
+// effect": HandleCommonErrors passes it through and the wait ends on it. The
+// status and dial error underneath stay readable through the tag.
+func MarkSubmission(err error) error {
+	if err == nil || IsSubmissionError(err) {
+		return err
+	}
+	return &submissionError{err: err}
+}
+
+// IsSubmissionError reports whether err, as returned and not through any
+// wrapping, is the tagged error of an operation's side-effecting request.
+func IsSubmissionError(err error) bool {
+	_, ok := err.(*submissionError)
+	return ok
+}
+
+// endSubmission drops the tag HandleCommonErrors consumed, so an error leaving it
+// cannot make an enclosing retry loop take a later result for a refused request.
+func endSubmission(err error) error {
+	if tagged, ok := err.(*submissionError); ok {
+		return tagged.err
+	}
+	return err
+}
+
+// IsUnprocessedRequestError reports whether err shows the server did not act on
+// the request: the connection never opened, or the server answered 429 or 503.
+// Unlike IsTransientRequestError it leaves out a lost response, a 502 and a 504,
+// which can follow a request that already ran, so a request that is not
+// idempotent may be sent again on it. Only the tagged error of the
+// side-effecting request itself (MarkSubmission) can be unprocessed: any other
+// error came from a later request of an operation the server already acted on,
+// whatever status it carries.
+func IsUnprocessedRequestError(err error) bool {
+	if err == nil || !IsSubmissionError(err) {
+		return false
+	}
+	switch HTTPStatusCode(err) {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
+		return true
+	case 0:
+		var opErr *net.OpError
+		return errors.As(err, &opErr) && opErr.Op == "dial"
+	default:
+		return false
+	}
+}
+
 // IsTransientRequestError reports whether err may not repeat on the next
 // attempt. A missing status covers a request that never reached the server and
 // a response that failed to decode, so a caller must bound its retries.
@@ -245,6 +321,34 @@ func IsTransientRequestError(err error) bool {
 		return true
 	}
 	return !IsFatalClientError(status)
+}
+
+// RetryAfterFromHeader reads a Retry-After header as delta-seconds, the form a
+// throttled response sends. An HTTP-date, a non-positive or an unrepresentable
+// value reads as no hint, since misreading one would stall a wait.
+func RetryAfterFromHeader(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	// The upper bound is what a time.Duration can hold: past it the
+	// multiplication wraps, and a wrapped delay is worse than no hint at all.
+	if err != nil || seconds <= 0 || int64(seconds) > math.MaxInt64/int64(time.Second) {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// StructuredErrorCode returns the code a typed error in err's chain carries, or
+// "" if none does. Unlike ParseErrorResponse it never reads a code out of
+// message text, so a code that only appears inside a message, such as an
+// agent's transfer report, does not count.
+func StructuredErrorCode(err error) string {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if coded, ok := e.(codedError); ok {
+			if code := coded.ErrorCode(); code != "" {
+				return code
+			}
+		}
+	}
+	return ""
 }
 
 func ParseErrorResponse(err error) (string, string) {

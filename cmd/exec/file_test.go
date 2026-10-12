@@ -414,14 +414,14 @@ func TestFileExecRefusal(t *testing.T) {
 			name:         "invalid reuse days names the range and the omission",
 			err:          coded("file_exec_invalid_reuse_days"),
 			wantMessage:  "the server refused the reuse proposal: a reuse duration must be 1 to 366 days",
-			wantHintPart: "omit --reuse-days",
+			wantHintPart: "omit --reuse-days to propose none; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)",
 			wantOK:       true,
 		},
 		{
 			name:         "reuse past the ceiling says to shorten or drop it",
 			err:          coded("file_exec_reuse_exceeds_max"),
 			wantMessage:  "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
-			wantHintPart: "shorter --reuse-days, or omit it",
+			wantHintPart: "shorter --reuse-days, or omit it; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)",
 			wantOK:       true,
 		},
 		{
@@ -768,4 +768,16 @@ func TestExecFileInlineCredentialPrintsFileLaneHint(t *testing.T) {
 		assert.Equal(t, utils.CommandInlineCredential, envelope.ErrorCode)
 		assert.Contains(t, envelope.Message, fileExecInlineCredentialMessage)
 	})
+}
+
+func TestFileExecRefusalReuseHintsNeverPromiseAnIndefiniteGrant(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"file_exec_invalid_reuse_days", "file_exec_reuse_exceeds_max"} {
+		for _, entry := range fileExecRefusals {
+			if entry.code == code {
+				assert.NotContains(t, entry.hint, "indefinitely")
+				assert.NotContains(t, entry.message, "indefinitely")
+			}
+		}
+	}
 }
