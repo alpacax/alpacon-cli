@@ -39,7 +39,6 @@ type wsListener struct {
 	// sit through the production delay.
 	reconnectBaseDelay time.Duration
 	stableLifetime     time.Duration
-	closeTimeout       time.Duration // lowered by tests, like reconnectBaseDelay
 
 	done        chan struct{}
 	stopped     chan struct{} // closed when listenLoop exits
@@ -63,14 +62,13 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*Event
 		handshakeTimeout:   handshakeTimeout,
 		reconnectBaseDelay: wsReconnectBaseDelay,
 		stableLifetime:     wsStableConnectionLifetime,
-		closeTimeout:       eventSessionCloseTimeout,
 		done:               make(chan struct{}),
 		stopped:            make(chan struct{}),
 		connected:          make(chan struct{}),
 	}
 	w.closeUnopened = func(string) {}
 	if ac != nil {
-		w.closeUnopened = func(id string) { go closeSession(ac, id, w.closeTimeout) }
+		w.closeUnopened = func(id string) { go closeSession(ac, id, eventSessionCloseTimeout) }
 	}
 	return w
 }
