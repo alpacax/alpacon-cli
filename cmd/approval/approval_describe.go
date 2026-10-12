@@ -2,6 +2,7 @@ package approval
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
@@ -220,7 +221,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 		add("  Sudo policies", joinClean(policies, "; "))
 		add("  Target account", ch.TargetAccountUsername)
 		if len(rows) > start {
-			rows = append(rows[:start], append([]describeRow{{"Requested changes", ""}}, rows[start:]...)...)
+			rows = slices.Insert(rows, start, describeRow{"Requested changes", ""})
 		}
 	}
 	return rows
