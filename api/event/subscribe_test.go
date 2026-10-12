@@ -286,7 +286,7 @@ func TestCloseSession_GivesUpAtItsDeadline(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second)
 	select {
 	case <-arrived:
-	default:
+	case <-time.After(time.Second):
 		t.Error("the close never reached the server, so the deadline was not what ended it")
 	}
 }
