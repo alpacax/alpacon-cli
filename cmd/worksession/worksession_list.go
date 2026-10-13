@@ -43,7 +43,7 @@ func MarkActive(rows []wsapi.WorkSessionAttributes, activeUUID string) {
 		return
 	}
 	for i := range rows {
-		if rows[i].ID == activeUUID && !isEndedStatus(rows[i].Status) {
+		if strings.EqualFold(rows[i].ID, activeUUID) && !isEndedStatus(rows[i].Status) {
 			rows[i].Active = "*"
 		}
 	}

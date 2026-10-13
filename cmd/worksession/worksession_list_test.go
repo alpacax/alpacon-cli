@@ -19,6 +19,17 @@ func TestMarkActive_DecoratesMatchingRow(t *testing.T) {
 	assert.Equal(t, "*", rows[1].Active)
 }
 
+func TestMarkActive_MatchesIDThatDiffersOnlyInCase(t *testing.T) {
+	t.Parallel()
+	rows := []wsapi.WorkSessionAttributes{
+		{ID: "4f9c2a1e-0000-4000-8000-00000000abcd", Status: "active"},
+	}
+
+	worksession.MarkActive(rows, "4F9C2A1E-0000-4000-8000-00000000ABCD")
+
+	assert.Equal(t, "*", rows[0].Active)
+}
+
 func TestMarkActive_EmptyActiveUUID_NoChange(t *testing.T) {
 	t.Parallel()
 	rows := []wsapi.WorkSessionAttributes{

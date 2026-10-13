@@ -31,11 +31,7 @@ var workSessionRevokeCmd = &cobra.Command{
 	},
 }
 
-// RunRevoke revokes the session and, when it is the workspace's active one, clears it.
-// The error is the server's alone; a failed clear only warns. Reports whether it cleared.
+// RunRevoke revokes the session; see endSession.
 func RunRevoke(ac *client.AlpaconClient, id string) (bool, error) {
-	if err := wsapi.RevokeWorkSession(ac, id); err != nil {
-		return false, err
-	}
-	return clearEndedActiveSession(ac, id), nil
+	return endSession(ac, id, wsapi.RevokeWorkSession)
 }
