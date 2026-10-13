@@ -421,7 +421,7 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -455,7 +455,7 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 		terminal:    EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -478,12 +478,14 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	seams, delays := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{})
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, seams)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
+	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
 }
 
 // throttleServer replies 429 to the first throttled requests, then serves a
@@ -936,7 +938,7 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
@@ -949,9 +951,11 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
+	delays := defaultStreamDelays
+	delays.pollTick = tick
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
+		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, delays, waitApproval)
 	}()
 	return done
 }
@@ -1049,7 +1053,7 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
 	require.NoError(t, err)
 
 	mu.Lock()
@@ -1151,7 +1155,7 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1184,7 +1188,7 @@ func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1206,7 +1210,7 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1224,7 +1228,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
@@ -1261,7 +1265,7 @@ func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "seq", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1331,7 +1335,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
@@ -1383,7 +1387,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
 }
@@ -1429,7 +1433,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
@@ -1475,9 +1479,27 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
+}
+
+// testStreamDelays keeps the production connect budget, which a stream that
+// connects never waits out, and shortens the waits the tests would sit through.
+var testStreamDelays = streamDelays{
+	connectTimeout:     commandOutputConnectTimeout,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
+}
+
+// testFallbackDelays is for a stream whose session the server refuses: it
+// never connects, so the whole connect budget is spent before the fallback.
+var testFallbackDelays = streamDelays{
+	connectTimeout:     100 * time.Millisecond,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
 }
 
 // streamingServerConfig configures the fake event servers for streaming tests.
@@ -1671,7 +1693,7 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 
 	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
@@ -1756,7 +1778,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				runningPolls: 1,
 				terminal:     tt.terminal,
 			})
-			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+			err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 			tt.check(t, err)
 		})
 	}
@@ -1782,7 +1804,7 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1800,7 +1822,7 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
@@ -2363,7 +2385,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			var out bytes.Buffer
-			err := runCommandFallbackFromID(ac, cmdID, &out, false, fmt.Errorf("websocket dial failed"))
+			err := runCommandFallbackFromID(ac, cmdID, &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
 
 			assert.Equal(t, tt.wantOut, out.String())
 			switch {
@@ -2397,7 +2419,7 @@ func TestCommandStream_RefusedSubmissionsShareOneSession(t *testing.T) {
 		submits:        &submits,
 	})
 
-	stream := NewCommandStream(ac)
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
 	defer stream.Close()
 	for range 3 {
 		err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
@@ -2427,7 +2449,7 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 		submits:       &submits,
 	})
 
-	stream := NewCommandStream(ac)
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
 	defer stream.Close()
 	stdoutBuf := &bytes.Buffer{}
 	err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)

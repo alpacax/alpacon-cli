@@ -17,20 +17,23 @@ import (
 func TestCommandStream_MFAWaitDoesNotResubmitAfterAnAcceptedCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		cfg  streamingServerConfig
+		name   string
+		cfg    streamingServerConfig
+		delays streamDelays
 	}{
 		{
 			// The event session is refused, so the run polls the command it
 			// submitted and then reads its output from the chunk endpoint.
-			name: "polling fallback",
-			cfg:  streamingServerConfig{sessionStatus: http.StatusForbidden},
+			name:   "polling fallback",
+			cfg:    streamingServerConfig{sessionStatus: http.StatusForbidden},
+			delays: testFallbackDelays,
 		},
 		{
 			// The listener connects, but subscribing to the accepted command fails,
 			// so the run falls back to polling the command it already submitted.
-			name: "event listener",
-			cfg:  streamingServerConfig{subscribeStatus: http.StatusServiceUnavailable},
+			name:   "event listener",
+			cfg:    streamingServerConfig{subscribeStatus: http.StatusServiceUnavailable},
+			delays: testStreamDelays,
 		},
 	}
 	for _, tc := range tests {
@@ -48,7 +51,7 @@ func TestCommandStream_MFAWaitDoesNotResubmitAfterAnAcceptedCommand(t *testing.T
 			cfg.chunkStatus = http.StatusServiceUnavailable
 			ac := newStreamingServers(t, cfg)
 
-			stream := NewCommandStream(ac)
+			stream := &CommandStream{ac: ac, delays: tc.delays}
 			defer stream.Close()
 			var out bytes.Buffer
 			run := func() error {

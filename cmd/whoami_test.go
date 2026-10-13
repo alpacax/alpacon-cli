@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -152,26 +153,33 @@ func TestFormatDuration(t *testing.T) {
 
 func TestFormatExpiresHuman(t *testing.T) {
 	t.Parallel()
+	past, day2, half := -1*time.Hour, 48*time.Hour, 30*time.Minute
 	tests := []struct {
-		name     string
-		input    string
-		contains string
+		name       string
+		offset     *time.Duration // nil for a literal input that is no timestamp
+		input      string
+		want       string
+		wantSuffix string
 	}{
-		{"empty string", "", ""},
-		{"invalid format", "not-a-date", "not-a-date"},
-		{"expired token", time.Now().Add(-1 * time.Hour).Format(time.RFC3339), "expired"},
-		{"future token with days", time.Now().Add(48 * time.Hour).Format(time.RFC3339), "remaining"},
-		{"future token under 1 hour", time.Now().Add(30 * time.Minute).Format(time.RFC3339), "remaining"},
+		{name: "empty string", input: "", want: ""},
+		{name: "invalid format", input: "not-a-date", want: "not-a-date"},
+		{name: "expired token", offset: &past, wantSuffix: " (expired)"},
+		{name: "future token with days", offset: &day2, wantSuffix: " (2d 0h remaining)"},
+		{name: "future token under 1 hour", offset: &half, wantSuffix: " (30m remaining)"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatExpiresHuman(tt.input)
-			if tt.contains == "" {
-				assert.Empty(t, result)
-			} else {
-				assert.Contains(t, result, tt.contains)
-			}
+			// t.Run cannot be called from inside a bubble, so each case enters its own.
+			synctest.Test(t, func(t *testing.T) {
+				input, want := tt.input, tt.want
+				if tt.offset != nil {
+					expires := time.Now().Add(*tt.offset)
+					input = expires.Format(time.RFC3339)
+					want = expires.Local().Format("2006-01-02 15:04 MST") + tt.wantSuffix
+				}
+				assert.Equal(t, want, formatExpiresHuman(input))
+			})
 		})
 	}
 }

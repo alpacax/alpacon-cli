@@ -63,12 +63,16 @@ type commandOutputEnvelope struct {
 // it. The targets are set later via setTargets, because SubmitCommand must run once
 // the WS is already connected.
 func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
+	return newCommandOutputListener(ac, commandOutputConnectTimeout)
+}
+
+func newCommandOutputListener(ac *client.AlpaconClient, connectTimeout time.Duration) *CommandOutputListener {
 	l := &CommandOutputListener{
 		ac:       ac,
 		chunks:   make(chan ChunkEvent, commandOutputChunkBuffer),
 		finished: make(chan struct{}, 1),
 	}
-	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, commandOutputConnectTimeout)
+	l.wsListener = newProvisionedWSListener(ac, l.provisionSession, connectTimeout)
 	l.handleFrame = l.handleMessage
 	l.onConnected = l.subscribe
 	return l

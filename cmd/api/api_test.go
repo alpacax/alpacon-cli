@@ -48,6 +48,16 @@ func runAPITest(ac *client.AlpaconClient, opts options, stdout, stderr io.Writer
 	return runAPI(ac, opts, request, stdout, stderr)
 }
 
+// runAPIInBubble runs runAPITest on synctest's fake clock, so the MFA wait's
+// one-second retries pass at once; mfaTestServer's transport holds no socket.
+func runAPIInBubble(t *testing.T, ac *client.AlpaconClient, opts options, stdout, stderr io.Writer) (code int, err error) {
+	t.Helper()
+	synctest.Test(t, func(*testing.T) {
+		code, err = runAPITest(ac, opts, stdout, stderr, strings.NewReader(""))
+	})
+	return code, err
+}
+
 func TestRunAPI_MethodAndFieldRouting(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -949,7 +959,7 @@ func TestRunAPI_MFARequiredOpensLinkAndRetriesOnce(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x"}, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
@@ -969,7 +979,7 @@ func TestRunAPI_MFARequiredRetriesUntilTheEndpointStopsRefusing(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x"}, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
@@ -988,7 +998,7 @@ func TestRunAPI_MFAVerboseShowsOnlyTheFirstAndLastAttempt(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x", Verbose: true}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x", Verbose: true}, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
@@ -1010,7 +1020,7 @@ func TestRunAPI_MFAWaitRidesThroughA503(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x"}, &stdout, &stderr)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
@@ -1029,7 +1039,7 @@ func TestRunAPI_MFAWaitEndingOn503sReportsTheResponse(t *testing.T) {
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x"}, &stdout, &stderr)
 
 	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusServiceUnavailable))
 	assert.Equal(t, 1, code)
@@ -1050,7 +1060,7 @@ func TestRunAPI_MFAWaitEndingWithoutAResponsePrintsNoStaleResponse(t *testing.T)
 	})
 	var stdout, stderr bytes.Buffer
 
-	code, err := runAPITest(ac, options{Endpoint: "/x"}, &stdout, &stderr, strings.NewReader(""))
+	code, err := runAPIInBubble(t, ac, options{Endpoint: "/x"}, &stdout, &stderr)
 
 	require.ErrorContains(t, err, "connection refused")
 	assert.Equal(t, 1, code)
