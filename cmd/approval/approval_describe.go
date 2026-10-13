@@ -167,7 +167,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 
 	if ws := meta.WorkSession; ws != nil {
-		value := ws.Title
+		value := utils.SanitizeTerminalText(ws.Title)
 		if detail := joinClean([]string{ws.Status, ws.ID}, ", "); detail != "" {
 			value += " (" + detail + ")"
 		}

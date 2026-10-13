@@ -233,6 +233,16 @@ func TestContextRows(t *testing.T) {
 			want: []describeRow{{"Work session", "(active, ws-1)"}},
 		},
 		{
+			name: "work session title ending in a stray escape keeps the status intact",
+			body: "{\"metadata\":{\"work_session\":{\"id\":\"ws-1\",\"title\":\"deploy\\u001b\",\"status\":\"active\"}}}",
+			want: []describeRow{{"Work session", "deploy (active, ws-1)"}},
+		},
+		{
+			name: "work session title ending in an unfinished CSI keeps the status intact",
+			body: "{\"metadata\":{\"work_session\":{\"id\":\"ws-1\",\"title\":\"deploy\\u001b[\",\"status\":\"active\"}}}",
+			want: []describeRow{{"Work session", "deploy (active, ws-1)"}},
+		},
+		{
 			name: "escape sequence in a value is stripped",
 			body: "{\"metadata\":{\"command\":{\"line\":\"ls \\u001b[31mred\\u001b[0m\"}}}",
 			want: []describeRow{{"Command", "ls red"}},
