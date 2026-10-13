@@ -61,7 +61,7 @@ func GetClusterIDByName(ac *client.AlpaconClient, clusterName string) (string, e
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireID(result.ID, "cluster")
 }
 
 // GetClusterDetail fetches one cluster by ID.

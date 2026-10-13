@@ -260,6 +260,10 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
+	uploadID, err := api.RequireID(response.ID, "upload")
+	if err != nil {
+		return err
+	}
 
 	file, size, cleanup, err := open()
 	if err != nil {
@@ -273,7 +277,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 		}
 	}
 
-	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", response.ID), nil)
+	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", uploadID), nil)
 	if err := transferStep(ac, serverID, func() error {
 		_, err := ac.SendGetRequest(triggerURL)
 		return err
@@ -282,7 +286,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(1, size)
-	success, message, err := pollTransfer(ac, serverID, "upload", response.ID, timeout, time.Time{})
+	success, message, err := pollTransfer(ac, serverID, "upload", uploadID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}

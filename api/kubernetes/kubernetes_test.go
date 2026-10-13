@@ -522,3 +522,31 @@ func TestCloseSession_PropagatesError(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }
+
+func TestGetClusterIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ClusterDetail]{Count: 1, Results: []ClusterDetail{{ID: tc.id, Name: "my-cluster"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetClusterIDByName(ac, "my-cluster")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrInvalidID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
+		})
+	}
+}

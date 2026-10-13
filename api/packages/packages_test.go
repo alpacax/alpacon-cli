@@ -529,3 +529,31 @@ func TestGetPackageIDByName(t *testing.T) {
 		})
 	}
 }
+
+func TestGetPackageIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[packageEntryRef]{Count: 1, Results: []packageEntryRef{{ID: tc.id, Name: "numpy-2.0.0.whl"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetPackageIDByName(ac, "numpy-2.0.0.whl", "python")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrInvalidID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
+		})
+	}
+}

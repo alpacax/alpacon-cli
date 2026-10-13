@@ -1349,3 +1349,14 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 		})
 	}
 }
+
+func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts, hits := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := shareCreatedSession(ac, []byte(`{"id":"../x"}`), true, false)
+
+	require.ErrorIs(t, err, api.ErrInvalidID)
+	assert.Zero(t, hits.Load())
+}

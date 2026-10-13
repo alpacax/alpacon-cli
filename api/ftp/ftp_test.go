@@ -1756,3 +1756,20 @@ func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T
 		})
 	}
 }
+
+func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts, hits := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() (io.Reader, int64, func(), error) {
+		opened = true
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":"../x"}`), open)
+
+	require.ErrorIs(t, err, api.ErrInvalidID)
+	assert.False(t, opened, "the file must not be read for an upload that is refused")
+	assert.Zero(t, hits.Load())
+}

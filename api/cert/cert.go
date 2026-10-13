@@ -133,7 +133,7 @@ func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error)
 	}
 	for _, a := range authorities {
 		if a.Name == name {
-			return a.ID, nil
+			return api.RequireID(a.ID, "certificate authority")
 		}
 	}
 	return "", fmt.Errorf("no authority found with name %q", name)

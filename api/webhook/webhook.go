@@ -103,5 +103,5 @@ func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, e
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireID(result.ID, "webhook")
 }

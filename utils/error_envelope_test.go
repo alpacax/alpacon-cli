@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,27 +107,37 @@ func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
 }
 
 func TestCliErrorEnvelopeWithExit_InvalidIDUsesUsageExit(t *testing.T) {
-	t.Parallel()
-	help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitInvalidIDHelperProcess$")
-	help.Env = append(os.Environ(), "GO_WANT_INVALID_ID_ENVELOPE_HELPER=1")
+	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitInvalidIDHelperProcess$")
+			help.Env = append(os.Environ(), "GO_WANT_INVALID_ID_ENVELOPE_HELPER="+format)
+			var stderr bytes.Buffer
+			help.Stderr = &stderr
 
-	output, err := help.CombinedOutput()
+			err := help.Run()
 
-	var exitErr *exec.ExitError
-	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
-	var envelope JSONErrorEnvelope[cliErrorCtx]
-	require.NoError(t, json.Unmarshal(output, &envelope), "output: %s", output)
-	assert.Equal(t, ExitCodeUsageError, envelope.ExitCode)
-	assert.Equal(t, UsageErrorCode, envelope.ErrorCode)
-	assert.Equal(t, "wait", envelope.Context.Operation)
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
+			if format == OutputFormatTable {
+				assert.Contains(t, stderr.String(), "Failed to wait: invalid target ID: invalid id.")
+				return
+			}
+			var envelope JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, UsageErrorCode, envelope.ErrorCode)
+			assert.Equal(t, "wait", envelope.Context.Operation)
+		})
+	}
 }
 
 func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_INVALID_ID_ENVELOPE_HELPER") != "1" {
+	format := os.Getenv("GO_WANT_INVALID_ID_ENVELOPE_HELPER")
+	if format == "" {
 		return
 	}
-	OutputFormat = OutputFormatJSON
+	OutputFormat = format
 	err := fmt.Errorf("invalid target ID: %w", ErrInvalidID)
 	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
 }
