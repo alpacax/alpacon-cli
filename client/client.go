@@ -1298,9 +1298,8 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors.
-// It serves every status; a case here names the remedy for a code whose
-// bare identifier would not tell the user what to do next.
+// codeOnlyMessage renders a code sent with no detail or field errors; a case
+// here names the remedy where the bare code would not.
 func codeOnlyMessage(code string) string {
 	switch code {
 	case utils.APINotFound:

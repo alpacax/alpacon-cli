@@ -28,7 +28,7 @@ var installPAMCmd = &cobra.Command{
 			args[0],
 			server.ActionInstallPAM,
 			"Install alpamon-pam on server '%s'?",
-			"alpamon-pam installation requested. Run 'alpacon events' to monitor progress.",
+			"alpamon-pam installation requested. Run 'alpacon exec ls' to monitor progress.",
 			"Failed to install alpamon-pam",
 			yes,
 		)

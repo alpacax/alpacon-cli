@@ -554,15 +554,17 @@ func TestRequestServerAction(t *testing.T) {
 	t.Parallel()
 	const serverID = "action-server-id"
 
+	// wire is the literal the server reads, so a drifting constant fails here.
 	tests := []struct {
 		name   string
 		action string
+		wire   string
 		force  bool
 	}{
-		{"restart agent with force", ActionRestartAgent, true},
-		{"upgrade agent without force", ActionUpgradeAgent, false},
-		{"refresh without force", ActionUpdateInformation, false},
-		{"install pam without force", ActionInstallPAM, false},
+		{"restart agent with force", ActionRestartAgent, "restart_agent", true},
+		{"upgrade agent without force", ActionUpgradeAgent, "upgrade_agent", false},
+		{"refresh without force", ActionUpdateInformation, "update_information", false},
+		{"install pam without force", ActionInstallPAM, "install_pam", false},
 	}
 
 	for _, tt := range tests {
@@ -589,8 +591,8 @@ func TestRequestServerAction(t *testing.T) {
 						w.WriteHeader(http.StatusInternalServerError)
 						return
 					}
-					if req.Action != tt.action {
-						t.Errorf("expected action %q, got %q", tt.action, req.Action)
+					if req.Action != tt.wire {
+						t.Errorf("expected action %q, got %q", tt.wire, req.Action)
 					}
 					if req.Force != tt.force {
 						t.Errorf("expected force %v, got %v", tt.force, req.Force)

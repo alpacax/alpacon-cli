@@ -52,7 +52,7 @@ func RunServerAction(serverName, action, confirmMsg, successMsg, failMsg string,
 }
 
 // requestServerActionWithMFA submits the action and, when the workspace asks
-// for MFA, walks the user through it and retries once.
+// for MFA, walks the user through it and retries until the step-up clears.
 func requestServerActionWithMFA(serverName, action string, force bool) error {
 	alpaconClient, err := client.NewAlpaconAPIClient()
 	if err != nil {

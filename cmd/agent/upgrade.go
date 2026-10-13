@@ -27,7 +27,7 @@ var upgradeAgentCmd = &cobra.Command{
 			args[0],
 			server.ActionUpgradeAgent,
 			"Upgrade the agent on server '%s'?",
-			"Agent upgrade requested. Run 'alpacon events' to monitor progress.",
+			"Agent upgrade requested. Run 'alpacon exec ls' to monitor progress.",
 			"Failed to upgrade the agent",
 			yes, force,
 		)

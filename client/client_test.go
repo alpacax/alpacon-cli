@@ -2616,9 +2616,8 @@ func TestSendRawRequest_RenewalPreservesCustomUserAgent(t *testing.T) {
 	assert.Equal(t, []string{"custom-agent", "custom-agent"}, agents)
 }
 
-// The install_pam refusals arrive with no detail, so each message has to say
-// what lifts it—a host that lacks the package, a workspace setting to turn on,
-// or an install to wait for—rather than echo the code.
+// The install_pam refusals arrive with no detail, so each message names the
+// remedy rather than echoing the code.
 func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

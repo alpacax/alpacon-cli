@@ -57,19 +57,15 @@ const (
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
 
-	// ServerPAMInstallUnsupported rides a 400: the server refused to install
-	// alpamon-pam because the host has no package path for it (macOS, Windows,
-	// or a package manager the agent does not know). Retrying cannot lift it.
+	// ServerPAMInstallUnsupported rides a 400: the host has no alpamon-pam
+	// package path (macOS, Windows, or an unknown package manager).
 	ServerPAMInstallUnsupported = "server_pam_install_unsupported"
 
-	// ServerPAMInstallRequiresSudoWithMFA rides a 400: alpamon-pam only works
-	// where sudo asks for MFA, so the server refuses the install while the
-	// workspace's "Use sudo with MFA" setting is off or the deployment cannot
-	// complete an MFA step-up. Turning the setting on lifts it.
+	// ServerPAMInstallRequiresSudoWithMFA rides a 400: refused while "Use sudo with MFA"
+	// is off, or always on a deployment that cannot complete an MFA step-up.
 	ServerPAMInstallRequiresSudoWithMFA = "server_pam_install_requires_sudo_with_mfa"
 
-	// ServerPAMInstallInProgress rides a 409: an alpamon-pam install is already
-	// pending on that server. Waiting for it to finish lifts it.
+	// ServerPAMInstallInProgress rides a 409: an alpamon-pam install is already pending.
 	ServerPAMInstallInProgress = "server_pam_install_in_progress"
 
 	// CommandInlineCredential: the server refused a command because its command
