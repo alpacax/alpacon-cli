@@ -1305,8 +1305,8 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors.
-// It serves every status, so it carries no denial-specific wording.
+// codeOnlyMessage renders a code sent with no detail or field errors; a case
+// here names the remedy where the bare code would not.
 func codeOnlyMessage(code string) string {
 	switch code {
 	case utils.APINotFound:
@@ -1325,6 +1325,12 @@ func codeOnlyMessage(code string) string {
 		return "the server would not take this page's cursor—read the listing again from the start"
 	case utils.APISearchUnavailable:
 		return "the search backend would not start this read right now—try again in a moment"
+	case utils.ServerPAMInstallUnsupported:
+		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
+	case utils.ServerPAMInstallRequiresSudoWithMFA:
+		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
+	case utils.ServerPAMInstallInProgress:
+		return "an alpamon-pam install is already pending on this server—wait for it to finish"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}
