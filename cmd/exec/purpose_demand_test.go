@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -168,20 +169,22 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 // reporting it—spending the command's single chance on a wait that cannot end
 // well, since the answer was this caller's to give all along.
 func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
-	_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
-	demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
-	calls := 0
-	runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
-		calls++
-		return demand
-	}
+	synctest.Test(t, func(t *testing.T) {
+		_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")
+		demand := &event.AwaitingPurposeError{CommandID: "cmd-1"}
+		calls := 0
+		runPresenceStepUp = func(*client.AlpaconClient, string, string, string, string, map[string]string, string, string, io.Writer) error {
+			calls++
+			return demand
+		}
 
-	start := time.Now()
-	err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
+		start := time.Now()
+		err := RunExecWithApprovalWait(nil, "srv", "whoami", "", "", nil, "", "", time.Minute, io.Discard)
 
-	assert.Same(t, demand, err, "the demand must reach the caller unchanged")
-	assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")
-	assert.Less(t, time.Since(start), time.Second, "the wait window must not be entered at all")
+		assert.Same(t, demand, err, "the demand must reach the caller unchanged")
+		assert.Equal(t, 1, calls, "a purpose demand must not be retried inside the wait loop")
+		assert.Equal(t, time.Duration(0), time.Since(start), "the wait window must not be entered at all")
+	})
 }
 
 // TestAwaitingPurposeStatusIsNotAnApproval keeps the two holds apart at the

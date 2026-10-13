@@ -1,8 +1,7 @@
 package token
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +17,7 @@ Three independent ACL types enforce deny-by-default:
 
 If no ACL rule exists for a given type, that access is denied entirely.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = cmd.Help()
-		return errors.New("a subcommand is required. Run 'alpacon token acl --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

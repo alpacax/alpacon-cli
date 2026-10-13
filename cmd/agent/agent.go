@@ -1,8 +1,7 @@
 package agent
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -13,15 +12,12 @@ var AgentCmd = &cobra.Command{
 	// "unknown command" instead of falling through to the help below.
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon agent upgrade' or 'alpacon agent restart' to manage the server agent. Run 'alpacon agent --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 
 func init() {
 	AgentCmd.AddCommand(upgradeAgentCmd)
 	AgentCmd.AddCommand(restartAgentCmd)
+	AgentCmd.AddCommand(installPAMCmd)
 }

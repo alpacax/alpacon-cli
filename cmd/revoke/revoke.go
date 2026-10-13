@@ -1,8 +1,7 @@
 package revoke
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var RevokeCmd = &cobra.Command{
 	Aliases: []string{"revoke-request"},
 	Short:   "Manage certificate revocation requests",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon revoke list', 'alpacon revoke create', 'alpacon revoke describe', 'alpacon revoke approve', 'alpacon revoke deny', 'alpacon revoke retry', or 'alpacon revoke cancel'. Run 'alpacon revoke --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

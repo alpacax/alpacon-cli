@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -63,9 +64,7 @@ func TestGetEventList_PassesTailAsTheLimit(t *testing.T) {
 	assert.Len(t, events, 250)
 }
 
-// The --server and --user filters are path segments, not query params, so a broken join
-// does not fail the request—it returns every command as if no filter had been given.
-func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
+func TestGetEventList_SendsTheResolvedFilterIDsAsQueryParams(t *testing.T) {
 	t.Parallel()
 	// Mirrors the lookup endpoints of api/server and api/iam, whose consts are unexported.
 	const (
@@ -74,34 +73,25 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 	)
 
 	tests := []struct {
-		name         string
-		serverName   string
-		userName     string
-		expectedPath string
+		name       string
+		serverName string
+		userName   string
+		wantQuery  url.Values
 	}{
+		{name: "no filter", wantQuery: url.Values{}},
+		{name: "server only", serverName: "my-server", wantQuery: url.Values{"server": {"srv-uuid"}}},
+		{name: "user only", userName: "admin", wantQuery: url.Values{"requested_by": {"usr-uuid"}}},
 		{
-			name:         "both filters",
-			serverName:   "my-server",
-			userName:     "admin",
-			expectedPath: getEventURL + "srv-uuid/usr-uuid/",
-		},
-		{
-			name:         "server only",
-			serverName:   "my-server",
-			expectedPath: getEventURL + "srv-uuid/",
-		},
-		{
-			// path.Join drops the empty server segment, so a lone user ID lands on the address
-			// the command detail route also answers on. Recorded as current behavior, not as
-			// the desired one—confirming it needs the server-side route (alpacax/alpacon-cli#363).
-			name:         "user only",
-			userName:     "admin",
-			expectedPath: getEventURL + "usr-uuid/",
+			name:       "both filters",
+			serverName: "my-server",
+			userName:   "admin",
+			wantQuery:  url.Values{"server": {"srv-uuid"}, "requested_by": {"usr-uuid"}},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 
@@ -111,7 +101,11 @@ func TestGetEventList_PutsTheResolvedFilterIDsInThePath(t *testing.T) {
 				case strings.HasPrefix(r.URL.Path, userLookupURL):
 					_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"usr-uuid"}]}`))
 				case strings.HasPrefix(r.URL.Path, getEventURL):
-					assert.Equal(t, tt.expectedPath, r.URL.Path)
+					q := r.URL.Query()
+					q.Del("page")
+					q.Del("page_size")
+					assert.Equal(t, getEventURL, r.URL.Path)
+					assert.Equal(t, tt.wantQuery, q)
 					_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
 				default:
 					t.Errorf("unexpected request path %q", r.URL.Path)
@@ -427,7 +421,7 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -461,7 +455,7 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 		terminal:    EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -484,12 +478,14 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	seams, delays := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{})
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, seams)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
+	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
 }
 
 // throttleServer replies 429 to the first throttled requests, then serves a
@@ -942,7 +938,7 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
@@ -955,9 +951,11 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
+	delays := defaultStreamDelays
+	delays.pollTick = tick
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
+		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, delays, waitApproval)
 	}()
 	return done
 }
@@ -1055,7 +1053,7 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
 	require.NoError(t, err)
 
 	mu.Lock()
@@ -1157,7 +1155,7 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1190,7 +1188,7 @@ func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1212,7 +1210,7 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1230,7 +1228,7 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
@@ -1267,7 +1265,7 @@ func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "seq", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1337,7 +1335,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
@@ -1389,7 +1387,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
 }
@@ -1435,7 +1433,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
@@ -1481,9 +1479,27 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
+}
+
+// testStreamDelays keeps the production connect budget, which a stream that
+// connects never waits out, and shortens the waits the tests would sit through.
+var testStreamDelays = streamDelays{
+	connectTimeout:     commandOutputConnectTimeout,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
+}
+
+// testFallbackDelays is for a stream whose session the server refuses: it
+// never connects, so the whole connect budget is spent before the fallback.
+var testFallbackDelays = streamDelays{
+	connectTimeout:     100 * time.Millisecond,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
 }
 
 // streamingServerConfig configures the fake event servers for streaming tests.
@@ -1503,6 +1519,17 @@ type streamingServerConfig struct {
 	heldStatus   string // status the held responses carry; "awaiting_approval" when empty
 	runningPolls int
 	terminal     EventDetails // returned by the detail poll once held+running elapse
+	// submitRefusals is how many leading command submissions are refused with
+	// 403 auth_mfa_required before one is accepted.
+	submitRefusals int
+	// sessionStatus, when set, answers every event session request with it.
+	sessionStatus int
+	sessions      *atomic.Int32 // counts event session requests when set
+	submits       *atomic.Int32 // counts command submissions when set
+	// subscribeStatus, when set, answers every subscription request with it.
+	subscribeStatus int
+	// chunkStatus, when set, answers every chunk request with it.
+	chunkStatus int
 }
 
 // newStreamingServers starts a WS + API server pair and returns a client for
@@ -1512,6 +1539,8 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	subscribed := make(chan struct{})
 	var subOnce sync.Once
+	delivered, wsGone := make(chan struct{}), make(chan struct{})
+	var deliveredOnce, wsGoneOnce sync.Once
 
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -1519,6 +1548,12 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		defer wsGoneOnce.Do(func() { close(wsGone) })
+		// A pong means the client has handled every frame sent before the ping.
+		conn.SetPongHandler(func(string) error {
+			deliveredOnce.Do(func() { close(delivered) })
+			return nil
+		})
 		select {
 		case <-subscribed:
 		case <-time.After(10 * time.Second):
@@ -1540,6 +1575,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			})
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
+		_ = conn.WriteControl(websocket.PingMessage, nil, time.Time{})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -1549,7 +1585,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	t.Cleanup(wsServer.Close)
 	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
 
-	var pollCount, failCount int
+	var pollCount, failCount, submitN int
 	var mu sync.Mutex
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1557,8 +1593,28 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 		case r.URL.Path == "/api/servers/servers/" && r.Method == http.MethodGet:
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + cfg.serverID + `","name":"srv"}]}`))
 		case r.URL.Path == "/api/events/sessions/" && r.Method == http.MethodPost:
+			if cfg.sessions != nil {
+				cfg.sessions.Add(1)
+			}
+			if cfg.sessionStatus != 0 {
+				w.WriteHeader(cfg.sessionStatus)
+				_, _ = w.Write([]byte(`{"detail":"refused"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"id":"s","websocket_url":"` + wsURL + `","channel_id":"ch"}`))
 		case r.URL.Path == "/api/events/commands/" && r.Method == http.MethodPost:
+			mu.Lock()
+			submitN++
+			n := submitN
+			mu.Unlock()
+			if cfg.submits != nil {
+				cfg.submits.Add(1)
+			}
+			if n <= cfg.submitRefusals {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code":"auth_mfa_required","source":"command"}`))
+				return
+			}
 			_, _ = w.Write([]byte(`[{"id":"` + cfg.cmdID + `","server":{"id":"` + cfg.serverID + `"}}]`))
 		case r.URL.Path == "/api/events/subscriptions/" && r.Method == http.MethodPost:
 			if cfg.onSubscribe != nil {
@@ -1567,9 +1623,19 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				cfg.onSubscribe(string(req.EventType), req.TargetID)
 			}
 			subOnce.Do(func() { close(subscribed) })
+			if cfg.subscribeStatus != 0 {
+				w.WriteHeader(cfg.subscribeStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{}`))
 		case r.URL.Path == "/api/events/commands/"+cfg.cmdID+"/chunks/" && r.Method == http.MethodGet:
+			if cfg.chunkStatus != 0 {
+				w.WriteHeader(cfg.chunkStatus)
+				_, _ = w.Write([]byte(`{"detail":"unavailable"}`))
+				return
+			}
 			fromSeq, _ := strconv.Atoi(r.URL.Query().Get("seq__gte"))
 			var results []Chunk
 			if cfg.chunksFor != nil {
@@ -1605,10 +1671,18 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
+			if cfg.sessionStatus == 0 { // a refused session never opens the WS
+				select {
+				case <-delivered:
+				case <-wsGone:
+				}
+			}
 			term := cfg.terminal
 			term.ID = cfg.cmdID
 			term.Server.ID = cfg.serverID
 			_ = json.NewEncoder(w).Encode(term)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/events/sessions/"):
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -1634,7 +1708,7 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 
 	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
@@ -1719,7 +1793,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				runningPolls: 1,
 				terminal:     tt.terminal,
 			})
-			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+			err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 			tt.check(t, err)
 		})
 	}
@@ -1745,7 +1819,7 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1763,7 +1837,7 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
@@ -2326,7 +2400,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			var out bytes.Buffer
-			err := runCommandFallbackFromID(ac, cmdID, &out, false, fmt.Errorf("websocket dial failed"))
+			err := runCommandFallbackFromID(ac, cmdID, &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
 
 			assert.Equal(t, tt.wantOut, out.String())
 			switch {
@@ -2339,6 +2413,103 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			default:
 				require.NoError(t, err)
 			}
+		})
+	}
+}
+
+// A submission refused for MFA is retried once a second for minutes. The stream
+// keeps its one connected listener across those refusals, so the whole wait
+// opens a single event session, and the accepted submission still streams.
+func TestCommandStream_RefusedSubmissionsShareOneSession(t *testing.T) {
+	t.Parallel()
+	var sessions, submits atomic.Int32
+	stdoutBuf := &bytes.Buffer{}
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:          "cmd-uuid",
+		serverID:       "srv-uuid",
+		wsChunks:       []ChunkEvent{{Seq: 0, Content: "hello\n"}},
+		terminal:       EventDetails{Status: "completed", Success: boolPtr(true)},
+		submitRefusals: 3,
+		sessions:       &sessions,
+		submits:        &submits,
+	})
+
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
+	defer stream.Close()
+	for range 3 {
+		err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+		code, _ := utils.ParseErrorResponse(err)
+		require.Equal(t, utils.AuthMFARequired, code, "got %v", err)
+	}
+	require.NoError(t, stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf))
+
+	assert.Equal(t, "hello\n", stdoutBuf.String())
+	assert.Equal(t, int32(4), submits.Load())
+	assert.Equal(t, int32(1), sessions.Load(), "one event session for the attempt and all its retries")
+}
+
+// A listener that could not connect is not dialed again for the next
+// submission: the stream goes straight to polling.
+func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
+	t.Parallel()
+	var sessions, submits atomic.Int32
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:          "cmd-uuid",
+		serverID:       "srv-uuid",
+		terminal:       EventDetails{Status: "completed", Success: boolPtr(true), Result: "hello\n"},
+		submitRefusals: 1,
+		// A 403 is fatal before the first subscribe, so the connect gives up at once.
+		sessionStatus: http.StatusForbidden,
+		sessions:      &sessions,
+		submits:       &submits,
+	})
+
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
+	defer stream.Close()
+	stdoutBuf := &bytes.Buffer{}
+	err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	code, _ := utils.ParseErrorResponse(err)
+	require.Equal(t, utils.AuthMFARequired, code, "got %v", err)
+	sessionsAfterFirst := sessions.Load()
+
+	require.NoError(t, stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf))
+
+	assert.Equal(t, "hello\n", stdoutBuf.String())
+	assert.Equal(t, int32(2), submits.Load())
+	assert.Equal(t, sessionsAfterFirst, sessions.Load(), "the failed listener must not be dialed again")
+}
+
+// A caller that runs the MFA wait itself gets the typed refusal at once; the
+// default poll keeps treating it like any other failed GET.
+func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		surfaceMFA bool
+		wantCode   bool
+	}{
+		{name: "surfaced", surfaceMFA: true, wantCode: true},
+		{name: "retried until the deadline", surfaceMFA: false, wantCode: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			require.Error(t, err)
+			if tc.wantCode {
+				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
+				return
+			}
+			var clientTimeout *ClientTimeoutError
+			require.ErrorAs(t, err, &clientTimeout)
 		})
 	}
 }

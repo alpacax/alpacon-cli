@@ -1,8 +1,7 @@
 package iam
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -15,11 +14,7 @@ var MemberCmd = &cobra.Command{
 	Use this command to oversee group membership and control access to group resources.
 	`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon group member add' or 'alpacon group member delete' to manage group membership. Run 'alpacon group member --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

@@ -233,17 +233,19 @@ func TestWaiter_ReconnectRerunsCatchUp(t *testing.T) {
 
 	w := newTestWaiter(t, ts, WaitOptions{
 		CatchUp: func() (string, error) {
-			catchUps.Add(1)
-			return "pending", nil
+			if catchUps.Add(1) == 1 {
+				return "pending", nil
+			}
+			return "approved", nil
 		},
 		OK:      []string{"approved"},
-		Timeout: 2 * time.Second,
+		Timeout: testWaitTimeout,
 	})
 
 	_, outcome, err := w.Wait()
 
 	require.NoError(t, err)
-	assert.Equal(t, OutcomeTimeout, outcome)
 	// Events published during the outage are gone; re-running catch-up is the only recovery.
-	assert.GreaterOrEqual(t, catchUps.Load(), int32(2), "a reconnect must re-run catch-up")
+	assert.Equal(t, OutcomeMatched, outcome, "a reconnect must re-run catch-up")
+	assert.Equal(t, int32(2), catchUps.Load())
 }

@@ -83,6 +83,8 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
+`alpacon version --output json` prints one object on stdout with `version`, `latest`, `update_available`, and `release_url`. `update_available` is `true` only when `alpacon update` has a newer release to install, so a `dev` build reports `false`. When the latest release cannot be fetched, `latest` and `release_url` are `null`, a warning goes to stderr, and the command still exits `0`—branch on `alpacon update --check` instead.
+
 #### What the checksum and the attestation do and do not prove
 
 `alpacon update` compares SHA-256 checksums and nothing else. That comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and the update would install it. Teaching the CLI to verify the publisher is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
@@ -151,6 +153,17 @@ $ alpacon websh <server>
 $ alpacon exec <server> "uptime"
 $ alpacon cp ./file.txt <server>:/tmp/
 $ alpacon tunnel <server> -l 9000 -r 8082
+
+# An AI agent replaces steps 3 and 4: it drops --use and websh, which an agent session
+# refuses, and names the session before the server on each command.
+$ alpacon work-session create \
+    --purpose "describe the task" \
+    --scope command \
+    --server <server> \
+    --expires-in 1h \
+    --requester-type agent \
+    --wait
+$ alpacon exec --work-session <SESSION_ID> <server> "uptime"
 ```
 
 CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
@@ -217,6 +230,15 @@ $ alpacon server create                          # interactive: prompts for name
 $ alpacon server rm <server>
 ```
 
+### Kubernetes clusters
+```bash
+$ alpacon kube ls                                # aliases: k8s, clusters
+$ alpacon kube describe <cluster>
+$ alpacon kube ls --output json
+```
+
+The `kube` group appears only on workspaces whose server reports Kubernetes support. The CLI records that answer at `alpacon login` and `alpacon workspace switch`; elsewhere `kube` is hidden from help, and calling it prints a notice and exits with `1`. If support was turned on after you logged in, run `alpacon login` again.
+
 ### Websh (terminal in your shell)
 ```bash
 $ alpacon websh <server>
@@ -260,7 +282,7 @@ $ alpacon exec --file /opt/deploy.sh --reuse-days 30 root@<server> -- --fast
 
 `--file` submits a script as structure instead of a command line: the platform hashes the bytes the reviewer sees, and the agent proves at execution time that the file it runs on the server is those bytes. The file must already exist at that path on the target server, and the local copy the CLI reads must be byte-identical, or the agent refuses to run it. Both the path and `--interpreter` (default `/bin/bash`) must be absolute; the content is limited to 64 KB; `--env` does not combine with `--file`. Script arguments are recorded with the command, shown to the reviewer, and repeated in the re-run hint, so a secret goes in a file or the environment the script reads at run time, never in an argument.
 
-An approval binds exactly those bytes, on that server, as that account, with those arguments. It does not mean "the file is safe": environment, libraries, the interpreter's version and anything the script fetches at run time are yours, and only the first entrypoint is verified. Composition (pipes, redirection, `&&`) goes inside the script, where it is reviewed and hashed with it. A reviewer can mark an approval standing, and an unchanged re-run then stops asking anyone; one changed byte re-queues review. `--reuse-days N` proposes how long that standing approval should last, 1 to 366 days. A proposal is not a grant: the approver decides whether reuse is granted at all, and a workspace may set a ceiling lower than N, in which case the server refuses the request with `file_exec_reuse_exceeds_max` rather than shortening it—resubmit with a shorter duration or none. Without the flag the request carries no proposal; if the approver opts in anyway, the grant lasts until the workspace ceiling, or indefinitely when the workspace has set none. A target whose Alpamon is older than 2.6.0, or a deployment with the command assessor disabled, refuses the lane with guidance to run the script as an ordinary command instead.
+An approval binds exactly those bytes, on that server, as that account, with those arguments. It does not mean "the file is safe": environment, libraries, the interpreter's version and anything the script fetches at run time are yours, and only the first entrypoint is verified. Composition (pipes, redirection, `&&`) goes inside the script, where it is reviewed and hashed with it. A reviewer can mark an approval standing, and an unchanged re-run then stops asking anyone; one changed byte re-queues review. `--reuse-days N` proposes how long that standing approval should last, 1 to 366 days. A proposal is not a grant: the approver decides whether reuse is granted at all, and a workspace may set a ceiling lower than N, in which case the server refuses the request with `file_exec_reuse_exceeds_max` rather than shortening it—resubmit with a shorter duration or none. A grant always expires, after the proposed days or at the workspace ceiling (1 to 366 days, default 90). Without the flag the request carries no proposal; the approver may still grant reuse up to the ceiling. A target whose Alpamon is older than 2.6.0, or a deployment with the command assessor disabled, refuses the lane with guidance to run the script as an ordinary command instead.
 
 ### File transfer
 ```bash
@@ -355,10 +377,13 @@ $ alpacon token acl <type> delete <acl-id>
 ```bash
 $ alpacon agent restart <server>
 $ alpacon agent upgrade <server>
+$ alpacon agent install-pam <server>             # install alpamon-pam through the agent
 $ alpacon server refresh <server>                # re-collect system information
 ```
 
 `agent restart` and `agent upgrade` ask for confirmation first; pass `-y` to skip the prompt, which a non-interactive run (a script or CI job) needs. If the server has active user work—an open Websh/WebFTP session or an in-flight command—they are refused with exit code `5`; retry when idle, or pass `--force` to override. When the workspace asks for MFA, the CLI walks you through it and retries the request.
+
+`agent install-pam` installs the `alpamon-pam` package on the server as root through the host's package manager, and leaves a server that already has the current version as is. It asks for confirmation and takes `-y` the same way, but it is not disruptive: active user work does not refuse it, and it has no `--force`. The server refuses it with `server_pam_install_unsupported` on a host with no `alpamon-pam` package (macOS, Windows, or an unknown package manager), with `server_pam_install_requires_sudo_with_mfa` while the workspace's "Use sudo with MFA" setting is off or the deployment cannot complete the MFA step-up (a self-hosted site without Auth0), and with `server_pam_install_in_progress` while an install is already pending on that server.
 
 The CLI does not reboot, shut down, or upgrade the operating system of a server. Run those inside a work session instead, where sudo, MFA, policy or approval, and recording apply:
 

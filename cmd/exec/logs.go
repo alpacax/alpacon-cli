@@ -42,6 +42,9 @@ Run the command again later to check for completion.`,
 			utils.CliErrorWithExit("failed to fetch command result: %s", err)
 			return
 		}
+		if line := event.StandingGrantLine(details); line != "" {
+			fmt.Fprintln(os.Stderr, line)
+		}
 
 		// Ahead of the approval hold: a parked command has no approval request,
 		// so reporting one would name a queue it is not in. This is the detach
@@ -143,7 +146,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
 			stderrLine = fmt.Sprintf("%s: [%s] %s (status=%s)\n",
-				utils.Red("Error"), phase, desc, details.Status)
+				utils.Red("Error"), phase, desc, details.Status) +
+				phaseHintLine(*details.ErrorPhase)
 		} else {
 			stderrLine = fmt.Sprintf("%s: command failed with status: %s\n",
 				utils.Red("Error"), details.Status)
@@ -158,7 +162,8 @@ func logsCommandOutcome(details event.EventDetails) (stdoutLine, stderrLine stri
 		}
 		if details.ErrorPhase != nil && *details.ErrorPhase != "" {
 			phase, desc := sanitizedPhaseParts(*details.ErrorPhase)
-			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc)
+			stderrLine = fmt.Sprintf("%s: [%s] %s\n", utils.Red("Error"), phase, desc) +
+				phaseHintLine(*details.ErrorPhase)
 		}
 		return details.Result, stderrLine, exitCode
 	}

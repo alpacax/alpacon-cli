@@ -40,5 +40,6 @@ func EditAccessControl(ac *client.AlpaconClient) (any, error) {
 // PatchAccessControl sends the edited access control settings to the server.
 // Returns the raw error from SendPatchRequest to preserve error structure for ParseErrorResponse.
 func PatchAccessControl(ac *client.AlpaconClient, data any) ([]byte, error) {
-	return ac.SendPatchRequest(accessControlURL, data)
+	body, err := ac.SendPatchRequest(accessControlURL, data)
+	return body, utils.MarkSubmission(err)
 }

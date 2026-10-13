@@ -239,7 +239,7 @@ func AuditAttributesFrom(entries []RoleAuditLogResponse) []RoleAuditAttributes {
 func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 	_, err := ac.SendPostRequest(userRolesURL, request)
 
-	return err
+	return utils.MarkSubmission(err)
 }
 
 func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
@@ -247,11 +247,11 @@ func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
 
 	if reason == "" {
 		_, err := ac.SendDeleteRequest(url)
-		return err
+		return utils.MarkSubmission(err)
 	}
 
 	_, err := ac.SendDeleteRequestWithBody(url, BindingRevokeRequest{Reason: reason})
-	return err
+	return utils.MarkSubmission(err)
 }
 
 func IsDuplicateBinding(err error) bool {

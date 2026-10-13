@@ -94,15 +94,19 @@ func Start(opts StartOptions) (*Runtime, error) {
 	tunnelSession, err := tunnelapi.CreateTunnelSession(alpaconClient, opts.ServerName, opts.Username, opts.Groupname, targetPort, opts.WorkSessionID)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("failed to create tunnel session: %w", err)
+		return nil, utils.MarkSubmission(fmt.Errorf("failed to create tunnel session: %w", err))
 	}
 
+	// The tunnel session exists from here on; what fails after it is returned
+	// untagged, so a refused dial never reads as a refused create.
 	smuxConfig := config.GetSmuxConfig()
 	headers := alpaconClient.SetWebsocketHeader()
 	wsConn, _, err := newTunnelDialer(smuxConfig.MaxFrameSize).Dial(tunnelSession.WebsocketURL, headers)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("failed to connect to proxy server: %w", err)
+		// The URL carries a channel token in its path, which a URL error prints
+		// whole, so only the host is kept.
+		return nil, fmt.Errorf("failed to connect to proxy server: %w", utils.RedactURLErrorHostOnly(err))
 	}
 
 	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)

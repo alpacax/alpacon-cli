@@ -1,8 +1,7 @@
 package cert
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var CertCmd = &cobra.Command{
 	Aliases: []string{"certificate"},
 	Short:   "List, describe, and download certificates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon cert ls', 'alpacon cert describe', or 'alpacon cert download' to manage SSL/TLS certificates. Run 'alpacon cert --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

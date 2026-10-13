@@ -112,14 +112,25 @@ func InviteUser(ac *client.AlpaconClient, request UserInviteRequest) error {
 	return err
 }
 
-func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) error {
+// CreateUser returns the password the server generated for the new user, or "" when the response carries none.
+func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) (string, error) {
 	userRequest.IsActive = true
-	_, err := ac.SendPostRequest(userURL, userRequest)
+	body, err := ac.SendPostRequest(userURL, userRequest)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if len(body) == 0 {
+		return "", nil
 	}
 
-	return nil
+	var created struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		return "", err
+	}
+
+	return created.Password, nil
 }
 
 func CreateGroup(ac *client.AlpaconClient, groupRequest GroupCreateRequest) error {
@@ -194,13 +205,7 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		"user":  memberID,
 		"group": groupID,
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(membershipURL, "", params))
-	if err != nil {
-		return err
-	}
-
-	var memberDetails []MemberDetailResponse
-	err = json.Unmarshal(responseBody, &memberDetails)
+	memberDetails, err := api.FetchPagesUpTo[MemberDetailResponse](ac, membershipURL, params, 1)
 	if err != nil {
 		return err
 	}

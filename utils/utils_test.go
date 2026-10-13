@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -662,6 +663,43 @@ func TestRequirePositiveIntHelperProcess(t *testing.T) {
 		return
 	}
 	RequirePositiveInt("tail", 0)
+}
+
+func TestRequireSubcommandPrintsHelpAndPointsToIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		notes []string
+		want  string
+	}{
+		{
+			name: "without a note",
+			want: "a subcommand is required. Run 'alpacon token acl --help' for more information",
+		},
+		{
+			name:  "with a note",
+			notes: []string{"Approvals happen in the console."},
+			want:  "a subcommand is required. Approvals happen in the console. Run 'alpacon token acl --help' for more information",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := &cobra.Command{Use: "alpacon"}
+			token := &cobra.Command{Use: "token"}
+			acl := &cobra.Command{Use: "acl"}
+			acl.AddCommand(&cobra.Command{Use: "server", Run: func(*cobra.Command, []string) {}})
+			token.AddCommand(acl)
+			root.AddCommand(token)
+			var out bytes.Buffer
+			acl.SetOut(&out)
+
+			err := RequireSubcommand(acl, tt.notes...)
+
+			require.EqualError(t, err, tt.want)
+			assert.Contains(t, out.String(), "Available Commands:")
+		})
+	}
 }
 
 func TestSanitizeTerminalLine(t *testing.T) {

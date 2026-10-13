@@ -92,11 +92,24 @@ func TestResolveServerIDsReportsEarliestFailureInInputOrder(t *testing.T) {
 	assert.EqualError(t, err, "failed to resolve server 'missing-early': no server found with the given name")
 }
 
-// Serial: the test relies on the failing lookup answering well before the slow ones.
+// Serial: the slow lookups answer 200ms after the barrier, the time the failure has
+// to be recorded before a freed slot could launch one more.
 func TestResolveServerIDsStopsLaunchingLookupsAfterAFailure(t *testing.T) {
 	var requested atomic.Int32
+	allLaunched := make(chan struct{})
+	// The failure must not answer before every slot has filled, or a slow runner
+	// stops the launch loop early and the count says nothing about the code.
+	awaitAllLaunched := func() {
+		select {
+		case <-allLaunched:
+		case <-time.After(5 * time.Second): // a regression that launches fewer still finishes, and fails the count
+		}
+	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requested.Add(1)
+		if requested.Add(1) == maxConcurrentServerLookups {
+			close(allLaunched)
+		}
+		awaitAllLaunched()
 		name := r.URL.Query().Get("name")
 		if name == "ghost" {
 			writeServerResults(w, nil)

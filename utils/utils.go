@@ -19,6 +19,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -187,6 +188,21 @@ func SplitAndParseInt(input string) []int {
 	}
 
 	return intValues
+}
+
+// FormatTimestamp renders a server timestamp in the local zone.
+func FormatTimestamp(ts string) string {
+	if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+		return t.Local().Format("2006-01-02 15:04:05")
+	}
+	date, rest, found := strings.Cut(ts, "T")
+	if !found {
+		return ts
+	}
+	if idx := strings.IndexAny(rest, ".+Z"); idx != -1 {
+		rest = rest[:idx]
+	}
+	return date + " " + rest
 }
 
 func TimeUtils(t time.Time) string {
@@ -704,6 +720,16 @@ func RequirePositiveInt(flagName string, value int) {
 	if value <= 0 {
 		CliErrorWithExitCode(ExitCodeUsageError, "--%s must be a positive integer.", flagName)
 	}
+}
+
+// RequireSubcommand prints cmd's help, then returns an error that points to --help
+// instead of repeating the subcommand list the help already printed.
+func RequireSubcommand(cmd *cobra.Command, notes ...string) error {
+	if err := cmd.Help(); err != nil {
+		return err
+	}
+	parts := append([]string{"a subcommand is required."}, notes...)
+	return fmt.Errorf("%s Run '%s --help' for more information", strings.Join(parts, " "), cmd.CommandPath())
 }
 
 // ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.

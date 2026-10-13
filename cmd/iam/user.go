@@ -1,8 +1,7 @@
 package iam
 
 import (
-	"errors"
-
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
@@ -11,11 +10,7 @@ var UserCmd = &cobra.Command{
 	Short: "List, create, describe, update, and delete users",
 	Long:  "Manage user accounts and their permissions within the Alpacon workspace.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := cmd.Help()
-		if err != nil {
-			return err
-		}
-		return errors.New("a subcommand is required. Use 'alpacon user ls', 'alpacon user create', 'alpacon user describe', 'alpacon user update', 'alpacon user delete', 'alpacon user invite', 'alpacon user role', or 'alpacon user permission'. Run 'alpacon user --help' for more information")
+		return utils.RequireSubcommand(cmd)
 	},
 }
 

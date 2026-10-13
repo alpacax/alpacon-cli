@@ -2,8 +2,8 @@ package event
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"sync"
@@ -25,10 +25,11 @@ const (
 	// inline at the one place that prints it.
 	sudoOutageWarning = "Sudo MFA listener disconnected; retrying..."
 
-	// defaultMFAPollInterval is how often the listener checks whether MFA completed.
+	// defaultMFAPollInterval is how often the listener retries the grant
+	// verification while it waits for MFA.
 	defaultMFAPollInterval = 500 * time.Millisecond
 
-	// defaultMFAPollTimeout is the longest the listener waits for MFA completion.
+	// defaultMFAPollTimeout is the longest the listener waits for MFA.
 	// The server expires the pending sudo grant after a short window; the buffer
 	// over that keeps a slow browser MFA from racing the expiry.
 	defaultMFAPollTimeout = 60 * time.Second
@@ -61,19 +62,16 @@ type SudoListener struct {
 	serverName string
 	sessionID  string
 	mfaMu      sync.Mutex // serializes handleSudoMFA so only one MFA flow runs at a time
-	// refreshToken is ac.RefreshToken, or nil when ac is nil. Replaced in tests.
-	refreshToken func() error
-	// pollInterval and pollTimeout bound pollMFACompletion. Fields rather than
+	// pollInterval and pollTimeout bound retryVerifyUntilMFA. Fields rather than
 	// package vars: the poll runs on a goroutine that can outlive the test which
 	// started it, and a test shortening a shared knob would race the next one.
 	pollInterval time.Duration
 	pollTimeout  time.Duration
 
-	stateMu    sync.Mutex // guards channelID, subscribed, warned, refreshed, err
+	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
 	channelID  string
 	subscribed bool
 	warned     bool
-	refreshed  bool
 	err        error
 }
 
@@ -87,9 +85,6 @@ func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *Su
 		sessionID:    sessionID,
 		pollInterval: defaultMFAPollInterval,
 		pollTimeout:  defaultMFAPollTimeout,
-	}
-	if ac != nil {
-		sl.refreshToken = ac.RefreshToken
 	}
 	sl.wsListener = newProvisionedWSListener(ac, sl.provisionSession, sudoHandshakeTimeout)
 	sl.handleFrame = sl.handleMessage
@@ -106,17 +101,17 @@ func (sl *SudoListener) Err() error {
 	return sl.err
 }
 
-func (sl *SudoListener) provisionSession() (string, error) {
+func (sl *SudoListener) provisionSession() (*EventSessionResponse, error) {
 	session, err := CreateEventSession(sl.ac)
 	if err != nil {
-		return "", sl.fail(err)
+		return nil, sl.fail(err)
 	}
 
 	sl.stateMu.Lock()
 	sl.channelID = session.ChannelID
 	sl.stateMu.Unlock()
 
-	return session.WebsocketURL, nil
+	return session, nil
 }
 
 func (sl *SudoListener) subscribe() error {
@@ -149,21 +144,9 @@ func (sl *SudoListener) announceOutage(cause error) {
 // the reconnect loop. Every cause is recorded either way, so a caller reading Err()
 // after a timeout gets the transport's own words rather than nothing.
 func (sl *SudoListener) fail(cause error) error {
-	// refreshToken is assigned before Start and never reassigned, so no lock here.
-	expired := sl.refreshToken != nil && utils.HTTPStatusCode(cause) == http.StatusUnauthorized
-
 	sl.stateMu.Lock()
 	sl.err = cause
 	fatal := !sl.subscribed && isFatalRequestError(cause)
-	// websh created its own session on this token moments ago, so a 401 on the first
-	// attempt means it expired in between and a refresh would fix it. The allowance is
-	// spent here whether or not the refresh below lands, because what it bounds is the
-	// downgrade, not the refresh: a refresh that fails leaves the retry presenting the
-	// same token, and that second 401 is the one that has to stop us.
-	if fatal && expired && !sl.refreshed {
-		sl.refreshed = true
-		fatal = false
-	}
 	announce := sl.subscribed && !sl.warned
 	if announce {
 		sl.warned = true
@@ -185,27 +168,7 @@ func (sl *SudoListener) fail(cause error) error {
 		}
 	}
 
-	if expired {
-		sl.refreshExpiredToken()
-	}
-
 	return cause
-}
-
-// refreshExpiredToken renews the access token so the next dial stops presenting the one
-// that just came back 401. Past the first subscribe nothing else would: no status is
-// fatal there, so an access token that expires mid-session would be re-presented on
-// every dial until websh exits and sudo MFA would never come back.
-func (sl *SudoListener) refreshExpiredToken() {
-	// An MFA flow holds mfaMu across its own refresh; a second one would race it.
-	if !sl.mfaMu.TryLock() {
-		return
-	}
-	defer sl.mfaMu.Unlock()
-
-	// A failed refresh leaves the next attempt to the reconnect loop, which is
-	// where a recovery would land anyway.
-	_ = sl.refreshToken()
 }
 
 func (sl *SudoListener) handleMessage(message []byte) {
@@ -266,8 +229,8 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	}
 
 	// Slow path: open browser for MFA verification.
-	// Use CLI-specific MFA URL (location=cli) so the server persists
-	// MFACompletion to DB for polling.
+	// Use the CLI-specific MFA URL (location=cli): completing it credits the
+	// MFA to this client, which the retried verification is checked against.
 	mfaURL, err := mfa.GetMFALinkByServerName(sl.ac, sl.serverName)
 	if err != nil {
 		if sl.reportCredentialCannotProveMFA(err) {
@@ -281,20 +244,11 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
-	// Poll for MFA completion
-	completed := sl.pollMFACompletion()
-	if !completed {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
-		return
-	}
-
-	// MFA completed — refresh token so server sees updated MFA claims
-	if err := sl.ac.RefreshToken(); err != nil {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to refresh access token after MFA: %s\033[0m\r\n", err)
-		return
-	}
-
-	if err := sl.verifySudoGrant(grantID); err != nil {
+	if err := sl.retryVerifyUntilMFA(grantID); err != nil {
+		if errors.Is(err, errMFAWaitEnded) {
+			fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
+			return
+		}
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
@@ -314,7 +268,23 @@ func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
 	return true
 }
 
-func (sl *SudoListener) pollMFACompletion() bool {
+// errMFAWaitEnded is what retryVerifyUntilMFA returns when the wait ran out, or
+// the listener stopped, while the server was still refusing for MFA.
+var errMFAWaitEnded = errors.New("MFA verification did not complete in time")
+
+// retryVerifyUntilMFA retries the grant verification until the server stops
+// refusing it for MFA. The step-up link names this client, so completing MFA
+// in the browser credits the client this listener's requests come from: the
+// next verification passes on the same access token, with no completion probe
+// or token refresh in between.
+//
+// A typed auth_mfa_required keeps the wait going, never one read out of message
+// text, and so does a verification the server never acted on
+// (utils.IsUnprocessedRequestError), up to utils.MaxConsecutivePollFailures in a
+// row; a Retry-After on that answer holds the next attempt back, capped like any
+// poll backoff. Any other answer is returned as is. The attempts are bounded by
+// pollTimeout / pollInterval.
+func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
 	// keeps over the server's pending-grant expiry is what this wait is built on,
 	// and a gap that widens to ten ticks at the tail spends that buffer against a
@@ -323,16 +293,40 @@ func (sl *SudoListener) pollMFACompletion() bool {
 	ticker := time.NewTicker(sl.pollInterval)
 	defer ticker.Stop()
 
+	failures := 0
 	for {
 		select {
 		case <-sl.done:
-			return false
+			return errMFAWaitEnded
 		case <-timeout:
-			return false
+			return errMFAWaitEnded
 		case <-ticker.C:
-			// The endpoint may lag the browser; a failure here is not an answer.
-			if completed, err := mfa.CheckMFACompletion(sl.ac); err == nil && completed {
-				return true
+			err := sl.verifySudoGrant(grantID)
+			if err == nil {
+				return nil
+			}
+			switch {
+			case utils.StructuredErrorCode(err) == utils.AuthMFARequired:
+				failures = 0
+			case utils.IsUnprocessedRequestError(err):
+				failures++
+				if failures >= utils.MaxConsecutivePollFailures {
+					return err
+				}
+				// A longer Retry-After waits out all but one interval, and the
+				// ticker restarts so the next attempt lands one interval later.
+				if wait := utils.NextPollBackoff(sl.pollInterval, 0, utils.RetryAfter(err)); wait > sl.pollInterval {
+					select {
+					case <-sl.done:
+						return errMFAWaitEnded
+					case <-timeout:
+						return errMFAWaitEnded
+					case <-time.After(wait - sl.pollInterval):
+						ticker.Reset(sl.pollInterval)
+					}
+				}
+			default:
+				return err
 			}
 		}
 	}
@@ -345,7 +339,7 @@ func (sl *SudoListener) verifySudoGrant(grantID string) error {
 
 	_, err := sl.ac.SendPostRequest(endpoint, struct{}{})
 	if err != nil {
-		return fmt.Errorf("failed to verify sudo grant: %w", err)
+		return utils.MarkSubmission(fmt.Errorf("failed to verify sudo grant: %w", err))
 	}
 
 	return nil

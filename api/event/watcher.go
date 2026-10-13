@@ -94,10 +94,10 @@ func (w *Watcher) sessionCreateFailed(cause error) error {
 	return cause
 }
 
-func (w *Watcher) provisionSession() (string, error) {
+func (w *Watcher) provisionSession() (*EventSessionResponse, error) {
 	session, err := CreateEventSession(w.ac)
 	if err != nil {
-		return "", w.sessionCreateFailed(err)
+		return nil, w.sessionCreateFailed(err)
 	}
 
 	// Rejected here because the dialer's own *url.Error quotes the whole URL, and this
@@ -107,14 +107,35 @@ func (w *Watcher) provisionSession() (string, error) {
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err
 		}
-		return "", w.fail(fmt.Errorf("server returned a malformed event channel URL: %w", err))
+		cause := fmt.Errorf("server returned a malformed event channel URL: %w", err)
+		w.closeRejectedSession(session.ID, cause)
+		return nil, w.fail(cause)
 	}
 
 	w.stateMu.Lock()
 	w.channelID = session.ChannelID
 	w.stateMu.Unlock()
 
-	return session.WebsocketURL, nil
+	return session, nil
+}
+
+// closeRejectedSession waits on the close only when the rejection stops the Watcher:
+// the command then exits through os.Exit, which would drop a background close unsent.
+func (w *Watcher) closeRejectedSession(id string, cause error) {
+	w.stateMu.Lock()
+	stops := w.failureStopsLocked()
+	if stops {
+		w.err = cause // before the close, which can outlast WaitConnected's window
+	}
+	w.stateMu.Unlock()
+
+	if !stops {
+		w.closeUnopenedSession(id)
+		return
+	}
+	if id != "" {
+		closeSession(w.ac, id, eventSessionCloseTimeout)
+	}
 }
 
 func (w *Watcher) subscribe() error {
@@ -148,12 +169,15 @@ func (w *Watcher) subscribe() error {
 	return nil
 }
 
+// failureStopsLocked reports whether a failure now stops the Watcher. The caller holds stateMu.
+func (w *Watcher) failureStopsLocked() bool { return !w.subscribed }
+
 // A failure before any successful subscribe is fatal, so a bad target or an expired
 // login surfaces the server's own message rather than a generic connect timeout.
 // Later failures are ordinary reconnect material.
 func (w *Watcher) fail(cause error) error {
 	w.stateMu.Lock()
-	fatal := !w.subscribed
+	fatal := w.failureStopsLocked()
 	if fatal {
 		w.err = cause
 	}

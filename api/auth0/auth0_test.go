@@ -228,6 +228,42 @@ func TestFetchAuthEnv(t *testing.T) {
 	}
 }
 
+func TestFetchAuthEnvSurfaces(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		surfaces         string
+		expectKubernetes bool
+	}{
+		{name: "kubernetes on", surfaces: `,"surfaces":{"kubernetes":true}`, expectKubernetes: true},
+		{name: "kubernetes off", surfaces: `,"surfaces":{"kubernetes":false}`},
+		{name: "older server omits surfaces", surfaces: ""},
+		{name: "surfaces without kubernetes", surfaces: `,"surfaces":{}`},
+		{name: "surfaces null", surfaces: `,"surfaces":null`},
+		{name: "surfaces not an object", surfaces: `,"surfaces":"yes"`},
+		{name: "kubernetes not a bool", surfaces: `,"surfaces":{"kubernetes":"true"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body := `{"auth0":{"method":"auth0","client_id":"client123"},"language":"en"` + tt.surfaces + `}`
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer ts.Close()
+
+			// A malformed surfaces value must not fail the fetch: login,
+			// refresh, revoke and logout all decode this same response.
+			envInfo, err := FetchAuthEnv(ts.URL, ts.Client())
+			require.NoError(t, err)
+			assert.Equal(t, "client123", envInfo.Auth0.ClientID)
+			assert.Equal(t, tt.expectKubernetes, envInfo.Surfaces.Kubernetes)
+		})
+	}
+}
+
 func TestExtractSubdomain(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

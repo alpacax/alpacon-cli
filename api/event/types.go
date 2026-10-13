@@ -3,6 +3,7 @@ package event
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
@@ -15,6 +16,34 @@ var phaseDescriptions = map[string]string{
 	"agent_timeout":                   "agent acknowledged the command but did not return a result in time",
 	"remote_command_exceeded_timeout": "remote command exceeded its execution timeout",
 	"client_timeout":                  "CLI gave up waiting for the server to report a result",
+
+	// File lane: the agent refused to run a file execution request.
+	"file_hash_mismatch":    "the file changed after it was verified, so the agent refused to run it",
+	"file_payload_invalid":  "the agent could not read the file execution request",
+	"file_open_failed":      "the agent could not open the file on the server",
+	"file_exec_unsupported": "this server's platform cannot run a file execution safely",
+	"file_too_large":        "the file is larger than the agent will run",
+}
+
+// filePhasePrefix marks every error_phase the file execution lane can emit.
+const filePhasePrefix = "file_"
+
+// genericFilePhaseDescription and genericFilePhaseHint cover a file_* phase a
+// newer server emits that this CLI does not know yet, so the user never sees a
+// bare code.
+const (
+	genericFilePhaseDescription = "the agent refused to run the file"
+	genericFilePhaseHint        = "Run `alpacon exec --file` again; if it keeps failing, update the CLI and contact your workspace admin."
+)
+
+// phaseHints gives the next step for a file lane phase. Other phases have no
+// hint.
+var phaseHints = map[string]string{
+	"file_hash_mismatch":    "The file changed after it was verified. Run `alpacon exec --file` again so it is verified again; a standing approval only covers the unchanged file.",
+	"file_payload_invalid":  "Run `alpacon exec --file` again. If it keeps failing, update the CLI and the agent on the server.",
+	"file_open_failed":      "Check that the file exists on the server, is a regular file, and is readable by the agent, then run `alpacon exec --file` again.",
+	"file_exec_unsupported": "File execution is not available on this server's platform. Run the command with `alpacon exec` instead.",
+	"file_too_large":        "Reduce the file size, or move the logic out of the script, and run `alpacon exec --file` again.",
 }
 
 // RemoteCommandError is returned when the remote command completed but exited
@@ -72,30 +101,32 @@ type AwaitingPurposeError struct {
 }
 
 type EventAttributes struct {
-	Server      string `json:"server"`
-	Shell       string `json:"shell"`
-	Command     string `json:"command"`
-	Result      string `json:"result"`
-	Status      string `json:"status"`
-	Operator    string `json:"operator"`
-	RequestedAt string `json:"requested_at" table:"Requested At"`
+	Server                string           `json:"server"`
+	Shell                 string           `json:"shell"`
+	Command               string           `json:"command"`
+	Result                string           `json:"result"`
+	Status                string           `json:"status"`
+	Operator              string           `json:"operator"`
+	RequestedAt           string           `json:"requested_at" table:"Requested At"`
+	ApprovedFileExecution *json.RawMessage `json:"approved_file_execution,omitempty" table:"-"`
 }
 
 type EventDetails struct {
-	ID            string              `json:"id"`
-	Shell         string              `json:"shell"`
-	Line          string              `json:"line"`
-	Success       *bool               `json:"success"`
-	ExitCode      *int                `json:"exit_code"`
-	ErrorPhase    *string             `json:"error_phase"`
-	Result        string              `json:"result"`
-	Status        string              `json:"status"`
-	Cancellable   bool                `json:"cancellable"`
-	ResponseDelay float64             `json:"response_delay"`
-	ElapsedTime   float64             `json:"elapsed_time"`
-	AddedAt       time.Time           `json:"added_at"`
-	Server        types.ServerSummary `json:"server"`
-	RequestedBy   types.UserSummary   `json:"requested_by"`
+	ID                    string              `json:"id"`
+	Shell                 string              `json:"shell"`
+	Line                  string              `json:"line"`
+	Success               *bool               `json:"success"`
+	ExitCode              *int                `json:"exit_code"`
+	ErrorPhase            *string             `json:"error_phase"`
+	Result                string              `json:"result"`
+	Status                string              `json:"status"`
+	Cancellable           bool                `json:"cancellable"`
+	ResponseDelay         float64             `json:"response_delay"`
+	ElapsedTime           float64             `json:"elapsed_time"`
+	AddedAt               time.Time           `json:"added_at"`
+	Server                types.ServerSummary `json:"server"`
+	RequestedBy           types.UserSummary   `json:"requested_by"`
+	ApprovedFileExecution *json.RawMessage    `json:"approved_file_execution,omitempty"`
 	// What the requester said this command is for, and when the ask expires.
 	// Both are absent on a server predating the read exposure, and on any
 	// command nobody was asked—which is every command until the gate is
@@ -249,12 +280,28 @@ func (e *CommandRejectedError) Error() string {
 }
 
 // DescribePhase returns the human-readable description for an error_phase,
-// or the raw identifier when the phase is unknown.
+// or the raw identifier when the phase is unknown. An unknown file_* phase
+// gets a generic file lane description instead of the bare code.
 func DescribePhase(phase string) string {
 	if desc, ok := phaseDescriptions[phase]; ok {
 		return desc
 	}
+	if strings.HasPrefix(phase, filePhasePrefix) {
+		return genericFilePhaseDescription
+	}
 	return phase
+}
+
+// PhaseHint returns the actionable next step for an error_phase, or "" when
+// the phase has none. An unknown file_* phase gets a generic file lane hint.
+func PhaseHint(phase string) string {
+	if hint, ok := phaseHints[phase]; ok {
+		return hint
+	}
+	if strings.HasPrefix(phase, filePhasePrefix) {
+		return genericFilePhaseHint
+	}
+	return ""
 }
 
 // IsRunningStatus reports whether status represents an in-progress (non-terminal) command.

@@ -242,7 +242,7 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
-		return SessionResponse{}, err
+		return SessionResponse{}, utils.MarkSubmission(err)
 	}
 
 	rows, cols, err := terminalSize()
@@ -254,11 +254,18 @@ func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupnam
 
 	responseBody, err := ac.SendPostRequest(sessionsBaseURL, sessionRequest)
 	if err != nil {
-		return SessionResponse{}, err
+		return SessionResponse{}, utils.MarkSubmission(err)
 	}
+	// The session exists from here on; a failure after it is returned untagged,
+	// so it never creates another.
+	return shareCreatedSession(ac, responseBody, share, readOnly)
+}
 
+// shareCreatedSession reads the session the server created and, with share,
+// asks for its share link.
+func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, readOnly bool) (SessionResponse, error) {
 	var response SessionResponse
-	err = json.Unmarshal(responseBody, &response)
+	err := json.Unmarshal(responseBody, &response)
 	if err != nil {
 		return SessionResponse{}, err
 	}
@@ -294,6 +301,9 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
 	if err != nil {
 		// The handshake response carries the reason a bad handshake alone never names.
+		// The URL carries a channel token in its path, which a URL error prints
+		// whole, so only the host is kept.
+		err = utils.RedactURLErrorHostOnly(err)
 		if resp == nil {
 			return fmt.Errorf("websocket connection failed: %w", err)
 		}
