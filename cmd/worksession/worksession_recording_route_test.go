@@ -12,12 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const recordingRouteTimeline = `[
- {"type":"command","id":"c1"},
- {"type":"websh_session","id":"wsh-1"},
- {"type":"tunnel_session","id":"tun-1","is_tunnel":true},
- {"type":"websh_session","id":"wsh-2"}]`
-
 // recordingRouteServer pages the timeline two items at a time and the records of
 // wsh-2 as short pages that still carry a `next`, logging every request URL.
 func recordingRouteServer(t *testing.T, recordsStatus int) (*httptest.Server, func() []string) {
