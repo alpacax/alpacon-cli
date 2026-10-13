@@ -607,6 +607,15 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 
 	// Runs on whichever terminal signal arrives first, the fin event or the poll.
 	finish := func(details EventDetails) error {
+		// select picks among ready cases at random, so delivered chunks may still be queued.
+		for delivered := true; delivered; {
+			select {
+			case chunk := <-listener.Chunks():
+				lastSeq = applyChunk(ac, cmdID, lastSeq, chunk, out, gap)
+			default:
+				delivered = false
+			}
+		}
 		lastSeq = drainRemainingChunks(ac, cmdID, lastSeq, out)
 		gap.recoverSkipped(ac, cmdID, out)
 		listener.Stop()

@@ -1539,6 +1539,8 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	subscribed := make(chan struct{})
 	var subOnce sync.Once
+	delivered, wsGone := make(chan struct{}), make(chan struct{})
+	var deliveredOnce, wsGoneOnce sync.Once
 
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -1546,6 +1548,12 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		defer wsGoneOnce.Do(func() { close(wsGone) })
+		// A pong means the client has handled every frame sent before the ping.
+		conn.SetPongHandler(func(string) error {
+			deliveredOnce.Do(func() { close(delivered) })
+			return nil
+		})
 		select {
 		case <-subscribed:
 		case <-time.After(10 * time.Second):
@@ -1567,6 +1575,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			})
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
+		_ = conn.WriteControl(websocket.PingMessage, nil, time.Time{})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -1661,6 +1670,12 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			if n <= cfg.heldPolls+cfg.runningPolls {
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
+			}
+			if cfg.sessionStatus == 0 { // a refused session never opens the WS
+				select {
+				case <-delivered:
+				case <-wsGone:
+				}
 			}
 			term := cfg.terminal
 			term.ID = cfg.cmdID
