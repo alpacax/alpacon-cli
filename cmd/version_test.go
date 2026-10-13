@@ -98,4 +98,5 @@ func TestVersionCommandPrintsTheCurrentVersionAndExitsZeroWhenTheReleaseLookupFa
 	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.JSONEq(t, `{"version":"1.3.0","latest":null,"update_available":false,"release_url":null}`, stdout)
 	assert.Contains(t, stderr, "Could not check for updates")
+	assert.NotContains(t, stderr, "{")
 }
