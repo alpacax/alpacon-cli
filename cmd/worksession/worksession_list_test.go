@@ -46,3 +46,17 @@ func TestMarkActive_EmptySlice_NoPanic(t *testing.T) {
 		worksession.MarkActive(rows, "ses-anything")
 	})
 }
+
+func TestMarkActive_SkipsSessionThatHasEnded(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"completed", "expired", "revoked", "rejected", "cancelled"} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			rows := []wsapi.WorkSessionAttributes{{ID: "ses-1", Status: status}}
+
+			worksession.MarkActive(rows, "ses-1")
+
+			assert.Empty(t, rows[0].Active)
+		})
+	}
+}

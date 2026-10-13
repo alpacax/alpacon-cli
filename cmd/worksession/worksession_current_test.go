@@ -6,8 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,4 +65,59 @@ func TestRunCurrent_StaleUUID_ServerNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "ses-stale", uuid)
 	assert.Nil(t, ws)
+}
+
+func currentSessionClient(t *testing.T, status string) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/work-sessions/sessions/ses-abc/" {
+			t.Errorf("unexpected request %s", r.URL.Path)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-abc","status":"` + status + `"}`))
+	}))
+	t.Cleanup(ts.Close)
+	return newTestClient(ts)
+}
+
+func TestWriteCurrentTable_MarksARunningSessionQuietly(t *testing.T) {
+	ac := currentSessionClient(t, "active")
+
+	var err error
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		err = worksession.WriteCurrentTable(ac, "ses-abc")
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "*")
+	assert.Empty(t, stderr)
+}
+
+func TestWriteCurrentTable_WarnsAndLeavesAnEndedSessionUnmarked(t *testing.T) {
+	ac := currentSessionClient(t, "completed")
+
+	var err error
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		err = worksession.WriteCurrentTable(ac, "ses-abc")
+	})
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "ses-abc")
+	assert.NotContains(t, stdout, "*")
+	assert.Contains(t, stderr, "Active work-session ses-abc has ended (completed). Run 'alpacon work-session use --unset' to clear it.")
+}
+
+func TestWriteCurrentRaw_WarnsOnAnEndedSessionAndKeepsTheBody(t *testing.T) {
+	ac := currentSessionClient(t, "completed")
+
+	var err error
+	stdout, stderr := testutil.CaptureOutput(t, func() {
+		err = worksession.WriteCurrentRaw(ac, "ses-abc")
+	})
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"ses-abc","status":"completed"}`, stdout)
+	assert.Contains(t, stderr, "Active work-session ses-abc has ended (completed).")
 }

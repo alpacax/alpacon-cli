@@ -19,10 +19,23 @@ var workSessionRevokeCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opRevoke, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if err := wsapi.RevokeWorkSession(ac, args[0]); err != nil {
+		cleared, err := RunRevoke(ac, args[0])
+		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opRevoke, err, "Failed to revoke work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s revoked.", args[0])
+		if cleared {
+			utils.CliInfo("Active work-session cleared.")
+		}
 	},
+}
+
+// RunRevoke revokes the session and, when it is the workspace's active one, clears it.
+// The error is the server's alone; a failed clear only warns. Reports whether it cleared.
+func RunRevoke(ac *client.AlpaconClient, id string) (bool, error) {
+	if err := wsapi.RevokeWorkSession(ac, id); err != nil {
+		return false, err
+	}
+	return clearEndedActiveSession(ac, id), nil
 }

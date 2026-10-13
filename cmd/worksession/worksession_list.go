@@ -36,15 +36,14 @@ func resolveAssignedUser(user string, getCurrentUserID func() (string, error)) (
 	}
 }
 
-// MarkActive decorates the row whose ID matches activeUUID with a "*" marker
-// in its Active column. No-op when activeUUID is empty or no row matches.
-// Exported for unit testing; safe to call with a nil/empty slice.
+// MarkActive puts "*" in the Active column of the row whose ID is activeUUID unless that session has
+// ended, since one ended outside this CLI stays in config. Safe with an empty activeUUID or slice.
 func MarkActive(rows []wsapi.WorkSessionAttributes, activeUUID string) {
 	if activeUUID == "" {
 		return
 	}
 	for i := range rows {
-		if rows[i].ID == activeUUID {
+		if rows[i].ID == activeUUID && !isEndedStatus(rows[i].Status) {
 			rows[i].Active = "*"
 		}
 	}
