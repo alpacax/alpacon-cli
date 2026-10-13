@@ -152,7 +152,7 @@ func joinClean(items []string, sep string) string {
 }
 
 func joinNonEmpty(items []string, sep string) string {
-	return strings.Join(slices.DeleteFunc(slices.Clone(items), func(it string) bool { return it == "" }), sep)
+	return strings.Join(slices.DeleteFunc(items, func(it string) bool { return it == "" }), sep)
 }
 
 func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
