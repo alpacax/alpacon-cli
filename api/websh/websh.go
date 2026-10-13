@@ -299,7 +299,7 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 	}
 	response.ID, err = api.RequireID(response.ID, "Websh session")
 	if err != nil {
-		return SessionResponse{}, err
+		return SessionResponse{}, fmt.Errorf("the server created the Websh session, but its ID is unusable (%w)", err)
 	}
 
 	if share {

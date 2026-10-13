@@ -299,7 +299,7 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 	}
 	created := cmdResponse[0]
 	if created.ID, err = api.RequireID(created.ID, "command"); err != nil {
-		return CommandResponse{}, err
+		return CommandResponse{}, fmt.Errorf("the server created the command, but its ID is unusable (%w); check for it before submitting again", err)
 	}
 	return created, nil
 }

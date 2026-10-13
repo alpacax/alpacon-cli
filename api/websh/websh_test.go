@@ -1366,6 +1366,7 @@ func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) 
 			_, err := shareCreatedSession(ac, []byte(`{"id":"../x"}`), tc.share, false)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Contains(t, err.Error(), "the server created the Websh session")
 		})
 	}
 }

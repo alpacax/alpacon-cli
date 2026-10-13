@@ -1771,3 +1771,47 @@ func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T)
 	require.ErrorIs(t, err, api.ErrInvalidID)
 	assert.False(t, opened, "the file must not be read for an upload that is refused")
 }
+
+func TestCompleteBulkUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() ([]io.Reader, []int64, func(), error) {
+		opened = true
+		return []io.Reader{strings.NewReader(""), strings.NewReader("")}, []int64{0, 0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":"id-1"},{"id":"../x"}]`), open)
+
+	require.ErrorIs(t, err, api.ErrInvalidID)
+	assert.False(t, opened, "the files must not be read for an upload that is refused")
+}
+
+func TestCompleteBulkUpload_TriggersAndPollsTheTrimmedUploadIDs(t *testing.T) {
+	t.Parallel()
+	var triggerReq BulkUploadTriggerRequest
+	var statusPaths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&triggerReq)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		statusPaths.Store(r.URL.Path, true)
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() ([]io.Reader, []int64, func(), error) {
+		return []io.Reader{strings.NewReader("")}, []int64{0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":" id-1 "}]`), open)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id-1"}, triggerReq.IDs)
+	_, polled := statusPaths.Load("/api/webftp/uploads/id-1/status/")
+	assert.True(t, polled, "status must be polled at the trimmed ID")
+}

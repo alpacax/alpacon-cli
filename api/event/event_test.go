@@ -2563,6 +2563,7 @@ func TestPostCommand_ReturnsOnlyAOneSegmentCommandID(t *testing.T) {
 
 			if tc.want == "" {
 				require.ErrorIs(t, err, api.ErrInvalidID)
+				assert.Contains(t, err.Error(), "the server created the command")
 				return
 			}
 			require.NoError(t, err)

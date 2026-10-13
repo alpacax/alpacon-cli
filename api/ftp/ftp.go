@@ -321,6 +321,13 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
 	}
+	for i := range responses {
+		id, err := api.RequireID(responses[i].ID, "upload")
+		if err != nil {
+			return err
+		}
+		responses[i].ID = id
+	}
 
 	files, sizes, cleanup, err := open()
 	if err != nil {
