@@ -231,11 +231,10 @@ func TestResolveCommandOutputSurfacesFetchFailure(t *testing.T) {
 
 func TestGetCommandChunks_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
-	ts, hits := testutil.NewNoRequestServer(t)
+	ts := testutil.NewNoRequestServer(t)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, err := getCommandChunks(ac, "../../etc/test", 0, noSeqBound)
 
 	require.ErrorIs(t, err, api.ErrInvalidID)
-	assert.Zero(t, hits.Load())
 }

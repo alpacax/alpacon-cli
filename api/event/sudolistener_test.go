@@ -743,11 +743,10 @@ func TestSudoListener_RetryVerifyUntilMFA_HonorsRetryAfter(t *testing.T) {
 
 func TestVerifySudoGrant_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
-	ts, hits := testutil.NewNoRequestServer(t)
+	ts := testutil.NewNoRequestServer(t)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	err := (&SudoListener{ac: ac}).verifySudoGrant("../../etc/test")
 
 	require.ErrorIs(t, err, api.ErrInvalidID)
-	assert.Zero(t, hits.Load())
 }

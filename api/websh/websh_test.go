@@ -1339,42 +1339,62 @@ func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ts, hits := testutil.NewNoRequestServer(t)
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := tt.call(ac)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
-			assert.Zero(t, hits.Load())
 		})
 	}
 }
 
 func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
-	ts, hits := testutil.NewNoRequestServer(t)
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	for _, tc := range []struct {
+		name  string
+		share bool
+	}{
+		{name: "shared", share: true},
+		{name: "not_shared", share: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := shareCreatedSession(ac, []byte(`{"id":"../x"}`), true, false)
+			_, err := shareCreatedSession(ac, []byte(`{"id":"../x"}`), tc.share, false)
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
-	assert.Zero(t, hits.Load())
+			require.ErrorIs(t, err, api.ErrInvalidID)
+		})
+	}
 }
 
-func TestShareCreatedSession_SharesAndReturnsTheTrimmedSessionID(t *testing.T) {
+func TestShareCreatedSession_ReturnsTheTrimmedSessionID(t *testing.T) {
 	t.Parallel()
-	var uri string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		uri = r.RequestURI
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"shared_url":"https://example.com/s","password":"pw","expiration":"2026-01-01T00:00:00Z"}`))
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	for _, tc := range []struct {
+		name, uri string
+		share     bool
+	}{
+		{name: "shared", share: true, uri: "/api/websh/sessions/session-1/share/"},
+		{name: "not_shared", share: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var uri string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				uri = r.RequestURI
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"shared_url":"https://example.com/s","password":"pw","expiration":"2026-01-01T00:00:00Z"}`))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	session, err := shareCreatedSession(ac, []byte(`{"id":" session-1 "}`), true, false)
+			session, err := shareCreatedSession(ac, []byte(`{"id":" session-1 "}`), tc.share, false)
 
-	require.NoError(t, err)
-	assert.Equal(t, "/api/websh/sessions/session-1/share/", uri)
-	assert.Equal(t, "session-1", session.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.uri, uri)
+			assert.Equal(t, "session-1", session.ID)
+		})
+	}
 }

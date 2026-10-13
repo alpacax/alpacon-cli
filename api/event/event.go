@@ -297,7 +297,11 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 	if len(cmdResponse) == 0 {
 		return CommandResponse{}, fmt.Errorf("server returned empty command list")
 	}
-	return cmdResponse[0], nil
+	created := cmdResponse[0]
+	if created.ID, err = api.RequireID(created.ID, "command"); err != nil {
+		return CommandResponse{}, err
+	}
+	return created, nil
 }
 
 // AnswerPurposeDemand states what a parked command is for and sends it back
@@ -548,6 +552,10 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 }
 
 func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDelays, cmdID string, out io.Writer, timeout time.Duration) error {
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return err
+	}
 	listener := newCommandOutputListener(ac, delays.connectTimeout)
 	listener.reconnectBaseDelay = delays.reconnectBaseDelay
 	listener.Start()

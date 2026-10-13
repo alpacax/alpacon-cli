@@ -212,13 +212,12 @@ func TestCloseEventSession_RefusesAnIDThatIsNotOneSegment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			ts, hits := testutil.NewNoRequestServer(t)
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := CloseEventSession(t.Context(), ac, tc.id)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
-			assert.Zero(t, hits.Load())
 		})
 	}
 }

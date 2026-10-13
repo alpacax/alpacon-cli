@@ -604,13 +604,12 @@ func TestRBACCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ts, hits := testutil.NewNoRequestServer(t)
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := tt.call(ac)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
-			assert.Zero(t, hits.Load())
 		})
 	}
 }

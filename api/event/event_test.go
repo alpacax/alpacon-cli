@@ -2534,13 +2534,49 @@ func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ts, hits := testutil.NewNoRequestServer(t)
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := tt.call(ac)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
-			assert.Zero(t, hits.Load())
 		})
 	}
+}
+
+func TestPostCommand_ReturnsOnlyAOneSegmentCommandID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " cmd-1 ", want: "cmd-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode([]CommandResponse{{ID: tc.id}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			created, err := postCommand(ac, &CommandRequest{})
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrInvalidID)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, created.ID)
+		})
+	}
+}
+
+func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
+
+	require.ErrorIs(t, err, api.ErrInvalidID)
 }

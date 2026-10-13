@@ -1746,20 +1746,19 @@ func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			ts, hits := testutil.NewNoRequestServer(t)
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := tt.call(ac, ts.URL)
 
 			require.ErrorIs(t, err, api.ErrInvalidID)
-			assert.Zero(t, hits.Load())
 		})
 	}
 }
 
 func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
-	ts, hits := testutil.NewNoRequestServer(t)
+	ts := testutil.NewNoRequestServer(t)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	opened := false
 	open := func() (io.Reader, int64, func(), error) {
@@ -1771,5 +1770,4 @@ func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T)
 
 	require.ErrorIs(t, err, api.ErrInvalidID)
 	assert.False(t, opened, "the file must not be read for an upload that is refused")
-	assert.Zero(t, hits.Load())
 }
