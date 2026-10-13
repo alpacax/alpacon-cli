@@ -59,6 +59,10 @@ func projectAttributes(r *ApprovalRequest) ApprovalRequestAttributes {
 }
 
 func GetApprovalRequest(ac *client.AlpaconClient, id string) (*ApprovalRequest, error) {
+	id, err := api.RequireID(id, "approval request")
+	if err != nil {
+		return nil, err
+	}
 	body, err := ac.SendGetRequest(utils.BuildURL(approvalURL, id, nil))
 	if err != nil {
 		return nil, err
@@ -71,10 +75,18 @@ func GetApprovalRequest(ac *client.AlpaconClient, id string) (*ApprovalRequest, 
 }
 
 func GetApprovalRequestRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
+	id, err := api.RequireID(id, "approval request")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(approvalURL, id, nil))
 }
 
 func CancelRequest(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "cancel"), nil), struct{}{})
+	id, err := api.RequireID(id, "approval request")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "cancel"), nil), struct{}{})
 	return err
 }

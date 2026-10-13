@@ -81,6 +81,10 @@ func GetClusterDetail(ac *client.AlpaconClient, clusterID string) (*ClusterDetai
 
 // GetClusterDetailRaw fetches one cluster by ID and returns the body as the server sent it.
 func GetClusterDetailRaw(ac *client.AlpaconClient, clusterID string) ([]byte, error) {
+	clusterID, err := api.RequireID(clusterID, "cluster")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(clusterURL, clusterID, nil))
 }
 

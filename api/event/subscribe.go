@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -83,9 +84,9 @@ func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventT
 // CloseEventSession closes an event session. The server keeps a closed session and
 // answers 204 for one that is already closed.
 func CloseEventSession(ctx context.Context, ac *client.AlpaconClient, id string) error {
-	// url.PathEscape keeps dot segments, which a server or proxy may resolve to another route.
-	if id == "" || id == "." || id == ".." {
-		return fmt.Errorf("invalid event session id %q", id)
+	id, err := api.RequireID(id, "event session")
+	if err != nil {
+		return err
 	}
 	if _, err := ac.SendDeleteRequestWithContext(ctx, eventSessionsURL+url.PathEscape(id)+"/"); err != nil {
 		return fmt.Errorf("failed to close event session: %w", err)

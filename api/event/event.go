@@ -310,11 +310,19 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 // command is parked is not something a bystander needs to learn. So a failure
 // here cannot be read as "the deadline passed" specifically.
 func AnswerPurposeDemand(ac *client.AlpaconClient, cmdID, purpose string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(getEventURL, cmdID+"/purpose", nil), CommandPurposeRequest{Purpose: purpose})
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(getEventURL, cmdID+"/purpose", nil), CommandPurposeRequest{Purpose: purpose})
 	return err
 }
 
 func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return EventDetails{}, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 	if err != nil {
 		return EventDetails{}, err
@@ -359,6 +367,11 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
+
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return response, err
+	}
 
 	started := seams.Now()
 	deadline := started.Add(timeout)

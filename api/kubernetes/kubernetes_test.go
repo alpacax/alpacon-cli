@@ -12,6 +12,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -474,6 +475,36 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 			defer ts.Close()
 
 			require.Error(t, CloseSession(newTestClient(ts), tt.sessionID))
+			assert.Zero(t, hits.Load())
+		})
+	}
+}
+
+func TestClusterCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetClusterDetailRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetClusterDetailRaw(ac, badID)
+			return err
+		}},
+		{"GetClusterDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetClusterDetail(ac, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
 			assert.Zero(t, hits.Load())
 		})
 	}

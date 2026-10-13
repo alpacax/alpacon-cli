@@ -1,7 +1,11 @@
 package utils
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,4 +103,30 @@ func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
 	envelope := buildCliErrorEnvelope("work-session create", "", "work session was rejected")
 
 	assert.Equal(t, 1, envelope.ExitCode)
+}
+
+func TestCliErrorEnvelopeWithExit_InvalidIDUsesUsageExit(t *testing.T) {
+	t.Parallel()
+	help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitInvalidIDHelperProcess$")
+	help.Env = append(os.Environ(), "GO_WANT_INVALID_ID_ENVELOPE_HELPER=1")
+
+	output, err := help.CombinedOutput()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
+	var envelope JSONErrorEnvelope[cliErrorCtx]
+	require.NoError(t, json.Unmarshal(output, &envelope), "output: %s", output)
+	assert.Equal(t, ExitCodeUsageError, envelope.ExitCode)
+	assert.Equal(t, UsageErrorCode, envelope.ErrorCode)
+	assert.Equal(t, "wait", envelope.Context.Operation)
+}
+
+func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_INVALID_ID_ENVELOPE_HELPER") != "1" {
+		return
+	}
+	OutputFormat = OutputFormatJSON
+	err := fmt.Errorf("invalid target ID: %w", ErrInvalidID)
+	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
 }

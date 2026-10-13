@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -333,11 +334,13 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 }
 
 func (sl *SudoListener) verifySudoGrant(grantID string) error {
-	// PathEscape the server-issued grant ID so a stray '/' cannot redirect
-	// the request to an unintended endpoint.
+	grantID, err := api.RequireID(grantID, "sudo grant")
+	if err != nil {
+		return err
+	}
 	endpoint := fmt.Sprintf(sudoVerifyURLFmt, url.PathEscape(grantID))
 
-	_, err := sl.ac.SendPostRequest(endpoint, struct{}{})
+	_, err = sl.ac.SendPostRequest(endpoint, struct{}{})
 	if err != nil {
 		return utils.MarkSubmission(fmt.Errorf("failed to verify sudo grant: %w", err))
 	}

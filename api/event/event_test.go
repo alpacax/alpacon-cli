@@ -2513,3 +2513,34 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"AnswerPurposeDemand", func(ac *client.AlpaconClient) error { return AnswerPurposeDemand(ac, badID, "rotate logs") }},
+		{"GetCommandByID", func(ac *client.AlpaconClient) error {
+			_, err := GetCommandByID(ac, badID)
+			return err
+		}},
+		{"PollCommandExecution", func(ac *client.AlpaconClient) error {
+			_, err := PollCommandExecution(ac, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Zero(t, hits.Load())
+		})
+	}
+}

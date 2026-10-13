@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	configpkg "github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -673,6 +674,33 @@ func TestLoginAndSaveCredentialsPasswordKeepsCodeOfRefusedLogin(t *testing.T) {
 			assert.Equal(t, tt.wantCode, code)
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
 			assert.Equal(t, fmt.Sprintf("response status: %d %s", tt.status, http.StatusText(tt.status)), err.Error())
+		})
+	}
+}
+
+func TestAPITokenCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"DeleteAPIToken", func(ac *client.AlpaconClient) error { return DeleteAPIToken(ac, badID) }},
+		{"DuplicateAPIToken", func(ac *client.AlpaconClient) error {
+			_, err := DuplicateAPIToken(ac, badID, "copy")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Zero(t, hits.Load())
 		})
 	}
 }

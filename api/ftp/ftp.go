@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -80,15 +81,22 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 }
 
 // transferStatusURL is the status endpoint of an upload or download transfer.
-func transferStatusURL(transferType, id string) string {
-	if transferType == "upload" {
-		return fmt.Sprintf(uploadStatusURL, id)
+func transferStatusURL(transferType, id string) (string, error) {
+	id, err := api.RequireID(id, "transfer")
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf(downloadStatusURL, id)
+	if transferType == "upload" {
+		return fmt.Sprintf(uploadStatusURL, id), nil
+	}
+	return fmt.Sprintf(downloadStatusURL, id), nil
 }
 
 func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
-	statusURL := transferStatusURL(transferType, id)
+	statusURL, err := transferStatusURL(transferType, id)
+	if err != nil {
+		return false, "", err
+	}
 
 	start := time.Now()
 	deadline := start.Add(timeout)
@@ -1109,9 +1117,12 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 			// running the whole poll under the gate. A transient failure is
 			// ridden through as the full poll rides through it, so a flaky read
 			// does not end the wait.
-			var probeErr error
+			statusURL, probeErr := transferStatusURL(transferType, id)
+			if probeErr != nil {
+				return probeErr
+			}
 			for failures := range utils.MaxConsecutivePollFailures {
-				_, probeErr = ac.SendGetRequest(transferStatusURL(transferType, id))
+				_, probeErr = ac.SendGetRequest(statusURL)
 				if probeErr == nil || !utils.IsTransientRequestError(probeErr) {
 					break
 				}

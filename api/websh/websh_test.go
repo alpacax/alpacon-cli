@@ -1303,3 +1303,49 @@ func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T)
 		})
 	}
 }
+
+func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+
+	const traversal = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetSessionDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetSessionDetail(ac, traversal)
+			return err
+		}},
+		{"GetSessionRecords", func(ac *client.AlpaconClient) error {
+			_, err := GetSessionRecords(ac, traversal, "", 10)
+			return err
+		}},
+		{"CloseSession", func(ac *client.AlpaconClient) error {
+			return CloseSession(ac, traversal)
+		}},
+		{"ForceCloseSession", func(ac *client.AlpaconClient) error {
+			return ForceCloseSession(ac, traversal)
+		}},
+		{"InviteToSession", func(ac *client.AlpaconClient) error {
+			return InviteToSession(ac, traversal, []string{"alice@example.com"}, false)
+		}},
+		{"SendTerminalSize", func(ac *client.AlpaconClient) error { return SendTerminalSize(ac, traversal) }},
+		{"JoinWebshSession_traversing_channel", func(ac *client.AlpaconClient) error {
+			_, err := JoinWebshSession(ac, "https://example.com/join?channel=%2E%2E%2F%2E%2E%2Fetc%2Ftest", "pw")
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Zero(t, hits.Load())
+		})
+	}
+}

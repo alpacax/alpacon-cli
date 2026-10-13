@@ -2,9 +2,12 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // ErrBlankName marks a resolver's refusal of a name that trims to empty, so a caller can
@@ -36,6 +39,31 @@ func RequireName(name, blankMsg string) (string, error) {
 		return "", &blankNameError{msg: blankMsg}
 	}
 	return name, nil
+}
+
+// ErrInvalidID is the sentinel every RequireID refusal wraps; it is utils.ErrInvalidID.
+var ErrInvalidID = utils.ErrInvalidID
+
+type invalidIDError struct {
+	id   string
+	what string
+}
+
+func (e *invalidIDError) Error() string {
+	return fmt.Sprintf("invalid %s ID %q: must be a single path segment", e.what, e.id)
+}
+func (e *invalidIDError) Unwrap() error       { return utils.ErrInvalidID }
+func (e *invalidIDError) ErrorCode() string   { return utils.UsageErrorCode }
+func (e *invalidIDError) ErrorSource() string { return "" }
+
+// RequireID trims id and refuses anything that is not one URL path segment. BuildURL's
+// path.Join resolves "..", and a server or proxy may decode "%2F", so either would retarget the request.
+func RequireID(id, what string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\?#%;`) || strings.ContainsFunc(id, unicode.IsControl) {
+		return "", &invalidIDError{id: id, what: what}
+	}
+	return id, nil
 }
 
 // ResolveByName looks up a single resource through a server-side, exact-match name filter.

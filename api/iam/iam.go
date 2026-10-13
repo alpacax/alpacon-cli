@@ -90,6 +90,10 @@ func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
 }
 
 func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
+	userId, err := api.RequireID(userId, "user")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, userId, nil))
 	if err != nil {
 		return nil, err
@@ -99,6 +103,10 @@ func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
 }
 
 func GetGroupDetail(ac *client.AlpaconClient, groupId string) ([]byte, error) {
+	groupId, err := api.RequireID(groupId, "group")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(groupURL, groupId, nil))
 	if err != nil {
 		return nil, err
@@ -339,6 +347,10 @@ func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *User
 }
 
 func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) ([]byte, error) {
+	userID, err := api.RequireID(userID, "user")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
 }
 

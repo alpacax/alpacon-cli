@@ -45,6 +45,10 @@ func GetRevokeRequestList(ac *client.AlpaconClient, status string, certificate s
 }
 
 func GetRevokeRequestDetail(ac *client.AlpaconClient, requestId string) ([]byte, error) {
+	requestId, err := api.RequireID(requestId, "revoke request")
+	if err != nil {
+		return nil, err
+	}
 	body, err := ac.SendGetRequest(utils.BuildURL(revokeRequestURL, requestId, nil))
 	if err != nil {
 		return nil, err
@@ -69,6 +73,10 @@ func CreateRevokeRequest(ac *client.AlpaconClient, request RevokeRequestCreate) 
 }
 
 func ApproveRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
+	requestId, err := api.RequireID(requestId, "revoke request")
+	if err != nil {
+		return nil, err
+	}
 	relativePath := path.Join(requestId, "approve")
 	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
@@ -79,6 +87,10 @@ func ApproveRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, e
 }
 
 func DenyRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
+	requestId, err := api.RequireID(requestId, "revoke request")
+	if err != nil {
+		return nil, err
+	}
 	relativePath := path.Join(requestId, "deny")
 	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
@@ -89,6 +101,10 @@ func DenyRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, erro
 }
 
 func RetryRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
+	requestId, err := api.RequireID(requestId, "revoke request")
+	if err != nil {
+		return nil, err
+	}
 	relativePath := path.Join(requestId, "retry")
 	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
@@ -99,7 +115,11 @@ func RetryRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, err
 }
 
 func CancelRevokeRequest(ac *client.AlpaconClient, requestId string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(revokeRequestURL, requestId, nil))
+	requestId, err := api.RequireID(requestId, "revoke request")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(revokeRequestURL, requestId, nil))
 	if err != nil {
 		return err
 	}

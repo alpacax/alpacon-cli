@@ -13,6 +13,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -738,4 +739,15 @@ func TestSudoListener_RetryVerifyUntilMFA_HonorsRetryAfter(t *testing.T) {
 			assert.Equal(t, tc.wantGap, rt.arrivals[1].Sub(rt.arrivals[0]))
 		})
 	}
+}
+
+func TestVerifySudoGrant_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	ts, hits := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := (&SudoListener{ac: ac}).verifySudoGrant("../../etc/test")
+
+	require.ErrorIs(t, err, api.ErrInvalidID)
+	assert.Zero(t, hits.Load())
 }

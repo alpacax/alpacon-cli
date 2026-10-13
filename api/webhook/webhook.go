@@ -32,6 +32,10 @@ func GetWebhookList(ac *client.AlpaconClient) ([]WebhookAttributes, error) {
 }
 
 func GetWebhookDetail(ac *client.AlpaconClient, webhookId string) ([]byte, error) {
+	webhookId, err := api.RequireID(webhookId, "webhook")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(webhookURL, webhookId, nil))
 	if err != nil {
 		return nil, err

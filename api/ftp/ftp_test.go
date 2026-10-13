@@ -19,6 +19,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1724,4 +1725,34 @@ func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
 	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
+}
+
+func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient, baseURL string) error
+	}{
+		{"PollTransferStatus_upload", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "upload", badID, time.Second)
+			return err
+		}},
+		{"PollTransferStatus_download", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "download", badID, time.Second)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac, ts.URL)
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Zero(t, hits.Load())
+		})
+	}
 }

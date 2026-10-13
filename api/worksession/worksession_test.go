@@ -6,12 +6,14 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -564,4 +566,80 @@ func TestWorkSessionUnmarshalNoAdjustments(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"id":"ses-1","adjustments":null,"recommendations":[]}`), &ws))
 	assert.Nil(t, ws.Adjustments)
 	assert.Empty(t, ws.Recommendations)
+}
+
+func TestWorkSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"UpdateWorkSession", func(ac *client.AlpaconClient) error {
+			_, err := UpdateWorkSession(ac, badID, WorkSessionUpdateRequest{})
+			return err
+		}},
+		{"GetWorkSession", func(ac *client.AlpaconClient) error {
+			_, err := GetWorkSession(ac, badID)
+			return err
+		}},
+		{"ActivateWorkSession", func(ac *client.AlpaconClient) error { return ActivateWorkSession(ac, badID) }},
+		{"CompleteWorkSession", func(ac *client.AlpaconClient) error { return CompleteWorkSession(ac, badID) }},
+		{"ExtendWorkSession", func(ac *client.AlpaconClient) error {
+			_, _, err := ExtendWorkSession(ac, badID, WorkSessionExtendRequest{})
+			return err
+		}},
+		{"RevokeWorkSession", func(ac *client.AlpaconClient) error { return RevokeWorkSession(ac, badID) }},
+		{"CancelWorkSession", func(ac *client.AlpaconClient) error { return CancelWorkSession(ac, badID) }},
+		{"GetWorkSessionRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetWorkSessionRaw(ac, badID)
+			return err
+		}},
+		{"GetWorkSessionTimeline", func(ac *client.AlpaconClient) error {
+			_, err := GetWorkSessionTimeline(ac, badID, false)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, hits := testutil.NewNoRequestServer(t)
+
+			err := tt.call(newTestClient(ts))
+
+			require.ErrorIs(t, err, api.ErrInvalidID)
+			assert.Zero(t, hits.Load())
+		})
+	}
+}
+
+func TestWorkSessionCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+		want string
+	}{
+		{"GetWorkSessionRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetWorkSessionRaw(ac, " 42 ")
+			return err
+		}, "GET /api/work-sessions/sessions/42/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.Store(r.Method + " " + r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+
+			err := tt.call(newTestClient(ts))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Load())
+		})
+	}
 }

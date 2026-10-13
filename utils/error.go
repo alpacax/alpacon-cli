@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// ErrInvalidID marks a local refusal of an ID that is unsafe as a URL path segment.
+var ErrInvalidID = errors.New("invalid id")
+
 const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
