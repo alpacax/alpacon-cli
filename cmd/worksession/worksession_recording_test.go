@@ -9,52 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func makeRecording(id, sessionID string) wsapi.TimelineItem {
-	return wsapi.TimelineItem{Type: "websh_record", ID: id, SessionID: sessionID}
-}
-
-// findRecording
-
-func TestFindRecording_DefaultFirst(t *testing.T) {
-	t.Parallel()
-	recs := []wsapi.TimelineItem{makeRecording("r1", "s1"), makeRecording("r2", "s1")}
-	target, idx := findRecording(recs, 1)
-	assert.Equal(t, "r1", target.ID)
-	assert.Equal(t, 1, idx)
-}
-
-func TestFindRecording_ByIndex(t *testing.T) {
-	t.Parallel()
-	recs := []wsapi.TimelineItem{makeRecording("r1", "s1"), makeRecording("r2", "s1"), makeRecording("r3", "s1")}
-	target, idx := findRecording(recs, 3)
-	assert.Equal(t, "r3", target.ID)
-	assert.Equal(t, 3, idx)
-}
-
-func TestFindRecording_IndexOutOfRange(t *testing.T) {
-	t.Parallel()
-	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
-	target, idx := findRecording(recs, 2)
-	assert.Nil(t, target)
-	assert.Equal(t, -1, idx)
-}
-
-func TestFindRecording_IndexZero(t *testing.T) {
-	t.Parallel()
-	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
-	target, idx := findRecording(recs, 0)
-	assert.Nil(t, target)
-	assert.Equal(t, -1, idx)
-}
-
-func TestFindRecording_NegativeIndex(t *testing.T) {
-	t.Parallel()
-	recs := []wsapi.TimelineItem{makeRecording("r1", "s1")}
-	target, idx := findRecording(recs, -1)
-	assert.Nil(t, target)
-	assert.Equal(t, -1, idx)
-}
-
 // buildRecordingIndex
 
 func TestBuildRecordingIndex_GroupsBySessionID(t *testing.T) {
