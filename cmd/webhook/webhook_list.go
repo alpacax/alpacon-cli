@@ -12,7 +12,7 @@ var webhookListCmd = &cobra.Command{
 	Aliases: []string{"list"},
 	Short:   "List all webhooks",
 	Long: `
-	List all configured webhooks with their name, URL, status, and owner information.
+	List all configured webhooks with their name, URL, and status.
 	`,
 	Example: `
 	alpacon webhook list

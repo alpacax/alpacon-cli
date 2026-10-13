@@ -16,7 +16,7 @@ var revokeListCmd = &cobra.Command{
 	`,
 	Example: `
 	alpacon revoke list
-	alpacon revoke ls --status=pending
+	alpacon revoke ls --status=requested
 	alpacon revoke ls --certificate=550e8400-e29b-41d4-a716-446655440000
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -38,6 +38,6 @@ var revokeListCmd = &cobra.Command{
 }
 
 func init() {
-	revokeListCmd.Flags().String("status", "", "Filter by status (e.g., pending, approved, denied)")
+	revokeListCmd.Flags().String("status", "", "Filter by status (requested, revoking, revoked, failed, denied, canceled)")
 	revokeListCmd.Flags().String("certificate", "", "Filter by certificate ID")
 }

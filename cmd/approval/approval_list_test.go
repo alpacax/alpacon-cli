@@ -35,6 +35,7 @@ func TestValidateStatusFilter(t *testing.T) {
 		{"rejected", false},
 		{"cancelled", false},
 		{"expired", false},
+		{"recorded", false},
 		{"unknown", true},
 		{"PENDING", true},
 		{"active", true},
@@ -67,6 +68,9 @@ func TestValidateTypeFilter(t *testing.T) {
 		{"app_username", false},
 		{"work_session_mod", false},
 		{"sudo_policy", false},
+		{"command_exec", false},
+		{"discovered_account_accept", false},
+		{"api_token_scope_expand", false},
 		{"bad_type", true},
 		{"WorkSession", true},
 	}
