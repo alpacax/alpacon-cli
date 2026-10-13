@@ -297,17 +297,17 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 	if err != nil {
 		return SessionResponse{}, err
 	}
+	response.ID, err = api.RequireID(response.ID, "Websh session")
+	if err != nil {
+		return SessionResponse{}, err
+	}
 
 	if share {
 		shareRequest := &ShareRequest{
 			ReadOnly: readOnly,
 		}
 		var shareResponse ShareResponse
-		sessionID, err := api.RequireID(response.ID, "Websh session")
-		if err != nil {
-			return SessionResponse{}, err
-		}
-		relativePath := path.Join(sessionID, "share")
+		relativePath := path.Join(response.ID, "share")
 		responseBody, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, relativePath, nil), shareRequest)
 		if err != nil {
 			return SessionResponse{}, err

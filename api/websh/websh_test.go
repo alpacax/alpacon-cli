@@ -1360,3 +1360,21 @@ func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) 
 	require.ErrorIs(t, err, api.ErrInvalidID)
 	assert.Zero(t, hits.Load())
 }
+
+func TestShareCreatedSession_SharesAndReturnsTheTrimmedSessionID(t *testing.T) {
+	t.Parallel()
+	var uri string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uri = r.RequestURI
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"shared_url":"https://example.com/s","password":"pw","expiration":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	session, err := shareCreatedSession(ac, []byte(`{"id":" session-1 "}`), true, false)
+
+	require.NoError(t, err)
+	assert.Equal(t, "/api/websh/sessions/session-1/share/", uri)
+	assert.Equal(t, "session-1", session.ID)
+}
