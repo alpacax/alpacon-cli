@@ -84,6 +84,7 @@ func TestVersionCommandPrintsJSONOnStdoutWithOutputJSON(t *testing.T) {
 
 	assert.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.JSONEq(t, `{"version":"1.3.0","latest":"1.4.0","update_available":true,"release_url":"https://example.test/releases"}`, stdout)
+	assert.Empty(t, stderr)
 }
 
 func TestVersionCommandPrintsTheCurrentVersionAndExitsZeroWhenTheReleaseLookupFails(t *testing.T) {
