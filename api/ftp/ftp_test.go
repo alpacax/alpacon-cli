@@ -1772,6 +1772,29 @@ func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T)
 	assert.False(t, opened, "the file must not be read for an upload that is refused")
 }
 
+func TestCompleteSingleUpload_TriggersAndPollsTheTrimmedUploadID(t *testing.T) {
+	t.Parallel()
+	var paths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths.Store(r.URL.Path, true)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() (io.Reader, int64, func(), error) {
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":" id-1 "}`), open)
+
+	require.NoError(t, err)
+	for _, path := range []string{"/api/webftp/uploads/id-1/upload/", "/api/webftp/uploads/id-1/status/"} {
+		_, sent := paths.Load(path)
+		assert.True(t, sent, "no request reached %s", path)
+	}
+}
+
 func TestCompleteBulkUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
 	ts := testutil.NewNoRequestServer(t)

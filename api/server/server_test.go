@@ -695,23 +695,35 @@ func TestGetServerIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 	}
 }
 
-func TestDeleteRegistrationToken_RefusesATokenIDThatIsNotOneSegment(t *testing.T) {
+func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
 	t.Parallel()
-	var deletes atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			deletes.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[RegistrationTokenDetails]{Count: 1, Results: []RegistrationTokenDetails{{ID: "../x", Name: "my-token"}}})
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	for _, tc := range []struct{ name, id, wantDelete string }{
+		{name: "padded_id", id: " tok-1 ", wantDelete: "/api/servers/registration-tokens/tok-1/"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var deleted string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					deleted = r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[RegistrationTokenDetails]{Count: 1, Results: []RegistrationTokenDetails{{ID: tc.id, Name: "my-token"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	err := DeleteRegistrationToken(ac, "my-token")
+			err := DeleteRegistrationToken(ac, "my-token")
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
-	assert.Zero(t, deletes.Load())
+			if tc.wantDelete == "" {
+				require.ErrorIs(t, err, api.ErrInvalidID)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantDelete, deleted)
+		})
+	}
 }

@@ -641,30 +641,42 @@ func TestGetGroupIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 	}
 }
 
-func TestDeleteMember_RefusesAMembershipIDThatIsNotOneSegment(t *testing.T) {
+func TestDeleteMember_DeletesOnlyAOneSegmentMembershipID(t *testing.T) {
 	t.Parallel()
-	var deletes atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			deletes.Add(1)
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case groupURL:
-			_ = json.NewEncoder(w).Encode(api.ListResponse[GroupResponse]{Count: 1, Results: []GroupResponse{{ID: "group-1", Name: "my-group"}}})
-		case userURL:
-			_ = json.NewEncoder(w).Encode(api.ListResponse[UserResponse]{Count: 1, Results: []UserResponse{{ID: "user-1", Username: "alice"}}})
-		default:
-			_ = json.NewEncoder(w).Encode(api.ListResponse[MemberDetailResponse]{Count: 1, Results: []MemberDetailResponse{{ID: "../x"}}})
-		}
-	}))
-	defer ts.Close()
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	for _, tc := range []struct{ name, id, wantDelete string }{
+		{name: "padded_id", id: " membership-1 ", wantDelete: "/api/iam/memberships/membership-1/"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var deleted string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					deleted = r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case groupURL:
+					_ = json.NewEncoder(w).Encode(api.ListResponse[GroupResponse]{Count: 1, Results: []GroupResponse{{ID: "group-1", Name: "my-group"}}})
+				case userURL:
+					_ = json.NewEncoder(w).Encode(api.ListResponse[UserResponse]{Count: 1, Results: []UserResponse{{ID: "user-1", Username: "alice"}}})
+				default:
+					_ = json.NewEncoder(w).Encode(api.ListResponse[MemberDetailResponse]{Count: 1, Results: []MemberDetailResponse{{ID: tc.id}}})
+				}
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	err := DeleteMember(ac, MemberDeleteRequest{User: "alice", Group: "my-group"})
+			err := DeleteMember(ac, MemberDeleteRequest{User: "alice", Group: "my-group"})
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
-	assert.Zero(t, deletes.Load())
+			if tc.wantDelete == "" {
+				require.ErrorIs(t, err, api.ErrInvalidID)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantDelete, deleted)
+		})
+	}
 }
