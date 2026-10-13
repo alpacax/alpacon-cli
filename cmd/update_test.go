@@ -227,8 +227,14 @@ func TestUpdateCommandHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_UPDATE_HELPER") != "1" {
 		return
 	}
-	if latest := os.Getenv("ALPACON_TEST_LATEST_RELEASE"); latest != "" {
+	latest := os.Getenv("ALPACON_TEST_LATEST_RELEASE")
+	fails := os.Getenv("ALPACON_TEST_RELEASE_FAILS") == "1"
+	if latest != "" || fails {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if fails {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			_, _ = fmt.Fprintf(w, `{"tag_name":"v%s","html_url":"https://example.test/releases"}`, latest)
 		}))
 		defer ts.Close()
