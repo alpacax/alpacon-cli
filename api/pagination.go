@@ -125,13 +125,8 @@ func walkCursorPages[T any](ac *client.AlpaconClient, endpoint string, params ma
 	params = copyParams(params)
 
 	result := make([]T, 0, min(limit, maxPageSize))
-	// Named on every request, empty on the first, which also overwrites any
-	// cursor the caller supplied so the walk starts from the first page. The
-	// key is what makes the request a cursor walk: a list that always pages
-	// reads an empty cursor as its first page, and a route where paging is an
-	// opt-in reads the key itself as the opt-in—left off, that route answers
-	// the first request with the whole list, no `next` ever arrives, and the
-	// walk ends after one response having paged nothing.
+	// Named on every request, empty on the first, because a route where paging
+	// is opt-in reads the key itself as the opt-in.
 	cursor := ""
 	for len(result) < limit {
 		params["page_size"] = strconv.Itoa(min(maxPageSize, limit-len(result)))
