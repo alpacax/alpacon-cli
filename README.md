@@ -151,6 +151,17 @@ $ alpacon websh <server>
 $ alpacon exec <server> "uptime"
 $ alpacon cp ./file.txt <server>:/tmp/
 $ alpacon tunnel <server> -l 9000 -r 8082
+
+# An AI agent replaces steps 3 and 4: it drops --use and websh, which an agent session
+# refuses, and names the session before the server on each command.
+$ alpacon work-session create \
+    --purpose "describe the task" \
+    --scope command \
+    --server <server> \
+    --expires-in 1h \
+    --requester-type agent \
+    --wait
+$ alpacon exec --work-session <SESSION_ID> <server> "uptime"
 ```
 
 CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
