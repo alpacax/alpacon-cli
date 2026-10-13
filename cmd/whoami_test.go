@@ -151,34 +151,46 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestFormatExpiresHuman(t *testing.T) {
+func TestFormatExpiresHuman_PassesThroughANonTimestamp(t *testing.T) {
 	t.Parallel()
-	past, day2, half := -1*time.Hour, 48*time.Hour, 30*time.Minute
 	tests := []struct {
-		name       string
-		offset     *time.Duration // nil for a literal input that is no timestamp
-		input      string
-		want       string
-		wantSuffix string
+		name  string
+		input string
 	}{
-		{name: "empty string", input: "", want: ""},
-		{name: "invalid format", input: "not-a-date", want: "not-a-date"},
-		{name: "expired token", offset: &past, wantSuffix: " (expired)"},
-		{name: "future token with days", offset: &day2, wantSuffix: " (2d 0h remaining)"},
-		{name: "future token under 1 hour", offset: &half, wantSuffix: " (30m remaining)"},
+		{name: "empty string", input: ""},
+		{name: "invalid format", input: "not-a-date"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.input, formatExpiresHuman(tt.input))
+		})
+	}
+}
+
+func TestFormatExpiresHuman_AppendsTheTimeLeft(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		offset     time.Duration
+		wantSuffix string
+	}{
+		{name: "expired token", offset: -time.Hour, wantSuffix: " (expired)"},
+		{name: "future token with days", offset: 48 * time.Hour, wantSuffix: " (2d 0h remaining)"},
+		{name: "future token under 1 hour", offset: 30 * time.Minute, wantSuffix: " (30m remaining)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			// t.Run cannot be called from inside a bubble, so each case enters its own.
 			synctest.Test(t, func(t *testing.T) {
-				input, want := tt.input, tt.want
-				if tt.offset != nil {
-					expires := time.Now().Add(*tt.offset)
-					input = expires.Format(time.RFC3339)
-					want = expires.Local().Format("2006-01-02 15:04 MST") + tt.wantSuffix
-				}
-				assert.Equal(t, want, formatExpiresHuman(input))
+				expires := time.Now().Add(tt.offset)
+
+				got := formatExpiresHuman(expires.Format(time.RFC3339))
+
+				assert.Equal(t, expires.Local().Format("2006-01-02 15:04 MST")+tt.wantSuffix, got)
 			})
 		})
 	}
