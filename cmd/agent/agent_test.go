@@ -64,7 +64,9 @@ func TestAgentInstallPAMSendsTheAction(t *testing.T) {
 				Results: []server.ServerDetails{{ID: serverID, Name: "my-server"}},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/servers/servers/"+serverID+"/actions/":
-			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode action body: %v", err)
+			}
 			w.WriteHeader(http.StatusCreated)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
