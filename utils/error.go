@@ -20,6 +20,10 @@ const (
 	AuthTokenMissing         = "auth_token_missing"
 	AuthAuthenticationFailed = "auth_authentication_failed"
 
+	// AuthTokenMFAMissing rides a 401: the token was issued without the
+	// workspace's sign-in MFA, and only a new login, which runs it, can lift it.
+	AuthTokenMFAMissing = "auth_token_mfa_missing"
+
 	// AuthVerificationUnavailable rides a 503: the server could not check the
 	// credential, did not reject it, and a retry can succeed.
 	AuthVerificationUnavailable = "auth_verification_unavailable"

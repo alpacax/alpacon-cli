@@ -752,9 +752,59 @@ func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
 	}
 }
 
+func TestSendRequest_401LoginCodeWithDetailKeepsLoginHint(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code": "` + code + `", "detail": "Sign-in rejected."}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+
+			require.Error(t, err)
+			assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+			assert.Equal(t, "Sign-in rejected. (run 'alpacon login' again)", err.Error())
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
+// TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal covers a token
+// issued without sign-in MFA, which stays refused however often it is renewed.
+func TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_token_mfa_missing"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+	assert.Equal(t, "multi-factor authentication required at sign-in: please run 'alpacon login' again", err.Error())
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthTokenMFAMissing, code)
+}
+
 func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 	t.Parallel()
-	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed} {
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -767,6 +817,7 @@ func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 			ac := newTestClient(ts.URL)
 			_, err := ac.SendGetRequest("/api/test/")
 			require.Error(t, err)
+			assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
 			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
 			assert.NotContains(t, err.Error(), "alpacon login")
 
