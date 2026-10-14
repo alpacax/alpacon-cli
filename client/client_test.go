@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -751,9 +752,59 @@ func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
 	}
 }
 
+func TestSendRequest_401LoginCodeWithDetailKeepsLoginHint(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code": "` + code + `", "detail": "Sign-in rejected."}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+
+			require.Error(t, err)
+			assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+			assert.Equal(t, "Sign-in rejected. (run 'alpacon login' again)", err.Error())
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
+// TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal covers a token
+// issued without sign-in MFA, which stays refused however often it is renewed.
+func TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_token_mfa_missing"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+	assert.Equal(t, "multi-factor authentication required at sign-in: please run 'alpacon login' again", err.Error())
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthTokenMFAMissing, code)
+}
+
 func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 	t.Parallel()
-	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed} {
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -766,6 +817,7 @@ func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 			ac := newTestClient(ts.URL)
 			_, err := ac.SendGetRequest("/api/test/")
 			require.Error(t, err)
+			assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
 			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
 			assert.NotContains(t, err.Error(), "alpacon login")
 
@@ -1800,6 +1852,45 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	assert.True(t, <-renewed, "the stubbed grant installs a token: %q", "fresh")
 }
 
+func TestSendDeleteRequestWithContext_SendsADelete(t *testing.T) {
+	t.Parallel()
+	var method, path string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := ac.SendDeleteRequestWithContext(t.Context(), "/api/test/1/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodDelete, method)
+	assert.Equal(t, "/api/test/1/", path)
+}
+
+// The event session close in api/event depends on this: a server that never answers
+// must not hold the caller past its deadline.
+func TestSendDeleteRequestWithContext_GivesUpAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
+		}
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ac.SendDeleteRequestWithContext(ctx, "/api/test/1/")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
+}
+
 // Everything below cmd/ reads the workspace off the client, so dropping either
 // field here leaves every MFA link the process builds naming no workspace.
 func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
@@ -2640,6 +2731,57 @@ func TestSendRawRequest_RenewalPreservesCustomUserAgent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 	assert.Equal(t, []string{"custom-agent", "custom-agent"}, agents)
+}
+
+// The install_pam refusals arrive with no detail, so each message names the
+// remedy rather than echoing the code.
+func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		want   string
+	}{
+		{
+			name:   "unsupported host",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallUnsupported,
+			want:   "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package",
+		},
+		{
+			name:   "sudo with MFA off",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallRequiresSudoWithMFA,
+			want:   "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon",
+		},
+		{
+			name:   "install already pending",
+			status: http.StatusConflict,
+			code:   utils.ServerPAMInstallInProgress,
+			want:   "an alpamon-pam install is already pending on this server—wait for it to finish",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, tt.code)
+			}))
+			defer ts.Close()
+
+			_, err := newTestClient(ts.URL).SendPostRequest("/api/servers/servers/my-server-id/actions/", map[string]string{"action": "install_pam"})
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+		})
+	}
 }
 
 // The cursor-paginator codes reach a user only after api.FetchCursorPages has spent

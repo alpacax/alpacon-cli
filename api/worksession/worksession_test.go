@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -301,42 +303,198 @@ func TestCancelWorkSession(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestGetWorkSessionTimeline(t *testing.T) {
-	t.Parallel()
-	ts := newString("2024-01-15T10:30:00Z")
-	items := []TimelineItem{
-		{Type: "command", Timestamp: ts, Line: "ls -la"},
-		{Type: "websh_session", Timestamp: ts},
-	}
+// timelineSessionID is the session every timeline contract server answers for,
+// so the handler can pin the whole path instead of its tail.
+const timelineSessionID = "ses-abc"
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/work-sessions/sessions/ses-abc/timeline/", r.URL.Path)
-		assert.Equal(t, "true", r.URL.Query().Get("include_records"))
+// newTimelineContractServer serves the two shapes GetWorkSessionTimeline
+// documents, switching on whether `cursor` is named.
+func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/"+timelineSessionID+"/timeline/", r.URL.Path)
+		query := r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 2, Results: items})
-	}))
-	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-abc", true)
-	require.NoError(t, err)
-	assert.Len(t, result, 2)
-	assert.Equal(t, "command", result[0].Type)
-	assert.Equal(t, "ls -la", result[0].Line)
+		if !query.Has("cursor") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"results": filterTimelineRecords(items, query.Get("include_records") != "false"),
+			})
+			return
+		}
+
+		paged := filterTimelineRecords(items, false)
+		start := 0
+		if cursor := query.Get("cursor"); cursor != "" {
+			parsed, err := strconv.Atoi(cursor)
+			if err != nil || parsed < 0 || parsed > len(paged) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code": "api_invalid_cursor"}`))
+				return
+			}
+			start = parsed
+		}
+		end := min(start+pageSize, len(paged))
+		next := ""
+		if end < len(paged) {
+			next = strconv.Itoa(end)
+		}
+		_ = json.NewEncoder(w).Encode(api.CursorListResponse[TimelineItem]{Next: next, Results: paged[start:end]})
+	}))
 }
 
-func TestGetWorkSessionTimeline_ExcludeRecords(t *testing.T) {
+func filterTimelineRecords(items []TimelineItem, keepRecords bool) []TimelineItem {
+	out := make([]TimelineItem, 0, len(items))
+	for _, item := range items {
+		if item.Type == "websh_record" && !keepRecords {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func timelineFixture() []TimelineItem {
+	ts := newString("2024-01-15T10:30:00Z")
+	return []TimelineItem{
+		{Type: "command", Timestamp: ts, Line: "ls -la"},
+		{Type: "websh_session", Timestamp: ts, ID: "wsh-1"},
+		{Type: "command", Timestamp: ts, Line: "systemctl status nginx"},
+		{Type: "websh_record", Timestamp: ts, SessionID: "wsh-1", MaskedRecord: "ls -la\n"},
+	}
+}
+
+func TestGetWorkSessionTimeline_WithRecordsKeepsTheRecordings(t *testing.T) {
 	t.Parallel()
+	srv := newTimelineContractServer(t, timelineFixture(), 2)
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+	require.NoError(t, err)
+	require.Len(t, result, 4)
+
+	var records []TimelineItem
+	for _, item := range result {
+		if item.Type == "websh_record" {
+			records = append(records, item)
+		}
+	}
+	require.Len(t, records, 1)
+	assert.Equal(t, "wsh-1", records[0].SessionID)
+	assert.Equal(t, "ls -la\n", records[0].MaskedRecord)
+}
+
+func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
+	t.Parallel()
+	srv := newTimelineContractServer(t, timelineFixture(), 1)
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	require.NoError(t, err)
+	require.Len(t, result, 3)
+	assert.Equal(t, "ls -la", result[0].Line)
+	assert.Equal(t, "wsh-1", result[1].ID)
+	assert.Equal(t, "systemctl status nginx", result[2].Line)
+	for _, item := range result {
+		assert.NotEqual(t, "websh_record", item.Type)
+	}
+}
+
+// Without the opt-in, the one-response answer holds the same items as the
+// walk, so only the wire can tell them apart; `Has` because `Get` reads an
+// absent key and an empty value alike.
+func TestGetWorkSessionTimeline_ExcludeRecordsNamesAnEmptyCursorThenTheMintedOne(t *testing.T) {
+	t.Parallel()
+	var sent []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/api/work-sessions/sessions/ses-xyz/timeline/", r.URL.Path)
-		assert.Equal(t, "false", r.URL.Query().Get("include_records"))
+		sent = append(sent, r.URL.Query())
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(api.ListResponse[TimelineItem]{Count: 0, Results: nil})
+		var next any
+		if len(sent) == 1 {
+			next = "page-2"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"next":    next,
+			"results": []TimelineItem{{Type: "command", Line: "ls"}},
+		})
 	}))
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), "ses-xyz", false)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
 	require.NoError(t, err)
-	assert.Empty(t, result)
+	require.Len(t, result, 2)
+
+	require.Len(t, sent, 2)
+	assert.True(t, sent[0].Has("cursor"), "first request must name cursor to opt in, sent %q", sent[0].Encode())
+	assert.Empty(t, sent[0].Get("cursor"))
+	assert.NotEmpty(t, sent[0].Get("page_size"))
+	assert.Equal(t, "page-2", sent[1].Get("cursor"))
+	assert.NotEmpty(t, sent[1].Get("page_size"))
+}
+
+func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T) {
+	t.Parallel()
+	items := timelineFixture()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/"+timelineSessionID+"/timeline/", r.URL.Path)
+		keepRecords := r.URL.Query().Get("include_records") != "false"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": filterTimelineRecords(items, keepRecords)})
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	require.NoError(t, err)
+	require.Len(t, result, 3)
+	for _, item := range result {
+		assert.NotEqual(t, "websh_record", item.Type)
+	}
+}
+
+func TestGetWorkSessionTimeline_RefusesAPageWhenItAskedForTheWholeTimeline(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "more pages to come",
+			body: `{"next":"TOKEN2","results":[{"type":"command","line":"ls -la"}]}`,
+		},
+		{
+			name: "null next on a single page",
+			body: `{"next":null,"results":[{"type":"command","line":"ls -la"}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+			require.ErrorIs(t, err, ErrTimelinePaginated)
+			assert.Empty(t, result)
+			assert.Contains(t, err.Error(), "alpacon update")
+		})
+	}
+}
+
+func TestGetWorkSessionTimeline_AcceptsAnAnswerWithNoNextKey(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"type":"command","line":"ls -la"},{"type":"websh_record","masked_record":"ls -la\n"}]}`))
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "websh_record", result[1].Type)
 }
 
 func TestUpdateWorkSession(t *testing.T) {

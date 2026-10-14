@@ -143,6 +143,37 @@ func TestBuildWorkSessionErrorEnvelope_WithActiveWS(t *testing.T) {
 	}
 }
 
+func TestBuildWorkSessionErrorEnvelope_WebshAgentActionAvoidsWebshScope(t *testing.T) {
+	t.Parallel()
+	codes := []string{
+		WorkSessionRequired,
+		WorkSessionNotActive,
+		WorkSessionExpired,
+		WorkSessionScopeNotAllowed,
+		WorkSessionServerNotAllowed,
+		WorkSessionAssigneeMismatch,
+		WorkSessionNotUsable,
+	}
+
+	for _, code := range codes {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+
+			envelope := buildWorkSessionErrorEnvelope(code, OperationWebsh, "srv-1", "Browser login", "")
+
+			agentCmd := `alpacon work-session create --scope command --server srv-1 --expires-in 1h --purpose "<intent>" --requester-type agent`
+			assert.Contains(t, nextActionCommands(envelope.NextActions), agentCmd)
+			assert.NotContains(t, nextActionCommands(envelope.NextActions),
+				`alpacon work-session create --scope websh --server srv-1 --expires-in 1h --purpose "<intent>" --requester-type agent`)
+			for _, action := range envelope.NextActions {
+				if action.Command == agentCmd {
+					assert.Contains(t, action.Description, "alpacon exec --work-session <ID>")
+				}
+			}
+		})
+	}
+}
+
 func nextActionCommands(actions []NextAction) []string {
 	cmds := make([]string, len(actions))
 	for i, a := range actions {

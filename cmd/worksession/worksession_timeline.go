@@ -49,7 +49,6 @@ var workSessionTimelineCmd = &cobra.Command{
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			// Sent on the request so the recording bytes are never downloaded.
 			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
 		}()
 		go func() {

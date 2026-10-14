@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,10 @@ const (
 	// reauthenticateMessage covers a detail-less 401 that is uncoded or coded
 	// auth_token_missing/auth_authentication_failed.
 	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
+
+	// signInMFAMessage covers a 401 coded auth_token_mfa_missing: a refresh keeps
+	// the token's MFA state, so only a new login, which runs MFA, can lift it.
+	signInMFAMessage = "multi-factor authentication required at sign-in: please run 'alpacon login' again"
 
 	// gatePlan is the "gate" value the server sends on every 402 plan
 	// refusal, limit or feature lock alike.
@@ -243,12 +248,18 @@ func isJSONObject(body []byte) bool {
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
 // the server's human detail; absent that, a known structured code maps to a
 // clear message. Re-login is suggested only for a code-less 401 or one coded
-// auth_token_missing/auth_authentication_failed—an authenticated user who
-// merely needs MFA, or who hit a policy denial, must not be told to log in again.
+// auth_token_missing/auth_authentication_failed/auth_token_mfa_missing—a user
+// who merely needs step-up MFA, or who hit a policy denial, must not be told
+// to log in again.
 func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
-		if statusCode == http.StatusUnauthorized && code == "" {
-			return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
+		if statusCode == http.StatusUnauthorized {
+			switch code {
+			case "":
+				return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
+			case utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing:
+				return fmt.Sprintf("%s (run 'alpacon login' again)", detail)
+			}
 		}
 		return detail
 	}
@@ -284,9 +295,10 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
-// without a human detail to a clear, actionable message. The login hint for
-// auth_token_missing/auth_authentication_failed is 401-only; a 403 carrying
-// either falls through to the generic permission-denied floor.
+// without a human detail to a clear, actionable message. The login hints for
+// auth_token_missing/auth_authentication_failed/auth_token_mfa_missing are
+// 401-only; a 403 carrying any of them falls through to the generic
+// permission-denied floor.
 func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
@@ -304,6 +316,10 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
 		if statusCode == http.StatusUnauthorized {
 			return reauthenticateMessage, true
+		}
+	case utils.AuthTokenMFAMissing:
+		if statusCode == http.StatusUnauthorized {
+			return signInMFAMessage, true
 		}
 	}
 	return "", false
@@ -495,8 +511,8 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // an uninvited user—also land there and cost one renewal and one replay before
 // surfacing the same error. So that 401 is not proof of expiry—it is the only
 // one worth spending one retry on, because a coded refusal (MFA required, IP
-// not allowed, token ACL, auth_authentication_failed) names what it wants and
-// a new token is not it.
+// not allowed, token ACL, auth_authentication_failed, auth_token_mfa_missing)
+// names what it wants and a new token is not it.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false
@@ -863,11 +879,17 @@ func (ac *AlpaconClient) SendPostRequestWithStatus(url string, body any) ([]byte
 }
 
 func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
+	return ac.SendDeleteRequestWithContext(context.Background(), url)
+}
+
+// SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx. A token renewal the
+// request runs is not: it waits out the grant as any other request does.
+func (ac *AlpaconClient) SendDeleteRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodDelete, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // SendDeleteRequestWithBody sends a DELETE carrying a JSON body: an endpoint wanting a
@@ -1299,8 +1321,8 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors.
-// It serves every status, so it carries no denial-specific wording.
+// codeOnlyMessage renders a code sent with no detail or field errors; a case
+// here names the remedy where the bare code would not.
 func codeOnlyMessage(code string) string {
 	switch code {
 	case utils.APINotFound:
@@ -1319,6 +1341,12 @@ func codeOnlyMessage(code string) string {
 		return "the server would not take this page's cursor—read the listing again from the start"
 	case utils.APISearchUnavailable:
 		return "the search backend would not start this read right now—try again in a moment"
+	case utils.ServerPAMInstallUnsupported:
+		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
+	case utils.ServerPAMInstallRequiresSudoWithMFA:
+		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
+	case utils.ServerPAMInstallInProgress:
+		return "an alpamon-pam install is already pending on this server—wait for it to finish"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}

@@ -27,7 +27,7 @@ var restartAgentCmd = &cobra.Command{
 			args[0],
 			server.ActionRestartAgent,
 			"Restart the agent on server '%s'?",
-			"Agent restart requested. Run 'alpacon events' to monitor progress.",
+			"Agent restart requested. Run 'alpacon exec ls' to monitor progress.",
 			"Failed to restart the agent",
 			yes, force,
 		)

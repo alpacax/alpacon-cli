@@ -157,22 +157,23 @@ func TestHandleCommonErrors_MFA_AnotherErrorEndsTheWait(t *testing.T) {
 }
 
 func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
-	withFastRetry(t)
-	withFastTimeout(t)
-	var retryCount atomic.Int32
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var attempts int
 
-	result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
-		OnMFARequired: func(string) error { return nil },
-		RetryOperation: func() error {
-			retryCount.Add(1)
-			return MarkSubmission(typedMFARefusal())
-		},
+		result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
+			OnMFARequired: func(string) error { return nil },
+			RetryOperation: func() error {
+				attempts++
+				return MarkSubmission(typedMFARefusal())
+			},
+		})
+
+		require.ErrorContains(t, result, "MFA authentication timed out")
+		assert.Equal(t, int(maxRetryDuration/retryInterval), attempts, "one attempt per interval until the deadline")
+		assert.Equal(t, maxRetryDuration, time.Since(start))
 	})
-
-	require.ErrorContains(t, result, "MFA authentication timed out")
-	assert.Positive(t, retryCount.Load())
-	// 200ms at a 10ms interval, plus one attempt of slack for the deadline check.
-	assert.LessOrEqual(t, retryCount.Load(), int32(21), "the timeout must bound the retries")
 }
 
 func TestHandleCommonErrors_MFA_NoRetryReturnsTheRefusal(t *testing.T) {

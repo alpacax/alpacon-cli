@@ -1,6 +1,11 @@
 package iam
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
 	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -13,7 +18,8 @@ var userCreateCmd = &cobra.Command{
 	Short: "Create a new user",
 	Long: `
 	Create a new user in the Alpacon. 
-	This command allows you to add a new user by specifying required user information such as username, password, and other relevant details. 
+	This command allows you to add a new user by specifying required user information such as username and other relevant details.
+	The server generates the password and the command prints it once on stdout.
 	`,
 	Example: ` 
 	alpacon user create
@@ -43,12 +49,15 @@ var userCreateCmd = &cobra.Command{
 
 		userRequest := promptForUser(alpaconClient)
 
-		err = iam.CreateUser(alpaconClient, userRequest)
+		password, err := iam.CreateUser(alpaconClient, userRequest)
 		if err != nil {
 			utils.CliErrorWithExit("Failed to create the new user: %s", err)
 		}
 
 		utils.CliSuccess("User created: %s", userRequest.Username)
+		if err := printGeneratedPassword(os.Stdout, utils.CliInfo, password); err != nil {
+			utils.CliErrorWithExit("The user was created, but %s. Set a new password for the user before they can log in.", err)
+		}
 	},
 }
 
@@ -57,17 +66,6 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	var userRequest iam.UserCreateRequest
 
 	userRequest.Username = utils.PromptForRequiredInput("Username(required): ")
-	for {
-		password := utils.PromptForPassword("Password(required): ")
-		confirmPassword := utils.PromptForPassword("Confirm Password: ")
-
-		if password == confirmPassword {
-			userRequest.Password = password
-			break
-		} else {
-			utils.CliWarning("Passwords do not match. Please try again.")
-		}
-	}
 	userRequest.FirstName = utils.PromptForRequiredInput("First name(required): ")
 	userRequest.LastName = utils.PromptForRequiredInput("Last name(required): ")
 	userRequest.Email = utils.PromptForRequiredInput("Email(required): ")
@@ -84,4 +82,17 @@ func promptForUser(ac *client.AlpaconClient) iam.UserCreateRequest {
 	}
 
 	return userRequest
+}
+
+// printGeneratedPassword keeps stdout to the password line alone so a script can capture it.
+func printGeneratedPassword(stdout io.Writer, info func(string, ...any), password string) error {
+	if password == "" {
+		return errors.New("the server returned no password")
+	}
+	if _, altered := utils.SanitizeTerminalLine(password); altered {
+		return errors.New("the generated password contains characters that cannot be shown safely")
+	}
+	info("This is the generated password. It is shown only once; pass it to the user securely.")
+	_, err := fmt.Fprintln(stdout, password)
+	return err
 }

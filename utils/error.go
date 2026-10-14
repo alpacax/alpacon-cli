@@ -20,6 +20,10 @@ const (
 	AuthTokenMissing         = "auth_token_missing"
 	AuthAuthenticationFailed = "auth_authentication_failed"
 
+	// AuthTokenMFAMissing rides a 401: the token was issued without the
+	// workspace's sign-in MFA, and only a new login, which runs it, can lift it.
+	AuthTokenMFAMissing = "auth_token_mfa_missing"
+
 	// AuthVerificationUnavailable rides a 503: the server could not check the
 	// credential, did not reject it, and a retry can succeed.
 	AuthVerificationUnavailable = "auth_verification_unavailable"
@@ -56,6 +60,17 @@ const (
 
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
+
+	// ServerPAMInstallUnsupported rides a 400: the host has no alpamon-pam
+	// package path (macOS, Windows, or an unknown package manager).
+	ServerPAMInstallUnsupported = "server_pam_install_unsupported"
+
+	// ServerPAMInstallRequiresSudoWithMFA rides a 400: refused while "Use sudo with MFA"
+	// is off, or always on a deployment that cannot complete an MFA step-up.
+	ServerPAMInstallRequiresSudoWithMFA = "server_pam_install_requires_sudo_with_mfa"
+
+	// ServerPAMInstallInProgress rides a 409: an alpamon-pam install is already pending.
+	ServerPAMInstallInProgress = "server_pam_install_in_progress"
 
 	// CommandInlineCredential: the server refused a command because its command
 	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such

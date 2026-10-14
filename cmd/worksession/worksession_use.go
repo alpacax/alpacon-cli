@@ -20,6 +20,15 @@ const (
 	completedWorkSessionStatus = "completed"
 )
 
+func isEndedStatus(status string) bool {
+	switch status {
+	case completedWorkSessionStatus, expiredWorkSessionStatus, revokedWorkSessionStatus,
+		rejectedWorkSessionStatus, cancelledWorkSessionStatus:
+		return true
+	}
+	return false
+}
+
 var unsetActiveWorkSession bool
 
 var workSessionUseCmd = &cobra.Command{

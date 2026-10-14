@@ -410,14 +410,37 @@ func GetActiveWorkSession() (string, error) {
 		}
 		return "", err
 	}
-	if cfg.ActiveWorkSessions == nil {
-		return "", nil
+	return activeWorkSessionOn(cfg, cfg.WorkspaceIdentity()), nil
+}
+
+// ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
+// so ending one session never drops another the user has since switched to. Reports whether it cleared.
+func ClearActiveWorkSessionFor(workspaceName, uuid string) (bool, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to load config: %w", err)
 	}
-	if uuid, ok := cfg.ActiveWorkSessions[cfg.WorkspaceIdentity()]; ok {
-		return uuid, nil
+	if uuid == "" || !strings.EqualFold(activeWorkSessionOn(cfg, workspaceName), uuid) {
+		return false, nil
+	}
+	if err := setActiveWorkSessionOn(&cfg, workspaceName, ""); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func activeWorkSessionOn(cfg Config, workspaceName string) string {
+	if uuid, ok := cfg.ActiveWorkSessions[workspaceName]; ok {
+		return uuid
+	}
+	if workspaceName != cfg.WorkspaceIdentity() {
+		return ""
 	}
 	// A session saved before schema_name was recorded sits under the host label.
-	return cfg.ActiveWorkSessions[cfg.WorkspaceName], nil
+	return cfg.ActiveWorkSessions[cfg.WorkspaceName]
 }
 
 // IsServiceToken reports whether token is a service token, identified by its key

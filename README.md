@@ -83,6 +83,8 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
+`alpacon version --output json` prints one object on stdout with `version`, `latest`, `update_available`, and `release_url`. `update_available` is `true` only when `alpacon update` has a newer release to install, so a `dev` build reports `false`. When the latest release cannot be fetched, `latest` and `release_url` are `null`, a warning goes to stderr, and the command still exits `0`—branch on `alpacon update --check` instead.
+
 #### What the checksum and the attestation do and do not prove
 
 `alpacon update` compares SHA-256 checksums and nothing else. That comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and the update would install it. Teaching the CLI to verify the publisher is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
@@ -151,6 +153,17 @@ $ alpacon websh <server>
 $ alpacon exec <server> "uptime"
 $ alpacon cp ./file.txt <server>:/tmp/
 $ alpacon tunnel <server> -l 9000 -r 8082
+
+# An AI agent replaces steps 3 and 4: it drops --use and websh, which an agent session
+# refuses, and names the session before the server on each command.
+$ alpacon work-session create \
+    --purpose "describe the task" \
+    --scope command \
+    --server <server> \
+    --expires-in 1h \
+    --requester-type agent \
+    --wait
+$ alpacon exec --work-session <SESSION_ID> <server> "uptime"
 ```
 
 CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
@@ -325,6 +338,8 @@ $ alpacon work-session cancel <session-id>       # requester withdraws own pendi
 
 Override the active session per command with `--work-session <id>` or `ALPACON_WORK_SESSION=<id>`. Resolution order: `--work-session` flag > env var > active session.
 
+`complete` and `revoke` clear the active session when they end it. A session that ends anywhere else—it expires, an admin revokes it, or it is completed from the console—stays set until you run `alpacon work-session use --unset`; `ls` stops marking it as active and `current` warns that it has ended.
+
 `extend` reads the session's `expires_at` back from the server rather than echoing the `--expires-in`/`--expires-at` value it sent, so the printed result is always what was actually applied.
 
 `--reason` is required on every `extend`—a short justification an approver judges the request by. Whether the extension applies immediately or waits for approval follows the workspace's approval policy, the same rule `work-session create` uses: the CLI reports a queued extension pending (`status` `pending_approval` under `--output json`, with `requested_expires_at` and the request's own deadline in `context`; exit `4`) instead of the session already extended. Check `alpacon work-session describe <id>` for the request's status (`--output json` shows it under `pending_extension_request`), then run `extend` again with a new reason once it settles—`extend` does not wait on its own. `error_code` `work_session_extension_reason_required` means `--reason` was missing or blank; `work_session_extension_already_pending` means a decision is already outstanding for this session (find its id with `alpacon work-session describe <id> --output json`)—wait for it before asking again.
@@ -380,10 +395,13 @@ $ alpacon token acl <type> delete <acl-id>
 ```bash
 $ alpacon agent restart <server>
 $ alpacon agent upgrade <server>
+$ alpacon agent install-pam <server>             # install alpamon-pam through the agent
 $ alpacon server refresh <server>                # re-collect system information
 ```
 
 `agent restart` and `agent upgrade` ask for confirmation first; pass `-y` to skip the prompt, which a non-interactive run (a script or CI job) needs. If the server has active user work—an open Websh/WebFTP session or an in-flight command—they are refused with exit code `5`; retry when idle, or pass `--force` to override. When the workspace asks for MFA, the CLI walks you through it and retries the request.
+
+`agent install-pam` installs the `alpamon-pam` package on the server as root through the host's package manager, and leaves a server that already has the current version as is. It asks for confirmation and takes `-y` the same way, but it is not disruptive: active user work does not refuse it, and it has no `--force`. The server refuses it with `server_pam_install_unsupported` on a host with no `alpamon-pam` package (macOS, Windows, or an unknown package manager), with `server_pam_install_requires_sudo_with_mfa` while the workspace's "Use sudo with MFA" setting is off or the deployment cannot complete the MFA step-up (a self-hosted site without Auth0), and with `server_pam_install_in_progress` while an install is already pending on that server.
 
 The CLI does not reboot, shut down, or upgrade the operating system of a server. Run those inside a work session instead, where sudo, MFA, policy or approval, and recording apply:
 

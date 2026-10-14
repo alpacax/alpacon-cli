@@ -43,6 +43,11 @@ func newWatcherTestServer(t *testing.T, sessionStatus func(attempt int32) int, s
 		})
 	})
 
+	// A failed dial closes its session; answered here so a close never counts as a create.
+	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	mux.HandleFunc(eventSubscriptionsURL, func(w http.ResponseWriter, r *http.Request) {
 		status := subscribeStatus(subscribes.Add(1))
 		w.Header().Set("Content-Type", "application/json")
@@ -325,6 +330,130 @@ func TestWatcher_MalformedWebsocketURLStopsAndSurfaces(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), token, "a malformed-url error must not echo the channel token")
 	assert.Contains(t, err.Error(), "malformed event channel URL")
+}
+
+// event watch and event wait exit through os.Exit as soon as the Watcher stops, so
+// the close of the session it rejected has to land before the stop, not after.
+func TestWatcher_ClosesARejectedSessionBeforeStopping(t *testing.T) {
+	t.Parallel()
+	deleted := make(chan string, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EventSessionResponse{
+			ID:           "session-1",
+			WebsocketURL: "ws://127.0.0.1/ws/\x7f",
+			ChannelID:    "channel",
+		})
+	})
+	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+		deleted <- r.PathValue("id")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	w := NewWatcher(ac, "work_session", "ws-uuid")
+
+	w.Start()
+	defer w.Stop()
+
+	require.False(t, w.WaitConnected(2*time.Second), "a rejected URL must not report a connection")
+	select {
+	case id := <-deleted:
+		assert.Equal(t, "session-1", id)
+	default:
+		t.Fatal("the close had not reached the server when the Watcher stopped")
+	}
+}
+
+// The close can outlast WaitConnected's window, so the cause must already be readable
+// when the wait times out, or the command reports a timeout instead of the bad URL.
+func TestWatcher_SurfacesARejectedURLWhileItsCloseIsPending(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(EventSessionResponse{
+			ID:           "session-1",
+			WebsocketURL: "ws://127.0.0.1/ws/\x7f",
+			ChannelID:    "channel",
+		})
+	})
+	mux.HandleFunc("DELETE "+eventSessionsURL+"{id}/", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	defer close(release) // runs before ts.Close, which waits on the held DELETE
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	w := NewWatcher(ac, "work_session", "ws-uuid")
+
+	w.Start()
+	defer w.Stop()
+
+	require.False(t, w.WaitConnected(300*time.Millisecond), "a rejected URL must not report a connection")
+	require.Error(t, w.Err())
+	assert.Contains(t, w.Err().Error(), "malformed event channel URL")
+}
+
+// Past the first subscribe the Watcher keeps reconnecting, so the close goes to
+// the background like a failed dial's and the stream carries on.
+func TestWatcher_ClosesARejectedSessionInTheBackgroundAfterTheFirstSubscribe(t *testing.T) {
+	t.Parallel()
+	var sessions atomic.Int32
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+	mux.HandleFunc("POST "+eventSessionsURL, func(w http.ResponseWriter, r *http.Request) {
+		n := sessions.Add(1)
+		session := EventSessionResponse{ID: fmt.Sprintf("session-%d", n), WebsocketURL: "ws://127.0.0.1/ws/\x7f", ChannelID: "channel"}
+		if n == 1 {
+			session.WebsocketURL = "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(session)
+	})
+	mux.HandleFunc(eventSubscriptionsURL, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"sub"}`))
+	})
+	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		_ = conn.Close() // dropped at once, so the next attempt meets the malformed URL
+	})
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	w := NewWatcher(ac, "work_session", "ws-uuid")
+	w.reconnectBaseDelay = testReconnectBaseDelay
+	closed := make(chan string, 1)
+	w.closeUnopened = func(id string) {
+		select {
+		case closed <- id: // later attempts also close; never park the listen goroutine on them
+		default:
+		}
+	}
+
+	w.Start()
+	defer w.Stop()
+
+	require.True(t, w.WaitConnected(2*time.Second), "the first session must subscribe")
+	select {
+	case id := <-closed:
+		assert.Equal(t, "session-2", id)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the rejected session was never closed")
+	}
+	assert.NoError(t, w.Err(), "a rejection after the first subscribe must not stop the Watcher")
 }
 
 func TestWatcher_SessionCreateRejectionStopsAndSurfaces(t *testing.T) {

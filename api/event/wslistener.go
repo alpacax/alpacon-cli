@@ -21,8 +21,11 @@ const (
 // wsListener is the shared dial/reconnect/shutdown skeleton for event WebSocket
 // consumers; embedders must assign handleFrame before calling Start.
 type wsListener struct {
-	// Event channel tokens are single-use, so a reconnect needs a freshly provisioned URL.
-	provision func() (string, error)
+	// Event channel tokens are single-use, so a reconnect needs a freshly provisioned session.
+	provision func() (*EventSessionResponse, error)
+	// The server closes a session once the connection that opened it drops, so only a
+	// session whose dial failed needs closing here. Replaced in tests.
+	closeUnopened func(id string)
 	// The server accepts a subscription only once the channel is connected.
 	onConnected func() error
 	// A dial error reaches neither provision nor onConnected, so without this an outage
@@ -46,15 +49,14 @@ type wsListener struct {
 	conn        *websocket.Conn
 }
 
-// newProvisionedWSListener builds the skeleton for a listener that obtains a new
-// URL for every dial attempt. A nil ac only means an empty header here; whether it
-// is safe at all is provision's call, since every attempt runs it.
-func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string, error), handshakeTimeout time.Duration) *wsListener {
+// newProvisionedWSListener builds a listener that obtains a new session on every dial attempt.
+// A nil ac means an empty header and no session closing; provision decides whether that is safe.
+func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (*EventSessionResponse, error), handshakeTimeout time.Duration) *wsListener {
 	wsHeader := http.Header{}
 	if ac != nil {
 		wsHeader = ac.SetWebsocketHeader()
 	}
-	return &wsListener{
+	w := &wsListener{
 		provision:          provision,
 		wsHeader:           wsHeader,
 		handshakeTimeout:   handshakeTimeout,
@@ -63,6 +65,17 @@ func newProvisionedWSListener(ac *client.AlpaconClient, provision func() (string
 		done:               make(chan struct{}),
 		stopped:            make(chan struct{}),
 		connected:          make(chan struct{}),
+	}
+	w.closeUnopened = func(string) {}
+	if ac != nil {
+		w.closeUnopened = func(id string) { go closeSession(ac, id, eventSessionCloseTimeout) }
+	}
+	return w
+}
+
+func (w *wsListener) closeUnopenedSession(id string) {
+	if id != "" {
+		w.closeUnopened(id)
 	}
 }
 
@@ -144,19 +157,20 @@ func nextReconnectDelay(delay time.Duration) time.Duration {
 // until the connection drops or Stop is called. Returns whether the subscribed
 // connection outlived stableLifetime.
 func (w *wsListener) connectAndListen() bool {
-	wsURL, err := w.provision()
+	session, err := w.provision()
 	if err != nil {
 		return false
 	}
 
 	dialer := newListenerDialer(w.handshakeTimeout)
-	conn, _, dialErr := dialer.Dial(wsURL, w.wsHeader)
+	conn, _, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
 			// The URL carries a channel token in its path, which a URL error prints
 			// whole, so only the host is kept.
 			w.onDialFailed(utils.RedactURLErrorHostOnly(dialErr))
 		}
+		w.closeUnopenedSession(session.ID)
 		return false
 	}
 
