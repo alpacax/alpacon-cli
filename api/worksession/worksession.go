@@ -14,6 +14,14 @@ import (
 
 const workSessionURL = "/api/work-sessions/sessions/"
 
+// ErrTimelinePaginated is returned when a whole-timeline read is answered with
+// a `next`, so a page is never shown as the whole session.
+var ErrTimelinePaginated = errors.New(
+	"this server paginates the work session timeline, which this version of alpacon reads only whole, " +
+		"so it would show the first page as the whole session; run 'alpacon update' to install a version " +
+		"that reads the timeline page by page and its recordings through the per-session recording route",
+)
+
 func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
 	params := map[string]string{}
 	if status != "" {
@@ -155,14 +163,6 @@ func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords 
 	}
 	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
 }
-
-// ErrTimelinePaginated is returned when a whole-timeline read is answered with
-// a `next`, so a page is never shown as the whole session.
-var ErrTimelinePaginated = errors.New(
-	"this server paginates the work session timeline, which this version of alpacon reads only whole, " +
-		"so it would show the first page as the whole session; run 'alpacon update' to install a version " +
-		"that reads the timeline page by page and its recordings through the per-session recording route",
-)
 
 // getWholeWorkSessionTimeline takes the unpaginated shape in one request. It
 // names no `cursor`, which is what holds the server to that shape, so nothing
