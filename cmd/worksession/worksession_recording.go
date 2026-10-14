@@ -30,6 +30,8 @@ var workSessionRecordingCmd = &cobra.Command{
 
 		sessionID := args[0]
 
+		// true keeps this read off the paginated shape, whose pages carry no
+		// recordings. #514 replaces this with the per-session recording route.
 		items, err := wsapi.GetWorkSessionTimeline(ac, sessionID, true)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
