@@ -174,6 +174,7 @@ func TestExecPendingApprovalExits4WithJSONSignal(t *testing.T) {
 // explicit print, the reviewer-free way out of an intent deviation (re-declaring
 // the session intent) never reaches the user.
 func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
+	t.Parallel()
 	stdout, stderr := runIntentDeviationHelper(t)
 
 	assert.Contains(t, stderr, "work-session update [SESSION_ID] --title")
@@ -192,6 +193,7 @@ func TestExecIntentDeviationPrintsSelfServiceHint(t *testing.T) {
 // last denial to the same handler, so the self-service hint must survive the
 // wait rather than only reaching the user on the no-wait path.
 func TestExecIntentDeviationPrintsSelfServiceHintAfterWaitTimeout(t *testing.T) {
+	t.Parallel()
 	// Shorter than the poll interval, so the window closes on the timer without
 	// the loop re-attempting the command.
 	_, stderr := runIntentDeviationHelper(t, "--wait-approval", "1ms")
