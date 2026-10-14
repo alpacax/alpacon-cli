@@ -82,7 +82,8 @@ func TestPollTransfer_SiblingsShareAFailedMFAWait(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stub := newGateStub(func() (int, string) { return http.StatusNotFound, `{"detail": "gone"}` })
 
-	errs := runGatePolls(t, stub.client())
+	var errs []error
+	synctest.Test(t, func(t *testing.T) { errs = runGatePolls(t, stub.client()) })
 
 	assert.Equal(t, int32(1), stub.links.Load(), "one MFA link for all polls")
 	for i, err := range errs {
@@ -97,7 +98,8 @@ func TestPollTransfer_SiblingsShareASuccessfulMFAWait(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stub := newGateStub(func() (int, string) { return http.StatusOK, `{"success": true, "message": "done"}` })
 
-	errs := runGatePolls(t, stub.client())
+	var errs []error
+	synctest.Test(t, func(t *testing.T) { errs = runGatePolls(t, stub.client()) })
 
 	assert.Equal(t, int32(1), stub.links.Load(), "one MFA link for all polls")
 	for i, err := range errs {
@@ -187,7 +189,8 @@ func TestBulkUpload_QueuedPollsShareAFailedMFAWait(t *testing.T) {
 		return http.StatusForbidden, mfaRefusal
 	}}
 
-	err := runBulkUpload(t, stub)
+	var err error
+	synctest.Test(t, func(t *testing.T) { err = runBulkUpload(t, stub) })
 
 	require.Error(t, err)
 	assert.Equal(t, int32(1), stub.links.Load(), "one MFA link for the whole command")
@@ -199,7 +202,10 @@ func TestBulkUpload_QueuedPollsShareASuccessfulMFAWait(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stub := &bulkGateStub{release: make(chan struct{}), afterMFA: func() (int, string) { return http.StatusOK, `{"success": true, "message": "done"}` }}
 
-	require.NoError(t, runBulkUpload(t, stub))
+	var err error
+	synctest.Test(t, func(t *testing.T) { err = runBulkUpload(t, stub) })
+
+	require.NoError(t, err)
 	assert.Equal(t, int32(1), stub.links.Load(), "one MFA link for the whole command")
 }
 
@@ -254,6 +260,9 @@ func TestBulkUpload_MFALapsingAgainPromptsAgain(t *testing.T) {
 	}
 	stub.afterMFA = func() (int, string) { return http.StatusOK, `{"success": true, "message": "done"}` }
 
-	require.NoError(t, runBulkUpload(t, stub))
+	var err error
+	synctest.Test(t, func(t *testing.T) { err = runBulkUpload(t, stub) })
+
+	require.NoError(t, err)
 	assert.Equal(t, int32(2), stub.links.Load(), "one link per lapse of MFA")
 }

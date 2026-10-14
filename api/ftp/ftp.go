@@ -978,12 +978,14 @@ func parseRefusal(body []byte) (code, source string) {
 
 // mfaGate lets the requests of transfers on one client and server share one MFA
 // wait: the bulk status polls run concurrently and are refused together. The
-// lock is held only for the wait itself. endedAt and endErr record when the
-// last wait ended and how, so a request refused before that moment takes its
-// outcome instead of starting another wait. Transfers of another client or
-// server have their own gate.
+// slot is held only for the wait itself. It is a one-element channel because a
+// goroutine blocked on a sync.Mutex never lets a synctest bubble's clock
+// advance, which would keep the gate tests on the real clock. endedAt and
+// endErr record when the last wait ended and how, so a request refused before
+// that moment takes its outcome instead of starting another wait. Transfers of
+// another client or server have their own gate.
 type mfaGate struct {
-	mu      sync.Mutex
+	slot    chan struct{}
 	endedAt time.Time
 	endErr  error
 }
@@ -996,15 +998,15 @@ type mfaGateKey struct {
 var mfaGates sync.Map // mfaGateKey -> *mfaGate
 
 func gateFor(ac *client.AlpaconClient, serverID string) *mfaGate {
-	gate, _ := mfaGates.LoadOrStore(mfaGateKey{ac: ac, serverID: serverID}, &mfaGate{})
+	gate, _ := mfaGates.LoadOrStore(mfaGateKey{ac: ac, serverID: serverID}, &mfaGate{slot: make(chan struct{}, 1)})
 	return gate.(*mfaGate)
 }
 
 // await runs wait unless one ended after refusedAt, in which case it returns
 // that wait's outcome. waited reports whether this call ran the wait.
 func (g *mfaGate) await(refusedAt time.Time, wait func() error) (waited bool, err error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	g.slot <- struct{}{}
+	defer func() { <-g.slot }()
 	if g.endedAt.After(refusedAt) {
 		return false, g.endErr
 	}
