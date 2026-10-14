@@ -27,6 +27,9 @@ type ErrorHandlerCallbacks struct {
 	// server's refusal is what tells the wait that MFA has not completed yet.
 	// Should return nil on success, error on failure.
 	RetryOperation func() error
+
+	// RetryInterval is the gap between those calls; zero means one second.
+	RetryInterval time.Duration
 }
 
 // HandleCommonErrors handles common errors (MFA, UsernameRequired) with retry logic
@@ -60,7 +63,7 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 		if callbacks.RetryOperation == nil {
 			return err
 		}
-		return retryUntilMFAAccepted(callbacks.RetryOperation)
+		return retryUntilMFAAccepted(callbacks.RetryOperation, callbacks.RetryInterval)
 
 	case UsernameRequired:
 		if callbacks.OnUsernameRequired == nil {
@@ -84,7 +87,7 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 	}
 }
 
-// retryUntilMFAAccepted re-runs retry once per retryInterval until the server
+// retryUntilMFAAccepted re-runs retry once per interval until the server
 // stops refusing it for MFA. The step-up link the user opened names this
 // client, so completing MFA in the browser credits the client the request
 // already comes from: the next attempt passes with the same access token, and
@@ -100,15 +103,19 @@ func handleSubmissionError(err error, serverName string, callbacks ErrorHandlerC
 // untagged one came after the operation took effect and ends the wait whatever
 // it carries. Any other answer, success or failure, is the operation's own
 // result and ends the wait.
-// The deadline bounds the attempts to about maxRetryDuration / retryInterval.
-func retryUntilMFAAccepted(retry func() error) error {
+// The deadline bounds the attempts to about maxRetryDuration / interval.
+func retryUntilMFAAccepted(retry func() error, interval time.Duration) error {
+	if interval == 0 {
+		interval = retryInterval
+	}
+
 	spinner := NewSpinner(mfaWaitMessage)
 	spinner.Start()
 	defer spinner.Stop()
 
 	startTime := time.Now()
 	failures := 0
-	delay := retryInterval
+	delay := interval
 	for {
 		// An attempt that would start past the deadline is never sent: the wait
 		// ends instead, without sitting out a gap nothing follows.
@@ -133,13 +140,13 @@ func retryUntilMFAAccepted(retry func() error) error {
 			return err
 		case StructuredErrorCode(err) == AuthMFARequired:
 			failures = 0
-			delay = retryInterval
+			delay = interval
 		case IsUnprocessedRequestError(err):
 			failures++
 			if failures >= MaxConsecutivePollFailures {
 				return err
 			}
-			delay = max(retryInterval, NextPollBackoff(retryInterval, 0, RetryAfter(err)))
+			delay = max(interval, NextPollBackoff(interval, 0, RetryAfter(err)))
 		default:
 			return err
 		}

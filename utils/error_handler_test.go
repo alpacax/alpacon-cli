@@ -176,6 +176,30 @@ func TestHandleCommonErrors_MFA_TimesOutWhileStillRefused(t *testing.T) {
 	})
 }
 
+func TestHandleCommonErrors_MFA_RetryIntervalSetsTheGap(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		var attempts int
+
+		result := HandleCommonErrors(MarkSubmission(errors.New(mfaRefusal)), "server1", ErrorHandlerCallbacks{
+			OnMFARequired: func(string) error { return nil },
+			RetryOperation: func() error {
+				attempts++
+				if attempts == 1 {
+					return MarkSubmission(typedMFARefusal())
+				}
+				return nil
+			},
+			RetryInterval: 10 * time.Millisecond,
+		})
+
+		require.NoError(t, result)
+		assert.Equal(t, 2, attempts)
+		assert.Equal(t, 20*time.Millisecond, time.Since(start))
+	})
+}
+
 func TestHandleCommonErrors_MFA_NoRetryReturnsTheRefusal(t *testing.T) {
 	t.Parallel()
 	err := errors.New(mfaRefusal)

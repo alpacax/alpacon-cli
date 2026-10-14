@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -65,6 +66,7 @@ func TestCommandStream_MFAWaitDoesNotResubmitAfterAnAcceptedCommand(t *testing.T
 			err := utils.HandleCommonErrors(first, "srv", utils.ErrorHandlerCallbacks{
 				OnMFARequired:  func(string) error { return nil },
 				RetryOperation: run,
+				RetryInterval:  time.Millisecond,
 			})
 
 			require.ErrorContains(t, err, "failed to read command output")
