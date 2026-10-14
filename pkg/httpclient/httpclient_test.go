@@ -1,7 +1,9 @@
 package httpclient
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -132,7 +134,6 @@ func TestNew(t *testing.T) {
 			assert.Equal(t, reflect.ValueOf(http.ProxyFromEnvironment).Pointer(), reflect.ValueOf(transport.Proxy).Pointer())
 			assert.NotNil(t, c.CheckRedirect)
 			assert.Equal(t, 10*time.Second, transport.TLSHandshakeTimeout)
-			assert.NotNil(t, transport.DialContext)
 		})
 	}
 }
@@ -141,6 +142,26 @@ func TestDialer_BoundsConnectionSetup(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, 30*time.Second, dialer.Timeout)
+}
+
+func TestNew_DialsThroughBoundedDialer(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+	transport, ok := New(false).Transport.(*http.Transport)
+	require.True(t, ok)
+	orig := dialer.Timeout
+	dialer.Timeout = time.Nanosecond
+	t.Cleanup(func() { dialer.Timeout = orig })
+
+	conn, err := transport.DialContext(context.Background(), "tcp", ln.Addr().String())
+
+	if conn != nil {
+		_ = conn.Close()
+	}
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	assert.True(t, netErr.Timeout(), "dial error is not a timeout: %v", err)
 }
 
 func TestStopAtCrossOrigin_FollowsSameOriginRedirect(t *testing.T) {
