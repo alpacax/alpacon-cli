@@ -2,6 +2,9 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"fmt"
+	"path"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -10,6 +13,7 @@ import (
 
 const (
 	clusterURL = "/api/kubernetes/clusters/"
+	sessionURL = "/api/kubernetes/sessions/"
 	// iamGroupURL is duplicated from api/iam so this package can build a lean
 	// UUID→name projection without pulling in the full iam.GroupResponse type.
 	iamGroupURL = "/api/iam/groups/"
@@ -109,4 +113,32 @@ func ResolveGroupNames(ac *client.AlpaconClient, groupIDs []string) []string {
 	}
 
 	return names
+}
+
+// CreateSession opens a proxy session to a cluster. The channel token appears
+// only in this response—the server never returns it again—so the caller must
+// persist it at once.
+func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*KubeSessionResponse, error) {
+	body, err := ac.SendPostRequest(sessionURL, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var session KubeSessionResponse
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+
+	return &session, nil
+}
+
+// CloseSession ends a proxy session. An ID that is blank or holds a path
+// segment is refused before any request: path.Join would turn it into another
+// route, such as POST /api/kubernetes/sessions/close/ for an empty ID.
+func CloseSession(ac *client.AlpaconClient, sessionID string) error {
+	if strings.TrimSpace(sessionID) == "" || strings.Contains(sessionID, "/") || sessionID == "." || sessionID == ".." {
+		return fmt.Errorf("invalid kube session id %q", sessionID)
+	}
+	_, err := ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
+	return err
 }

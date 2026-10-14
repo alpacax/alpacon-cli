@@ -1907,6 +1907,32 @@ func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
 	assert.Equal(t, "my-workspace", ac.WorkspaceName)
 }
 
+// A credential the CLI writes for another client (a kubeconfig) reads the
+// workspace's TLS choice off the client, so it must survive construction.
+func TestNewAlpaconAPIClient_CarriesInsecureFromConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		insecure bool
+	}{
+		{name: "verifying", insecure: false},
+		{name: "insecure", insecure: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			require.NoError(t, config.CreateConfig(
+				"https://my-workspace.alpacon.io", "my-workspace", "alpat-token",
+				"", "", "", "alpacon.io", 0, tt.insecure,
+			))
+
+			ac, err := NewAlpaconAPIClient()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.insecure, ac.Insecure)
+		})
+	}
+}
+
 // A workspace's URL slug can be renamed while its schema_name stays fixed, so a
 // login through the new URL leaves a host label that the server never calls the
 // workspace. The client must carry the schema_name, because that is what MFA

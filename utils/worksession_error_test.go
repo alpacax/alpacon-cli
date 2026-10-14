@@ -1,10 +1,13 @@
 package utils
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsWorkSessionCode(t *testing.T) {
@@ -208,4 +211,145 @@ func TestHandleWorkSessionError_NoOp(t *testing.T) {
 func TestHandleWorkSessionError_NilError(t *testing.T) {
 	t.Parallel()
 	HandleWorkSessionError(nil, "websh", "srv", "Browser login", "")
+}
+
+func kubeWorkSessionCases() []struct {
+	code     string
+	activeWS string
+	want     []string
+} {
+	const (
+		ls      = "alpacon work-session ls --status active"
+		use     = "alpacon work-session use <ID>"
+		current = "alpacon work-session current"
+		create  = `alpacon work-session create --scope command --server <SERVER> --expires-in 1h --purpose "<intent>" --use`
+	)
+	reuseOrCreate := []string{ls, use, create}
+	return []struct {
+		code     string
+		activeWS string
+		want     []string
+	}{
+		{WorkSessionRequired, "", reuseOrCreate},
+		{WorkSessionNotUsable, "", reuseOrCreate},
+		{WorkSessionAssigneeMismatch, "", reuseOrCreate},
+		{WorkSessionNotActive, "", []string{current, ls, use, create}},
+		{WorkSessionExpired, "", []string{"alpacon work-session extend <ID>", create}},
+		{WorkSessionExpired, "abc-123-uuid", []string{"alpacon work-session extend abc-123-uuid", create}},
+		{WorkSessionScopeNotAllowed, "", reuseOrCreate},
+		{WorkSessionServerNotAllowed, "", reuseOrCreate},
+	}
+}
+
+func kubeCaseName(code, activeWS string) string {
+	if activeWS != "" {
+		return code + "_with_active_session"
+	}
+	return code
+}
+
+// diagnosticNextCommands returns the commands under "Next:", in order, without their descriptions.
+func diagnosticNextCommands(t *testing.T, diagnostic string) []string {
+	t.Helper()
+	_, block, found := strings.Cut(diagnostic, "\nNext:\n")
+	require.True(t, found, "diagnostic has no Next block: %q", diagnostic)
+	block, _, _ = strings.Cut(block, "\n\n")
+	var cmds []string
+	for _, line := range strings.Split(block, "\n") {
+		cmd, _, _ := strings.Cut(strings.TrimPrefix(line, "  "), "  # ")
+		cmds = append(cmds, cmd)
+	}
+	return cmds
+}
+
+func TestBuildWorkSessionDiagnostic_KubeIgnoresServerName(t *testing.T) {
+	t.Parallel()
+	// A kube session names no server, so the create suggestion keeps its placeholder.
+	got := buildWorkSessionDiagnostic(WorkSessionRequired, OperationKube, "prod-1", "Browser login", "")
+	assert.Contains(t, got, "  target server : prod-1\n")
+	assert.Equal(t, []string{
+		"alpacon work-session ls --status active",
+		"alpacon work-session use <ID>",
+		`alpacon work-session create --scope command --server <SERVER> --expires-in 1h --purpose "<intent>" --use`,
+	}, diagnosticNextCommands(t, got))
+}
+
+func TestKubeWorkSessionCasesCoverEveryCode(t *testing.T) {
+	t.Parallel()
+	covered := map[string]bool{}
+	for _, tc := range kubeWorkSessionCases() {
+		covered[tc.code] = true
+	}
+	for code := range workSessionReasonMap {
+		assert.True(t, covered[code], "no kube case for %s", code)
+	}
+}
+
+func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
+	t.Parallel()
+	for _, tc := range kubeWorkSessionCases() {
+		t.Run(kubeCaseName(tc.code, tc.activeWS), func(t *testing.T) {
+			t.Parallel()
+			got := buildWorkSessionDiagnostic(tc.code, OperationKube, "", "Browser login", tc.activeWS)
+
+			lines := strings.Split(got, "\n")
+			require.NotEmpty(t, lines)
+			assert.Equal(t, Red("Error")+": opening a kube session requires an active WorkSession on this authentication.", lines[0])
+			assert.Contains(t, got, workSessionReasonMap[tc.code])
+			assert.Contains(t, got, "Browser login (interactive)")
+			assert.NotContains(t, got, "required scope")
+			assert.NotContains(t, got, "  target server : ")
+			assert.NotContains(t, got, "--scope kube")
+			assert.NotContains(t, got, "AI agent")
+			assert.NotContains(t, got, "--requester-type")
+			assert.NotContains(t, got, "the kube operation")
+			assert.Equal(t, tc.want, diagnosticNextCommands(t, got))
+			assert.Equal(t, "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs 'alpacon login' without -t.", lines[len(lines)-1])
+		})
+	}
+}
+
+func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
+	t.Parallel()
+	for _, tc := range kubeWorkSessionCases() {
+		t.Run(kubeCaseName(tc.code, tc.activeWS), func(t *testing.T) {
+			t.Parallel()
+			envelope := buildWorkSessionErrorEnvelope(tc.code, OperationKube, "", "Browser login", tc.activeWS)
+
+			assert.False(t, envelope.OK)
+			assert.Equal(t, ExitCodeWorkSessionDenied, envelope.ExitCode)
+			assert.Equal(t, tc.code, envelope.ErrorCode)
+			assert.Equal(t, "opening a kube session requires an active WorkSession on this authentication.", envelope.Message)
+			assert.Equal(t, workSessionReasonMap[tc.code], envelope.Reason)
+			assert.Empty(t, envelope.Context.RequiredScope)
+			assert.Equal(t, []string{}, envelope.Context.TargetServers)
+			if tc.activeWS == "" {
+				assert.Nil(t, envelope.Context.CurrentWorksession)
+			} else if assert.NotNil(t, envelope.Context.CurrentWorksession) {
+				assert.Equal(t, tc.activeWS, *envelope.Context.CurrentWorksession)
+			}
+			assert.Equal(t, tc.want, nextActionCommands(envelope.NextActions))
+			for _, action := range envelope.NextActions {
+				assert.NotContains(t, action.Command, "--scope kube")
+				assert.NotContains(t, action.Command, "--requester-type")
+				assert.NotContains(t, action.Description, "AI agent")
+			}
+		})
+	}
+}
+
+func TestBuildWorkSessionErrorEnvelope_KubeKeepsRequiredScopeField(t *testing.T) {
+	t.Parallel()
+	body, err := json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationKube, "", "Browser login", ""))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"required_scope":""`)
+}
+
+func TestKubeWorkSessionNextActions_CreateDescription(t *testing.T) {
+	t.Parallel()
+	actions := workSessionNextActions(WorkSessionRequired, OperationKube, "", "")
+	require.Len(t, actions, 3)
+	assert.Equal(t, "find an existing active session you own", actions[0].Description)
+	assert.Equal(t, "attach it", actions[1].Description)
+	assert.Equal(t, "none active? create one; any active session you own works for kube", actions[2].Description)
 }

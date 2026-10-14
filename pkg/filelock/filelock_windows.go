@@ -1,6 +1,6 @@
 //go:build windows
 
-package selfupdate
+package filelock
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ func lockFile(file *os.File) error {
 	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
 	err := windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, lockFileBytes, 0, new(windows.Overlapped))
 	if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-		return ErrUpdateInProgress
+		return ErrLocked
 	}
 	return err
 }

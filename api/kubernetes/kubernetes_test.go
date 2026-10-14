@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -318,4 +319,175 @@ func TestResolveGroupNames(t *testing.T) {
 			assert.Equal(t, tt.expectCalls, calls.Load())
 		})
 	}
+}
+
+const sessionBody = `{
+	"id": "s-1",
+	"cluster": "c-prod",
+	"channel_id": "ch-1",
+	"channel_token": "tok-secret",
+	"token_expired_at": "2026-10-08T12:30:00.000001+09:00",
+	"proxy_url": "https://kube.example.com"
+}`
+
+func TestCreateSession_Body(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		workSession string
+		expectBody  string
+	}{
+		{
+			name:        "with work session",
+			workSession: "ws-1",
+			expectBody:  `{"cluster":"c-prod","work_session":"ws-1","client_type":"cli"}`,
+		},
+		{
+			name:       "without work session",
+			expectBody: `{"cluster":"c-prod","client_type":"cli"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bodies := make(chan string, 1)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != sessionURL {
+					t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("read body: %v", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				bodies <- string(body)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(sessionBody))
+			}))
+			defer ts.Close()
+
+			_, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{
+				Cluster:     "c-prod",
+				WorkSession: tt.workSession,
+				ClientType:  ClientTypeCLI,
+			})
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
+			// JSONEq over the whole body also pins that work_session is absent,
+			// not sent empty, when no work session is set.
+			assert.JSONEq(t, tt.expectBody, <-bodies)
+		})
+	}
+}
+
+func TestCreateSession_DecodesResponse(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(sessionBody))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{Cluster: "c-prod", ClientType: ClientTypeCLI})
+	require.NoError(t, err)
+	require.NotNil(t, session)
+
+	assert.Equal(t, "s-1", session.ID)
+	assert.Equal(t, "c-prod", session.Cluster)
+	assert.Equal(t, "ch-1", session.ChannelID)
+	assert.Equal(t, "tok-secret", session.ChannelToken)
+	assert.Equal(t, "https://kube.example.com", session.ProxyURL)
+	assert.True(t, session.TokenExpiredAt.Equal(time.Date(2026, 10, 8, 3, 30, 0, 1000, time.UTC)), "token_expired_at: %v", session.TokenExpiredAt)
+}
+
+func TestCreateSession_KeepsErrorStatusAndCode(t *testing.T) {
+	t.Parallel()
+	// The command layer branches on the refusal's status and code, so both
+	// must survive the client's wrapping.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"permission_denied","source":"kubernetes"}`))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{Cluster: "c-prod", ClientType: ClientTypeCLI})
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "permission_denied", code)
+}
+
+func TestCloseSession_PostsToClosePath(t *testing.T) {
+	t.Parallel()
+	requests := make(chan string, 1)
+	bodies := make(chan string, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		bodies <- string(body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	require.NoError(t, CloseSession(newTestClient(ts), "s-1"))
+	require.Len(t, requests, 1)
+	assert.Equal(t, "POST /api/kubernetes/sessions/s-1/close/", <-requests)
+	// An empty object, not null: the action takes no fields.
+	assert.JSONEq(t, `{}`, <-bodies)
+}
+
+func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		sessionID string
+	}{
+		{name: "empty", sessionID: ""},
+		{name: "blank", sessionID: "  "},
+		{name: "dot", sessionID: "."},
+		{name: "dot dot", sessionID: ".."},
+		{name: "parent segment", sessionID: "../clusters/c-1"},
+		{name: "nested segment", sessionID: "s-1/x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var hits atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer ts.Close()
+
+			require.Error(t, CloseSession(newTestClient(ts), tt.sessionID))
+			assert.Zero(t, hits.Load())
+		})
+	}
+}
+
+func TestCloseSession_PropagatesError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"detail":"Not found."}`))
+	}))
+	defer ts.Close()
+
+	err := CloseSession(newTestClient(ts), "s-gone")
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }

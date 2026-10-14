@@ -13,7 +13,7 @@ import (
 // the package-level KubeCmd; cmd/kube_gate_test.go covers the real tree.
 func newGateTree() (root, real *cobra.Command) {
 	root = &cobra.Command{Use: "alpacon", Run: func(*cobra.Command, []string) {}}
-	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "View Kubernetes clusters", Args: cobra.NoArgs}
+	real = &cobra.Command{Use: "kube", Aliases: []string{"k8s", "clusters"}, Short: "Access Kubernetes clusters", Args: cobra.NoArgs}
 	real.AddCommand(&cobra.Command{Use: "ls", Run: func(*cobra.Command, []string) {}})
 	real.AddCommand(&cobra.Command{Use: "describe CLUSTER", Run: func(*cobra.Command, []string) {}})
 	root.AddCommand(real)

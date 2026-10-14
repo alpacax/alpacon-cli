@@ -235,9 +235,25 @@ $ alpacon server rm <server>
 $ alpacon kube ls                                # aliases: k8s, clusters
 $ alpacon kube describe <cluster>
 $ alpacon kube ls --output json
+
+# Write a kubeconfig context for a cluster, then use kubectl as usual
+$ alpacon kube config <cluster>                  # context alpacon-<cluster>, made current
+$ kubectl get pods -A
+
+# A separate file is read only when kubectl is pointed at it
+$ alpacon kube config <cluster> --work-session <ID> --kubeconfig ~/.kube/alpacon
+$ kubectl --kubeconfig ~/.kube/alpacon get pods -A
+
+# Optional: send kubectl through a local proxy
+$ alpacon kube config <cluster> --proxy-port 18443
+$ alpacon kube proxy <cluster>                   # --port 18443 by default; Ctrl+C to stop
 ```
 
 The `kube` group appears only on workspaces whose server reports Kubernetes support. The CLI records that answer at `alpacon login` and `alpacon workspace switch`; elsewhere `kube` is hidden from help, and calling it prints a notice and exits with `1`. If support was turned on after you logged in, run `alpacon login` again.
+
+`kube config` opens a kube session under your active WorkSession and needs an interactive login: a token from `alpacon login -t` cannot open one. Without an active WorkSession it exits with `3` and lists what to run next. It writes to the file `kubectl config` itself writes (`--kubeconfig`, else the first existing file in `KUBECONFIG` or the last one listed when none exists, else `~/.kube/config`), keeps the other entries in it, and rewrites the file in kubectl's layout. The context holds the session's token in plain text until a credential plugin replaces it, so keep the file private (`chmod 600`). The token stops working when the WorkSession ends; run `kube config` again for a new one.
+
+`kube proxy` is optional. It listens on `127.0.0.1` and relays HTTP CONNECT only to the cluster's proxy host, without reading the traffic, so kubectl's TLS stays end to end. kubectl uses it only for a context written with `--proxy-port` set to the same port. It finds the context the way kubectl does, across every file in `KUBECONFIG` (or the one `--kubeconfig` names). One proxy runs per cluster and port.
 
 ### Websh (terminal in your shell)
 ```bash
