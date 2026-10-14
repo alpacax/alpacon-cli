@@ -148,8 +148,9 @@ func TestNew_DialsThroughBoundedDialer(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
-	transport, ok := New(false).Transport.(*http.Transport)
-	require.True(t, ok)
+	c := New(false)
+	transport, ok := c.Transport.(*http.Transport)
+	require.True(t, ok, "transport is %T", c.Transport)
 	orig := dialer.Timeout
 	dialer.Timeout = time.Nanosecond
 	t.Cleanup(func() { dialer.Timeout = orig })
