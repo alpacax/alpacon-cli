@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,8 +131,16 @@ func TestNew(t *testing.T) {
 			require.NotNil(t, transport.Proxy)
 			assert.Equal(t, reflect.ValueOf(http.ProxyFromEnvironment).Pointer(), reflect.ValueOf(transport.Proxy).Pointer())
 			assert.NotNil(t, c.CheckRedirect)
+			assert.Equal(t, 10*time.Second, transport.TLSHandshakeTimeout)
+			assert.NotNil(t, transport.DialContext)
 		})
 	}
+}
+
+func TestDialer_BoundsConnectionSetup(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 30*time.Second, dialer.Timeout)
 }
 
 func TestStopAtCrossOrigin_FollowsSameOriginRedirect(t *testing.T) {
