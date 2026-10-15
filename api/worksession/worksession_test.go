@@ -675,3 +675,44 @@ func TestWorkSessionCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestIsEndedStatus(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{name: "completed", status: "completed", want: true},
+		{name: "expired", status: "expired", want: true},
+		{name: "revoked", status: "revoked", want: true},
+		{name: "rejected", status: "rejected", want: true},
+		{name: "cancelled", status: "cancelled", want: true},
+		{name: "active", status: "active", want: false},
+		{name: "approved", status: "approved", want: false},
+		{name: "pending", status: "pending", want: false},
+		{name: "empty", status: "", want: false},
+		{name: "unknown", status: "unknown", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, IsEndedStatus(tc.status))
+		})
+	}
+}
+
+func TestEndedStatuses_ListsEveryEndedStatus(t *testing.T) {
+	t.Parallel()
+	assert.ElementsMatch(t, []string{"completed", "expired", "revoked", "rejected", "cancelled"}, EndedStatuses())
+}
+
+func TestEndedStatuses_CallerCannotChangeTheList(t *testing.T) {
+	t.Parallel()
+	statuses := EndedStatuses()
+
+	statuses[0] = "active"
+
+	assert.False(t, IsEndedStatus("active"), "mutating the returned slice must not reach the shared list")
+	assert.Len(t, EndedStatuses(), 5)
+}
