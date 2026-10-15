@@ -65,11 +65,9 @@ func runGatePolls(t *testing.T, ac *client.AlpaconClient) []error {
 	errs := make([]error, gatePolls)
 	var wg sync.WaitGroup
 	for i := range gatePolls {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _, errs[i] = pollTransfer(ac, "srv-id", "upload", "t-1", 30*time.Second, time.Time{})
-		}()
+		})
 	}
 	wg.Wait()
 	return errs
