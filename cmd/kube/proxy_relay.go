@@ -204,12 +204,10 @@ func (r *connectRelay) startHandler(conn net.Conn) bool {
 		return false
 	}
 	r.conns[conn] = struct{}{}
-	r.handlers.Add(1)
-	go func() {
-		defer r.handlers.Done()
+	r.handlers.Go(func() {
 		defer r.forget(conn)
 		r.handle(conn)
-	}()
+	})
 	return true
 }
 

@@ -417,9 +417,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	writeErrs := make([]error, 2)
 	done := make(chan struct{})
 	for w := range 2 {
-		writers.Add(1)
-		go func() {
-			defer writers.Done()
+		writers.Go(func() {
 			// Varying lengths so a half-written file differs in size from the
 			// one it replaced, which is what a reader would catch.
 			for i := range 300 {
@@ -428,7 +426,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	go func() {
 		writers.Wait()

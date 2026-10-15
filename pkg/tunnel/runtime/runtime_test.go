@@ -115,12 +115,10 @@ func TestShutdownRunsOnce(t *testing.T) {
 
 	const workers = 8
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r.shutdown(cause)
-		}()
+		})
 	}
 	wg.Wait()
 

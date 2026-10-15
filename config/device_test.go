@@ -308,9 +308,7 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 		stop := make(chan struct{})
 		seen := make(chan string, 1)
 		var watching sync.WaitGroup
-		watching.Add(1)
-		go func() {
-			defer watching.Done()
+		watching.Go(func() {
 			for {
 				data, err := os.ReadFile(path)
 				if err == nil {
@@ -325,7 +323,7 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 				default:
 				}
 			}
-		}()
+		})
 
 		err := createDeviceIDFile(path, deviceID)
 		close(stop)

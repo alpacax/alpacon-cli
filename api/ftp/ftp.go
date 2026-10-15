@@ -210,12 +210,10 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	var wg sync.WaitGroup
 	for i := range count {
 		sem <- struct{}{}
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
-			failuresByIndex[index] = fn(index)
-		}(i)
+			failuresByIndex[i] = fn(i)
+		})
 	}
 	wg.Wait()
 
