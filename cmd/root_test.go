@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,4 +99,23 @@ func TestRootRegistersAPICommand(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "api", command.Name())
+}
+
+func TestRootVersionFlag(t *testing.T) {
+	origVersion, origCmdVersion := utils.Version, RootCmd.Version
+	t.Cleanup(func() {
+		utils.Version, RootCmd.Version = origVersion, origCmdVersion
+		RootCmd.SetOut(nil)
+		RootCmd.SetArgs(nil)
+	})
+	assert.Equal(t, origVersion, origCmdVersion, "RootCmd.Version must come from utils.Version")
+
+	utils.Version = "1.2.3"
+	RootCmd.Version = utils.Version
+	var out bytes.Buffer
+	RootCmd.SetOut(&out)
+	RootCmd.SetArgs([]string{"--version"})
+
+	require.NoError(t, RootCmd.Execute())
+	assert.Equal(t, "alpacon version 1.2.3\n", out.String())
 }
