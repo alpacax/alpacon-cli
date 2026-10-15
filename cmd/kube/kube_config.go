@@ -34,7 +34,7 @@ type kubeConfigFlagValues struct {
 var kubeConfigFlags kubeConfigFlagValues
 
 var kubeConfigCmd = &cobra.Command{
-	Use:   "config CLUSTER [flags]",
+	Use:   "config CLUSTER",
 	Short: "Write a kubeconfig context for a cluster",
 	Long: `Open a kube session on a cluster under the active WorkSession and write a
 context named alpacon-CLUSTER into your kubeconfig, then make it the current

@@ -8,7 +8,7 @@ import (
 )
 
 var csrApproveCmd = &cobra.Command{
-	Use:   "approve",
+	Use:   "approve CSR_ID",
 	Short: "Approve a CSR",
 	Long: `
 	Reviews and approves a pending Certificate Signing Request, 

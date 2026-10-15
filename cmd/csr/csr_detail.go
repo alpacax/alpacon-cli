@@ -10,7 +10,7 @@ import (
 var csrDetailCmd = &cobra.Command{
 	Use:     "describe CSR_ID",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a specific Certificate Signing Request",
+	Short:   "Show details of a CSR",
 	Long: `
 	The describe command fetches and displays detailed information about a specific certificate signing request, 
 	including its csr text, certificate authority and other relevant attributes. 

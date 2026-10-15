@@ -32,7 +32,7 @@ type kubeProxyFlagValues struct {
 var kubeProxyFlags kubeProxyFlagValues
 
 var kubeProxyCmd = &cobra.Command{
-	Use:   "proxy CLUSTER [flags]",
+	Use:   "proxy CLUSTER",
 	Short: "Run a local proxy for a cluster",
 	Long: `Run a local HTTP CONNECT proxy on 127.0.0.1 that reaches the proxy host of
 one cluster's context and nowhere else. It never reads the traffic: kubectl's

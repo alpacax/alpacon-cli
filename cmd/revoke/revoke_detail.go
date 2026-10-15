@@ -10,7 +10,7 @@ import (
 var revokeDetailCmd = &cobra.Command{
 	Use:     "describe REQUEST_ID",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a revoke request",
+	Short:   "Show details of a revoke request",
 	Long: `
 	The describe command fetches and displays detailed information about a specific certificate
 	revoke request, including its status, reason, and associated certificate details.

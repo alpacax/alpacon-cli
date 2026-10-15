@@ -15,9 +15,12 @@ import (
 )
 
 var waitCmd = &cobra.Command{
-	Use:   "wait --type TYPE [--target TARGET_ID]",
+	Use:   "wait",
 	Short: "Wait for one event, then exit",
 	Long: `Block until one event decides the wait, print it, and exit.
+
+Usage: alpacon event wait --type TYPE [--target TARGET_ID]
+--type is required; --target narrows the wait to one target.
 
 The outcome is carried by the exit code, so a script never has to parse prose:
 

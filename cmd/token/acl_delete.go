@@ -3,7 +3,7 @@ package token
 import "github.com/spf13/cobra"
 
 var aclDeleteCmd = &cobra.Command{
-	Use:        "delete ACL-ID",
+	Use:        "delete ACL_ID",
 	Aliases:    []string{"rm"},
 	Short:      "Delete a command ACL rule (deprecated: use 'acl command delete')",
 	Deprecated: "use 'alpacon token acl command delete' instead",

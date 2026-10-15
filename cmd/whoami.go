@@ -17,7 +17,7 @@ import (
 )
 
 var whoamiCmd = &cobra.Command{
-	Use:   "whoami [flags]",
+	Use:   "whoami",
 	Short: "Display current authenticated identity",
 	Long: `Display the current authenticated identity, workspace, system user info,
 and permissions. Useful for verifying context before running infrastructure

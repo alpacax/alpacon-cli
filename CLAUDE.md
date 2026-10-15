@@ -122,16 +122,16 @@ PSScriptAnalyzerSettings.psd1  # Lint rules for the installer
 All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 
 - **UPPERCASE**: User-supplied values (positional arguments)—`SERVER`, `COMMAND`, `SOURCE`
-- **lowercase**: Literal keywords or framework tokens—`[flags]`, `[command]`
-- **`[]`**: Optional—`[USER@]`, `[flags]`
+- **lowercase**: Literal keywords or framework tokens—`[command]`
+- **`[]`**: Optional—`[USER@]`
 - **`...`**: Repeatable—`SOURCE...`, `COMMAND...`
 
 Examples:
 
 ```go
-Use: "websh [flags] [USER@]SERVER [COMMAND]"
+Use: "websh [USER@]SERVER [COMMAND...]"
 Use: "cp [SOURCE...] [DESTINATION]"
-Use: "exec [USER@]SERVER COMMAND... [flags]"
+Use: "exec [USER@]SERVER COMMAND..."
 ```
 
 ### Cobra command conventions

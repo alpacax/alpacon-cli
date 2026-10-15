@@ -92,7 +92,7 @@ func (f *fieldFlag) Set(value string) error {
 func newCommand() *cobra.Command {
 	var opts options
 	cmd := &cobra.Command{
-		Use:   "api [flags] ENDPOINT",
+		Use:   "api ENDPOINT",
 		Short: "Send a request to the Alpacon API",
 		Long: "Send a request to the Alpacon API. ENDPOINT is a path on the current workspace—an absolute URL is refused.\n" +
 			"Fields (-f/-F) go to the query string for GET, and to a JSON body otherwise. A non-2xx response's body is still printed\n" +
