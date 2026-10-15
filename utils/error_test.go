@@ -249,7 +249,8 @@ func TestInteractiveOnly_RewritesTokenRefusal(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"token access control refusal", &codedStub{code: APITokenACLNotAllowed}},
+		{"interactive channel refusal", &codedStub{code: AuthInteractiveChannelRequiresPresence}},
+		{"token access control refusal from an older server", &codedStub{code: APITokenACLNotAllowed}},
 		{"token scope refusal", &codedStub{code: APITokenScopeMissing}},
 		{"wrapped token refusal", fmt.Errorf("failed to create tunnel session: %w", &codedStub{code: APITokenACLNotAllowed})},
 	}
@@ -257,7 +258,7 @@ func TestInteractiveOnly_RewritesTokenRefusal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := InteractiveOnly(tt.err, "open a tunnel")
-			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t and try again")
+			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (add --no-browser on a machine without a browser) and try again")
 		})
 	}
 }
