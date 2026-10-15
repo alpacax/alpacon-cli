@@ -25,8 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 // swapDownloadRetryDelays keeps the retry assertions off the production backoff,
 // which sleeps ~8s per exhausted budget.
 func swapDownloadRetryDelays(initial, max time.Duration) func() {
@@ -60,13 +58,13 @@ func TestPollTransferStatus(t *testing.T) {
 	}{
 		{
 			name:        "immediate success",
-			response:    TransferStatusResponse{Success: boolPtr(true), Message: "completed"},
+			response:    TransferStatusResponse{Success: new(true), Message: "completed"},
 			wantSuccess: true,
 			wantMessage: "completed",
 		},
 		{
 			name:        "immediate failure",
-			response:    TransferStatusResponse{Success: boolPtr(false), Message: "permission denied"},
+			response:    TransferStatusResponse{Success: new(false), Message: "permission denied"},
 			wantSuccess: false,
 			wantMessage: "permission denied",
 		},
@@ -154,7 +152,7 @@ func TestExecuteBulkUpload(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 		}
@@ -221,7 +219,7 @@ func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -282,7 +280,7 @@ func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			pollsEntered <- struct{}{}
 			<-releasePolls
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -341,7 +339,7 @@ func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 			})
 		}
 	}))
@@ -389,7 +387,7 @@ func TestExecuteBulkUpload_WithUnzip(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -452,7 +450,7 @@ func TestDownloadBulk(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 		}
@@ -517,7 +515,7 @@ func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write(zipContent)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		default:
 			http.NotFound(w, r)
 		}
@@ -570,7 +568,7 @@ func TestExecuteSingleUpload(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 
@@ -628,7 +626,7 @@ func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(false),
+				Success: new(false),
 				Message: "permission denied",
 			})
 
@@ -674,7 +672,7 @@ func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 			w.WriteHeader(http.StatusOK)
@@ -721,7 +719,7 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(false),
+				Success: new(false),
 				Message: "disk full",
 			})
 		}
@@ -1070,7 +1068,7 @@ func TestExecuteSingleUpload_WorkSession(t *testing.T) {
 				case r.Method == http.MethodPut:
 					w.WriteHeader(http.StatusOK)
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 					w.WriteHeader(http.StatusOK)
 				}
@@ -1123,7 +1121,7 @@ func TestUploadLocalFileAsUsesRemoteBasenameAndDirectory(t *testing.T) {
 			assert.Equal(t, "edited", string(body))
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -1191,7 +1189,7 @@ func TestExecuteBulkUpload_WorkSession(t *testing.T) {
 				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
 					w.WriteHeader(http.StatusCreated)
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 				}
 			}))
 			defer ts.Close()
@@ -1315,7 +1313,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "done"})
 	}))
 	defer ts.Close()
 
@@ -1778,7 +1776,7 @@ func TestCompleteSingleUpload_TriggersAndPollsTheTrimmedUploadID(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths.Store(r.URL.Path, true)
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
 	}))
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
@@ -1823,7 +1821,7 @@ func TestCompleteBulkUpload_TriggersAndPollsTheTrimmedUploadIDs(t *testing.T) {
 			return
 		}
 		statusPaths.Store(r.URL.Path, true)
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
 	}))
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
