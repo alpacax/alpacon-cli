@@ -47,7 +47,7 @@ func TestCommandStream_MFAWaitDoesNotResubmitAfterAnAcceptedCommand(t *testing.T
 			cfg.submits = &submits
 			// Completed with nothing in result, so the output has to come from
 			// the chunk endpoint, which is unavailable.
-			cfg.terminal = EventDetails{Status: "completed", Success: boolPtr(true)}
+			cfg.terminal = EventDetails{Status: "completed", Success: new(true)}
 			cfg.chunkStatus = http.StatusServiceUnavailable
 			ac := newStreamingServers(t, cfg)
 
