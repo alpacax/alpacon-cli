@@ -55,9 +55,9 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 }
 
 func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
-	var polls int32
+	var polls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&polls, 1)
+		polls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ws-1","status":"pending"}`))
 	}))
@@ -68,7 +68,7 @@ func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
 	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
 
 	require.Error(t, err)
-	got := atomic.LoadInt32(&polls)
+	got := polls.Load()
 	assert.Less(t, got, int32(40), "a fixed 1ms tick would poll about 60 times")
 }
 
