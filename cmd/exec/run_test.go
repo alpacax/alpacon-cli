@@ -866,3 +866,50 @@ func TestRemoteCommandOutcomeFilePhaseHint(t *testing.T) {
 	})
 	assert.Equal(t, utils.Red("Error")+": [agent_timeout] "+event.DescribePhase("agent_timeout")+"\n", stderrLine)
 }
+
+type execUserCodedErr struct{ code string }
+
+func (e execUserCodedErr) Error() string       { return "code: " + e.code }
+func (e execUserCodedErr) ErrorCode() string   { return e.code }
+func (e execUserCodedErr) ErrorSource() string { return "" }
+
+func TestExecUserRefusal(t *testing.T) {
+	t.Parallel()
+	bare := execUserCodedErr{code: "server_username_groupname_invalid"}
+	tests := []struct {
+		name   string
+		err    error
+		parsed RemoteExecArgs
+		wantOK bool
+	}{
+		{name: "bare code", err: bare, wantOK: true},
+		{name: "wrapped code", err: fmt.Errorf("failed to execute command on 'prod' server: %w", bare), wantOK: true},
+		{name: "another code falls through", err: execUserCodedErr{code: "server_busy_with_user_work"}},
+		{name: "plain error falls through", err: errors.New("boom")},
+		{name: "code only in message text falls through", err: errors.New("code: server_username_groupname_invalid")},
+		{name: "nil", err: nil},
+		{name: "a named user keeps the server error", err: bare, parsed: RemoteExecArgs{Server: "prod", Username: "bob"}},
+		{name: "a named group keeps the server error", err: bare, parsed: RemoteExecArgs{Server: "prod", Groupname: "ops"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parsed := tt.parsed
+			if parsed.Server == "" {
+				parsed.Server = "prod"
+			}
+			message, hint, ok := execUserRefusal(tt.err, parsed)
+			assert.Equal(t, tt.wantOK, ok)
+			if !tt.wantOK {
+				assert.Empty(t, message)
+				assert.Empty(t, hint)
+				return
+			}
+			assert.Contains(t, message, "'prod'")
+			assert.Contains(t, hint, "Hint:")
+			assert.Contains(t, hint, "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n")
+			assert.Contains(t, hint, "  alpacon exec -u USERNAME SERVER -- COMMAND\n")
+			assert.Contains(t, hint, "  alpacon exec USERNAME@SERVER -- COMMAND\n")
+		})
+	}
+}

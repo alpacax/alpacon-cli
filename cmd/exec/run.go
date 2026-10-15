@@ -971,3 +971,35 @@ func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine strin
 	}
 	return stderrLine, remoteErr.ExitCode
 }
+
+// usernameGroupnameInvalidCode is the code the server answers with when the
+// command carries no execution user and the server has no default one.
+const usernameGroupnameInvalidCode = "server_username_groupname_invalid"
+
+const execUserRequiredHint = "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n  alpacon exec -u USERNAME SERVER -- COMMAND\n  alpacon exec USERNAME@SERVER -- COMMAND\n"
+
+// execUserRefusal renders the refusal for a command sent with no execution user.
+// One that named a user or group keeps the server's own error, which this hint would contradict.
+func execUserRefusal(err error, parsed RemoteExecArgs) (message, hint string, ok bool) {
+	if parsed.Username != "" || parsed.Groupname != "" ||
+		utils.StructuredErrorCode(err) != usernameGroupnameInvalidCode {
+		return "", "", false
+	}
+	return fmt.Sprintf("no execution user was resolved for '%s' server", parsed.Server),
+		denialHintLine(execUserRequiredHint), true
+}
+
+// HandleExecUserRefusal reports the missing execution user and exits 1, or
+// returns false when err is something else. Under --output json it returns
+// false so the envelope stays what it is today.
+func HandleExecUserRefusal(err error, parsed RemoteExecArgs) bool {
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		return false
+	}
+	message, hint, ok := execUserRefusal(err, parsed)
+	if !ok {
+		return false
+	}
+	reportCodedRefusal("command", err, message, hint)
+	return true
+}

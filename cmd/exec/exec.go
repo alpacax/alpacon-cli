@@ -261,6 +261,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
 			}
+			if HandleExecUserRefusal(err, parsed) {
+				return
+			}
 			if file != nil && HandleFileExecInlineCredential(err) {
 				return
 			}
@@ -315,6 +318,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// A file-lane refusal names the server in its guidance, which
 	// HandleCommandResult does not know; it answers only its own codes.
 	if HandleFileExecRefusal(err, parsed.Server) {
+		return
+	}
+	if HandleExecUserRefusal(err, parsed) {
 		return
 	}
 	if file != nil && HandleFileExecInlineCredential(err) {
