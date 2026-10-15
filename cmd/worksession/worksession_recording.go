@@ -47,7 +47,7 @@ chosen terminal's recording is downloaded. Tunnels are not terminals and are not
 		}
 
 		if recordingIndex < 1 || recordingIndex > len(terminals) {
-			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d recording(s)).", recordingIndex, len(terminals))
+			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d terminal(s)).", recordingIndex, len(terminals))
 		}
 
 		record, addedAt, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[recordingIndex-1])

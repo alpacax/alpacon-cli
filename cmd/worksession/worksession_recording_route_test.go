@@ -116,7 +116,7 @@ func TestRecordingIndex_PastLastTerminalMakesNoRecordsRequest(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, "out of range (session has 2 recording(s))")
+	assert.Contains(t, stderr, "out of range (session has 2 terminal(s))")
 	for _, req := range requests() {
 		assert.NotContains(t, req, "/records/")
 	}
