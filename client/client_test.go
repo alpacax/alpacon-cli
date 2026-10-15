@@ -387,9 +387,9 @@ func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testi
 
 func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
 	t.Parallel()
-	// The server's refusal of an interactive channel to a token (alpacon-server
-	// #3496). It used to arrive as api_token_acl_not_allowed, whose message sends
-	// the user to the token's ACL rules, which cannot lift this refusal.
+	// The server's refusal of an interactive channel to a token. An older server
+	// sends it as api_token_acl_not_allowed, whose message sends the user to the
+	// token's ACL rules, which cannot lift this refusal.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)

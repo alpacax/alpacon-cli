@@ -86,8 +86,8 @@ const (
 	// server refuses to open a Websh terminal, an editor tunnel or a file-transfer
 	// session for it, whatever its scopes and ACL rules say. Permanent for that
 	// credential: widening its rules cannot lift it. Signing in with 'alpacon login'
-	// without -t can. Servers before alpacon-server#3496 sent APITokenACLNotAllowed
-	// for the same refusal, which is why InteractiveOnly still reads both.
+	// without -t can. An older server sends APITokenACLNotAllowed for the same
+	// refusal, which is why InteractiveOnly still reads both.
 	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
 
 	// The token-scope gate's refusals: the token's scopes do not cover this call, or
@@ -386,7 +386,7 @@ func ParseErrorResponse(err error) (string, string) {
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may
 // take; a scope refusal counts, since granting the scope only reaches the ACL refusal.
 // AuthInteractiveChannelRequiresPresence is the refusal's own code; APITokenACLNotAllowed
-// is what a server before alpacon-server#3496 sent for it.
+// is what an older server sends for it.
 func InteractiveOnly(err error, action string) error {
 	switch code, _ := ParseErrorResponse(err); code {
 	case AuthInteractiveChannelRequiresPresence, APITokenACLNotAllowed, APITokenScopeMissing:
