@@ -658,10 +658,7 @@ func planLimitRemedy(axis string, retryAfter time.Duration) string {
 // rounded to the nearest day and floored at one so a delay under twelve hours
 // never reads as "0 days".
 func monthlyRemedy(retryAfter time.Duration) string {
-	days := int(retryAfter.Round(24*time.Hour) / (24 * time.Hour))
-	if days < 1 {
-		days = 1
-	}
+	days := max(int(retryAfter.Round(24*time.Hour)/(24*time.Hour)), 1)
 	return fmt.Sprintf("Resets in %d days.", days)
 }
 
