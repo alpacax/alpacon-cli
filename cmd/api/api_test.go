@@ -910,7 +910,7 @@ func TestAPICommand_RejectsStdinFieldWithStdinInput(t *testing.T) {
 }
 
 // mfaTestServer points HOME at a temp dir holding a refresh token, so its caller must stay serial.
-func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, string, string)) (*client.AlpaconClient, *int32) {
+func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, string, string)) (*client.AlpaconClient, *atomic.Int32) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ALPACON_NO_BROWSER", "1")
@@ -920,14 +920,14 @@ func mfaTestServer(t *testing.T, endpointResponses func(callCount int) (int, str
 		"", "", "old-token", "refresh-token", "", 0, false,
 	))
 
-	var endpointCalls int32
+	var endpointCalls atomic.Int32
 	ac := &client.AlpaconClient{
 		BaseURL:       "https://workspace.example",
 		WorkspaceName: "my-workspace",
 		HTTPClient: &http.Client{Transport: apiRoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			switch r.URL.Path {
 			case "/x":
-				n := int(atomic.AddInt32(&endpointCalls, 1))
+				n := int(endpointCalls.Add(1))
 				status, ct, body := endpointResponses(n)
 				if status == 0 {
 					// No response at all: the connection was refused.
@@ -964,7 +964,7 @@ func TestRunAPI_MFARequiredOpensLinkAndRetriesOnce(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
 	assert.JSONEq(t, `{"ok":true}`, stdout.String())
-	assert.Equal(t, int32(2), atomic.LoadInt32(calls), "the endpoint must be hit exactly twice")
+	assert.Equal(t, int32(2), calls.Load(), "the endpoint must be hit exactly twice")
 }
 
 // The MFA wait is the retried request itself: it keeps going while the endpoint
@@ -984,7 +984,7 @@ func TestRunAPI_MFARequiredRetriesUntilTheEndpointStopsRefusing(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
 	assert.JSONEq(t, `{"ok":true}`, stdout.String())
-	assert.Equal(t, int32(3), atomic.LoadInt32(calls), "the first call, one refused retry, and the one that passes")
+	assert.Equal(t, int32(3), calls.Load(), "the first call, one refused retry, and the one that passes")
 }
 
 // Under -v the refused attempts in between are not printed: stderr shows the
@@ -1002,7 +1002,7 @@ func TestRunAPI_MFAVerboseShowsOnlyTheFirstAndLastAttempt(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.Equal(t, int32(3), calls.Load())
 	assert.Equal(t, 2, strings.Count(stderr.String(), "GET /x HTTP/1.1"), stderr.String())
 }
 
@@ -1025,7 +1025,7 @@ func TestRunAPI_MFAWaitRidesThroughA503(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, code)
 	assert.JSONEq(t, `{"ok":true}`, stdout.String())
-	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.Equal(t, int32(3), calls.Load())
 }
 
 // A wait that runs out on 503s reports the last one like any non-2xx answer:
@@ -1045,7 +1045,7 @@ func TestRunAPI_MFAWaitEndingOn503sReportsTheResponse(t *testing.T) {
 	assert.Equal(t, 1, code)
 	assert.JSONEq(t, `{"detail":"unavailable"}`, stdout.String())
 	assert.NotContains(t, stderr.String(), "HTTP 503", "the caller prints the status, not runAPI")
-	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), atomic.LoadInt32(calls))
+	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), calls.Load())
 }
 
 // A wait that ends on an attempt with no response at all reports that failure
@@ -1066,7 +1066,7 @@ func TestRunAPI_MFAWaitEndingWithoutAResponsePrintsNoStaleResponse(t *testing.T)
 	assert.Equal(t, 1, code)
 	assert.Empty(t, stdout.String())
 	assert.NotContains(t, stderr.String(), "HTTP 403")
-	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), atomic.LoadInt32(calls))
+	assert.Equal(t, int32(1+utils.MaxConsecutivePollFailures), calls.Load())
 }
 
 func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {
@@ -1084,7 +1084,7 @@ func TestRunAPI_CallerAuthorizationHeaderSkipsMFA(t *testing.T) {
 	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusUnauthorized))
 	assert.Equal(t, 1, code)
 	assert.JSONEq(t, `{"code":"auth_mfa_required"}`, stdout.String())
-	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "the endpoint must be hit exactly once")
+	assert.Equal(t, int32(1), calls.Load(), "the endpoint must be hit exactly once")
 }
 
 func TestRunAPI_DifferentCodeSkipsMFA(t *testing.T) {
@@ -1098,7 +1098,7 @@ func TestRunAPI_DifferentCodeSkipsMFA(t *testing.T) {
 	require.EqualError(t, err, fmt.Sprintf("HTTP %d", http.StatusUnauthorized))
 	assert.Equal(t, 1, code)
 	assert.JSONEq(t, `{"code":"auth_authentication_failed"}`, stdout.String())
-	assert.Equal(t, int32(1), atomic.LoadInt32(calls), "the endpoint must be hit exactly once")
+	assert.Equal(t, int32(1), calls.Load(), "the endpoint must be hit exactly once")
 }
 
 // A 429 during the MFA wait waits the Retry-After the response carried before
@@ -1133,6 +1133,6 @@ func TestRunAPI_MFAWaitHonorsRetryAfterOn429(t *testing.T) {
 		assert.Equal(t, 0, code)
 	})
 
-	assert.Equal(t, int32(3), atomic.LoadInt32(calls))
+	assert.Equal(t, int32(3), calls.Load())
 	assert.GreaterOrEqual(t, elapsed, 8*time.Second, "one interval before the retry that is throttled, then its Retry-After")
 }
