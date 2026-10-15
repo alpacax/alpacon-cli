@@ -169,6 +169,7 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		WorkspaceName: validConfig.WorkspaceIdentity(),
 		Token:         validConfig.Token,
 		UserAgent:     utils.GetUserAgent(),
+		Insecure:      validConfig.Insecure,
 	}
 	client.SetAccessToken(validConfig.AccessToken)
 

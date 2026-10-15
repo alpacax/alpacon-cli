@@ -14,26 +14,36 @@ package httpclient
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
 	// maxRedirects is the cap Go's default redirect policy applies.
 	maxRedirects = 10
 
+	// Go's default transport values, which a hand-built Transport lacks.
+	// Neither caps a transfer once connected.
+	dialTimeout         = 30 * time.Second
+	tlsHandshakeTimeout = 10 * time.Second
+
 	schemeHTTP  = "http"
 	schemeHTTPS = "https"
 )
 
-// New returns a client that follows the system proxy settings as Go's default
-// transport does, requires TLS 1.2, skips certificate verification only when
-// insecure is set, and refuses any redirect that leaves the origin.
+var dialer = &net.Dialer{Timeout: dialTimeout}
+
+// New returns a client with Go's default proxy and connection-setup bounds, TLS 1.2
+// minimum and a same-origin redirect policy; insecure skips certificate verification.
 func New(insecure bool) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
+			Proxy:               http.ProxyFromEnvironment,
+			DialContext:         dialer.DialContext,
+			TLSHandshakeTimeout: tlsHandshakeTimeout,
 			TLSClientConfig: &tls.Config{
 				MinVersion:         tls.VersionTLS12,
 				InsecureSkipVerify: insecure, //nolint:gosec
