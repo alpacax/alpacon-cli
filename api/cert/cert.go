@@ -24,6 +24,10 @@ const (
 // certificate sign request, so the server keeps it and its records.
 const CodeAuthorityCannotBeDeleted = "cert_authority_cannot_be_deleted"
 
+// CodeInvalidPeriod rides a 400 on a sign request whose valid_days falls outside
+// 1..max_valid_days of the CA.
+const CodeInvalidPeriod = "cert_invalid_period"
+
 func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignRequestResponse, error) {
 	var response SignRequestResponse
 

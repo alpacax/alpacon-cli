@@ -7,11 +7,13 @@ import (
 )
 
 type SignRequest struct {
-	DomainList  []string `json:"domain_list"`
-	IpList      []string `json:"ip_list"`
-	ValidDays   int      `json:"valid_days"`
-	CsrText     string   `json:"csr_text,omitempty"`
-	RequestedBy string   `json:"requested_by,omitempty"`
+	DomainList []string `json:"domain_list"`
+	IpList     []string `json:"ip_list"`
+	// ValidDays is omitted when zero so the server applies the CA's
+	// default_valid_days instead of a value the CLI picked.
+	ValidDays   int    `json:"valid_days,omitempty"`
+	CsrText     string `json:"csr_text,omitempty"`
+	RequestedBy string `json:"requested_by,omitempty"`
 }
 
 type SignRequestResponse struct {
