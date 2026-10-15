@@ -84,7 +84,7 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 		want      string
 		notWant   string
 	}{
-		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t", "bypass this check"},
+		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t (add --no-browser on a machine without a browser)", "bypass this check"},
 		{"command is bypassed by a token", OperationCommand, "bypass this check", "cannot open an interactive terminal"},
 		{"webftp is bypassed by a token", OperationWebFTP, "bypass this check", "cannot open an interactive terminal"},
 	}

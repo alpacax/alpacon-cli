@@ -82,7 +82,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 
 func workSessionTokenNote(operation string) string {
 	if operation == OperationWebsh {
-		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs 'alpacon login' without -t."
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs 'alpacon login' without -t (add --no-browser on a machine without a browser)."
 	}
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }
