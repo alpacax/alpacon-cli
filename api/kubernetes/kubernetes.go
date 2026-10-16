@@ -2,9 +2,7 @@ package kubernetes
 
 import (
 	"encoding/json"
-	"fmt"
 	"path"
-	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -136,13 +134,12 @@ func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*Kub
 	return &session, nil
 }
 
-// CloseSession ends a proxy session. An ID that is blank or holds a path
-// segment is refused before any request: path.Join would turn it into another
-// route, such as POST /api/kubernetes/sessions/close/ for an empty ID.
+// CloseSession ends a proxy session.
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" || strings.Contains(sessionID, "/") || sessionID == "." || sessionID == ".." {
-		return fmt.Errorf("invalid kube session id %q", sessionID)
+	sessionID, err := api.RequireID(sessionID, "kube session")
+	if err != nil {
+		return err
 	}
-	_, err := ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
 	return err
 }

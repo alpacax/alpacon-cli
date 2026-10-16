@@ -462,6 +462,8 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 		{name: "dot dot", sessionID: ".."},
 		{name: "parent segment", sessionID: "../clusters/c-1"},
 		{name: "nested segment", sessionID: "s-1/x"},
+		{name: "backslash", sessionID: `s-1\x`},
+		{name: "encoded slash", sessionID: "s-1%2Fx"},
 	}
 
 	for _, tt := range tests {
@@ -474,7 +476,7 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			require.Error(t, CloseSession(newTestClient(ts), tt.sessionID))
+			require.ErrorIs(t, CloseSession(newTestClient(ts), tt.sessionID), api.ErrInvalidID)
 			assert.Zero(t, hits.Load())
 		})
 	}
