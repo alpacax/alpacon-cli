@@ -1838,3 +1838,47 @@ func TestCompleteBulkUpload_TriggersAndPollsTheTrimmedUploadIDs(t *testing.T) {
 	_, polled := statusPaths.Load("/api/webftp/uploads/id-1/status/")
 	assert.True(t, polled, "status must be polled at the trimmed ID")
 }
+
+// noDownloadRequestClient fails the test on any request and answers it with a
+// finished command, so a missed check ends the download instead of polling on.
+func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"error"}`))
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "transfer ID", body: `{"id":"../x","command":"cmd-1"}`},
+		{name: "command ID", body: `{"id":"dl-1","command":"../x"}`},
+	}
+	for _, tc := range tests {
+		t.Run("single "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), "/remote/file", t.TempDir(), false)
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+		t.Run("bulk "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			err := completeBulkDownload(ac, "server-1", []byte(tc.body), []string{"/remote/a", "/remote/b"}, t.TempDir())
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}

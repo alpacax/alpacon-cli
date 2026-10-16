@@ -785,12 +785,30 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 	return completeSingleDownload(ac, serverID, postBody, remotePath, dest, recursive)
 }
 
+// downloadIDs checks the transfer and command IDs a download create returned,
+// before any of them reaches a path.
+func downloadIDs(transferID, commandID string) (string, string, error) {
+	transferID, err := api.RequireResponseID(transferID, "download")
+	if err != nil {
+		return "", "", err
+	}
+	commandID, err = api.RequireResponseID(commandID, "command")
+	if err != nil {
+		return "", "", err
+	}
+	return transferID, commandID, nil
+}
+
 // completeSingleDownload waits for the download the server started, fetches
 // the file and confirms the transfer. Each request after the create is its own
 // retry unit (transferStep).
 func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
+		return DownloadedFile{}, err
+	}
+	var err error
+	if downloadResponse.ID, downloadResponse.Command, err = downloadIDs(downloadResponse.ID, downloadResponse.Command); err != nil {
 		return DownloadedFile{}, err
 	}
 
@@ -863,6 +881,10 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []byte, remotePaths []string, dest string) error {
 	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
+		return err
+	}
+	var err error
+	if response.ID, response.Command, err = downloadIDs(response.ID, response.Command); err != nil {
 		return err
 	}
 
