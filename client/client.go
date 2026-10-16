@@ -1360,6 +1360,12 @@ func codeOnlyMessage(code string) string {
 		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
 	case utils.ServerPAMInstallInProgress:
 		return "an alpamon-pam install is already pending on this server—wait for it to finish"
+	case utils.WorkSessionTargetAccountAbsent:
+		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account"
+	case utils.WorkSessionTargetAccountNotReachable:
+		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account"
+	case utils.TargetAccountOtherPerson:
+		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account"
 	case utils.WorkSessionAgentSessionRequired:
 		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
 	default:

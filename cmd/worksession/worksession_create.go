@@ -82,7 +82,9 @@ before the server on each command instead, as in 'alpacon exec --work-session
 SESSION_ID web-01 -- uptime'. --wait still waits for approval.
 
 Pass --account to name the account the work runs as on the servers (for example
-root), so the approver sees it with the request.`,
+root), so the approver sees it with the request. The session runs only as that
+account, so pass it to later commands with -u <account> (for example 'alpacon exec
+-u root web-01 -- uptime').`,
 	Example: `  alpacon work-session create --scope command,websh --server web-01 --expires-in 2h --purpose "restart nginx on web-01 to clear 502s"
   alpacon work-session create --scope command --server web-01,db-01 --expires-at 2027-01-15T10:00:00Z --purpose "deploy" --wait
   alpacon work-session create --scope command --server web-01 --expires-in 1h --purpose "hotfix" --use
@@ -270,7 +272,7 @@ root), so the approver sees it with the request.`,
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
 					session.ApprovalRequestID,
-					afterApprovalAction(sessionRequesterType, session.ID),
+					afterApprovalAction(sessionRequesterType, session.ID, account),
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -302,7 +304,7 @@ root), so the approver sees it with the request.`,
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 					session.ApprovalRequestID,
-					afterApprovalAction(sessionRequesterType, session.ID),
+					afterApprovalAction(sessionRequesterType, session.ID, account),
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -515,11 +517,15 @@ func resolveRequesterType(flagValue string, flagSet bool, detected aiagent.Detec
 // afterApprovalAction is the follow-up for a session still waiting on approval.
 // A user session is attached with 'work-session use'; an agent session cannot
 // be, so its ID goes to each subsequent command with --work-session instead.
-func afterApprovalAction(requesterType, id string) utils.NextAction {
-	if requesterType == "agent" {
-		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)", id)}
+func afterApprovalAction(requesterType, id, account string) utils.NextAction {
+	asAccount := ""
+	if account != "" {
+		asAccount = fmt.Sprintf("; run exec with -u %s, the account the session was created for", account)
 	}
-	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval"}
+	if requesterType == "agent" {
+		return utils.NextAction{Description: fmt.Sprintf("after approval, pass --work-session %s to each subsequent command (exec, cp, tunnel)%s", id, asAccount)}
+	}
+	return utils.NextAction{Command: fmt.Sprintf("alpacon work-session use %s", id), Description: "after approval" + asAccount}
 }
 
 // detectedAgentSuffix explains, after a refusal that applies to agent sessions,
@@ -712,6 +718,6 @@ func init() {
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
 	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
-	workSessionCreateCmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request")
+	workSessionCreateCmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
 }

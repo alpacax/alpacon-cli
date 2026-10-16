@@ -238,7 +238,7 @@ func kubeWorkSessionCases() []struct {
 		{WorkSessionExpired, "abc-123-uuid", []string{"alpacon work-session extend abc-123-uuid", create}},
 		{WorkSessionScopeNotAllowed, "", reuseOrCreate},
 		{WorkSessionServerNotAllowed, "", reuseOrCreate},
-		{WorkSessionAgentSessionRequired, "", reuseOrCreate},
+		{WorkSessionAccountNotApproved, "", reuseOrCreate},
 	}
 }
 
@@ -277,7 +277,8 @@ func TestBuildWorkSessionDiagnostic_KubeIgnoresServerName(t *testing.T) {
 
 func TestKubeWorkSessionCasesCoverEveryCode(t *testing.T) {
 	t.Parallel()
-	covered := map[string]bool{}
+	// The agent-session code has its own test below: its next step is a note, not a command.
+	covered := map[string]bool{WorkSessionAgentSessionRequired: true}
 	for _, tc := range kubeWorkSessionCases() {
 		covered[tc.code] = true
 	}
@@ -301,9 +302,7 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 			assert.NotContains(t, got, "required scope")
 			assert.NotContains(t, got, "  target server : ")
 			assert.NotContains(t, got, "--scope kube")
-			if tc.code != WorkSessionAgentSessionRequired { // its reason names the agent
-				assert.NotContains(t, got, "AI agent")
-			}
+			assert.NotContains(t, got, "AI agent")
 			assert.NotContains(t, got, "--requester-type")
 			assert.NotContains(t, got, "the kube operation")
 			assert.Equal(t, tc.want, diagnosticNextCommands(t, got))
@@ -359,6 +358,9 @@ func agentCreateAction(t *testing.T, actions []NextAction) NextAction {
 func TestWorkSessionNextActions_AgentRecoveryAvoidsForbiddenScope(t *testing.T) {
 	t.Parallel()
 	for code := range workSessionReasonMap {
+		if code == WorkSessionAccountNotApproved { // offers -u and --account, covered by its own test
+			continue
+		}
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 			actions := workSessionNextActions(code, OperationWebsh, "prod-1", "")
@@ -391,6 +393,9 @@ func TestWorkSessionNextActions_AgentRecoveryKeepsAllowedScope(t *testing.T) {
 				{Command: `alpacon work-session create --scope ` + operation + ` --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent`, Description: "none active? create an agent session (prefix the gated command with --work-session <ID>)"},
 			}, actions)
 			for code := range workSessionReasonMap {
+				if code == WorkSessionAccountNotApproved { // offers -u and --account, covered by its own test
+					continue
+				}
 				agent := agentCreateAction(t, workSessionNextActions(code, operation, "prod-1", ""))
 				assert.Contains(t, agent.Command, "--scope "+operation+" ")
 				assert.NotContains(t, agent.Description, "alpacon exec")
@@ -413,4 +418,56 @@ func TestKubeWorkSessionNextActions_CreateDescription(t *testing.T) {
 	assert.Equal(t, "find an existing active session you own", actions[0].Description)
 	assert.Equal(t, "attach it", actions[1].Description)
 	assert.Equal(t, "none active? create one; any active session you own works for kube", actions[2].Description)
+}
+
+// Under a detected agent a kube session cannot be opened at all: an agent
+// session is refused and a user session is refused again. The only way out is
+// a person's own terminal, so no use or --use is suggested.
+func TestKubeWorkSessionAgentSessionRequired(t *testing.T) {
+	t.Setenv("AI_AGENT", "test-agent")
+	want := "kube needs a person's own terminal: unset the AI agent variables or run the command from your own terminal, then attach a session you own"
+
+	actions := workSessionNextActions(WorkSessionAgentSessionRequired, OperationKube, "", "")
+	require.Len(t, actions, 1)
+	assert.Empty(t, actions[0].Command)
+	assert.Equal(t, want, actions[0].Description)
+
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationKube, "", "Browser login", "")
+	assert.Contains(t, got, "Detected AI agent")
+	assert.Contains(t, got, "Unset those variables, or run the command from your own terminal.")
+	assert.Contains(t, got, "  "+want+"\n")
+	assert.NotContains(t, got, "work-session use")
+	assert.NotContains(t, got, "--use")
+	assert.NotContains(t, got, "work-session create")
+}
+
+func TestWorkSessionAccountNotApproved(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+	reason := workSessionReasonMap[WorkSessionAccountNotApproved]
+	assert.Equal(t, "the command runs as an account the session was not approved for; a session runs only as the account named when it was created", reason)
+
+	actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", "")
+	require.Len(t, actions, 2)
+	assert.Equal(t, "alpacon exec -u <approved account> web-01 -- <command>", actions[0].Command)
+	assert.Contains(t, actions[0].Description, "pass -u with the session's account")
+	assert.Contains(t, actions[1].Command, "alpacon work-session create --scope command --server web-01")
+	assert.Contains(t, actions[1].Command, "--account <account>")
+	assert.NotContains(t, actions[1].Command, "--use")
+	assert.Equal(t, "or create a session for this account", actions[1].Description)
+
+	got := buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	assert.Contains(t, got, reason)
+	assert.Contains(t, got, "alpacon exec -u <approved account> web-01")
+
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	assert.Equal(t, WorkSessionAccountNotApproved, envelope.ErrorCode)
+	assert.Equal(t, reason, envelope.Reason)
+}
+
+func TestWorkSessionAccountNotApproved_AgentCreateIsAgentSession(t *testing.T) {
+	t.Setenv("AI_AGENT", "test-agent")
+	actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", "")
+	require.Len(t, actions, 2)
+	assert.Contains(t, actions[1].Command, "--requester-type agent")
+	assert.Contains(t, actions[1].Command, "--account <account>")
 }

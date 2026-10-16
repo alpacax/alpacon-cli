@@ -349,11 +349,11 @@ Override the active session per command with `--work-session <id>` or `ALPACON_W
 
 `complete` and `revoke` clear the active session when they end it. A session that ends anywhere else—it expires, an admin revokes it, or it is completed from the console—stays set until you run `alpacon work-session use --unset`; `ls` stops marking it as active and `current` warns that it has ended.
 
-`create --account <name>` names the account the work runs as on the servers (for example `root`), so the approver sees it with the request.
+`create --account <name>` names the account the work runs as on the servers (for example `root`), so the approver sees it with the request. The session runs only as that account, so pass it to later commands with `-u <name>` (for example `alpacon exec -u root web-01 -- uptime`); without it `exec` is refused with `work_session_account_not_approved`.
 
 #### AI agents
 
-The CLI tells when an AI coding agent runs it, from environment variables only, and names the agent on every request with the `X-Alpacon-Declared-Agent-Name` header (and `X-Alpacon-Declared-Agent-Version` when the environment states a version). The first match names the agent:
+The CLI detects when an AI coding agent runs it, from environment variables only, and names the agent on every request with the `X-Alpacon-Declared-Agent-Name` header (and `X-Alpacon-Declared-Agent-Version` when the environment states a version). The first match names the agent:
 
 | Variable | Agent |
 |---|---|
@@ -365,6 +365,8 @@ The CLI tells when an AI coding agent runs it, from environment variables only, 
 | `CURSOR_AGENT=1` | `cursor` |
 | `CLINE_ACTIVE=true` | `cline` |
 | `GOOSE_TERMINAL=1` or `AGENT=goose` | `goose` |
+
+Commands run through Claude Code's `!` prefix count as an agent too.
 
 None of these count: no TTY, `CI`, `TERM_PROGRAM` or any other editor terminal, `CLAUDECODE` on its own, `REPL_ID`, `GOOSE_PROVIDER`, and `AGENT` with any value but `goose`. For an agent that sets none of the variables (for example Aider), set `AI_AGENT=<name>` in its environment.
 

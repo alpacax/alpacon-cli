@@ -126,6 +126,15 @@ const (
 	// session it named is a user session. Only an agent session serves it.
 	WorkSessionAgentSessionRequired = "work_session_agent_session_required"
 
+	// WorkSessionAccountNotApproved: the command names an account other than
+	// the one the session was approved to run as.
+	WorkSessionAccountNotApproved = "work_session_account_not_approved"
+
+	// Refusals of the account a work session create names with --account.
+	WorkSessionTargetAccountAbsent       = "work_session_target_account_absent"
+	WorkSessionTargetAccountNotReachable = "work_session_target_account_not_reachable"
+	TargetAccountOtherPerson             = "target_account_other_person"
+
 	// Refusals of a kube session the server names itself. An AI agent's
 	// WorkSession cannot open one yet; the cluster's agent is not connected;
 	// the agent did not accept the session, which the server then closed; and

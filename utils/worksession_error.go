@@ -54,6 +54,7 @@ var workSessionReasonMap = map[string]string{
 	WorkSessionServerNotAllowed:     "target server is not in this session",
 	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",
 	WorkSessionAgentSessionRequired: "this CLI runs under an AI agent, and an AI agent cannot use a user session",
+	WorkSessionAccountNotApproved:   "the command runs as an account the session was not approved for; a session runs only as the account named when it was created",
 }
 
 func isWorkSessionCode(code string) bool {
@@ -102,8 +103,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
-	// Kube offers no agent path, so its diagnostic carries no agent note.
-	if code == WorkSessionAgentSessionRequired && operation != OperationKube {
+	if code == WorkSessionAgentSessionRequired {
 		fmt.Fprintln(&sb, agentSessionNote(aiagent.FromEnvironment()))
 	}
 	fmt.Fprint(&sb, workSessionTokenNote(operation))
@@ -212,6 +212,15 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentNext + ")"},
 	}
 	switch code {
+	case WorkSessionAccountNotApproved:
+		accountCreate := strings.Replace(createCmd, " --use", " --account <account>", 1)
+		if aiagent.FromEnvironment().Detected() {
+			accountCreate = agentCreateCmd + " --account <account>"
+		}
+		return []NextAction{
+			{Command: "alpacon exec -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: accountCreate, Description: "or create a session for this account"},
+		}
 	case WorkSessionAgentSessionRequired:
 		// The selected session is a person's; only an agent session serves an agent.
 		return []NextAction{
@@ -258,6 +267,10 @@ func kubeWorkSessionNextActions(code, activeWS string) []NextAction {
 		create,
 	}
 	switch code {
+	case WorkSessionAgentSessionRequired:
+		// An agent session cannot open a kube session, and a user session is
+		// refused under a detected agent: only a person's own terminal works.
+		return []NextAction{{Description: "kube needs a person's own terminal: unset the AI agent variables or run the command from your own terminal, then attach a session you own"}}
 	case WorkSessionNotActive:
 		return append([]NextAction{
 			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked/cancelled: create or reuse below"},
