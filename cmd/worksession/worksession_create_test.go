@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -804,4 +805,25 @@ func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 
 	assert.NotContains(t, stderr, "\x1b[2K")
 	assert.Contains(t, stderr, "work session was rejected")
+}
+
+func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
+	t.Parallel()
+	// A status IsEndedStatus accepts but the switch lacks would fall through to
+	// polling until the timeout instead of ending the wait.
+	for _, status := range wsapi.EndedStatuses() {
+		t.Run(status, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"ws-uuid","status":%q}`, status)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+
+			var terminal *terminalWaitError
+			assert.ErrorAs(t, err, &terminal, "no case for ended status %q in the create --wait switch", status)
+		})
+	}
 }

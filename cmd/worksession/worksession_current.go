@@ -109,7 +109,7 @@ func WriteCurrentTable(ac *client.AlpaconClient, uuid string) error {
 }
 
 func warnIfEnded(uuid, status string) {
-	if isEndedStatus(status) {
+	if wsapi.IsEndedStatus(status) {
 		utils.CliWarning("Active work-session %s has ended (%s). Run 'alpacon work-session use --unset' to clear it.", uuid, status)
 	}
 }

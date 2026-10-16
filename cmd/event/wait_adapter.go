@@ -18,12 +18,12 @@ const (
 	workSessionActivatedEvent = "activated"
 )
 
-// Sub types are copied by hand from the work session status changes the server
-// publishes; nothing keeps the two in sync.
+// The ok sub types are copied by hand from the work session status changes the
+// server publishes; fail comes from the same list the REST commands read.
 var waitAdapters = map[eventapi.EventType]waitAdapter{
 	eventTypeWorkSession: {
 		ok:      []string{"approved", workSessionActivatedEvent},
-		fail:    []string{"rejected", "expired", "revoked", "cancelled", "completed"},
+		fail:    wsapi.EndedStatuses(),
 		catchUp: workSessionCatchUp,
 	},
 }

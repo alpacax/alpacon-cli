@@ -1,10 +1,15 @@
 package worksession
 
 import (
+	"slices"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
 )
+
+// endedStatuses are the statuses after which a work session never runs again.
+// A new status also needs a case in the create --wait switch in cmd/worksession.
+var endedStatuses = []string{"completed", "expired", "revoked", "rejected", "cancelled"}
 
 type WorkSession struct {
 	ID                string                `json:"id"`
@@ -189,4 +194,12 @@ type TimelineAttributes struct {
 	Server  string `json:"server"    table:"Server"`
 	User    string `json:"user"      table:"User"`
 	Details string `json:"details"   table:"Details"`
+}
+
+func EndedStatuses() []string {
+	return append([]string(nil), endedStatuses...)
+}
+
+func IsEndedStatus(status string) bool {
+	return slices.Contains(endedStatuses, status)
 }
