@@ -2838,7 +2838,7 @@ func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
 func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ code, want string }{
-		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present—run this command from your own terminal, signed in with 'alpacon login', and complete the MFA prompt; or drop --sudo, and each sudo command asks for MFA"},
+		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
 		{utils.SudoPolicyBypassAgentSessionNeedsApproval, "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
 	}
 	for _, tt := range tests {
