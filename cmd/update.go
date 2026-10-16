@@ -14,7 +14,7 @@ import (
 var checkOnly bool
 
 var updateCmd = &cobra.Command{
-	Use:   "update [flags]",
+	Use:   "update",
 	Short: "Update the CLI to the latest release",
 	Args:  cobra.NoArgs, // Without this, 'alpacon update check'—the typo for --check—is an argument nobody reads, and the binary gets replaced instead.
 	Long: `Update the CLI to the latest release.

@@ -34,7 +34,7 @@ var csrFlags struct {
 }
 
 var csrCreateCmd = &cobra.Command{
-	Use:   "create [flags]",
+	Use:   "create",
 	Short: "Create a CSR",
 	Long: `
 	Generates a new Certificate Signing Request based on provided information,
