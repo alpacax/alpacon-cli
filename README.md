@@ -203,7 +203,7 @@ For Auth0 and MFA authentication the CLI opens the auth URL in your default brow
 ## Shell completion
 
 ```bash
-source <(alpacon completion bash)                                  # bash (add to ~/.bashrc)
+source <(alpacon completion bash)                                  # bash (needs the bash-completion package; add to ~/.bashrc)
 source <(alpacon completion zsh)                                   # zsh (add to ~/.zshrc after compinit)
 mkdir -p ~/.config/fish/completions && alpacon completion fish > ~/.config/fish/completions/alpacon.fish  # fish
 alpacon completion powershell | Out-String | Invoke-Expression     # PowerShell (add to $PROFILE)

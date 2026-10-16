@@ -106,7 +106,7 @@ func init() {
 	)
 
 	// version
-	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Display the current CLI version")
+	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
 
 	// update
