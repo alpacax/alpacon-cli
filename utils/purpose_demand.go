@@ -169,11 +169,8 @@ func PrintPurposeAccepted(commandID string) {
 	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
 }
 
-// PrintPurposeRefused reports a rejected answer. The server answers a settled
-// command and an answer from the wrong principal with one code, so neither this
-// message nor the envelope can say which happened—hence the pointer at the
-// command's own state rather than a guess, and never at a resubmission.
-// It never exits; the caller owns the exit-code contract.
+// The server answers a settled command and a wrong principal with one code, so the message
+// points at the command's own state, never at a resubmission. It never exits.
 func PrintPurposeRefused(commandID string, cause error) {
 	commandID = SanitizeTerminalText(commandID)
 	message := fmt.Sprintf(
@@ -187,17 +184,14 @@ func PrintPurposeRefused(commandID string, cause error) {
 	}
 
 	if OutputFormat == OutputFormatJSON {
-		envelope := purposeAnswerJSON{
-			OK:          false,
-			Status:      "purpose_refused",
+		PrintFailureJSON(Failure{
 			ExitCode:    ExitCodeGeneralError,
+			ErrorCode:   ErrorCodePurposeRefused,
+			Err:         cause,
 			Message:     message,
 			CommandID:   commandID,
 			NextActions: []NextAction{next},
-		}
-		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
-			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":"purpose_refused"}`+"\n")
-		}
+		})
 		return
 	}
 

@@ -19,7 +19,7 @@ var workspaceListCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeNotLoggedIn, "Not logged in. Run 'alpacon login' first.")
 		}
 
 		if !cfg.IsMultiWorkspaceMode() {

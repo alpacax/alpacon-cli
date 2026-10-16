@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -215,12 +216,56 @@ func TestUpdateCommandCheckExitsZeroWhenAlreadyCurrent(t *testing.T) {
 	assert.Contains(t, stderr, "already up to date")
 }
 
+func TestUpdateCommandCheckJSONPrintsAStatusObjectWhenANewerReleaseExists(t *testing.T) {
+	t.Parallel()
+	stdout, stderr, exitCode := runUpdateCommandHelperOut(t, []string{"update", "--check", "--output", "json"},
+		"ALPACON_TEST_CURRENT_VERSION=1.0.0",
+		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
+	)
+
+	assert.Equal(t, utils.ExitCodeUpdateAvailable, exitCode)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &got), "stdout: %s", stdout)
+	assert.Equal(t, true, got["ok"])
+	assert.Equal(t, "update_available", got["status"])
+	assert.Equal(t, "1.0.0", got["current"])
+	assert.Equal(t, "9.9.9", got["latest"])
+	assert.NotEmpty(t, got["action"])
+	assert.NotContains(t, stderr, `"error_code"`, "exit 8 is a status, not a failure")
+}
+
+func TestUpdateCommandCheckJSONPrintsAStatusObjectWhenAlreadyCurrent(t *testing.T) {
+	t.Parallel()
+	stdout, _, exitCode := runUpdateCommandHelperOut(t, []string{"update", "--check", "--output", "json"},
+		"ALPACON_TEST_CURRENT_VERSION=9.9.9",
+		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
+	)
+
+	assert.Equal(t, 0, exitCode)
+	assert.JSONEq(t, `{"ok":true,"status":"up_to_date","current":"9.9.9","latest":"9.9.9"}`, stdout)
+}
+
+func TestUpdateCommandCheckTableKeepsStdoutEmpty(t *testing.T) {
+	t.Parallel()
+	stdout, _, _ := runUpdateCommandHelperOut(t, []string{"update", "--check"},
+		"ALPACON_TEST_CURRENT_VERSION=1.0.0",
+		"ALPACON_TEST_LATEST_RELEASE=9.9.9",
+	)
+
+	assert.Empty(t, stdout)
+}
+
 func runUpdateCommandHelper(t *testing.T, args []string, env ...string) (stderr string, exitCode int) {
+	t.Helper()
+	_, stderr, exitCode = runUpdateCommandHelperOut(t, args, env...)
+	return stderr, exitCode
+}
+
+func runUpdateCommandHelperOut(t *testing.T, args []string, env ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 
 	helperEnv := append([]string{"GO_WANT_UPDATE_HELPER=1", homeEnvVar() + "=" + t.TempDir()}, env...)
-	_, stderr, exitCode = runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args, helperEnv...)
-	return stderr, exitCode
+	return runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args, helperEnv...)
 }
 
 func TestUpdateCommandHelperProcess(t *testing.T) {

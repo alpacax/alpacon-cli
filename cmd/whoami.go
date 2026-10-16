@@ -27,7 +27,7 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
 		if err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' to authenticate.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeNotLoggedIn, "Not logged in. Run 'alpacon login' to authenticate.")
 		}
 
 		worksessionRequired := isWorksessionRequired(cfg)

@@ -31,7 +31,7 @@ from the CLI; edits that tighten these settings or leave them unchanged are save
 		// No IsSaaS() gate, unlike the sibling authentication update: the server
 		// serves access-control on self-hosted workspaces too.
 		if _, err := config.LoadConfig(); err != nil {
-			utils.CliErrorWithExit("Not logged in. Run 'alpacon login' first.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeNotLoggedIn, "Not logged in. Run 'alpacon login' first.")
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

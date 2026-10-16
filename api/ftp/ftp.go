@@ -165,7 +165,7 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		// The URL is presigned: its query holds a live signature.
-		return utils.RedactURLError(err)
+		return utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

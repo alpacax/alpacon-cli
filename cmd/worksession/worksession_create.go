@@ -388,6 +388,7 @@ func printTerminalWaitErrorJSON(operation string, terminal *terminalWaitError, e
 	utils.PrintJSONError(os.Stderr, utils.JSONErrorEnvelope[terminalWaitErrorCtx]{
 		OK:          false,
 		ExitCode:    utils.ExitCodeNotApproved,
+		ErrorCode:   utils.ErrorCodeNotApproved,
 		Message:     err.Error(),
 		Context:     terminalWaitErrorCtx{Operation: operation, WorkSessionID: terminal.sessionID},
 		NextActions: terminalWaitNextActions(terminal.sessionID),

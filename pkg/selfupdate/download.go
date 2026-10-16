@@ -108,7 +108,7 @@ func downloadTo(assetURL, destPath string, maxBytes int64) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		// A redirect to signed storage makes the error name that URL.
-		return utils.RedactURLError(err)
+		return utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

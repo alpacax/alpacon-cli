@@ -43,8 +43,10 @@ type options struct {
 }
 
 type httpStatusError struct {
-	status   int
-	location string
+	status     int
+	location   string
+	body       []byte
+	retryAfter time.Duration
 }
 
 type mfaRequiredError struct{}
@@ -73,6 +75,30 @@ type preparedRequest struct {
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.status) }
 
+func (e *httpStatusError) failure() utils.Failure {
+	f := utils.Failure{
+		ExitCode:   utils.ExitCodeGeneralError,
+		ErrorCode:  utils.HTTPErrorCode(e.status),
+		Message:    e.Error(),
+		HTTPStatus: e.status,
+		RetryAfter: e.retryAfter,
+	}
+	var body map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(e.body))
+	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
+	if decoder.Decode(&body) != nil || body == nil {
+		return f
+	}
+	if code, _ := body["code"].(string); code != "" {
+		f.ErrorCode = code
+	}
+	delete(body, "code")
+	if len(body) > 0 {
+		f.Server = body
+	}
+	return f
+}
+
 func (e unprocessedResponseError) Error() string       { return fmt.Sprintf("HTTP %d", e.status) }
 func (e unprocessedResponseError) HTTPStatusCode() int { return e.status }
 
@@ -97,7 +123,7 @@ func newCommand() *cobra.Command {
 		Short: "Send a request to the Alpacon API",
 		Long: "Send a request to the Alpacon API. ENDPOINT is a path on the current workspace—an absolute URL is refused.\n" +
 			"Fields (-f/-F) go to the query string for GET, and to a JSON body otherwise. A non-2xx response's body is still printed\n" +
-			"to stdout, while `HTTP <code>` goes to stderr and the command exits 1. An MFA-required response opens the workspace\n" +
+			"to stdout, while `HTTP <code>` goes to stderr (then the error envelope under --output json) and the command exits 1. An MFA-required response opens the workspace\n" +
 			"MFA link and retries once MFA completes, like other commands—unless the request carries its own -H Authorization header.",
 		Example: "  alpacon api /api/iam/users/\n  alpacon api -X POST -F name=my-server /api/servers/servers/\n  alpacon api -i /api/iam/users/-/",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -125,12 +151,14 @@ func newCommand() *cobra.Command {
 							utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, "%s", writeErr)
 						}
 					}
+					utils.PrintFailureJSON(statusErr.failure())
 					exitAPI(utils.ExitCodeGeneralError)
 					return
 				}
 				utils.CliErrorWithExitCode(code, "%s", err)
 			}
 			if code != 0 {
+				utils.PrintFailureJSON(utils.Failure{ExitCode: code, Message: fmt.Sprintf("exit %d", code)})
 				exitAPI(code)
 			}
 		},
@@ -290,7 +318,7 @@ func runAPI(ac *client.AlpaconClient, opts options, request preparedRequest, std
 		return utils.ExitCodeGeneralError, err
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		statusErr := &httpStatusError{status: response.StatusCode}
+		statusErr := &httpStatusError{status: response.StatusCode, body: response.Body, retryAfter: utils.RetryAfterFromHeader(response.Header)}
 		if response.StatusCode >= http.StatusMultipleChoices && response.StatusCode < http.StatusBadRequest {
 			statusErr.location = response.Header.Get("Location")
 		}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -132,6 +133,7 @@ type apiError struct {
 	// can emit a JSON object too. The stale-token retry reads it to drop
 	// gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
+	extra      map[string]any
 }
 
 // statusError carries an HTTP status on errors that aren't *apiError (e.g. an
@@ -240,6 +242,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		gate:       gate,
 		missing:    missing,
 		apiPayload: isJSONObject(body),
+		extra:      errorExtraFields(body),
 	}
 }
 
@@ -582,7 +585,7 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, utils.RedactURLError(err)
+		return nil, redirectRefusedStatus(resp), withRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -850,7 +853,7 @@ func hasRawSpaceOrBadEscape(query string) bool {
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 	resp, err := httpclient.StopAtCrossOrigin(ac.HTTPClient).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, withRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
@@ -1006,7 +1009,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		// A download URL may be presigned, and a transport error prints it whole.
-		return nil, utils.RedactURLError(err)
+		return nil, withRedirectStatus(utils.RedactURLError(err), resp)
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -1119,12 +1122,34 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
+func (e *apiError) ErrorFields() map[string]any {
+	if len(e.extra) == 0 {
+		return nil
+	}
+	return maps.Clone(e.extra)
+}
+
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
 
 func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
 	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
+}
+
+// withRedirectStatus keeps the 3xx a refused redirect leaves: Do returns it beside the error.
+func withRedirectStatus(err error, resp *http.Response) error {
+	if resp == nil {
+		return err
+	}
+	return withStatus(err, resp.StatusCode)
+}
+
+func redirectRefusedStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
 }
 
 // withStatus tags err with its HTTP status so callers can tell 404 from 401,
@@ -1170,7 +1195,25 @@ func withRetryAfter(err error, header http.Header) error {
 // envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return newAPIError(message, code, source, gate, axis, next, missing)
+	err := newAPIError(message, code, source, gate, axis, next, missing)
+	if ae, ok := err.(*apiError); ok {
+		ae.extra = errorExtraFields(body)
+	}
+	return err
+}
+
+func errorExtraFields(body []byte) map[string]any {
+	var parsed map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
+	if decoder.Decode(&parsed) != nil {
+		return nil
+	}
+	delete(parsed, "code")
+	if len(parsed) == 0 {
+		return nil
+	}
+	return parsed
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {

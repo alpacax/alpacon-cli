@@ -145,14 +145,27 @@ func runTunnel(cmd *cobra.Command, args []string) {
 	}
 
 	exitCode, err := executeTunnelCommand(cmd, args, sigChan)
+	exitTunnel(exitCode, err)
+}
+
+// A failure carries the child's exit code when the child ran.
+func exitTunnel(exitCode int, err error) {
 	if err != nil {
-		utils.CliError("%s", err)
 		if exitCode == 0 {
 			exitCode = 1
 		}
+		cleanMessage, _ := utils.SanitizeTerminalBlock(err.Error())
+		utils.ExitWithFailureJSON(utils.Failure{ExitCode: exitCode, Err: err, Message: cleanMessage})
+		utils.CliError("%s", err)
 		os.Exit(exitCode)
 	}
 	if exitCode != 0 {
+		utils.ExitWithFailureJSON(utils.Failure{
+			ExitCode:       exitCode,
+			ErrorCode:      utils.ErrorCodeChildCommandFailed,
+			Message:        fmt.Sprintf("the child command exited with code %d", exitCode),
+			RemoteExitCode: &exitCode,
+		})
 		os.Exit(exitCode)
 	}
 }
