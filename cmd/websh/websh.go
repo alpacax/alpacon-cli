@@ -127,7 +127,7 @@ func buildRemoteExecArgs(parsed WebshArgs, username, serverName string) execCmd.
 }
 
 var WebshCmd = &cobra.Command{
-	Use:   "websh [flags] [USER@]SERVER [COMMAND]", // [flags] stays first: words after SERVER go to the remote command
+	Use:   "websh [flags] [USER@]SERVER [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 	Short: "Open a websh terminal or execute a command on a server",
 	Long: `Open a websh terminal for interacting with a server or execute a command directly on the server.
 Supports SSH-like user@host syntax for specifying the username inline.

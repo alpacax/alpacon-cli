@@ -130,7 +130,7 @@ All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 Examples:
 
 ```go
-Use: "websh [flags] [USER@]SERVER [COMMAND]"
+Use: "websh [flags] [USER@]SERVER [COMMAND...]"
 Use: "cp [SOURCE...] [DESTINATION]"
 Use: "exec [flags] [USER@]SERVER [--] [COMMAND...]"
 Use: "tunnel [flags] SERVER [-- COMMAND...]"
