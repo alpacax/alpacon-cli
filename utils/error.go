@@ -50,6 +50,15 @@ const (
 	// so it cannot complete sudo MFA. Signing in interactively can.
 	SudoVerifyCredentialCannotProveMFA = "sudo_verify_credential_cannot_prove_mfa"
 
+	// Refusals of an MFA-bypass sudo policy bound to an AI agent session, both
+	// on a 403. NeedsPresence: the write would leave the policy on an agent
+	// session without a person proving presence for that request (a fresh MFA
+	// on an interactive login). NeedsApproval: a direct write of such a policy
+	// is refused; it has to arrive as a modification of the session, which a
+	// person approves.
+	SudoPolicyBypassAgentSessionNeedsPresence = "sudo_policy_bypass_agent_session_needs_presence"
+	SudoPolicyBypassAgentSessionNeedsApproval = "sudo_policy_bypass_agent_session_needs_approval"
+
 	// Codes the server sends on its own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
 	APIRateLimited          = "api_rate_limited"

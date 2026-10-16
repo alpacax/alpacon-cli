@@ -141,3 +141,20 @@ func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
 	err := fmt.Errorf("invalid target ID: %w", ErrInvalidID)
 	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
 }
+
+func TestBuildCliErrorEnvelopeFromErr_SudoBypassAgentSessionRefusals(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{SudoPolicyBypassAgentSessionNeedsPresence, SudoPolicyBypassAgentSessionNeedsApproval} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			err := errors.New("code: " + code + "; source: ")
+			env := buildCliErrorEnvelopeFromErr("create", err, "Failed to create work session: next step.")
+			assert.False(t, env.OK)
+			assert.Equal(t, code, env.ErrorCode)
+			assert.Equal(t, "create", env.Context.Operation)
+			rendered, jerr := FormatJSON(env)
+			require.NoError(t, jerr)
+			assert.Contains(t, rendered, `"error_code": "`+code+`"`)
+		})
+	}
+}
