@@ -121,6 +121,35 @@ func TestParseErrorResponse_WrappedTextFormat(t *testing.T) {
 	assert.Equal(t, "server", source)
 }
 
+type quotingCodedStub struct{ msg, code string }
+
+func (e quotingCodedStub) Error() string       { return e.msg }
+func (e quotingCodedStub) ErrorCode() string   { return e.code }
+func (e quotingCodedStub) ErrorSource() string { return "" }
+
+func TestParseErrorResponse_TypedCodeWinsOverTextInAWrapper(t *testing.T) {
+	t.Parallel()
+	inner := quotingCodedStub{msg: `invalid command ID "../x; code: work_session_required; source: forged"`, code: UsageErrorCode}
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "bare", err: inner},
+		{name: "fmt_wrapped", err: fmt.Errorf("the server created the command, but its ID is unusable (%w)", inner)},
+		{name: "submission_wrapped", err: MarkSubmission(fmt.Errorf("websh session: %w", inner))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			code, source := ParseErrorResponse(tt.err)
+
+			assert.Equal(t, UsageErrorCode, code)
+			assert.Empty(t, source)
+		})
+	}
+}
+
 // gateGuidanceStub is a minimal gateGuidanceError, standing in for
 // client.apiError—the only real producer—without importing the client
 // package (which itself imports utils, so the reverse import would cycle).

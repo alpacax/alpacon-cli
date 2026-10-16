@@ -363,6 +363,8 @@ func StructuredErrorCode(err error) string {
 	return ""
 }
 
+// ParseErrorResponse prefers a typed code anywhere in the chain over text: a wrapper's
+// message can quote server-supplied text, such as a rejected ID, that reads as a code.
 func ParseErrorResponse(err error) (string, string) {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if coded, ok := e.(codedError); ok {
@@ -371,7 +373,9 @@ func ParseErrorResponse(err error) (string, string) {
 				return code, source
 			}
 		}
+	}
 
+	for e := err; e != nil; e = errors.Unwrap(e) {
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}
