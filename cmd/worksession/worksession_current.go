@@ -14,7 +14,7 @@ import (
 
 var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
-	Short:   "Show the active work-session for the current workspace",
+	Short:   "Show the active work-session in this workspace",
 	Example: `  alpacon work-session current`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if utils.OutputFormat == utils.OutputFormatJSON {

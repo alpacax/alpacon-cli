@@ -20,7 +20,7 @@ var (
 
 var workSessionExtendCmd = &cobra.Command{
 	Use:   "extend SESSION_ID",
-	Short: "Extend the expiry of an approved or active work session",
+	Short: "Extend an approved or active work session",
 	Long: `Extend the expiry of an approved or active work session.
 
 --reason is required: a short justification an approver judges the request by.

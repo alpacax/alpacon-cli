@@ -10,7 +10,7 @@ import (
 var serverListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all servers",
+	Short:   "List servers",
 	Long: `
 	Display a detailed list of all servers registered in the Alpacon.
 	This command provides information such as server ID, name, status, and other relevant details.

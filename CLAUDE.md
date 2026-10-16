@@ -125,13 +125,13 @@ All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 - **lowercase**: Literal keywords or framework tokens—`[flags]`, `[command]`
 - **`[]`**: Optional—`[USER@]`
 - **`...`**: Repeatable—`SOURCE...`, `COMMAND...`
-- **`[flags]`**: Omit it—Cobra appends it to the end of the usage line. Write it only where flags must not come after the arguments, so the appended position would be wrong. `websh` and `exec` parse their own flags and treat every word after the server name as the remote command; `tunnel` hands every word after `--` to the local command. These put `[flags]` before those arguments, with a one-line comment beside the `Use` saying why
+- **`[flags]`**: Omit it—Cobra appends it to the end of the usage line. Write it only where flags must not come after the arguments, so the appended position would be wrong. `websh` and `exec` parse their own flags and treat every word after the server name as the remote command; `tunnel` hands every word after `--` to the local command. These put `[flags]` before those arguments, with a one-line comment beside the `Use` saying why. Never spell individual flags into `Use` either: it lists positional arguments only, and the flag list with its `(required)` notes already says which flags a command needs
 
 Examples:
 
 ```go
 Use: "websh [flags] [USER@]SERVER [COMMAND...]"
-Use: "cp [SOURCE...] [DESTINATION]"
+Use: "cp SOURCE... DESTINATION"
 Use: "exec [flags] [USER@]SERVER [--] [COMMAND...]"
 Use: "tunnel [flags] SERVER [-- COMMAND...]"
 Use: "records SESSION_ID"

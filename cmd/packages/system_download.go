@@ -8,11 +8,11 @@ import (
 )
 
 var systemPackageDownloadCmd = &cobra.Command{
-	Use:   "download PACKAGE FILE",
-	Short: "Download a system package from alpacon",
+	Use:   "download PACKAGE DIRECTORY",
+	Short: "Download a system package from Alpacon",
 	Long: `
-	The 'download' command allows users to download a System package from the alpacon.
-	This command is designed to facilitate the transfer of your locally developed System packages to a remote server environment for further usage or distribution.
+	The 'download' command allows users to download a system package from Alpacon.
+	The package is saved into DIRECTORY on this machine.
 	`,
 	Example: `
 	alpacon package system download osquery_5.8.2-1.linux_amd64.deb .
@@ -29,7 +29,7 @@ var systemPackageDownloadCmd = &cobra.Command{
 
 		err = packages.DownloadPackage(alpaconClient, file, dest, "system")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the system packages from alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to download the system package from Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package downloaded: %s", file)

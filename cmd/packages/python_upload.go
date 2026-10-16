@@ -9,9 +9,9 @@ import (
 
 var pythonPackageUploadCmd = &cobra.Command{
 	Use:   "upload FILE",
-	Short: "Upload a python package to alpacon",
+	Short: "Upload a Python package to Alpacon",
 	Long: `
-	The 'upload' command allows users to upload a Python package to the alpacon. 
+	The 'upload' command allows users to upload a Python package to Alpacon.
 	This command is designed to facilitate the transfer of your locally developed Python packages to a remote server environment for further usage or distribution.
 	`,
 	Example: `
@@ -29,7 +29,7 @@ var pythonPackageUploadCmd = &cobra.Command{
 
 		err = packages.UploadPackage(alpaconClient, file, "python")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to upload the python packages to alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to upload the Python package to Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package uploaded: %s", file)

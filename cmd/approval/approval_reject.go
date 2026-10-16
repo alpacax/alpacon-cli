@@ -6,7 +6,7 @@ import (
 )
 
 var approvalRejectCmd = &cobra.Command{
-	Use:   "reject REQUEST_ID",
+	Use:   "reject",
 	Short: "Reject a request (moved to the Alpacon console)",
 	Long: `Rejecting requests has moved to the Alpacon console (web).
 

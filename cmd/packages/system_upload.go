@@ -9,10 +9,10 @@ import (
 
 var systemPackageUploadCmd = &cobra.Command{
 	Use:   "upload FILE",
-	Short: "Upload a system package to alpacon",
+	Short: "Upload a system package to Alpacon",
 	Long: `
-	The 'upload' command allows users to upload a System package to the alpacon. 
-	This command is designed to facilitate the transfer of System packages to a remote server environment for further usage or distribution.
+	The 'upload' command allows users to upload a system package to Alpacon.
+	This command is designed to facilitate the transfer of system packages to a remote server environment for further usage or distribution.
 	`,
 	Example: `
 	alpacon package system upload osquery-5.10.2-1.linux.x86_64.rpm
@@ -30,7 +30,7 @@ var systemPackageUploadCmd = &cobra.Command{
 
 		err = packages.UploadPackage(alpaconClient, file, "system")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to upload the system packages to alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to upload the system package to Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package uploaded: %s", file)

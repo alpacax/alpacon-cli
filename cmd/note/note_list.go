@@ -10,7 +10,7 @@ import (
 var noteListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of the newest notes",
+	Short:   "List the newest notes",
 	Long: `Display notes stored on Alpacon, newest first.
 
 Use --tail to limit the output to the newest N notes, --server to scope to one server,

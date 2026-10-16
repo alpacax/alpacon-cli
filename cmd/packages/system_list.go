@@ -10,9 +10,9 @@ import (
 var systemPackageListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all system packages",
+	Short:   "List system packages",
 	Long: `
-	Display a detailed list of all system packages registered in the Alpacon.
+	Display a detailed list of all system packages registered in Alpacon.
 	This command provides information such as name, version, platform and other relevant details.
 	`,
 	Example: `

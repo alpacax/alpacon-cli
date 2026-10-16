@@ -14,7 +14,7 @@ const (
 var EventCmd = &cobra.Command{
 	Use:     "event",
 	Aliases: []string{"events"},
-	Short:   "List recent remote command executions (deprecated)",
+	Short:   "List recent command executions (deprecated)",
 	Long: `List recent remote command executions, most recent first.
 
 This command has moved to 'alpacon exec ls' and will be removed in a future
