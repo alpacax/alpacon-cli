@@ -5,7 +5,7 @@ import "github.com/spf13/cobra"
 var aclDeleteCmd = &cobra.Command{
 	Use:        "delete ACL_ID",
 	Aliases:    []string{"rm"},
-	Short:      "Delete a command ACL rule (deprecated: use 'acl command delete')",
+	Short:      "Delete a command ACL rule",
 	Deprecated: "use 'alpacon token acl command delete' instead",
 	Hidden:     true,
 	Args:       cobra.ExactArgs(1),

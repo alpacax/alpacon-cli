@@ -10,7 +10,7 @@ import (
 var csrListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all certificate signing requests",
+	Short:   "List certificate signing requests",
 	Long: `
 	Display CSRs, optionally filtered by status ('requested', 'signing', 'signed',
     'issued', 'failed', 'canceled', 'denied'). Use the --status flag to specify the status.

@@ -10,7 +10,7 @@ import (
 var authorityListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all certificate authorities",
+	Short:   "List certificate authorities",
 	Long: `
  	Displays a comprehensive list of all certificate authorities that have been initialized within the system, 
 	including their status and configuration details
