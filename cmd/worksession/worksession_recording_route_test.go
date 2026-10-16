@@ -13,7 +13,8 @@ import (
 )
 
 // recordingRouteServer pages the timeline two items at a time and the records of
-// wsh-2 as short pages that still carry a `next`, logging every request URL.
+// wsh-2 as short pages that still carry a `next`, logging every request URL. wsh-1
+// has no recording, and ses-none has no terminal.
 func recordingRouteServer(t *testing.T, recordsStatus int) (*httptest.Server, func() []string) {
 	t.Helper()
 	var (
@@ -33,13 +34,22 @@ func recordingRouteServer(t *testing.T, recordsStatus int) (*httptest.Server, fu
 				return
 			}
 			_, _ = w.Write([]byte(`{"next":null,"results":[{"type":"tunnel_session","id":"tun-1","is_tunnel":true},{"type":"websh_session","id":"wsh-2"}]}`))
+		case "/api/work-sessions/sessions/ses-none/timeline/":
+			_, _ = w.Write([]byte(`{"next":null,"results":[{"type":"command","id":"c1"}]}`))
 		case "/api/work-sessions/sessions/ses-1/records/":
-			if recordsStatus != 0 {
+			if recordsStatus == http.StatusPaymentRequired {
 				w.WriteHeader(recordsStatus)
 				_, _ = w.Write([]byte(`{"code":"workspace_plan_update_required","gate":"plan"}`))
 				return
 			}
+			if recordsStatus != 0 {
+				w.WriteHeader(recordsStatus)
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
 			switch {
+			case q.Get("session") == "wsh-1":
+				_, _ = w.Write([]byte(`{"next":null,"results":[]}`))
 			case q.Get("session") != "wsh-2":
 				w.WriteHeader(http.StatusNotFound)
 			case q.Get("cursor") == "":
@@ -69,7 +79,7 @@ func TestRecordingIndex_WalksTimelineOnceThenOnlyThatSessionsRecords(t *testing.
 		"recording", "ses-1", "--index", "2")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
-	assert.Contains(t, stdout, "Recording 2/2")
+	assert.Contains(t, stdout, "Terminal 2/2")
 	assert.Contains(t, stdout, "one two three\n")
 
 	var timeline, records []string
@@ -116,8 +126,73 @@ func TestRecordingIndex_PastLastTerminalMakesNoRecordsRequest(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, "out of range (session has 2 terminal(s))")
+	assert.Contains(t, stderr, "Terminal index 3 out of range (session has 2 terminal(s))")
 	for _, req := range requests() {
 		assert.NotContains(t, req, "/records/")
 	}
+}
+
+func TestRecordingIndex_BelowOneMakesNoRecordsRequest(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		index string
+	}{
+		{name: "zero", index: "0"},
+		{name: "negative", index: "-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts, requests := recordingRouteServer(t, 0)
+
+			stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
+				"recording", "ses-1", "--index", tc.index)
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Terminal index "+tc.index+" out of range (session has 2 terminal(s))")
+			for _, req := range requests() {
+				assert.NotContains(t, req, "/records/")
+			}
+		})
+	}
+}
+
+func TestRecordingIndex_TerminalWithoutRecording(t *testing.T) {
+	t.Parallel()
+	ts, _ := recordingRouteServer(t, 0)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
+		"recording", "ses-1", "--index", "1")
+
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Terminal 1 of 2 in session ses-1 has no recording; try another --index.")
+}
+
+func TestRecordingIndex_SessionWithoutTerminals(t *testing.T) {
+	t.Parallel()
+	ts, requests := recordingRouteServer(t, 0)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
+		"recording", "ses-none")
+
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "No recordings found for session ses-none.")
+	for _, req := range requests() {
+		assert.NotContains(t, req, "/records/")
+	}
+}
+
+func TestRecordingIndex_RecordsRouteServerError(t *testing.T) {
+	t.Parallel()
+	ts, _ := recordingRouteServer(t, http.StatusInternalServerError)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL,
+		"recording", "ses-1", "--index", "2")
+
+	assert.Equal(t, 1, exitCode)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Failed to retrieve recording")
 }

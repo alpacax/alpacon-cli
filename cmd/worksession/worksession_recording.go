@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var recordingIndex int
+var terminalIndex int
 
 var workSessionRecordingCmd = &cobra.Command{
 	Use:     "recording SESSION_ID",
@@ -46,30 +46,30 @@ chosen terminal's recording is downloaded. Tunnels are not terminals and are not
 			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
 		}
 
-		if recordingIndex < 1 || recordingIndex > len(terminals) {
-			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d terminal(s)).", recordingIndex, len(terminals))
+		if terminalIndex < 1 || terminalIndex > len(terminals) {
+			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
 		}
 
-		record, addedAt, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[recordingIndex-1])
+		record, addedAt, found, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[terminalIndex-1])
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve recording: %s.", err)
 		}
-		if record == "" && addedAt == "" {
-			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
+		if !found {
+			utils.CliErrorEnvelopeWithExit(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
 		}
 
 		target := &wsapi.TimelineItem{Type: "websh_record", Timestamp: &addedAt}
-		printRecordingHeader(os.Stdout, target, recordingIndex, len(terminals))
+		printRecordingHeader(os.Stdout, target, terminalIndex, len(terminals))
 		printRecordingContent(os.Stdout, record)
 	},
 }
 
 func init() {
-	workSessionRecordingCmd.Flags().IntVar(&recordingIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
+	workSessionRecordingCmd.Flags().IntVar(&terminalIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
 }
 
 func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total int) {
-	header := fmt.Sprintf("Recording %d/%d", idx, total)
+	header := fmt.Sprintf("Terminal %d/%d", idx, total)
 	// formatTimestamp hands back the server's string whenever it fails to parse, so
 	// this line is a sink for whatever was stored.
 	if ts := utils.SanitizeTerminalText(resolveTimestamp(target.Timestamp)); ts != "" {

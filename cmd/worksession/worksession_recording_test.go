@@ -117,7 +117,7 @@ func TestPrintRecordingHeader_SanitizesTimestamp(t *testing.T) {
 	ts := "\x1b[2J\x1b[H\u202eSPOOFED"
 	var buf bytes.Buffer
 	printRecordingHeader(&buf, &wsapi.TimelineItem{Timestamp: &ts}, 1, 1)
-	assert.Equal(t, "Recording 1/1 — SPOOFED\n\n", buf.String())
+	assert.Equal(t, "Terminal 1/1 — SPOOFED\n\n", buf.String())
 }
 
 // printRecordingContent
