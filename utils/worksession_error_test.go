@@ -238,6 +238,7 @@ func kubeWorkSessionCases() []struct {
 		{WorkSessionExpired, "abc-123-uuid", []string{"alpacon work-session extend abc-123-uuid", create}},
 		{WorkSessionScopeNotAllowed, "", reuseOrCreate},
 		{WorkSessionServerNotAllowed, "", reuseOrCreate},
+		{WorkSessionAgentSessionRequired, "", reuseOrCreate},
 	}
 }
 
@@ -300,7 +301,9 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 			assert.NotContains(t, got, "required scope")
 			assert.NotContains(t, got, "  target server : ")
 			assert.NotContains(t, got, "--scope kube")
-			assert.NotContains(t, got, "AI agent")
+			if tc.code != WorkSessionAgentSessionRequired { // its reason names the agent
+				assert.NotContains(t, got, "AI agent")
+			}
 			assert.NotContains(t, got, "--requester-type")
 			assert.NotContains(t, got, "the kube operation")
 			assert.Equal(t, tc.want, diagnosticNextCommands(t, got))

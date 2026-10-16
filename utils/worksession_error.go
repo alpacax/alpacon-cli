@@ -102,7 +102,8 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
-	if code == WorkSessionAgentSessionRequired {
+	// Kube offers no agent path, so its diagnostic carries no agent note.
+	if code == WorkSessionAgentSessionRequired && operation != OperationKube {
 		fmt.Fprintln(&sb, agentSessionNote(aiagent.FromEnvironment()))
 	}
 	fmt.Fprint(&sb, workSessionTokenNote(operation))
