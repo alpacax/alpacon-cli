@@ -41,7 +41,6 @@ var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
 	Short:   "Command-line client for Alpacon, the AI-native PAM",
-	Version: utils.Version,
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
@@ -72,9 +71,15 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		if showVersion {
+			versionCmd.Run(versionCmd, args)
+			return
+		}
 		utils.ShowLogo(buildWelcomeLines())
 	},
 }
+
+var showVersion bool
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
@@ -101,6 +106,7 @@ func init() {
 	)
 
 	// version
+	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Display the current CLI version")
 	RootCmd.AddCommand(versionCmd)
 
 	// update

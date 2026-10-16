@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -101,21 +99,33 @@ func TestRootRegistersAPICommand(t *testing.T) {
 	assert.Equal(t, "api", command.Name())
 }
 
-func TestRootVersionFlag(t *testing.T) {
-	origVersion, origCmdVersion := utils.Version, RootCmd.Version
-	t.Cleanup(func() {
-		utils.Version, RootCmd.Version = origVersion, origCmdVersion
-		RootCmd.SetOut(nil)
-		RootCmd.SetArgs(nil)
-	})
-	assert.Equal(t, origVersion, origCmdVersion, "RootCmd.Version must come from utils.Version")
+func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		flag []string
+		cmd  []string
+	}{
+		{name: "table", flag: []string{"--version"}, cmd: []string{"version"}},
+		{name: "shorthand", flag: []string{"-v"}, cmd: []string{"version"}},
+		{name: "json", flag: []string{"--version", "--output", "json"}, cmd: []string{"version", "--output", "json"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			run := func(args []string) (string, string, int) {
+				return runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args,
+					"GO_WANT_UPDATE_HELPER=1", homeEnvVar()+"="+t.TempDir(),
+					"ALPACON_TEST_LATEST_RELEASE=1.4.0", "ALPACON_TEST_CURRENT_VERSION=1.3.0")
+			}
 
-	utils.Version = "1.2.3"
-	RootCmd.Version = utils.Version
-	var out bytes.Buffer
-	RootCmd.SetOut(&out)
-	RootCmd.SetArgs([]string{"--version"})
+			wantOut, wantErr, wantCode := run(tc.cmd)
+			gotOut, gotErr, gotCode := run(tc.flag)
 
-	require.NoError(t, RootCmd.Execute())
-	assert.Equal(t, "alpacon version 1.2.3\n", out.String())
+			require.Contains(t, wantOut+wantErr, "1.4.0", "the version command must have reached the stub release")
+			assert.Equal(t, wantCode, gotCode)
+			assert.Equal(t, wantOut, gotOut)
+			assert.Equal(t, wantErr, gotErr)
+		})
+	}
 }
