@@ -471,3 +471,24 @@ func TestWorkSessionAccountNotApproved_AgentCreateIsAgentSession(t *testing.T) {
 	assert.Contains(t, actions[1].Command, "--requester-type agent")
 	assert.Contains(t, actions[1].Command, "--account <account>")
 }
+
+func TestWorkSessionAccountNotApproved_RetryCarriesSession(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+	const bare = "alpacon exec -u <approved account> web-01 -- <command>"
+	const withSession = "alpacon exec --work-session ses-1 -u <approved account> web-01 -- <command>"
+
+	// Passed on the command line or active: the caller hands over the same ID.
+	for _, tc := range []struct{ name, activeWS, want string }{
+		{"session passed or active", "ses-1", withSession},
+		{"neither", "", bare},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", tc.activeWS)
+			require.NotEmpty(t, actions)
+			assert.Equal(t, tc.want, actions[0].Command)
+			envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS)
+			assert.Equal(t, tc.want, envelope.NextActions[0].Command)
+			assert.Contains(t, buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS), tc.want)
+		})
+	}
+}

@@ -218,7 +218,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 			accountCreate = agentCreateCmd + " --account <account>"
 		}
 		return []NextAction{
-			{Command: "alpacon exec -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
 			{Command: accountCreate, Description: "or create a session for this account"},
 		}
 	case WorkSessionAgentSessionRequired:
@@ -245,6 +245,16 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 	default: // scope_not_allowed, server_not_allowed
 		return []NextAction{{Command: createCmd}, agentCreate}
 	}
+}
+
+// workSessionFlag carries the selected session into a suggested command, so a
+// retry names the session the refused command used; an agent session cannot be
+// attached with 'work-session use' and has no other way to select one.
+func workSessionFlag(activeWS string) string {
+	if activeWS == "" {
+		return ""
+	}
+	return " --work-session " + activeWS
 }
 
 func workSessionExtendCommand(activeWS string) string {
