@@ -876,14 +876,26 @@ func (e execUserCodedErr) ErrorSource() string { return "" }
 func TestExecUserRefusal(t *testing.T) {
 	t.Parallel()
 	bare := execUserCodedErr{code: "server_username_groupname_invalid"}
+	execExamples := []string{
+		"  alpacon exec -u USERNAME SERVER -- COMMAND\n",
+		"  alpacon exec USERNAME@SERVER -- COMMAND\n",
+	}
 	tests := []struct {
-		name   string
-		err    error
-		parsed RemoteExecArgs
-		wantOK bool
+		name         string
+		err          error
+		parsed       RemoteExecArgs
+		wantOK       bool
+		wantMessage  string
+		wantExamples []string
 	}{
-		{name: "bare code", err: bare, wantOK: true},
-		{name: "wrapped code", err: fmt.Errorf("failed to execute command on 'prod' server: %w", bare), wantOK: true},
+		{name: "bare code", err: bare, wantOK: true, wantExamples: execExamples},
+		{name: "wrapped code", err: fmt.Errorf("failed to execute command on 'prod' server: %w", bare), wantOK: true, wantExamples: execExamples},
+		{name: "websh renders websh syntax", err: bare, parsed: RemoteExecArgs{Server: "prod", InvokedAs: WebshInvocation}, wantOK: true, wantExamples: []string{
+			"  alpacon websh -u USERNAME SERVER 'COMMAND'\n",
+			"  alpacon websh USERNAME@SERVER 'COMMAND'\n",
+		}},
+		{name: "control bytes in the server name are stripped", err: bare, parsed: RemoteExecArgs{Server: "prod\n\x1b[2Kforged"}, wantOK: true,
+			wantMessage: "no execution user was resolved for 'prodforged' server", wantExamples: execExamples},
 		{name: "another code falls through", err: execUserCodedErr{code: "server_busy_with_user_work"}},
 		{name: "plain error falls through", err: errors.New("boom")},
 		{name: "code only in message text falls through", err: errors.New("code: server_username_groupname_invalid")},
@@ -905,11 +917,19 @@ func TestExecUserRefusal(t *testing.T) {
 				assert.Empty(t, hint)
 				return
 			}
-			assert.Contains(t, message, "'prod'")
+			wantMessage := tt.wantMessage
+			if wantMessage == "" {
+				wantMessage = "no execution user was resolved for 'prod' server"
+			}
+			assert.Equal(t, wantMessage, message)
 			assert.Contains(t, hint, "Hint:")
 			assert.Contains(t, hint, "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n")
-			assert.Contains(t, hint, "  alpacon exec -u USERNAME SERVER -- COMMAND\n")
-			assert.Contains(t, hint, "  alpacon exec USERNAME@SERVER -- COMMAND\n")
+			for _, example := range tt.wantExamples {
+				assert.Contains(t, hint, example)
+			}
+			if tt.parsed.InvokedAs == WebshInvocation {
+				assert.NotContains(t, hint, "alpacon exec")
+			}
 		})
 	}
 }
