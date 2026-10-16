@@ -231,9 +231,10 @@ func fileExecRefusal(err error, serverName string) (message, hint string, ok boo
 		}
 		message, hint = r.message, r.hint
 		if r.needsServer {
-			message = fmt.Sprintf(message, serverName)
+			server := utils.SanitizeTerminalText(serverName) // reportCodedRefusal writes raw
+			message = fmt.Sprintf(message, server)
 			if hint != "" {
-				hint = fmt.Sprintf(hint, serverName)
+				hint = fmt.Sprintf(hint, server)
 			}
 		}
 		switch {

@@ -470,6 +470,17 @@ func TestFileExecRefusal(t *testing.T) {
 	}
 }
 
+func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
+	t.Parallel()
+	err := errors.New("code: file_exec_unsupported_agent; source: command")
+
+	message, hint, ok := fileExecRefusal(err, "prod\n\x1b[2Kforged")
+
+	require.True(t, ok)
+	assert.Equal(t, "the agent on 'prodforged' cannot verify a file digest; Alpamon 2.6.0 or newer is required", message)
+	assert.Contains(t, hint, "  alpacon exec prodforged -- /bin/bash /path/to/script.sh\n")
+}
+
 // TestReRunHint_File pins the re-run a pending approval prints on the file
 // lane: only the flags the user gave, the arguments after --, and a quoted
 // argument that carries a space.
