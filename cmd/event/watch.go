@@ -16,7 +16,7 @@ import (
 const watchConnectTimeout = 15 * time.Second
 
 var watchCmd = &cobra.Command{
-	Use:   "watch --type TYPE [--target TARGET_ID]",
+	Use:   "watch",
 	Short: "Stream events from the Alpacon event channel",
 	Long: `Stream events from the Alpacon event channel until interrupted.
 

@@ -8,7 +8,7 @@ import (
 )
 
 var webshJoinCmd = &cobra.Command{
-	Use:   "join --url URL --password PASSWORD",
+	Use:   "join",
 	Short: "Join a shared websh session",
 	Long:  `Join an existing shared websh session using the provided URL and password.`,
 	Example: `  alpacon websh join --url https://myws.us1.alpacon.io/websh/shared/abcd1234?channel=default --password my-session-pass

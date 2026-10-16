@@ -15,7 +15,7 @@ import (
 )
 
 var waitCmd = &cobra.Command{
-	Use:   "wait --type TYPE [--target TARGET_ID]",
+	Use:   "wait",
 	Short: "Wait for one event, then exit",
 	Long: `Block until one event decides the wait, print it, and exit.
 

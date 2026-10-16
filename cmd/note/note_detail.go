@@ -10,7 +10,7 @@ import (
 var noteDetailCmd = &cobra.Command{
 	Use:     "describe NOTE_ID",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a specific note",
+	Short:   "Show details of a note",
 	Long: `
 	The describe command fetches and displays detailed information about a specific note,
 	including its content, server, author, and privacy settings.

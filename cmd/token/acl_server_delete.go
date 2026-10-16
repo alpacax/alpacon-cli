@@ -9,7 +9,7 @@ import (
 )
 
 var aclServerDeleteCmd = &cobra.Command{
-	Use:     "delete ACL-ID-OR-TOKEN",
+	Use:     "delete ACL_ID_OR_TOKEN",
 	Aliases: []string{"rm"},
 	Short:   "Delete server ACL rule(s)",
 	Long: `Delete a server ACL by its ID (single delete), or revoke a token's access

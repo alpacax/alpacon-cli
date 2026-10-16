@@ -8,7 +8,7 @@ import (
 )
 
 var csrDenyCmd = &cobra.Command{
-	Use:   "deny",
+	Use:   "deny CSR_ID",
 	Short: "Deny a CSR",
 	Long: `
 	Rejects a Certificate Signing Request, marking it as denied and stopping any further processing 
