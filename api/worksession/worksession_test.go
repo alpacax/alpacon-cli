@@ -14,6 +14,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -111,6 +112,38 @@ func TestCreateWorkSession(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ses-new", session.ID)
 	assert.Equal(t, "pending", session.Status)
+}
+
+func TestCreateWorkSessionRefusesAnUnusableCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: "../x"})
+	}))
+	defer ts.Close()
+
+	session, err := CreateWorkSession(newTestClient(ts), WorkSessionCreateRequest{})
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	require.NotErrorIs(t, err, utils.ErrInvalidID)
+	assert.Nil(t, session)
+	assert.Contains(t, err.Error(), "the server created the work session")
+}
+
+func TestCreateWorkSessionTrimsTheCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(WorkSession{ID: " ses-new "})
+	}))
+	defer ts.Close()
+
+	session, err := CreateWorkSession(newTestClient(ts), WorkSessionCreateRequest{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ses-new", session.ID)
 }
 
 func TestGetWorkSession(t *testing.T) {
@@ -607,7 +640,7 @@ func TestWorkSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(newTestClient(ts))
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }

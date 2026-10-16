@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -230,7 +231,7 @@ func TestWebhookCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(ac)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -253,7 +254,7 @@ func TestGetWebhookIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetWebhookIDByName(ac, "my-webhook")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}

@@ -748,5 +748,6 @@ func TestVerifySudoGrant_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) 
 
 	err := (&SudoListener{ac: ac}).verifySudoGrant("../../etc/test")
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.NotErrorIs(t, err, utils.ErrInvalidID)
 }

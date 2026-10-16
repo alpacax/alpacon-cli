@@ -548,7 +548,7 @@ func TestGetPackageIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetPackageIDByName(ac, "numpy-2.0.0.whl", "python")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}

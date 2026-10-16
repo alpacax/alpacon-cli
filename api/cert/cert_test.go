@@ -624,7 +624,7 @@ func TestCertCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(newTestClient(ts), "../../etc/test")
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -693,7 +693,7 @@ func TestGetAuthorityIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetAuthorityIDByName(ac, "my-ca")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}

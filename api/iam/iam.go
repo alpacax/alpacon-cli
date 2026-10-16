@@ -221,7 +221,7 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		return errors.New("no membership found for the given user and group")
 	}
 
-	membershipID, err := api.RequireID(memberDetails[0].ID, "membership")
+	membershipID, err := api.RequireResponseID(memberDetails[0].ID, "membership")
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 		return "", err
 	}
 
-	return api.RequireID(result.ID, "user")
+	return api.RequireResponseID(result.ID, "user")
 }
 
 // A role binding embeds a display name, not the username other commands accept.
@@ -275,7 +275,7 @@ func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error
 		return "", err
 	}
 
-	return api.RequireID(result.ID, "group")
+	return api.RequireResponseID(result.ID, "group")
 }
 
 func getUserStatus(isActive bool, isStaff bool, isSuperuser bool) string {

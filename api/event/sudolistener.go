@@ -334,7 +334,7 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 }
 
 func (sl *SudoListener) verifySudoGrant(grantID string) error {
-	grantID, err := api.RequireID(grantID, "sudo grant")
+	grantID, err := api.RequireResponseID(grantID, "sudo grant")
 	if err != nil {
 		return err
 	}

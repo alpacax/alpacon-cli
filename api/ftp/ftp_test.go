@@ -1751,7 +1751,7 @@ func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T
 
 			err := tt.call(ac, ts.URL)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -1768,7 +1768,7 @@ func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T)
 
 	err := completeSingleUpload(ac, "server-1", []byte(`{"id":"../x"}`), open)
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
+	require.ErrorIs(t, err, api.ErrUnusableID)
 	assert.False(t, opened, "the file must not be read for an upload that is refused")
 }
 
@@ -1807,7 +1807,7 @@ func TestCompleteBulkUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
 
 	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":"id-1"},{"id":"../x"}]`), open)
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
+	require.ErrorIs(t, err, api.ErrUnusableID)
 	assert.False(t, opened, "the files must not be read for an upload that is refused")
 }
 

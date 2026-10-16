@@ -407,6 +407,38 @@ func TestCreateSession_DecodesResponse(t *testing.T) {
 	assert.True(t, session.TokenExpiredAt.Equal(time.Date(2026, 10, 8, 3, 30, 0, 1000, time.UTC)), "token_expired_at: %v", session.TokenExpiredAt)
 }
 
+func TestCreateSession_RefusesAnUnusableCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"../x"}`))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{})
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	require.NotErrorIs(t, err, utils.ErrInvalidID)
+	assert.Nil(t, session)
+	assert.Contains(t, err.Error(), "the server created the kube session")
+}
+
+func TestCreateSession_TrimsTheCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":" s-1 "}`))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "s-1", session.ID)
+}
+
 func TestCreateSession_KeepsErrorStatusAndCode(t *testing.T) {
 	t.Parallel()
 	// The command layer branches on the refusal's status and code, so both
@@ -476,7 +508,7 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			require.ErrorIs(t, CloseSession(newTestClient(ts), tt.sessionID), api.ErrInvalidID)
+			require.ErrorIs(t, CloseSession(newTestClient(ts), tt.sessionID), utils.ErrInvalidID)
 			assert.Zero(t, hits.Load())
 		})
 	}
@@ -506,7 +538,7 @@ func TestClusterCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(ac)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -542,7 +574,7 @@ func TestGetClusterIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetClusterIDByName(ac, "my-cluster")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}

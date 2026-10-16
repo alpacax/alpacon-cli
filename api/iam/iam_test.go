@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -580,7 +581,7 @@ func TestIAMCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(ac)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -603,7 +604,7 @@ func TestGetUserIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetUserIDByName(ac, "alice")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}
@@ -631,7 +632,7 @@ func TestGetGroupIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetGroupIDByName(ac, "my-group")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}
@@ -672,7 +673,7 @@ func TestDeleteMember_DeletesOnlyAOneSegmentMembershipID(t *testing.T) {
 			err := DeleteMember(ac, MemberDeleteRequest{User: "alice", Group: "my-group"})
 
 			if tc.wantDelete == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 			} else {
 				require.NoError(t, err)
 			}

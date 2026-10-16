@@ -3,6 +3,7 @@ package worksession
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -71,6 +72,9 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	var session WorkSession
 	if err = json.Unmarshal(body, &session); err != nil {
 		return nil, err
+	}
+	if session.ID, err = api.RequireResponseID(session.ID, "work session"); err != nil {
+		return nil, fmt.Errorf("the server created the work session, but its ID is unusable (%w); check for it before creating another", err)
 	}
 	return &session, nil
 }

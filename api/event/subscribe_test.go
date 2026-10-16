@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -217,7 +216,7 @@ func TestCloseEventSession_RefusesAnIDThatIsNotOneSegment(t *testing.T) {
 
 			err := CloseEventSession(t.Context(), ac, tc.id)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }

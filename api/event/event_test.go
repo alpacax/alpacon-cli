@@ -2539,7 +2539,7 @@ func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(ac)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -2562,7 +2562,7 @@ func TestPostCommand_ReturnsOnlyAOneSegmentCommandID(t *testing.T) {
 			created, err := postCommand(ac, &CommandRequest{})
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Contains(t, err.Error(), "the server created the command")
 				return
 			}
@@ -2579,5 +2579,5 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 
 	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
+	require.ErrorIs(t, err, utils.ErrInvalidID)
 }

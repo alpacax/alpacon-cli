@@ -699,7 +699,7 @@ func TestAPITokenCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 
 			err := tt.call(ac)
 
-			require.ErrorIs(t, err, api.ErrInvalidID)
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -722,7 +722,7 @@ func TestGetAPITokenIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetAPITokenIDByName(ac, "my-token")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}

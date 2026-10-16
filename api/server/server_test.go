@@ -685,7 +685,7 @@ func TestGetServerIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			id, err := GetServerIDByName(ac, "my-server")
 
 			if tc.want == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 				assert.Empty(t, id)
 				return
 			}
@@ -719,7 +719,7 @@ func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
 			err := DeleteRegistrationToken(ac, "my-token")
 
 			if tc.wantDelete == "" {
-				require.ErrorIs(t, err, api.ErrInvalidID)
+				require.ErrorIs(t, err, api.ErrUnusableID)
 			} else {
 				require.NoError(t, err)
 			}

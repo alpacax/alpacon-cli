@@ -201,7 +201,7 @@ func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, er
 		return "", err
 	}
 
-	return api.RequireID(result.ID, "API token")
+	return api.RequireResponseID(result.ID, "API token")
 }
 
 func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {

@@ -260,7 +260,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
-	uploadID, err := api.RequireID(response.ID, "upload")
+	uploadID, err := api.RequireResponseID(response.ID, "upload")
 	if err != nil {
 		return err
 	}
@@ -322,7 +322,7 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		return err
 	}
 	for i := range responses {
-		id, err := api.RequireID(responses[i].ID, "upload")
+		id, err := api.RequireResponseID(responses[i].ID, "upload")
 		if err != nil {
 			return err
 		}

@@ -12,6 +12,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,5 +237,5 @@ func TestGetCommandChunks_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T)
 
 	_, err := getCommandChunks(ac, "../../etc/test", 0, noSeqBound)
 
-	require.ErrorIs(t, err, api.ErrInvalidID)
+	require.ErrorIs(t, err, utils.ErrInvalidID)
 }

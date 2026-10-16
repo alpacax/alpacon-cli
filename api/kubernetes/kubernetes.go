@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"fmt"
 	"path"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -59,7 +60,7 @@ func GetClusterIDByName(ac *client.AlpaconClient, clusterName string) (string, e
 		return "", err
 	}
 
-	return api.RequireID(result.ID, "cluster")
+	return api.RequireResponseID(result.ID, "cluster")
 }
 
 // GetClusterDetail fetches one cluster by ID.
@@ -129,6 +130,9 @@ func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*Kub
 	var session KubeSessionResponse
 	if err := json.Unmarshal(body, &session); err != nil {
 		return nil, err
+	}
+	if session.ID, err = api.RequireResponseID(session.ID, "kube session"); err != nil {
+		return nil, fmt.Errorf("the server created the kube session, but its ID is unusable (%w)", err)
 	}
 
 	return &session, nil
