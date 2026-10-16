@@ -20,7 +20,7 @@ import (
 )
 
 var ExecCmd = &cobra.Command{
-	Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]",
+	Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 	Short: "Execute a command on a remote server",
 	Long: `Execute a command on a remote server.
 

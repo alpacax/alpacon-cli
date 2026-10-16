@@ -10,7 +10,7 @@ import (
 )
 
 var webshRecordsCmd = &cobra.Command{
-	Use:     "records [flags] SESSION_ID",
+	Use:     "records SESSION_ID",
 	Aliases: []string{"rec"},
 	Short:   "Retrieve or search records within a Websh session",
 	Long: `Retrieve masked terminal records for a Websh session, optionally

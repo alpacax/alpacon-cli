@@ -37,7 +37,7 @@ type tunnelCommandRuntime interface {
 var tunnelFlags tunnelFlagValues
 
 var TunnelCmd = &cobra.Command{
-	Use:   "tunnel [flags] SERVER [-- COMMAND...]",
+	Use:   "tunnel [flags] SERVER [-- COMMAND...]", // [flags] stays before --: words after it go to the local command
 	Short: "Create a TCP tunnel (optionally run a command)",
 	Long: `
 	Create a TCP tunnel that forwards local TCP traffic to a remote server port.
