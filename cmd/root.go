@@ -37,6 +37,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var showVersion bool
+
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
@@ -72,14 +74,12 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if showVersion {
-			versionCmd.Run(versionCmd, args)
+			runVersion()
 			return
 		}
 		utils.ShowLogo(buildWelcomeLines())
 	},
 }
-
-var showVersion bool
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())

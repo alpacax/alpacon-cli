@@ -102,30 +102,44 @@ func TestRootRegistersAPICommand(t *testing.T) {
 func TestRootVersionFlagBehavesLikeTheVersionCommand(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		flag []string
-		cmd  []string
+		name  string
+		cmd   []string
+		flags map[string][]string
 	}{
-		{name: "table", flag: []string{"--version"}, cmd: []string{"version"}},
-		{name: "shorthand", flag: []string{"-v"}, cmd: []string{"version"}},
-		{name: "json", flag: []string{"--version", "--output", "json"}, cmd: []string{"version", "--output", "json"}},
+		{
+			name:  "table",
+			cmd:   []string{"version"},
+			flags: map[string][]string{"long": {"--version"}, "shorthand": {"-v"}},
+		},
+		{
+			name:  "json",
+			cmd:   []string{"version", "--output", "json"},
+			flags: map[string][]string{"long": {"--version", "--output", "json"}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			run := func(args []string) (string, string, int) {
+			run := func(t *testing.T, args []string) (string, string, int) {
+				t.Helper()
 				return runHelperProcess(t, "TestUpdateCommandHelperProcess", "update-helper", args,
 					"GO_WANT_UPDATE_HELPER=1", homeEnvVar()+"="+t.TempDir(),
 					"ALPACON_TEST_LATEST_RELEASE=1.4.0", "ALPACON_TEST_CURRENT_VERSION=1.3.0")
 			}
 
-			wantOut, wantErr, wantCode := run(tc.cmd)
-			gotOut, gotErr, gotCode := run(tc.flag)
-
+			wantOut, wantErr, wantCode := run(t, tc.cmd)
 			require.Contains(t, wantOut+wantErr, "1.4.0", "the version command must have reached the stub release")
-			assert.Equal(t, wantCode, gotCode)
-			assert.Equal(t, wantOut, gotOut)
-			assert.Equal(t, wantErr, gotErr)
+
+			for name, flag := range tc.flags {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					gotOut, gotErr, gotCode := run(t, flag)
+
+					assert.Equal(t, wantCode, gotCode)
+					assert.Equal(t, wantOut, gotOut)
+					assert.Equal(t, wantErr, gotErr)
+				})
+			}
 		})
 	}
 }
