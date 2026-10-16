@@ -186,3 +186,41 @@ func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, para
 	}
 	return response.Results, nil
 }
+
+// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in
+// timeline order. Tunnels are Websh sessions the server lists under their own
+// type and have no recording, so they are not terminals. It reads the paginated
+// timeline, which carries no recordings.
+func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, error) {
+	items, err := GetWorkSessionTimeline(ac, id, false /* includeRecords */)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, item := range items {
+		if item.Type == "websh_session" && !item.IsTunnel {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids, nil
+}
+
+// GetTerminalRecording reads one Websh session's recording through the work
+// session's records route, concatenating the chunks in order. The walk ends on a
+// null `next` or an empty page; a short page is not the last one. addedAt is the
+// first chunk's added_at, and found is false when the session has no recording.
+func GetTerminalRecording(ac *client.AlpaconClient, id, webshSessionID string) (record, addedAt string, found bool, err error) {
+	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "records"), nil)
+	chunks, err := api.FetchAllCursorPages[RecordChunk](ac, endpoint, map[string]string{"session": webshSessionID})
+	if err != nil {
+		return "", "", false, err
+	}
+	if len(chunks) == 0 {
+		return "", "", false, nil
+	}
+	var b strings.Builder
+	for _, chunk := range chunks {
+		b.WriteString(chunk.Record)
+	}
+	return b.String(), chunks[0].AddedAt, true, nil
+}

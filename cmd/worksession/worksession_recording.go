@@ -12,13 +12,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var recordingIndex int
+var terminalIndex int
 
 var workSessionRecordingCmd = &cobra.Command{
 	Use:     "recording SESSION_ID",
 	Aliases: []string{"rec"},
 	Short:   "Show a Websh session recording",
-	Args:    cobra.ExactArgs(1),
+	Long: `Show the recording of one Websh terminal in a work session.
+
+--index counts the session's terminals in timeline order, starting at 1. Only the
+chosen terminal's recording is downloaded. Tunnels are not terminals and are not counted.`,
+	Args: cobra.ExactArgs(1),
 	Example: `  alpacon work-session recording ses-abc123
   alpacon work-session recording ses-abc123 --index 2
   alpacon work-session rec ses-abc123`,
@@ -30,48 +34,42 @@ var workSessionRecordingCmd = &cobra.Command{
 
 		sessionID := args[0]
 
-		// true keeps this read off the paginated shape, whose pages carry no
-		// recordings. #514 replaces this with the per-session recording route.
-		items, err := wsapi.GetWorkSessionTimeline(ac, sessionID, true)
+		// Only the terminal list is read whole; the recording itself comes from the
+		// per-session records route, so one recording costs one session's bytes.
+		terminals, err := wsapi.ListTerminalSessionIDs(ac, sessionID)
 		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve work session timeline: %s.", err)
 		}
 
-		var recordings []wsapi.TimelineItem
-		for _, item := range items {
-			if item.Type == "websh_record" {
-				recordings = append(recordings, item)
-			}
-		}
-
-		// No recordings is a not-found state (no error_code); a bad --index is a usage_error.
-		if len(recordings) == 0 {
+		// No terminals is a not-found state (no error_code); a bad --index is a usage_error.
+		if len(terminals) == 0 {
 			utils.CliErrorEnvelopeWithExit(opRecording, nil, "No recordings found for session %s.", sessionID)
 		}
 
-		target, idx := findRecording(recordings, recordingIndex)
-		if target == nil {
-			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Recording index %d out of range (session has %d recording(s)).", recordingIndex, len(recordings))
+		if terminalIndex < 1 || terminalIndex > len(terminals) {
+			utils.CliUsageErrorEnvelopeWithExit(opRecording, "Terminal index %d out of range (session has %d terminal(s)).", terminalIndex, len(terminals))
 		}
 
-		printRecordingHeader(os.Stdout, target, idx, len(recordings))
-		printRecordingContent(os.Stdout, target.MaskedRecord)
+		record, addedAt, found, err := wsapi.GetTerminalRecording(ac, sessionID, terminals[terminalIndex-1])
+		if err != nil {
+			utils.CliErrorEnvelopeWithExit(opRecording, err, "Failed to retrieve recording: %s.", err)
+		}
+		if !found {
+			utils.CliErrorEnvelopeWithExit(opRecording, nil, "Terminal %d of %d in session %s has no recording; try another --index.", terminalIndex, len(terminals), sessionID)
+		}
+
+		target := &wsapi.TimelineItem{Type: "websh_record", Timestamp: &addedAt}
+		printRecordingHeader(os.Stdout, target, terminalIndex, len(terminals))
+		printRecordingContent(os.Stdout, record)
 	},
 }
 
 func init() {
-	workSessionRecordingCmd.Flags().IntVar(&recordingIndex, "index", 1, "Recording index to display (1-based)")
-}
-
-func findRecording(recordings []wsapi.TimelineItem, index int) (*wsapi.TimelineItem, int) {
-	if index < 1 || index > len(recordings) {
-		return nil, -1
-	}
-	return &recordings[index-1], index
+	workSessionRecordingCmd.Flags().IntVar(&terminalIndex, "index", 1, "Terminal to display (1-based, in timeline order)")
 }
 
 func printRecordingHeader(w io.Writer, target *wsapi.TimelineItem, idx, total int) {
-	header := fmt.Sprintf("Recording %d/%d", idx, total)
+	header := fmt.Sprintf("Terminal %d/%d", idx, total)
 	// formatTimestamp hands back the server's string whenever it fails to parse, so
 	// this line is a sink for whatever was stored.
 	if ts := utils.SanitizeTerminalText(resolveTimestamp(target.Timestamp)); ts != "" {

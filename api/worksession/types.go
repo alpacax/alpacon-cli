@@ -190,3 +190,9 @@ type TimelineAttributes struct {
 	User    string `json:"user"      table:"User"`
 	Details string `json:"details"   table:"Details"`
 }
+
+// RecordChunk is one entry of the per-session recording route's cursor envelope.
+type RecordChunk struct {
+	AddedAt string `json:"added_at"`
+	Record  string `json:"record"`
+}
