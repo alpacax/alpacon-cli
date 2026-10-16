@@ -336,22 +336,18 @@ func (c *connection) close() {
 
 // startReader reads server output for as long as the connection lasts.
 func (c *connection) startReader() {
-	c.pumps.Add(1)
-	go func() {
-		defer c.pumps.Done()
+	c.pumps.Go(func() {
 		c.readFromServer()
-	}()
+	})
 }
 
 // startWriter forwards user input for as long as the connection lasts. The input
 // channel outlives the connection: one stdin reader feeds every connection of the
 // session, since a goroutine parked in a terminal read cannot be released.
 func (c *connection) startWriter(inputChan <-chan string) {
-	c.pumps.Add(1)
-	go func() {
-		defer c.pumps.Done()
+	c.pumps.Go(func() {
 		c.writeToServer(inputChan)
-	}()
+	})
 }
 
 // closeConn releases the current connection, if the session ever had one.

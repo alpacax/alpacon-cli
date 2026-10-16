@@ -355,7 +355,7 @@ func filterTimelineRecords(items []TimelineItem, keepRecords bool) []TimelineIte
 }
 
 func timelineFixture() []TimelineItem {
-	ts := newString("2024-01-15T10:30:00Z")
+	ts := new("2024-01-15T10:30:00Z")
 	return []TimelineItem{
 		{Type: "command", Timestamp: ts, Line: "ls -la"},
 		{Type: "websh_session", Timestamp: ts, ID: "wsh-1"},
@@ -522,8 +522,6 @@ func TestUpdateWorkSession(t *testing.T) {
 	assert.Equal(t, "pol-1", gotBody.SudoPolicies[0].ID)
 	assert.Empty(t, gotBody.SudoPolicies[1].ID)
 }
-
-func newString(s string) *string { return &s }
 
 func TestWorkSessionUnmarshalAdjustmentsAndRecommendations(t *testing.T) {
 	t.Parallel()

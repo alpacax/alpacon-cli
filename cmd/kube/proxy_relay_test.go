@@ -81,23 +81,19 @@ func listenTCP(t *testing.T, handle func(net.Conn)) string {
 		_ = ln.Close()
 		waitForHandlers(t, &handlers)
 	})
-	handlers.Add(1)
-	go func() {
-		defer handlers.Done()
+	handlers.Go(func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			handlers.Add(1)
-			go func() {
-				defer handlers.Done()
+			handlers.Go(func() {
 				defer func() { _ = conn.Close() }()
 				_ = conn.SetDeadline(time.Now().Add(relayTestTimeout))
 				handle(conn)
-			}()
+			})
 		}
-	}()
+	})
 	return ln.Addr().String()
 }
 

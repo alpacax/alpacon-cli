@@ -24,8 +24,6 @@ func newTestClient(ts *httptest.Server) *client.AlpaconClient {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
@@ -84,7 +82,7 @@ func TestGetClusterList_Projection(t *testing.T) {
 			name: "measured cluster",
 			cluster: `{"id":"c1","name":"prod-east","provider":"eks","kube_version":"v1.31.2","agent_version":"0.1.0",
 				"node_count":3,"status":null,"enabled":true,"groups":[],"tags":{},"is_connected":true}`,
-			expected: ClusterAttributes{Name: "prod-east", Provider: "eks", KubeVersion: Optional[string]{Value: ptr("v1.31.2")}, NodeCount: Optional[int]{Value: ptr(3)}, Connected: true, Enabled: true, AgentVersion: "0.1.0"},
+			expected: ClusterAttributes{Name: "prod-east", Provider: "eks", KubeVersion: Optional[string]{Value: new("v1.31.2")}, NodeCount: Optional[int]{Value: new(3)}, Connected: true, Enabled: true, AgentVersion: "0.1.0"},
 		},
 		{
 			name: "not yet measured",
@@ -96,7 +94,7 @@ func TestGetClusterList_Projection(t *testing.T) {
 			name: "measured with no nodes and disabled",
 			cluster: `{"id":"c3","name":"empty","provider":"k3s","kube_version":"","agent_version":"0.1.0",
 				"node_count":0,"status":null,"enabled":false,"groups":[],"tags":{},"is_connected":false}`,
-			expected: ClusterAttributes{Name: "empty", Provider: "k3s", KubeVersion: Optional[string]{Value: ptr("")}, NodeCount: Optional[int]{Value: ptr(0)}, AgentVersion: "0.1.0"},
+			expected: ClusterAttributes{Name: "empty", Provider: "k3s", KubeVersion: Optional[string]{Value: new("")}, NodeCount: Optional[int]{Value: new(0)}, AgentVersion: "0.1.0"},
 		},
 	}
 
@@ -125,11 +123,11 @@ func TestOptional(t *testing.T) {
 		expectJSON string
 	}{
 		{name: "null string", value: Optional[string]{}, expectText: "", expectJSON: "null"},
-		{name: "empty string", value: Optional[string]{Value: ptr("")}, expectText: "", expectJSON: `""`},
-		{name: "version", value: Optional[string]{Value: ptr("v1.31.2")}, expectText: "v1.31.2", expectJSON: `"v1.31.2"`},
+		{name: "empty string", value: Optional[string]{Value: new("")}, expectText: "", expectJSON: `""`},
+		{name: "version", value: Optional[string]{Value: new("v1.31.2")}, expectText: "v1.31.2", expectJSON: `"v1.31.2"`},
 		{name: "null int", value: Optional[int]{}, expectText: "", expectJSON: "null"},
-		{name: "zero nodes", value: Optional[int]{Value: ptr(0)}, expectText: "0", expectJSON: "0"},
-		{name: "three nodes", value: Optional[int]{Value: ptr(3)}, expectText: "3", expectJSON: "3"},
+		{name: "zero nodes", value: Optional[int]{Value: new(0)}, expectText: "0", expectJSON: "0"},
+		{name: "three nodes", value: Optional[int]{Value: new(3)}, expectText: "3", expectJSON: "3"},
 	}
 
 	for _, tt := range tests {

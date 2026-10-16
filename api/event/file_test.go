@@ -166,10 +166,9 @@ func TestCommandRequestMarshal_FileReuseDays(t *testing.T) {
 func TestFileLaneRequestMirrorsCommandRequest(t *testing.T) {
 	t.Parallel()
 	refused := map[string]bool{"Shell": true, "Line": true, "Env": true, "Data": true}
-	fileLane := reflect.TypeOf(fileLaneRequest{})
-	generic := reflect.TypeOf(CommandRequest{})
-	for i := range generic.NumField() {
-		f := generic.Field(i)
+	fileLane := reflect.TypeFor[fileLaneRequest]()
+	generic := reflect.TypeFor[CommandRequest]()
+	for f := range generic.Fields() {
 		if refused[f.Name] {
 			_, present := fileLane.FieldByName(f.Name)
 			assert.False(t, present, "%s must not travel on the file lane", f.Name)

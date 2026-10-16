@@ -1731,11 +1731,9 @@ func TestSendRequest_ConcurrentStaleRequestsRenewOnce(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, errs[i] = ac.SendGetRequest("/api/test/")
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -2099,22 +2097,18 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range reads {
 				_, err := ac.SendGetRequest("/api/test/")
 				errs <- err
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for range refreshes {
 			errs <- ac.RefreshToken()
 		}
-	}()
+	})
 	wg.Wait()
 	close(errs)
 

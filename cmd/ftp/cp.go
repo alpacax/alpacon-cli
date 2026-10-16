@@ -3,6 +3,7 @@ package ftp
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/ftp"
@@ -169,12 +170,7 @@ func isLocalPath(path string) bool {
 }
 
 func isLocalPaths(paths []string) bool {
-	for _, path := range paths {
-		if isRemotePath(path) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(paths, isRemotePath)
 }
 
 // normalizeArgs resolves the username, then strips the inline user prefixes in
