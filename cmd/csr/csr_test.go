@@ -144,7 +144,7 @@ func TestCreateSubcommandFlags(t *testing.T) {
 
 	validDays := cmd.Flags().Lookup("valid-days")
 	assert.NotNil(t, validDays, "--valid-days flag should exist")
-	assert.Equal(t, "365", validDays.DefValue)
+	assert.Equal(t, "0", validDays.DefValue, "a nonzero default would be sent and override the CA's default validity")
 }
 
 func TestSplitAndTrim(t *testing.T) {
