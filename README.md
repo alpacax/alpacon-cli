@@ -200,6 +200,15 @@ An installation that logged in before this identifier existed holds a refresh to
 
 For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 
+## Shell completion
+
+```bash
+source <(alpacon completion bash)                                  # bash (needs the bash-completion package; add to ~/.bashrc)
+source <(alpacon completion zsh)                                   # zsh (add to ~/.zshrc after compinit)
+mkdir -p ~/.config/fish/completions && alpacon completion fish > ~/.config/fish/completions/alpacon.fish  # fish
+alpacon completion powershell | Out-String | Invoke-Expression     # PowerShell (add to $PROFILE)
+```
+
 ## Commands
 
 Run `alpacon --help` for the full command list. Common workflows below.

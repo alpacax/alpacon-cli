@@ -37,6 +37,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var showVersion bool
+
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
@@ -71,6 +73,10 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		if showVersion {
+			runVersion()
+			return
+		}
 		utils.ShowLogo(buildWelcomeLines())
 	},
 }
@@ -100,6 +106,7 @@ func init() {
 	)
 
 	// version
+	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
 
 	// update
