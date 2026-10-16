@@ -10,7 +10,7 @@ import (
 var userDetailCmd = &cobra.Command{
 	Use:     "describe USER",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a specific user",
+	Short:   "Show details of a user",
 	Long: `
 	The describe command fetches and displays detailed information about a specific user, 
 	including its description, shell and other relevant attributes. 

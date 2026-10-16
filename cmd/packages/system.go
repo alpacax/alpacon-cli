@@ -7,7 +7,7 @@ import (
 
 var systemCmd = &cobra.Command{
 	Use:   "system",
-	Short: "System packages",
+	Short: "Manage system packages",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return utils.RequireSubcommand(cmd)
 	},

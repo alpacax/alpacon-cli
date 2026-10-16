@@ -10,7 +10,7 @@ import (
 var webshDescribeCmd = &cobra.Command{
 	Use:     "describe SESSION_ID",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a websh session",
+	Short:   "Show details of a Websh session",
 	Example: `  alpacon websh describe abc123
   alpacon websh desc abc123`,
 	Args: cobra.ExactArgs(1),
