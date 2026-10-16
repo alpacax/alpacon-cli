@@ -2834,3 +2834,35 @@ func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
 		})
 	}
 }
+
+func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ code, want string }{
+		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
+		{utils.SudoPolicyBypassAgentSessionNeedsApproval, "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "` + tt.code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			// Create and update both reach the server through these two verbs.
+			for name, send := range map[string]func() error{
+				"create": func() error { _, err := ac.SendPostRequest("/api/test/", map[string]any{}); return err },
+				"update": func() error { _, err := ac.SendPatchRequest("/api/test/", map[string]any{}); return err },
+			} {
+				err := send()
+				require.Error(t, err, name)
+				assert.Equal(t, tt.want, err.Error(), name)
+				code, _ := utils.ParseErrorResponse(err)
+				assert.Equal(t, tt.code, code, name)
+			}
+		})
+	}
+}

@@ -313,6 +313,10 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "approval policies can only be created, changed or deleted from the web console", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
+	case utils.SudoPolicyBypassAgentSessionNeedsPresence:
+		return "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA", true
+	case utils.SudoPolicyBypassAgentSessionNeedsApproval:
+		return "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
 		if statusCode == http.StatusUnauthorized {
 			return reauthenticateMessage, true
