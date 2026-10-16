@@ -27,6 +27,10 @@ type Chunk struct {
 // bound. The streaming consumers rely on the order, so we sort defensively
 // in case the server does not honor the ordering param.
 func getCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int) ([]Chunk, error) {
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return nil, err
+	}
 	endpoint := "/api/events/commands/" + url.PathEscape(cmdID) + "/chunks/"
 	params := map[string]string{
 		"seq__gte": strconv.Itoa(fromSeq),

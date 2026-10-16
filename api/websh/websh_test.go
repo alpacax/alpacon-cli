@@ -20,6 +20,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1300,6 +1301,102 @@ func TestOpenTerminal_AdvertisesTheCapabilityOnlyWhereItReconnects(t *testing.T)
 			default:
 				require.Fail(t, "the server saw no dial")
 			}
+		})
+	}
+}
+
+func TestWebshSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+
+	const traversal = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetSessionDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetSessionDetail(ac, traversal)
+			return err
+		}},
+		{"GetSessionRecords", func(ac *client.AlpaconClient) error {
+			_, err := GetSessionRecords(ac, traversal, "", 10)
+			return err
+		}},
+		{"CloseSession", func(ac *client.AlpaconClient) error {
+			return CloseSession(ac, traversal)
+		}},
+		{"ForceCloseSession", func(ac *client.AlpaconClient) error {
+			return ForceCloseSession(ac, traversal)
+		}},
+		{"InviteToSession", func(ac *client.AlpaconClient) error {
+			return InviteToSession(ac, traversal, []string{"alice@example.com"}, false)
+		}},
+		{"SendTerminalSize", func(ac *client.AlpaconClient) error { return SendTerminalSize(ac, traversal) }},
+		{"JoinWebshSession_traversing_channel", func(ac *client.AlpaconClient) error {
+			_, err := JoinWebshSession(ac, "https://example.com/join?channel=%2E%2E%2F%2E%2E%2Fetc%2Ftest", "pw")
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestShareCreatedSession_RefusesASessionIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		share bool
+	}{
+		{name: "shared", share: true},
+		{name: "not_shared", share: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			_, err := shareCreatedSession(ac, []byte(`{"id":"../x"}`), tc.share, false)
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.Contains(t, err.Error(), "the server created the Websh session")
+		})
+	}
+}
+
+func TestShareCreatedSession_ReturnsTheTrimmedSessionID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, uri string
+		share     bool
+	}{
+		{name: "shared", share: true, uri: "/api/websh/sessions/session-1/share/"},
+		{name: "not_shared", share: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var uri string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				uri = r.RequestURI
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"shared_url":"https://example.com/s","password":"pw","expiration":"2026-01-01T00:00:00Z"}`))
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			session, err := shareCreatedSession(ac, []byte(`{"id":" session-1 "}`), tc.share, false)
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.uri, uri)
+			assert.Equal(t, "session-1", session.ID)
 		})
 	}
 }

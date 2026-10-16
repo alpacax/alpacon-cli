@@ -2513,3 +2513,71 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 		})
 	}
 }
+
+func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"AnswerPurposeDemand", func(ac *client.AlpaconClient) error { return AnswerPurposeDemand(ac, badID, "rotate logs") }},
+		{"GetCommandByID", func(ac *client.AlpaconClient) error {
+			_, err := GetCommandByID(ac, badID)
+			return err
+		}},
+		{"PollCommandExecution", func(ac *client.AlpaconClient) error {
+			_, err := PollCommandExecution(ac, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestPostCommand_ReturnsOnlyAOneSegmentCommandID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " cmd-1 ", want: "cmd-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode([]CommandResponse{{ID: tc.id}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			created, err := postCommand(ac, &CommandRequest{})
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Contains(t, err.Error(), "the server created the command")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, created.ID)
+		})
+	}
+}
+
+func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
+
+	require.ErrorIs(t, err, utils.ErrInvalidID)
+}

@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -118,4 +121,64 @@ func TestCancelRequest_403PropagatesError(t *testing.T) {
 
 	err := CancelRequest(newTestClient(ts), "apr-abc")
 	require.ErrorContains(t, err, "permission")
+}
+
+func TestApprovalCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetApprovalRequest", func(ac *client.AlpaconClient) error {
+			_, err := GetApprovalRequest(ac, badID)
+			return err
+		}},
+		{"GetApprovalRequestRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetApprovalRequestRaw(ac, badID)
+			return err
+		}},
+		{"CancelRequest", func(ac *client.AlpaconClient) error { return CancelRequest(ac, badID) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+
+			err := tt.call(newTestClient(ts))
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestApprovalCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+		want string
+	}{
+		{"GetApprovalRequestRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetApprovalRequestRaw(ac, " 42 ")
+			return err
+		}, "GET /api/approvals/approvals/42/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.Store(r.Method + " " + r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+
+			err := tt.call(newTestClient(ts))
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Load())
+		})
+	}
 }

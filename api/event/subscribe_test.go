@@ -184,56 +184,39 @@ func TestSubscribeEvent_NotFoundKeepsTheStatusReachable(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
 }
 
-// The id comes from a server response, so a slash in it must stay inside its own
-// path segment instead of reaching another route.
 func TestCloseEventSession_SendsADeleteForTheSession(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ name, id, uri string }{
-		{name: "plain_id", id: "session-1", uri: "/api/events/sessions/session-1/"},
-		{name: "id_with_slashes", id: "../iam/users/-", uri: "/api/events/sessions/..%2Fiam%2Fusers%2F-/"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			var method, uri string
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				method, uri = r.Method, r.RequestURI
-				w.WriteHeader(http.StatusNoContent)
-			}))
-			defer ts.Close()
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	var method, uri string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, uri = r.Method, r.RequestURI
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			err := CloseEventSession(t.Context(), ac, tc.id)
+	err := CloseEventSession(t.Context(), ac, "session-1")
 
-			require.NoError(t, err)
-			assert.Equal(t, http.MethodDelete, method)
-			assert.Equal(t, tc.uri, uri)
-		})
-	}
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodDelete, method)
+	assert.Equal(t, "/api/events/sessions/session-1/", uri)
 }
 
-// url.PathEscape keeps "." and "..", which a server or proxy may resolve to another
-// route, so an id that is not one real segment sends nothing.
 func TestCloseEventSession_RefusesAnIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, id string }{
 		{name: "empty", id: ""},
 		{name: "dot", id: "."},
 		{name: "dot_dot", id: ".."},
+		{name: "parent_traversal", id: "../../etc/test"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var requests atomic.Int32
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				w.WriteHeader(http.StatusNoContent)
-			}))
-			defer ts.Close()
+			ts := testutil.NewNoRequestServer(t)
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			err := CloseEventSession(t.Context(), ac, tc.id)
 
-			require.Error(t, err)
-			assert.Zero(t, requests.Load())
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }

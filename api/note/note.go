@@ -67,6 +67,10 @@ func CreateNote(ac *client.AlpaconClient, noteRequest NoteCreateRequest) error {
 }
 
 func GetNoteDetail(ac *client.AlpaconClient, noteID string) ([]byte, error) {
+	noteID, err := api.RequireID(noteID, "note")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(noteURL, noteID, nil))
 	if err != nil {
 		return nil, err
@@ -76,6 +80,10 @@ func GetNoteDetail(ac *client.AlpaconClient, noteID string) ([]byte, error) {
 }
 
 func UpdateNote(ac *client.AlpaconClient, noteID string) ([]byte, error) {
+	noteID, err := api.RequireID(noteID, "note")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := GetNoteDetail(ac, noteID)
 	if err != nil {
 		return nil, err
@@ -95,7 +103,11 @@ func UpdateNote(ac *client.AlpaconClient, noteID string) ([]byte, error) {
 }
 
 func DeleteNote(ac *client.AlpaconClient, noteID string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(noteURL, noteID, nil))
+	noteID, err := api.RequireID(noteID, "note")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(noteURL, noteID, nil))
 	if err != nil {
 		return err
 	}

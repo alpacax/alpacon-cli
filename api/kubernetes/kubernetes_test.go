@@ -12,6 +12,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -406,6 +407,38 @@ func TestCreateSession_DecodesResponse(t *testing.T) {
 	assert.True(t, session.TokenExpiredAt.Equal(time.Date(2026, 10, 8, 3, 30, 0, 1000, time.UTC)), "token_expired_at: %v", session.TokenExpiredAt)
 }
 
+func TestCreateSession_RefusesAnUnusableCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"../x"}`))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{})
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	require.NotErrorIs(t, err, utils.ErrInvalidID)
+	assert.Nil(t, session)
+	assert.Contains(t, err.Error(), "the server created the kube session")
+}
+
+func TestCreateSession_TrimsTheCreatedID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":" s-1 "}`))
+	}))
+	defer ts.Close()
+
+	session, err := CreateSession(newTestClient(ts), KubeSessionCreateRequest{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "s-1", session.ID)
+}
+
 func TestCreateSession_KeepsErrorStatusAndCode(t *testing.T) {
 	t.Parallel()
 	// The command layer branches on the refusal's status and code, so both
@@ -461,6 +494,8 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 		{name: "dot dot", sessionID: ".."},
 		{name: "parent segment", sessionID: "../clusters/c-1"},
 		{name: "nested segment", sessionID: "s-1/x"},
+		{name: "backslash", sessionID: `s-1\x`},
+		{name: "encoded slash", sessionID: "s-1%2Fx"},
 	}
 
 	for _, tt := range tests {
@@ -473,8 +508,37 @@ func TestCloseSession_RefusesIDThatWouldChangeTheRoute(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			require.Error(t, CloseSession(newTestClient(ts), tt.sessionID))
+			require.ErrorIs(t, CloseSession(newTestClient(ts), tt.sessionID), utils.ErrInvalidID)
 			assert.Zero(t, hits.Load())
+		})
+	}
+}
+
+func TestClusterCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetClusterDetailRaw", func(ac *client.AlpaconClient) error {
+			_, err := GetClusterDetailRaw(ac, badID)
+			return err
+		}},
+		{"GetClusterDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetClusterDetail(ac, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
 		})
 	}
 }
@@ -490,4 +554,32 @@ func TestCloseSession_PropagatesError(t *testing.T) {
 	err := CloseSession(newTestClient(ts), "s-gone")
 	require.Error(t, err)
 	assert.Equal(t, http.StatusNotFound, utils.HTTPStatusCode(err))
+}
+
+func TestGetClusterIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ClusterDetail]{Count: 1, Results: []ClusterDetail{{ID: tc.id, Name: "my-cluster"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetClusterIDByName(ac, "my-cluster")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
+		})
+	}
 }

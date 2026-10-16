@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"net"
 	"net/http"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrInvalidID marks a local refusal of an ID that is unsafe as a URL path segment.
+var ErrInvalidID = errors.New("invalid id")
 
 const (
 	AuthMFARequired  = "auth_mfa_required"
@@ -350,25 +354,18 @@ func RetryAfterFromHeader(header http.Header) time.Duration {
 // message text, so a code that only appears inside a message, such as an
 // agent's transfer report, does not count.
 func StructuredErrorCode(err error) string {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if coded, ok := e.(codedError); ok {
-			if code := coded.ErrorCode(); code != "" {
-				return code
-			}
-		}
-	}
-	return ""
+	code, _ := typedCode(err, func(code, _ string) bool { return code != "" })
+	return code
 }
 
+// ParseErrorResponse prefers a typed code anywhere in the chain over text: a wrapper's
+// message can quote server-supplied text, such as a rejected ID, that reads as a code.
 func ParseErrorResponse(err error) (string, string) {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if coded, ok := e.(codedError); ok {
-			code, source := coded.ErrorCode(), coded.ErrorSource()
-			if code != "" || source != "" {
-				return code, source
-			}
-		}
+	if code, source := typedCode(err, func(code, source string) bool { return code != "" || source != "" }); code != "" || source != "" {
+		return code, source
+	}
 
+	for e := range errorChain(err) {
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}
@@ -396,6 +393,44 @@ func ParseErrorResponse(err error) (string, string) {
 	}
 
 	return "", ""
+}
+
+func typedCode(err error, accept func(code, source string) bool) (string, string) {
+	for e := range errorChain(err) {
+		if coded, ok := e.(codedError); ok {
+			code, source := coded.ErrorCode(), coded.ErrorSource()
+			if accept(code, source) {
+				return code, source
+			}
+		}
+	}
+	return "", ""
+}
+
+func errorChain(err error) iter.Seq[error] {
+	return func(yield func(error) bool) {
+		var walk func(error) bool
+		walk = func(current error) bool {
+			if current == nil {
+				return true
+			}
+			if !yield(current) {
+				return false
+			}
+			switch wrapped := current.(type) {
+			case interface{ Unwrap() []error }:
+				for _, child := range wrapped.Unwrap() {
+					if !walk(child) {
+						return false
+					}
+				}
+			case interface{ Unwrap() error }:
+				return walk(wrapped.Unwrap())
+			}
+			return true
+		}
+		walk(err)
+	}
 }
 
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may

@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	eventapi "github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -60,11 +61,22 @@ func init() {
 	EventCmd.AddCommand(waitCmd)
 }
 
+func validateEventTarget(target string) (string, error) {
+	if target == "" {
+		return "", nil
+	}
+	return api.RequireID(target, "target")
+}
+
 func runWait(cmd *cobra.Command, _ []string) {
 	eventType, _ := cmd.Flags().GetString("type")
 	target, _ := cmd.Flags().GetString("target")
 	untilRaw, _ := cmd.Flags().GetStringSlice("until")
 	timeout, _ := cmd.Flags().GetDuration("timeout")
+	target, err := validateEventTarget(target)
+	if err != nil {
+		utils.CliUsageErrorEnvelopeWithExit(opWait, "%s.", strip(err.Error()))
+	}
 
 	// The slice reaches here as typed: '--until "approved, activated"' leaves a leading
 	// space on the second entry, which would never match a sub type.

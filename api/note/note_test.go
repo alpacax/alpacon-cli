@@ -7,12 +7,15 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -177,4 +180,68 @@ func TestGetNoteList_MapsResponseFields(t *testing.T) {
 		Pinned:  true,
 		AddedAt: "3 hours ago",
 	}, notes[0])
+}
+
+func TestNoteCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetNoteDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetNoteDetail(ac, badID)
+			return err
+		}},
+		{"UpdateNote", func(ac *client.AlpaconClient) error {
+			_, err := UpdateNote(ac, badID)
+			return err
+		}},
+		{"DeleteNote", func(ac *client.AlpaconClient) error { return DeleteNote(ac, badID) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+// UpdateNote opens an editor, so it is not driven here.
+func TestNoteCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+		want string
+	}{
+		{"GetNoteDetail", func(ac *client.AlpaconClient) error {
+			_, err := GetNoteDetail(ac, " 42 ")
+			return err
+		}, "GET /api/servers/notes/42/"},
+		{"DeleteNote", func(ac *client.AlpaconClient) error { return DeleteNote(ac, " 42 ") }, "DELETE /api/servers/notes/42/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.Store(r.Method + " " + r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Load())
+		})
+	}
 }

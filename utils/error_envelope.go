@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -41,9 +42,13 @@ func buildCliErrorEnvelopeFromErr(operation string, err error, message string) J
 	return buildCliErrorEnvelope(operation, code, message)
 }
 
-// CliErrorEnvelopeWithExit reports a command failure and exits(1): json mode prints the
-// envelope to stderr with the server code from err; table mode matches CliErrorWithExit.
+// CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code. An
+// ErrInvalidID refusal exits 2 through CliUsageErrorEnvelopeWithExit.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
+	if errors.Is(err, ErrInvalidID) {
+		CliUsageErrorEnvelopeWithExit(operation, format, args...)
+		return
+	}
 	if OutputFormat == OutputFormatJSON {
 		PrintJSONError(os.Stderr, buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...)))
 		os.Exit(1)

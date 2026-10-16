@@ -27,7 +27,11 @@ func AddCommandAcl(ac *client.AlpaconClient, request CommandAclRequest) error {
 }
 
 func DeleteCommandAcl(ac *client.AlpaconClient, commandAclId string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(commandAclURL, commandAclId, nil))
+	commandAclId, err := api.RequireID(commandAclId, "command ACL")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(commandAclURL, commandAclId, nil))
 	return err
 }
 
@@ -64,7 +68,11 @@ func BulkDeleteServerAcl(ac *client.AlpaconClient, request ServerAclBulkRequest)
 }
 
 func DeleteServerAcl(ac *client.AlpaconClient, serverAclID string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(serverAclURL, serverAclID, nil))
+	serverAclID, err := api.RequireID(serverAclID, "server ACL")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(serverAclURL, serverAclID, nil))
 	return err
 }
 
@@ -79,6 +87,10 @@ func AddFileAcl(ac *client.AlpaconClient, request FileAclRequest) error {
 }
 
 func DeleteFileAcl(ac *client.AlpaconClient, fileAclID string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(fileAclURL, fileAclID, nil))
+	fileAclID, err := api.RequireID(fileAclID, "file ACL")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(fileAclURL, fileAclID, nil))
 	return err
 }

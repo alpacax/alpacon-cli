@@ -16,6 +16,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	configpkg "github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -673,6 +674,60 @@ func TestLoginAndSaveCredentialsPasswordKeepsCodeOfRefusedLogin(t *testing.T) {
 			assert.Equal(t, tt.wantCode, code)
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
 			assert.Equal(t, fmt.Sprintf("response status: %d %s", tt.status, http.StatusText(tt.status)), err.Error())
+		})
+	}
+}
+
+func TestAPITokenCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"DeleteAPIToken", func(ac *client.AlpaconClient) error { return DeleteAPIToken(ac, badID) }},
+		{"DuplicateAPIToken", func(ac *client.AlpaconClient) error {
+			_, err := DuplicateAPIToken(ac, badID, "copy")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestGetAPITokenIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[APITokenResponse]{Count: 1, Results: []APITokenResponse{{ID: tc.id, Name: "my-token"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetAPITokenIDByName(ac, "my-token")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
 		})
 	}
 }

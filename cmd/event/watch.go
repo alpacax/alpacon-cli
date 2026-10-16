@@ -49,6 +49,10 @@ func init() {
 func runWatch(cmd *cobra.Command, _ []string) {
 	eventType, _ := cmd.Flags().GetString("type")
 	target, _ := cmd.Flags().GetString("target")
+	target, err := validateEventTarget(target)
+	if err != nil {
+		utils.CliUsageErrorEnvelopeWithExit(opWatch, "%s.", strip(err.Error()))
+	}
 
 	if eventType == "" {
 		utils.CliUsageErrorEnvelopeWithExit(opWatch, "--type is required.")

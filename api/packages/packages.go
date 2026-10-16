@@ -87,7 +87,7 @@ func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType s
 
 	for _, e := range entries {
 		if e.Name == fileName {
-			return e.ID, nil
+			return api.RequireResponseID(e.ID, "package")
 		}
 	}
 

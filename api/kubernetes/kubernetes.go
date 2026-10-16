@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
-	"strings"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -61,7 +60,7 @@ func GetClusterIDByName(ac *client.AlpaconClient, clusterName string) (string, e
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "cluster")
 }
 
 // GetClusterDetail fetches one cluster by ID.
@@ -81,6 +80,10 @@ func GetClusterDetail(ac *client.AlpaconClient, clusterID string) (*ClusterDetai
 
 // GetClusterDetailRaw fetches one cluster by ID and returns the body as the server sent it.
 func GetClusterDetailRaw(ac *client.AlpaconClient, clusterID string) ([]byte, error) {
+	clusterID, err := api.RequireID(clusterID, "cluster")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(clusterURL, clusterID, nil))
 }
 
@@ -128,17 +131,19 @@ func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*Kub
 	if err := json.Unmarshal(body, &session); err != nil {
 		return nil, err
 	}
+	if session.ID, err = api.RequireResponseID(session.ID, "kube session"); err != nil {
+		return nil, fmt.Errorf("the server created the kube session, but its ID is unusable (%w)", err)
+	}
 
 	return &session, nil
 }
 
-// CloseSession ends a proxy session. An ID that is blank or holds a path
-// segment is refused before any request: path.Join would turn it into another
-// route, such as POST /api/kubernetes/sessions/close/ for an empty ID.
+// CloseSession ends a proxy session.
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" || strings.Contains(sessionID, "/") || sessionID == "." || sessionID == ".." {
-		return fmt.Errorf("invalid kube session id %q", sessionID)
+	sessionID, err := api.RequireID(sessionID, "kube session")
+	if err != nil {
+		return err
 	}
-	_, err := ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
 	return err
 }

@@ -297,7 +297,11 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 	if len(cmdResponse) == 0 {
 		return CommandResponse{}, fmt.Errorf("server returned empty command list")
 	}
-	return cmdResponse[0], nil
+	created := cmdResponse[0]
+	if created.ID, err = api.RequireResponseID(created.ID, "command"); err != nil {
+		return CommandResponse{}, fmt.Errorf("the server created the command, but its ID is unusable (%w); check for it before submitting again", err)
+	}
+	return created, nil
 }
 
 // AnswerPurposeDemand states what a parked command is for and sends it back
@@ -310,11 +314,19 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 // command is parked is not something a bystander needs to learn. So a failure
 // here cannot be read as "the deadline passed" specifically.
 func AnswerPurposeDemand(ac *client.AlpaconClient, cmdID, purpose string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(getEventURL, cmdID+"/purpose", nil), CommandPurposeRequest{Purpose: purpose})
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(getEventURL, cmdID+"/purpose", nil), CommandPurposeRequest{Purpose: purpose})
 	return err
 }
 
 func GetCommandByID(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return EventDetails{}, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(getEventURL, cmdID, nil))
 	if err != nil {
 		return EventDetails{}, err
@@ -359,6 +371,11 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
 func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
+
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return response, err
+	}
 
 	started := seams.Now()
 	deadline := started.Add(timeout)
@@ -535,6 +552,10 @@ func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer
 }
 
 func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDelays, cmdID string, out io.Writer, timeout time.Duration) error {
+	cmdID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return err
+	}
 	listener := newCommandOutputListener(ac, delays.connectTimeout)
 	listener.reconnectBaseDelay = delays.reconnectBaseDelay
 	listener.Start()

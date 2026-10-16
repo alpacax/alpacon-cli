@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 )
 
@@ -106,6 +107,10 @@ type UsageEstimate struct {
 
 // GetUsageEstimate retrieves the usage estimate for a workspace from the payment API.
 func GetUsageEstimate(ac *client.AlpaconClient, paymentBaseURL, workspaceID string) (*UsageEstimate, error) {
+	workspaceID, err := api.RequireID(workspaceID, "workspace")
+	if err != nil {
+		return nil, err
+	}
 	estimateURL := fmt.Sprintf("%s%s%s/estimate/", paymentBaseURL, paymentWorkspacesURL, workspaceID)
 	body, err := ac.SendGetRequestToURL(estimateURL)
 	if err != nil {

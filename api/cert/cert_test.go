@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -588,6 +589,116 @@ func TestDownloadCertificate(t *testing.T) {
 				require.NoError(t, readErr)
 				assert.Equal(t, tt.response.CrtText, string(content))
 			}
+		})
+	}
+}
+
+func TestCertCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call func(*client.AlpaconClient, string) error
+	}{
+		{name: "GetCSRDetail", call: func(ac *client.AlpaconClient, id string) error { _, err := GetCSRDetail(ac, id); return err }},
+		{name: "GetCertificateDetail", call: func(ac *client.AlpaconClient, id string) error { _, err := GetCertificateDetail(ac, id); return err }},
+		{name: "ApproveCSR", call: func(ac *client.AlpaconClient, id string) error { _, err := ApproveCSR(ac, id); return err }},
+		{name: "DenyCSR", call: func(ac *client.AlpaconClient, id string) error { _, err := DenyCSR(ac, id); return err }},
+		{name: "RetryCSR", call: func(ac *client.AlpaconClient, id string) error { _, err := RetryCSR(ac, id); return err }},
+		{name: "DeleteCSR", call: DeleteCSR},
+		{name: "GetAuthorityDetail", call: func(ac *client.AlpaconClient, id string) error { _, err := GetAuthorityDetail(ac, id); return err }},
+		{name: "DeleteCA", call: DeleteCA},
+		{name: "UpdateAuthority", call: func(ac *client.AlpaconClient, id string) error { _, err := UpdateAuthority(ac, id); return err }},
+		{name: "DownloadCRL", call: func(ac *client.AlpaconClient, id string) error { return DownloadCRL(ac, id, "") }},
+		{name: "DownloadRootCertificate", call: func(ac *client.AlpaconClient, id string) error { return DownloadRootCertificate(ac, id, "") }},
+		{name: "GetRevokeRequestDetail", call: func(ac *client.AlpaconClient, id string) error { _, err := GetRevokeRequestDetail(ac, id); return err }},
+		{name: "ApproveRevokeRequest", call: func(ac *client.AlpaconClient, id string) error { _, err := ApproveRevokeRequest(ac, id); return err }},
+		{name: "DenyRevokeRequest", call: func(ac *client.AlpaconClient, id string) error { _, err := DenyRevokeRequest(ac, id); return err }},
+		{name: "RetryRevokeRequest", call: func(ac *client.AlpaconClient, id string) error { _, err := RetryRevokeRequest(ac, id); return err }},
+		{name: "CancelRevokeRequest", call: CancelRevokeRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+
+			err := tt.call(newTestClient(ts), "../../etc/test")
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+// UpdateAuthority opens an editor, and ApproveCSR, DenyCSR, DeleteCSR and DeleteCA
+// already have happy-path tests, so none of them is driven here.
+func TestCertCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	tests := []struct {
+		name string
+		call func(*client.AlpaconClient, string) error
+		want string
+	}{
+		{"GetCSRDetail", func(ac *client.AlpaconClient, id string) error { _, err := GetCSRDetail(ac, id); return err }, "GET /api/cert/sign-requests/42/"},
+		{"GetCertificateDetail", func(ac *client.AlpaconClient, id string) error { _, err := GetCertificateDetail(ac, id); return err }, "GET /api/cert/certificates/42/"},
+		{"RetryCSR", func(ac *client.AlpaconClient, id string) error { _, err := RetryCSR(ac, id); return err }, "POST /api/cert/sign-requests/42/retry/"},
+		{"GetAuthorityDetail", func(ac *client.AlpaconClient, id string) error { _, err := GetAuthorityDetail(ac, id); return err }, "GET /api/cert/authorities/42/"},
+		{"DownloadCRL", func(ac *client.AlpaconClient, id string) error {
+			return DownloadCRL(ac, id, filepath.Join(dir, "crl.pem"))
+		}, "GET /api/cert/authorities/42/crl/"},
+		{"DownloadRootCertificate", func(ac *client.AlpaconClient, id string) error {
+			return DownloadRootCertificate(ac, id, filepath.Join(dir, "root.pem"))
+		}, "GET /api/cert/authorities/42/"},
+		{"GetRevokeRequestDetail", func(ac *client.AlpaconClient, id string) error { _, err := GetRevokeRequestDetail(ac, id); return err }, "GET /api/cert/revoke-requests/42/"},
+		{"ApproveRevokeRequest", func(ac *client.AlpaconClient, id string) error { _, err := ApproveRevokeRequest(ac, id); return err }, "POST /api/cert/revoke-requests/42/approve/"},
+		{"DenyRevokeRequest", func(ac *client.AlpaconClient, id string) error { _, err := DenyRevokeRequest(ac, id); return err }, "POST /api/cert/revoke-requests/42/deny/"},
+		{"RetryRevokeRequest", func(ac *client.AlpaconClient, id string) error { _, err := RetryRevokeRequest(ac, id); return err }, "POST /api/cert/revoke-requests/42/retry/"},
+		{"CancelRevokeRequest", CancelRevokeRequest, "DELETE /api/cert/revoke-requests/42/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.Store(r.Method + " " + r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+
+			err := tt.call(newTestClient(ts), " 42 ")
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Load())
+		})
+	}
+}
+
+func TestGetAuthorityIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[AuthorityResponse]{Count: 1, Results: []AuthorityResponse{{ID: tc.id, Name: "my-ca"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetAuthorityIDByName(ac, "my-ca")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
 		})
 	}
 }

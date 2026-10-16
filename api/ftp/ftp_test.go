@@ -19,6 +19,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1724,4 +1725,160 @@ func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
 	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
+}
+
+func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient, baseURL string) error
+	}{
+		{"PollTransferStatus_upload", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "upload", badID, time.Second)
+			return err
+		}},
+		{"PollTransferStatus_download", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "download", badID, time.Second)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac, ts.URL)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() (io.Reader, int64, func(), error) {
+		opened = true
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":"../x"}`), open)
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, opened, "the file must not be read for an upload that is refused")
+}
+
+func TestCompleteSingleUpload_TriggersAndPollsTheTrimmedUploadID(t *testing.T) {
+	t.Parallel()
+	var paths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths.Store(r.URL.Path, true)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() (io.Reader, int64, func(), error) {
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":" id-1 "}`), open)
+
+	require.NoError(t, err)
+	for _, path := range []string{"/api/webftp/uploads/id-1/upload/", "/api/webftp/uploads/id-1/status/"} {
+		_, sent := paths.Load(path)
+		assert.True(t, sent, "no request reached %s", path)
+	}
+}
+
+func TestCompleteBulkUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() ([]io.Reader, []int64, func(), error) {
+		opened = true
+		return []io.Reader{strings.NewReader(""), strings.NewReader("")}, []int64{0, 0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":"id-1"},{"id":"../x"}]`), open)
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, opened, "the files must not be read for an upload that is refused")
+}
+
+func TestCompleteBulkUpload_TriggersAndPollsTheTrimmedUploadIDs(t *testing.T) {
+	t.Parallel()
+	var triggerReq BulkUploadTriggerRequest
+	var statusPaths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&triggerReq)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		statusPaths.Store(r.URL.Path, true)
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() ([]io.Reader, []int64, func(), error) {
+		return []io.Reader{strings.NewReader("")}, []int64{0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":" id-1 "}]`), open)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id-1"}, triggerReq.IDs)
+	_, polled := statusPaths.Load("/api/webftp/uploads/id-1/status/")
+	assert.True(t, polled, "status must be polled at the trimmed ID")
+}
+
+// noDownloadRequestClient fails the test on any request and answers it with a
+// finished command, so a missed check ends the download instead of polling on.
+func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"error"}`))
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "transfer ID", body: `{"id":"../x","command":"cmd-1"}`},
+		{name: "command ID", body: `{"id":"dl-1","command":"../x"}`},
+	}
+	for _, tc := range tests {
+		t.Run("single "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), "/remote/file", t.TempDir(), false)
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+		t.Run("bulk "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			err := completeBulkDownload(ac, "server-1", []byte(tc.body), []string{"/remote/a", "/remote/b"}, t.TempDir())
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
 }
