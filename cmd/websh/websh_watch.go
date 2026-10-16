@@ -14,7 +14,7 @@ import (
 
 var webshWatchCmd = &cobra.Command{
 	Use:     "watch SESSION_ID",
-	Short:   "Watch an active websh session (staff/superuser only)",
+	Short:   "Watch a Websh session (staff/superuser only)",
 	Example: `  alpacon websh watch abc123`,
 	Args:    cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {

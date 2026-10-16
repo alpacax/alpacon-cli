@@ -9,7 +9,7 @@ import (
 
 var systemPackageUploadCmd = &cobra.Command{
 	Use:   "upload FILE",
-	Short: "Upload a system package to alpacon",
+	Short: "Upload a system package to Alpacon",
 	Long: `
 	The 'upload' command allows users to upload a System package to the alpacon. 
 	This command is designed to facilitate the transfer of System packages to a remote server environment for further usage or distribution.

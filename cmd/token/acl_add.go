@@ -9,8 +9,8 @@ import (
 )
 
 var aclAddCmd = &cobra.Command{
-	Use:        "add",
-	Short:      "Add a command ACL rule to a token (deprecated: use 'acl command add')",
+	Use:        "add [TOKEN]",
+	Short:      "Add a command ACL rule to a token",
 	Deprecated: "use 'alpacon token acl command add' instead",
 	Hidden:     true,
 	Args:       cobra.RangeArgs(0, 1),

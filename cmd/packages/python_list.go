@@ -10,7 +10,7 @@ import (
 var pythonPackageListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all python packages",
+	Short:   "Display a list of all Python packages",
 	Long: `
 	Display a detailed list of all python packages registered in the Alpacon.
 	This command provides information such as name, version, platform and other relevant details.

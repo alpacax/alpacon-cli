@@ -10,7 +10,7 @@ import (
 var webshListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of active websh sessions",
+	Short:   "Display a list of active Websh sessions",
 	Example: `  alpacon websh ls
   alpacon websh ls --tail 50`,
 	Run: func(cmd *cobra.Command, args []string) {

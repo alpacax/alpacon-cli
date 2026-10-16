@@ -10,7 +10,7 @@ import (
 var tokenListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all api tokens",
+	Short:   "Display a list of all API tokens",
 	Long: `
 	Displays a list of all API tokens issued. 
 	This command provides an overview of token names, creation dates, and expiration dates, helping you manage access effectively.

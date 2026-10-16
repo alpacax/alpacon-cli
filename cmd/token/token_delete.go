@@ -10,7 +10,7 @@ import (
 var tokenDeleteCmd = &cobra.Command{
 	Use:     "delete TOKEN",
 	Aliases: []string{"rm"},
-	Short:   "Delete a specified api token",
+	Short:   "Delete a specified API token",
 	Long: `
 	Removes an existing API token from the system. 
 	This command requires the token name to identify the token to be deleted.

@@ -16,7 +16,7 @@ const approveRejectExcludedMessage = "Approvals must be done in the Alpacon cons
 	"Use 'alpacon approval ls' to track a request's status."
 
 var approvalApproveCmd = &cobra.Command{
-	Use:   "approve REQUEST_ID",
+	Use:   "approve",
 	Short: "Approve a request (moved to the Alpacon console)",
 	Long: `Approving requests has moved to the Alpacon console (web).
 

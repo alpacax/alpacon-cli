@@ -10,7 +10,7 @@ const opGet = "get"
 
 var UsernameCmd = &cobra.Command{
 	Use:   "username",
-	Short: "Manage the username for your account's server access",
+	Short: "Manage your username for server access",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return utils.RequireSubcommand(cmd)
 	},

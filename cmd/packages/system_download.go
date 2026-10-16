@@ -8,8 +8,8 @@ import (
 )
 
 var systemPackageDownloadCmd = &cobra.Command{
-	Use:   "download PACKAGE FILE",
-	Short: "Download a system package from alpacon",
+	Use:   "download PACKAGE DIRECTORY",
+	Short: "Download a system package from Alpacon",
 	Long: `
 	The 'download' command allows users to download a System package from the alpacon.
 	This command is designed to facilitate the transfer of your locally developed System packages to a remote server environment for further usage or distribution.

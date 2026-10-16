@@ -9,7 +9,7 @@ import (
 
 var pythonPackageUploadCmd = &cobra.Command{
 	Use:   "upload FILE",
-	Short: "Upload a python package to alpacon",
+	Short: "Upload a Python package to Alpacon",
 	Long: `
 	The 'upload' command allows users to upload a Python package to the alpacon. 
 	This command is designed to facilitate the transfer of your locally developed Python packages to a remote server environment for further usage or distribution.

@@ -20,9 +20,6 @@ var watchCmd = &cobra.Command{
 	Short: "Stream events from the Alpacon event channel",
 	Long: `Stream events from the Alpacon event channel until interrupted.
 
-Usage: alpacon event watch --type TYPE [--target TARGET_ID]
---type is required; --target narrows the stream to one target.
-
 One line is written to stdout per event; everything else goes to stderr, so the
 stream stays machine-readable when piped. With --output json each line is the
 server frame compacted to a single line (NDJSON)—whitespace is dropped, but

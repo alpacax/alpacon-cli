@@ -8,8 +8,8 @@ import (
 )
 
 var pythonPackageDownloadCmd = &cobra.Command{
-	Use:   "download PACKAGE FILE",
-	Short: "Download a python package from alpacon",
+	Use:   "download PACKAGE DIRECTORY",
+	Short: "Download a Python package from Alpacon",
 	Long: `
 	The 'download' command allows users to download a Python package from the alpacon.
 	This command is designed to facilitate the transfer of your locally developed Python packages to a remote server environment for further usage or distribution.

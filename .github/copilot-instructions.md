@@ -7,17 +7,16 @@ This repository is the Alpacon CLI (`alpacon`), built with Go and [Cobra](https:
 All Cobra command `Use` fields must follow POSIX/Cobra conventions:
 
 - **UPPERCASE** for user-supplied values (positional arguments): `SERVER`, `COMMAND`, `SOURCE`
-- **lowercase** for literal keywords or framework tokens: `[flags]`, `[command]`
-- **`[]`** for optional: `[USER@]`, `[flags]`
+- **lowercase** for literal keywords or framework tokens: `[command]`
+- **`[]`** for optional: `[USER@]`
 - **`...`** for repeatable: `SOURCE...`, `COMMAND...`
 
 Examples:
 
 ```go
-Use: "websh [flags] [USER@]SERVER [COMMAND]"
-Use: "cp [SOURCE...] [DESTINATION]"
-Use: "exec [USER@]SERVER COMMAND... [flags]"
-Use: "tunnel [SERVER] -l LOCAL -r REMOTE [flags]"
+Use: "websh [USER@]SERVER [COMMAND...]"
+Use: "cp SOURCE... DESTINATION"
+Use: "exec [USER@]SERVER COMMAND..."
 ```
 
 ## Subcommand alias convention

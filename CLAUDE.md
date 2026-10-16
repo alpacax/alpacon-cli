@@ -130,7 +130,7 @@ Examples:
 
 ```go
 Use: "websh [USER@]SERVER [COMMAND...]"
-Use: "cp [SOURCE...] [DESTINATION]"
+Use: "cp SOURCE... DESTINATION"
 Use: "exec [USER@]SERVER COMMAND..."
 ```
 

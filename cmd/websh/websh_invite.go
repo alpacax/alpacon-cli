@@ -9,7 +9,7 @@ import (
 
 var webshInviteCmd = &cobra.Command{
 	Use:   "invite SESSION_ID",
-	Short: "Invite users to a websh session by email",
+	Short: "Invite users to a Websh session by email",
 	Long: `Invite one or more users to join an existing websh session.
 An invitation email will be sent to each specified address.`,
 	Example: `  alpacon websh invite abc123 --email user@example.com
