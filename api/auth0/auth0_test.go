@@ -299,6 +299,42 @@ func TestExtractSubdomain(t *testing.T) {
 
 // --- Refresh-token scope negotiation ---------------------------------------
 
+func TestIsRefreshTokenRejected(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		desc   string
+		want   bool
+	}{
+		{name: "Invalid grant", status: http.StatusBadRequest, code: "invalid_grant", want: true},
+		{name: "Unauthorized client", status: http.StatusUnauthorized, code: "unauthorized_client", want: true},
+		{name: "Invalid request", status: http.StatusBadRequest, code: "invalid_request", want: true},
+		{name: "Invalid client", status: http.StatusUnauthorized, code: "invalid_client", want: true},
+		{name: "Access denied", status: http.StatusForbidden, code: "access_denied", want: true},
+		{name: "Rate-limited access denied", status: http.StatusTooManyRequests, code: "access_denied", desc: "Global limit has been reached"},
+		{name: "Lowercase rate-limited access denied", status: http.StatusForbidden, code: "access_denied", desc: "global limit has been reached"},
+		{name: "Invalid scope", status: http.StatusBadRequest, code: "invalid_scope"},
+		{name: "Rate limit", status: http.StatusTooManyRequests, code: "too_many_requests"},
+		{name: "Server error", status: http.StatusInternalServerError, code: "invalid_grant"},
+		{name: "Success status", status: http.StatusOK, code: "invalid_grant"},
+		{name: "Redirect status", status: http.StatusFound, code: "invalid_grant"},
+		{name: "Missing status", code: "invalid_grant"},
+		{name: "Description alone", status: http.StatusBadRequest, code: "server_error", desc: "invalid_grant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := &oauthError{Code: tt.code, Desc: tt.desc, statusCode: tt.status}
+			assert.Equal(t, tt.want, IsRefreshTokenRejected(err))
+			assert.Equal(t, tt.want, IsRefreshTokenRejected(fmt.Errorf("x: %w", err)))
+		})
+	}
+	assert.False(t, IsRefreshTokenRejected(nil), "a missing error does not reject the refresh token")
+	assert.False(t, IsRefreshTokenRejected(fmt.Errorf("invalid_grant")), "untyped error text does not reject the refresh token")
+}
+
 func newRefreshServer(t *testing.T, respond func(tokenRequest) (int, string)) *refreshServer {
 	t.Helper()
 	server := &refreshServer{respond: respond}

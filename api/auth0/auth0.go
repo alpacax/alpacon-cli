@@ -60,12 +60,16 @@ func (e *oauthError) Error() string {
 // IsRefreshTokenRejected reports an OAuth refusal that requires a new login.
 func IsRefreshTokenRejected(err error) bool {
 	var oauthErr *oauthError
-	if !errors.As(err, &oauthErr) || oauthErr.statusCode >= http.StatusInternalServerError {
+	if !errors.As(err, &oauthErr) || oauthErr.statusCode < http.StatusBadRequest || oauthErr.statusCode >= http.StatusInternalServerError {
 		return false
 	}
 	switch oauthErr.Code {
-	case "invalid_grant", "unauthorized_client", "access_denied":
+	case "invalid_grant", "unauthorized_client", "invalid_request", "invalid_client":
 		return true
+	case "access_denied":
+		// Auth0 also uses access_denied for the rate limit described in
+		// isDeviceScopeRefusal; a new login cannot resolve that refusal.
+		return !strings.Contains(strings.ToLower(oauthErr.Desc), "global limit has been reached")
 	default:
 		return false
 	}
@@ -438,8 +442,11 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 	if tokenRes.Error != "" {
 		return nil, &oauthError{Code: tokenRes.Error, Desc: tokenRes.ErrorDesc, statusCode: resp.StatusCode}
 	}
-	if resp.StatusCode >= http.StatusInternalServerError {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("response status: %s", resp.Status)
+	}
+	if tokenRes.AccessToken == "" {
+		return nil, fmt.Errorf("authentication server returned an empty access token")
 	}
 
 	return &tokenRes, nil

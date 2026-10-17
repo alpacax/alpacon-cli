@@ -175,6 +175,9 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	client.SetAccessToken(validConfig.AccessToken)
 
 	if isAccessTokenExpired(validConfig) {
+		if validConfig.RefreshToken == "" {
+			return nil, fmt.Errorf("authentication session expired. Please run 'alpacon login' again")
+		}
 		spinner := utils.NewSpinner("Refreshing access token...")
 		spinner.Start()
 		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
