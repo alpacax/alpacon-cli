@@ -1891,6 +1891,74 @@ func TestSendDeleteRequestWithContext_GivesUpAtTheDeadline(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second)
 }
 
+func TestNewAlpaconAPIClient_RefreshFailureGuidance(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenCode int
+		tokenBody string
+		envCode   int
+		dropToken bool
+		wantLogin bool
+		cause     string
+	}{
+		{name: "Invalid grant requires login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"invalid_grant"}`, wantLogin: true, cause: "invalid_grant"},
+		{name: "Unauthorized client requires login", tokenCode: http.StatusUnauthorized, tokenBody: `{"error":"unauthorized_client"}`, wantLogin: true, cause: "unauthorized_client"},
+		{name: "Access denied requires login", tokenCode: http.StatusForbidden, tokenBody: `{"error":"access_denied"}`, wantLogin: true, cause: "access_denied"},
+		{name: "Transport failure asks to retry", dropToken: true, cause: "EOF"},
+		{name: "Server error asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"server_error"}`, cause: "server_error"},
+		{name: "Server denial asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"access_denied"}`, cause: "access_denied"},
+		{name: "Server failure without OAuth code asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{}`, cause: "500"},
+		{name: "Env fetch failure asks to retry", envCode: http.StatusBadGateway, cause: "502"},
+		{name: "Description alone does not require login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"server_error","error_description":"invalid_grant"}`, cause: "invalid_grant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			mux := http.NewServeMux()
+			ts := httptest.NewTLSServer(mux)
+			t.Cleanup(ts.Close)
+			mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.envCode != 0 {
+					w.WriteHeader(tt.envCode)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"my-workspace"}}`)
+			})
+			mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.dropToken {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if assert.NoError(t, err) {
+						_ = conn.Close()
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.tokenCode)
+				_, _ = io.WriteString(w, tt.tokenBody)
+			})
+			require.NoError(t, config.CreateConfig(
+				ts.URL, "my-workspace", "", "", "stale", "refresh-token", "alpacon.io", 0, true,
+			))
+
+			ac, err := NewAlpaconAPIClient()
+
+			require.Error(t, err)
+			assert.Nil(t, ac)
+			assert.Contains(t, err.Error(), tt.cause)
+			if tt.wantLogin {
+				assert.Contains(t, err.Error(), "authentication session expired. Please run 'alpacon login' again")
+				assert.Equal(t, 1, strings.Count(err.Error(), "alpacon login"))
+				assert.NotContains(t, err.Error(), "Please retry")
+			} else {
+				assert.Contains(t, err.Error(), "could not complete access token refresh. Please retry")
+				assert.NotContains(t, err.Error(), "alpacon login")
+				assert.NotContains(t, err.Error(), "session expired")
+			}
+		})
+	}
+}
+
 // Everything below cmd/ reads the workspace off the client, so dropping either
 // field here leaves every MFA link the process builds naming no workspace.
 func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {

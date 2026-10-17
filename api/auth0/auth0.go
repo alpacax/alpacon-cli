@@ -48,12 +48,27 @@ var (
 // oauthError is the only refresh failure safe to retry with another scope; any other
 // may have consumed the refresh token. mapAuth0Error matches on Error(), so keep its format.
 type oauthError struct {
-	Code string
-	Desc string
+	Code       string
+	Desc       string
+	statusCode int
 }
 
 func (e *oauthError) Error() string {
 	return fmt.Sprintf("error response from authentication server: %s - %s", e.Code, e.Desc)
+}
+
+// IsRefreshTokenRejected reports an OAuth refusal that requires a new login.
+func IsRefreshTokenRejected(err error) bool {
+	var oauthErr *oauthError
+	if !errors.As(err, &oauthErr) || oauthErr.statusCode >= http.StatusInternalServerError {
+		return false
+	}
+	switch oauthErr.Code {
+	case "invalid_grant", "unauthorized_client", "access_denied":
+		return true
+	default:
+		return false
+	}
 }
 
 func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
@@ -421,7 +436,10 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 	}
 
 	if tokenRes.Error != "" {
-		return nil, &oauthError{Code: tokenRes.Error, Desc: tokenRes.ErrorDesc}
+		return nil, &oauthError{Code: tokenRes.Error, Desc: tokenRes.ErrorDesc, statusCode: resp.StatusCode}
+	}
+	if resp.StatusCode >= http.StatusInternalServerError {
+		return nil, fmt.Errorf("response status: %s", resp.Status)
 	}
 
 	return &tokenRes, nil
