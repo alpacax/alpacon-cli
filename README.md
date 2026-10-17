@@ -349,6 +349,29 @@ Override the active session per command with `--work-session <id>` or `ALPACON_W
 
 `complete` and `revoke` clear the active session when they end it. A session that ends anywhere else—it expires, an admin revokes it, or it is completed from the console—stays set until you run `alpacon work-session use --unset`; `ls` stops marking it as active and `current` warns that it has ended.
 
+`create --account <name>` names the account the work runs as on the servers (for example `root`), so the approver sees it with the request. The session runs only as that account, so pass it to later commands with `-u <name>` (for example `alpacon exec -u root web-01 -- uptime`); without it `exec` is refused with `work_session_account_not_approved`.
+
+#### AI agents
+
+The CLI detects when an AI coding agent runs it, from environment variables only, and names the agent on every request with the `X-Alpacon-Declared-Agent-Name` header (and `X-Alpacon-Declared-Agent-Version` when the environment states a version). The first match names the agent:
+
+| Variable | Agent |
+|---|---|
+| `AI_AGENT=<name>` | the name given |
+| `CLAUDE_CODE_CHILD_SESSION=1` | `claude-code` |
+| `CODEX_CI=1`, `CODEX_THREAD_ID`, or `CODEX_SANDBOX` | `codex` |
+| `GEMINI_CLI=1` | `gemini-cli` |
+| `COPILOT_AGENT=1` or `COPILOT_CLI=1` | `github-copilot` |
+| `CURSOR_AGENT=1` | `cursor` |
+| `CLINE_ACTIVE=true` | `cline` |
+| `GOOSE_TERMINAL=1` or `AGENT=goose` | `goose` |
+
+Commands run through Claude Code's `!` prefix count as an agent too.
+
+None of these count: no TTY, `CI`, `TERM_PROGRAM` or any other editor terminal, `CLAUDECODE` on its own, `REPL_ID`, `GOOSE_PROVIDER`, and `AGENT` with any value but `goose`. For an agent that sets none of the variables (for example Aider), set `AI_AGENT=<name>` in its environment.
+
+When an agent is detected, `work-session create` opens an agent session. `--requester-type agent` opens one without naming an agent, and `--requester-type user` is refused with exit code `2` and a message naming every variable found—unset them, or run the command from your own terminal.
+
 `extend` reads the session's `expires_at` back from the server rather than echoing the `--expires-in`/`--expires-at` value it sent, so the printed result is always what was actually applied.
 
 `--reason` is required on every `extend`—a short justification an approver judges the request by. Whether the extension applies immediately or waits for approval follows the workspace's approval policy, the same rule `work-session create` uses: the CLI reports a queued extension pending (`status` `pending_approval` under `--output json`, with `requested_expires_at` and the request's own deadline in `context`; exit `4`) instead of the session already extended. Check `alpacon work-session describe <id>` for the request's status (`--output json` shows it under `pending_extension_request`), then run `extend` again with a new reason once it settles—`extend` does not wait on its own. `error_code` `work_session_extension_reason_required` means `--reason` was missing or blank; `work_session_extension_already_pending` means a decision is already outstanding for this session (find its id with `alpacon work-session describe <id> --output json`)—wait for it before asking again.
@@ -483,6 +506,7 @@ What each refusal code means and what to do next:
 | `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
 | `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |
 | `work_session_assignee_mismatch` | session assigned to another principal | `work-session use <ID>` with your own session |
+| `work_session_agent_session_required` | the CLI runs under an AI agent, and the session is a user session | create an agent session and pass its ID with `--work-session`; not an AI agent? unset the variables the diagnostic names, or run from your own terminal |
 | `work_session_not_usable` | session is no longer usable | `work-session create --use` |
 
 `work-session` subcommand failures (`create`, `use`, `extend`, ...), `event wait` / `event watch` failures, and the inline-credential refusal below also emit a JSON error envelope under `--output json`, with `error_code` carrying the server code when available, and `exit_code` matching the process exit code—`1` for a failed request, `2` with `error_code` `usage_error` for a flag or argument the command rejected. These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1` or `2`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.

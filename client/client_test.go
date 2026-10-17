@@ -2866,3 +2866,18 @@ func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing
 		})
 	}
 }
+
+func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
+	cases := map[string]string{
+		utils.WorkSessionTargetAccountAbsent:       "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account",
+		utils.WorkSessionTargetAccountNotReachable: "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account",
+		utils.TargetAccountOtherPerson:             "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account",
+	}
+	for code, want := range cases {
+		assert.Equal(t, want, codeOnlyMessage(code), code)
+	}
+	assert.Equal(t, "work_session_target_account_absent", utils.WorkSessionTargetAccountAbsent)
+	assert.Equal(t, "work_session_target_account_not_reachable", utils.WorkSessionTargetAccountNotReachable)
+	assert.Equal(t, "target_account_other_person", utils.TargetAccountOtherPerson)
+	assert.Equal(t, "work_session_account_not_approved", utils.WorkSessionAccountNotApproved)
+}

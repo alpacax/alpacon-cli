@@ -97,6 +97,9 @@ type WorkSessionCreateRequest struct {
 	Servers       []string           `json:"servers"`
 	ExpiresAt     string             `json:"expires_at"`
 	SudoPolicies  []SudoPolicyInline `json:"sudo_policies,omitempty"`
+	// TargetAccountUsername is the account the work runs as on the servers.
+	// Left out, the server decides the account itself.
+	TargetAccountUsername string `json:"target_account_username,omitempty"`
 }
 
 // SudoPolicyInline is a sudo policy bound to a work session. It serves three
