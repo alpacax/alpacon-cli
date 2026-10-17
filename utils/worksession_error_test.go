@@ -238,6 +238,7 @@ func kubeWorkSessionCases() []struct {
 		{WorkSessionExpired, "abc-123-uuid", []string{"alpacon work-session extend abc-123-uuid", create}},
 		{WorkSessionScopeNotAllowed, "", reuseOrCreate},
 		{WorkSessionServerNotAllowed, "", reuseOrCreate},
+		{WorkSessionAccountNotApproved, "", reuseOrCreate},
 	}
 }
 
@@ -276,7 +277,8 @@ func TestBuildWorkSessionDiagnostic_KubeIgnoresServerName(t *testing.T) {
 
 func TestKubeWorkSessionCasesCoverEveryCode(t *testing.T) {
 	t.Parallel()
-	covered := map[string]bool{}
+	// The agent-session code has its own test below: its next step is a note, not a command.
+	covered := map[string]bool{WorkSessionAgentSessionRequired: true}
 	for _, tc := range kubeWorkSessionCases() {
 		covered[tc.code] = true
 	}
@@ -338,6 +340,70 @@ func TestBuildWorkSessionErrorEnvelope_Kube(t *testing.T) {
 	}
 }
 
+// agentCreateAction returns the recommended agent-session create, which every
+// work-session code offers.
+func agentCreateAction(t *testing.T, actions []NextAction) NextAction {
+	t.Helper()
+	for _, a := range actions {
+		if strings.HasPrefix(a.Command, "alpacon work-session create ") && strings.Contains(a.Command, "--requester-type agent") {
+			return a
+		}
+	}
+	t.Fatalf("no agent create among %v", actions)
+	return NextAction{}
+}
+
+// An agent session cannot hold websh, so the recovery for websh never asks for
+// that combination; it offers a command-scoped session run through exec.
+func TestWorkSessionNextActions_AgentRecoveryAvoidsForbiddenScope(t *testing.T) {
+	t.Parallel()
+	for code := range workSessionReasonMap {
+		if code == WorkSessionAccountNotApproved { // offers -u and --account, covered by its own test
+			continue
+		}
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			actions := workSessionNextActions(code, OperationWebsh, "prod-1", "")
+			agent := agentCreateAction(t, actions)
+			assert.Contains(t, agent.Command, "--scope "+OperationCommand+" ")
+			assert.NotContains(t, agent.Command, "--scope "+OperationWebsh)
+			assert.Contains(t, agent.Description, "alpacon exec --work-session <ID>")
+			for _, a := range actions {
+				if strings.Contains(a.Command, "--requester-type agent") {
+					assert.NotContains(t, a.Command, OperationWebsh)
+				}
+			}
+		})
+	}
+
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationWebsh, "prod-1", "Browser login", "")
+	assert.Contains(t, got, "--scope command --server prod-1")
+	assert.NotContains(t, got, "--scope websh")
+	assert.Contains(t, got, "an agent session cannot hold websh")
+}
+
+func TestWorkSessionNextActions_AgentRecoveryKeepsAllowedScope(t *testing.T) {
+	t.Parallel()
+	for _, operation := range []string{OperationCommand, OperationWebFTP} {
+		t.Run(operation, func(t *testing.T) {
+			t.Parallel()
+			actions := workSessionNextActions(WorkSessionAgentSessionRequired, operation, "prod-1", "")
+			assert.Equal(t, []NextAction{
+				{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by prefixing the gated command with --work-session <ID>"},
+				{Command: `alpacon work-session create --scope ` + operation + ` --server prod-1 --expires-in 1h --purpose "<intent>" --requester-type agent`, Description: "none active? create an agent session (prefix the gated command with --work-session <ID>)"},
+			}, actions)
+			for code := range workSessionReasonMap {
+				if code == WorkSessionAccountNotApproved { // offers -u and --account, covered by its own test
+					continue
+				}
+				agent := agentCreateAction(t, workSessionNextActions(code, operation, "prod-1", ""))
+				assert.Contains(t, agent.Command, "--scope "+operation+" ")
+				assert.NotContains(t, agent.Description, "alpacon exec")
+			}
+		})
+	}
+}
+
 func TestBuildWorkSessionErrorEnvelope_KubeKeepsRequiredScopeField(t *testing.T) {
 	t.Parallel()
 	body, err := json.Marshal(buildWorkSessionErrorEnvelope(WorkSessionRequired, OperationKube, "", "Browser login", ""))
@@ -352,4 +418,77 @@ func TestKubeWorkSessionNextActions_CreateDescription(t *testing.T) {
 	assert.Equal(t, "find an existing active session you own", actions[0].Description)
 	assert.Equal(t, "attach it", actions[1].Description)
 	assert.Equal(t, "none active? create one; any active session you own works for kube", actions[2].Description)
+}
+
+// Under a detected agent a kube session cannot be opened at all: an agent
+// session is refused and a user session is refused again. The only way out is
+// a person's own terminal, so no use or --use is suggested.
+func TestKubeWorkSessionAgentSessionRequired(t *testing.T) {
+	t.Setenv("AI_AGENT", "test-agent")
+	want := "kube needs a person's own terminal: unset the AI agent variables or run the command from your own terminal, then attach a session you own"
+
+	actions := workSessionNextActions(WorkSessionAgentSessionRequired, OperationKube, "", "")
+	require.Len(t, actions, 1)
+	assert.Empty(t, actions[0].Command)
+	assert.Equal(t, want, actions[0].Description)
+
+	got := buildWorkSessionDiagnostic(WorkSessionAgentSessionRequired, OperationKube, "", "Browser login", "")
+	assert.Contains(t, got, "Detected AI agent")
+	assert.Contains(t, got, "Unset those variables, or run the command from your own terminal.")
+	assert.Contains(t, got, "  "+want+"\n")
+	assert.NotContains(t, got, "work-session use")
+	assert.NotContains(t, got, "--use")
+	assert.NotContains(t, got, "work-session create")
+}
+
+func TestWorkSessionAccountNotApproved(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+	reason := workSessionReasonMap[WorkSessionAccountNotApproved]
+	assert.Equal(t, "the command runs as an account the session was not approved for; a session runs only as the account named when it was created", reason)
+
+	actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", "")
+	require.Len(t, actions, 2)
+	assert.Equal(t, "alpacon exec -u <approved account> web-01 -- <command>", actions[0].Command)
+	assert.Contains(t, actions[0].Description, "pass -u with the session's account")
+	assert.Contains(t, actions[1].Command, "alpacon work-session create --scope command --server web-01")
+	assert.Contains(t, actions[1].Command, "--account <account>")
+	assert.NotContains(t, actions[1].Command, "--use")
+	assert.Equal(t, "or create a session for this account", actions[1].Description)
+
+	got := buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	assert.Contains(t, got, reason)
+	assert.Contains(t, got, "alpacon exec -u <approved account> web-01")
+
+	envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", "")
+	assert.Equal(t, WorkSessionAccountNotApproved, envelope.ErrorCode)
+	assert.Equal(t, reason, envelope.Reason)
+}
+
+func TestWorkSessionAccountNotApproved_AgentCreateIsAgentSession(t *testing.T) {
+	t.Setenv("AI_AGENT", "test-agent")
+	actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", "")
+	require.Len(t, actions, 2)
+	assert.Contains(t, actions[1].Command, "--requester-type agent")
+	assert.Contains(t, actions[1].Command, "--account <account>")
+}
+
+func TestWorkSessionAccountNotApproved_RetryCarriesSession(t *testing.T) {
+	t.Setenv("AI_AGENT", "")
+	const bare = "alpacon exec -u <approved account> web-01 -- <command>"
+	const withSession = "alpacon exec --work-session ses-1 -u <approved account> web-01 -- <command>"
+
+	// Passed on the command line or active: the caller hands over the same ID.
+	for _, tc := range []struct{ name, activeWS, want string }{
+		{"session passed or active", "ses-1", withSession},
+		{"neither", "", bare},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := workSessionNextActions(WorkSessionAccountNotApproved, OperationCommand, "web-01", tc.activeWS)
+			require.NotEmpty(t, actions)
+			assert.Equal(t, tc.want, actions[0].Command)
+			envelope := buildWorkSessionErrorEnvelope(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS)
+			assert.Equal(t, tc.want, envelope.NextActions[0].Command)
+			assert.Contains(t, buildWorkSessionDiagnostic(WorkSessionAccountNotApproved, OperationCommand, "web-01", "Browser login", tc.activeWS), tc.want)
+		})
+	}
 }

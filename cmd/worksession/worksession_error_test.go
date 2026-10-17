@@ -122,6 +122,13 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 // work-session subcommand in the given output mode; returns (stdout, stderr, exitCode).
 func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...string) (string, string, int) {
 	t.Helper()
+	return runWorkSessionHelperWithEnv(t, nil, outputFormat, serverURL, args...)
+}
+
+// runWorkSessionHelperWithEnv is runWorkSessionHelper with extra environment
+// entries ("KEY=value") appended last, so they override the inherited ones.
+func runWorkSessionHelperWithEnv(t *testing.T, env []string, outputFormat, serverURL string, args ...string) (string, string, int) {
+	t.Helper()
 	// outputFormat and serverURL are adjacent strings: a transposed call site
 	// still compiles.
 	require.Contains(t, []string{utils.OutputFormatTable, utils.OutputFormatJSON}, outputFormat)
@@ -139,6 +146,7 @@ func runWorkSessionHelper(t *testing.T, outputFormat, serverURL string, args ...
 		"GO_WORKSESSION_HELPER_OUTPUT="+outputFormat,
 		"HOME="+home,
 	)
+	helper.Env = append(helper.Env, env...)
 	var stdout, stderr bytes.Buffer
 	helper.Stdout = &stdout
 	helper.Stderr = &stderr

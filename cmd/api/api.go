@@ -17,6 +17,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -449,6 +450,7 @@ func appendQueryField(query url.Values, key string, value any) {
 
 func printRequest(w io.Writer, ac *client.AlpaconClient, method, path string, header http.Header) error {
 	header = header.Clone()
+	aiagent.FromEnvironment().SetHeaders(header)
 	if _, hasContentType := header["Content-Type"]; !hasContentType && (method == http.MethodPost || method == http.MethodPatch || method == http.MethodPut) {
 		header.Set("Content-Type", "application/json")
 	}

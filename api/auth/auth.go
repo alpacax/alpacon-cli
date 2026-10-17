@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -88,6 +89,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 
 	httpReq.Header.Add("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", utils.GetUserAgent())
+	aiagent.FromEnvironment().SetHeaders(httpReq.Header)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {

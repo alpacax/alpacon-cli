@@ -3,7 +3,10 @@ package utils
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 )
 
 // Operations HandleWorkSessionError reports; each but OperationKube is also the WorkSession scope it requires.
@@ -15,6 +18,24 @@ const (
 	OperationKube = "kube"
 )
 
+// agentForbiddenScopes are the scopes an agent session cannot hold.
+var agentForbiddenScopes = []string{OperationWebsh}
+
+// IsAgentForbiddenScope reports whether an agent session cannot hold scope.
+func IsAgentForbiddenScope(scope string) bool {
+	return slices.Contains(agentForbiddenScopes, scope)
+}
+
+// AgentSessionScope is the scope an agent session requests for operation. An
+// agent cannot hold websh, so its work on the server runs through exec under
+// the command scope instead.
+func AgentSessionScope(operation string) string {
+	if IsAgentForbiddenScope(operation) {
+		return OperationCommand
+	}
+	return operation
+}
+
 type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
 type workSessionErrorCtx struct {
@@ -25,13 +46,15 @@ type workSessionErrorCtx struct {
 }
 
 var workSessionReasonMap = map[string]string{
-	WorkSessionRequired:         "no WorkSession selected for this shell",
-	WorkSessionNotUsable:        "session is no longer usable",
-	WorkSessionNotActive:        "selected session is not active",
-	WorkSessionExpired:          "selected session has expired",
-	WorkSessionScopeNotAllowed:  "session does not include this scope",
-	WorkSessionServerNotAllowed: "target server is not in this session",
-	WorkSessionAssigneeMismatch: "this session is assigned to another principal",
+	WorkSessionRequired:             "no WorkSession selected for this shell",
+	WorkSessionNotUsable:            "session is no longer usable",
+	WorkSessionNotActive:            "selected session is not active",
+	WorkSessionExpired:              "selected session has expired",
+	WorkSessionScopeNotAllowed:      "session does not include this scope",
+	WorkSessionServerNotAllowed:     "target server is not in this session",
+	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",
+	WorkSessionAgentSessionRequired: "this CLI runs under an AI agent, and an AI agent cannot use a user session",
+	WorkSessionAccountNotApproved:   "the command runs as an account the session was not approved for; a session runs only as the account named when it was created",
 }
 
 func isWorkSessionCode(code string) bool {
@@ -80,6 +103,9 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
+	if code == WorkSessionAgentSessionRequired {
+		fmt.Fprintln(&sb, agentSessionNote(aiagent.FromEnvironment()))
+	}
 	fmt.Fprint(&sb, workSessionTokenNote(operation))
 	return sb.String()
 }
@@ -97,6 +123,15 @@ func workSessionRequiredScope(operation string) string {
 		return ""
 	}
 	return operation
+}
+
+// agentSessionNote tells a person taken for an agent which variables made the
+// CLI think so, and how to get out of it.
+func agentSessionNote(d aiagent.Detection) string {
+	if !d.Detected() {
+		return "Note: Not an AI agent? Run the command from your own terminal."
+	}
+	return fmt.Sprintf("Note: Detected AI agent %s. Not an AI agent? Unset those variables, or run the command from your own terminal.", d.Describe())
 }
 
 func workSessionTokenNote(operation string) string {
@@ -152,28 +187,46 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --use`,
 		operation, serverArg,
 	)
-	agentScope := operation
-	agentHint := "prefix the gated command with --work-session <ID>"
-	agentDescription := ""
-	if operation == OperationWebsh {
-		agentScope = OperationCommand
-		agentHint = "agent sessions refuse websh, so run the command with 'alpacon exec --work-session <ID>'"
-		agentDescription = "AI agent; " + agentHint
-	}
+	agentScope := AgentSessionScope(operation)
 	agentCreateCmd := fmt.Sprintf(
 		`alpacon work-session create --scope %s --server %s --expires-in 1h --purpose "<intent>" --requester-type agent`,
 		agentScope, serverArg,
 	)
-	agentCreate := NextAction{Command: agentCreateCmd, Description: agentDescription}
+	// How an agent runs the work once it has a session: the gated command takes
+	// --work-session <ID>. An agent session cannot hold websh, so that work goes
+	// through exec instead.
+	agentReuse := "prefixing the gated command with --work-session <ID>"
+	agentNext := "prefix the gated command with --work-session <ID>"
+	agentCreate := NextAction{Command: agentCreateCmd}
+	if agentScope != operation {
+		agentReuse = fmt.Sprintf("running the work with 'alpacon exec --work-session <ID>' (an agent session cannot hold %s)", operation)
+		agentNext = fmt.Sprintf("run the work with 'alpacon exec --work-session <ID>'; an agent session cannot hold %s", operation)
+		agentCreate.Description = "AI agent: " + agentNext
+	}
 	// Reuse an active session first (ls), then create as the fallback. Humans attach via `use`;
 	// agents can't `use` (it rejects agent sessions) and instead pass --work-session <ID> downstream.
 	createOrReuse := []NextAction{
-		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by prefixing the gated command with --work-session <ID>"},
+		{Command: "alpacon work-session ls --status active", Description: "find an existing active session; AI agent: reuse it by " + agentReuse},
 		{Command: "alpacon work-session use <ID>", Description: "human: attach an existing session (rejects agent sessions)"},
 		{Command: createCmd, Description: "none active? create a new one (human)"},
-		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentHint + ")"},
+		{Command: agentCreateCmd, Description: "none active? create a new one (AI agent; " + agentNext + ")"},
 	}
 	switch code {
+	case WorkSessionAccountNotApproved:
+		accountCreate := strings.Replace(createCmd, " --use", " --account <account>", 1)
+		if aiagent.FromEnvironment().Detected() {
+			accountCreate = agentCreateCmd + " --account <account>"
+		}
+		return []NextAction{
+			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
+			{Command: accountCreate, Description: "or create a session for this account"},
+		}
+	case WorkSessionAgentSessionRequired:
+		// The selected session is a person's; only an agent session serves an agent.
+		return []NextAction{
+			{Command: "alpacon work-session ls --status active --requester-type agent", Description: "find an active agent session; reuse it by " + agentReuse},
+			{Command: agentCreateCmd, Description: "none active? create an agent session (" + agentNext + ")"},
+		}
 	case WorkSessionRequired:
 		return createOrReuse
 	case WorkSessionNotActive:
@@ -192,6 +245,16 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 	default: // scope_not_allowed, server_not_allowed
 		return []NextAction{{Command: createCmd}, agentCreate}
 	}
+}
+
+// workSessionFlag carries the selected session into a suggested command, so a
+// retry names the session the refused command used; an agent session cannot be
+// attached with 'work-session use' and has no other way to select one.
+func workSessionFlag(activeWS string) string {
+	if activeWS == "" {
+		return ""
+	}
+	return " --work-session " + activeWS
 }
 
 func workSessionExtendCommand(activeWS string) string {
@@ -214,6 +277,10 @@ func kubeWorkSessionNextActions(code, activeWS string) []NextAction {
 		create,
 	}
 	switch code {
+	case WorkSessionAgentSessionRequired:
+		// An agent session cannot open a kube session, and a user session is
+		// refused under a detected agent: only a person's own terminal works.
+		return []NextAction{{Description: "kube needs a person's own terminal: unset the AI agent variables or run the command from your own terminal, then attach a session you own"}}
 	case WorkSessionNotActive:
 		return append([]NextAction{
 			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked/cancelled: create or reuse below"},
