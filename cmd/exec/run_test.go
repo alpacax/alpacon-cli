@@ -782,6 +782,34 @@ func captureStderr(t *testing.T, fn func()) string {
 	return stderr
 }
 
+func TestRunWithPresenceStepUp_MFAGatedPolicy(t *testing.T) {
+	origInteractive, origStepUp := isInteractiveShell, stepUpForSudo
+	t.Cleanup(func() { isInteractiveShell, stepUpForSudo = origInteractive, origStepUp })
+	isInteractiveShell = func() bool { return true }
+	ac := &client.AlpaconClient{}
+	for _, code := range []string{"SUDO_POLICY_MFA_REQUIRED", "SUDO_PRESENCE_REQUIRED"} {
+		t.Run(code, func(t *testing.T) {
+			steps, runs := 0, 0
+			stepUpForSudo = func(got *client.AlpaconClient, server string) error {
+				assert.Same(t, ac, got)
+				assert.Equal(t, "my-server", server)
+				steps++
+				return nil
+			}
+			err := runWithPresenceStepUp(ac, "my-server", func() error {
+				runs++
+				if runs == 1 {
+					return &event.RemoteCommandError{ExitCode: 1, Output: denialLine(code)}
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			assert.Equal(t, 1, steps)
+			assert.Equal(t, 2, runs)
+		})
+	}
+}
+
 func TestPrintPresenceStepUpLink(t *testing.T) {
 	original := mfaLinkByServerName
 	t.Cleanup(func() { mfaLinkByServerName = original })

@@ -348,7 +348,7 @@ func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
 		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
 		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
 		{"sudo_policy_console_only", "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'"},
-		{"work_session_sudo_bypass_console_only", "this workspace adds an MFA-bypass sudo policy to a work session from the web console only; request the session without the MFA bypass"},
+		{"work_session_sudo_bypass_console_only", "this workspace adds an AI agent's MFA-bypass sudo policy to a work session from the web console only; add it there"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {

@@ -40,10 +40,11 @@ the current status. --sudo, --starts-at and --expires-at are also checked locall
 before the request. To change the expiry of an approved or active session, use
 'alpacon work-session extend'.
 
---scope and --server replace the whole list (not append). --sudo adds MFA-bypass
-sudo command patterns to the session's existing policies; this is the recovery
-path when an 'exec' sudo was denied. The additions may require approval before
-they take effect.
+--scope and --server replace the whole list (not append). --sudo adds command
+patterns to the session's existing sudo policies. A person's policy asks for MFA
+at sudo time. A declared AI agent's policy bypasses MFA, which the server may
+route to an approver or, in an Advisory workspace, refuse unless added from the
+web console. The additions may require approval before they take effect.
 
 If SESSION_ID is omitted, the effective work session is resolved from the
 ALPACON_WORK_SESSION environment variable, then the workspace's active session
@@ -289,6 +290,6 @@ func init() {
 	workSessionUpdateCmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; replaces the whole list)")
 	workSessionUpdateCmd.Flags().StringVar(&updateStartsAt, "starts-at", "", "New scheduled start time (RFC3339; pending sessions only)")
 	workSessionUpdateCmd.Flags().StringVar(&updateExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339; pending sessions only — use 'extend' for approved/active sessions)")
-	workSessionUpdateCmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as MFA-bypass policies (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
+	workSessionUpdateCmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed). A person's policy asks for MFA at sudo time; a declared AI agent's policy bypasses MFA, which the server may route to an approver or, in an Advisory workspace, refuse unless added from the web console.")
 	workSessionUpdateCmd.Flags().StringVar(&updateSudoReason, "sudo-reason", "", "Justification applied to the sudo policies added via --sudo")
 }

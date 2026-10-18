@@ -141,6 +141,37 @@ func TestWorkSessionCreate_NoAgentKeepsUserSession(t *testing.T) {
 	assert.NotContains(t, header, aiagent.NameHeader)
 }
 
+func TestWorkSessionCreate_SudoBypassMatchesAgentDeclaration(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name   string
+		env    []string
+		extra  []string
+		bypass bool
+	}{
+		{name: "person", env: agentHelperEnv()},
+		{name: "requester type alone is no agent declaration", env: agentHelperEnv(), extra: []string{"--requester-type", "agent"}},
+		{name: "declared agent", env: agentHelperEnv("AI_AGENT=codex"), bypass: true},
+		{name: "detected agent", env: agentHelperEnv("CODEX_THREAD_ID=thread-1"), bypass: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts, rec := newCreateRecorderServer(t)
+			extra := append([]string{"--sudo", "systemctl restart nginx"}, tt.extra...)
+			_, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env,
+				utils.OutputFormatJSON, ts.URL, createArgs(extra...)...)
+			require.Zero(t, exitCode, "stderr: %s", stderr)
+			_, body, header := rec.snapshot()
+			require.NotNil(t, body)
+			assert.Equal(t, []any{"command", "sudo"}, body["scopes"])
+			assert.Equal(t, []any{map[string]any{
+				"commands": []any{"systemctl restart nginx"}, "allow_bypass_mfa": tt.bypass,
+			}}, body["sudo_policies"])
+			assert.Equal(t, tt.bypass, header.Get(aiagent.NameHeader) != "")
+		})
+	}
+}
+
 func TestWorkSessionCreate_AccountReachesRequestBody(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

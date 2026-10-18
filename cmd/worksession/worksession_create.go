@@ -62,12 +62,12 @@ exec/websh/cp/tunnel commands attach to it without --work-session. When approval
 required, combine --use with --wait. The session is attached once it reaches the
 active state. Use --wait-approval DURATION to wait longer than the default 5 minutes.
 
-If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
-MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI agent
-running 'exec') can run those exact sudo commands without an interactive MFA
-prompt. The 'sudo' scope is added automatically, and the policies are submitted for
-approval together with the session. If a sudo command is later denied, add it to the
-session with 'alpacon work-session update <id> --sudo "<command>"'.
+If the work needs sudo, pre-declare the command patterns with --sudo. A person's
+policy asks for MFA at sudo time. A declared AI agent's policy bypasses MFA, which
+the server may route to an approver or, in an Advisory workspace, refuse unless
+added from the web console. The 'sudo' scope is added automatically. If a sudo
+command is later denied, add its pattern with
+'alpacon work-session update <id> --sudo "<command>"'.
 
 When an AI agent drives the CLI, the session is an agent session. The CLI detects
 Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, Cline, and Goose from the
@@ -172,12 +172,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 				scopeList = append(scopeList, s)
 			}
 		}
-		// Build sudo bypass policies from --sudo. Each --sudo value is a
-		// comma-separated list of command patterns forming one policy; the
-		// policies are MFA-bypass (the only way a non-interactive caller
-		// running 'exec' can sudo). The server binds each policy to
-		// the session assignee automatically, so they never apply to other
-		// users. The 'sudo' scope is required server-side, so add it implicitly.
+		// Inline sudo policies require the 'sudo' scope.
 		sudoPolicies := buildSudoPolicies(createSudo, createSudoReason)
 		if len(sudoPolicies) > 0 && !slices.Contains(scopeList, "sudo") {
 			scopeList = append(scopeList, "sudo")
@@ -563,11 +558,9 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 	return nil
 }
 
-// buildSudoPolicies turns repeatable --sudo values into MFA-bypass policy
-// definitions. Each value is a comma-separated list of command patterns
-// (wildcards permitted) forming one policy. Empty values are skipped.
 func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	var policies []wsapi.SudoPolicyInline
+	allowBypassMFA := aiagent.FromEnvironment().Detected()
 	for _, spec := range specs {
 		commands := utils.SplitAndTrim(spec, ",")
 		if len(commands) == 0 {
@@ -576,7 +569,7 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 		policies = append(policies, wsapi.SudoPolicyInline{
 			Commands:       commands,
 			Reason:         reason,
-			AllowBypassMFA: true,
+			AllowBypassMFA: allowBypassMFA,
 		})
 	}
 	return policies
@@ -716,7 +709,7 @@ func init() {
 	workSessionCreateCmd.Flags().BoolVar(&wait, "wait", false, "Poll until the session is approved, then exit (default timeout 5m; does not set as active; combine with --use to attach automatically)")
 	workSessionCreateCmd.Flags().StringVar(&waitApproval, "wait-approval", "", "Like --wait with a custom wait timeout (e.g. 30m; default 5m). Implies --wait")
 	workSessionCreateCmd.Flags().BoolVar(&useAfterCreate, "use", false, "Set the created session as the workspace's active session (requires status to reach 'active'; combine with --wait when approval is needed; refused with --requester-type agent)")
-	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns to run without interactive MFA (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported — pass the flag again for each policy that needs them). Required for non-interactive sudo via 'exec' (e.g. AI agents). Implies the 'sudo' scope. Patterns are submitted for approval with the session.")
+	workSessionCreateCmd.Flags().StringArrayVar(&createSudo, "sudo", nil, "Pre-declare sudo command patterns (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed; literal commas inside a pattern are not supported). A person's policy asks for MFA at sudo time; a declared AI agent's policy bypasses MFA, which the server may route to an approver or, in an Advisory workspace, refuse unless added from the web console. Implies the 'sudo' scope.")
 	workSessionCreateCmd.Flags().StringVar(&createSudoReason, "sudo-reason", "", "Justification applied to the sudo policies created via --sudo")
 	workSessionCreateCmd.Flags().StringVar(&createAccount, "account", "", "Account the work runs as on the servers (e.g. root); the approver sees it with the request. Pass the same account to later commands with -u <account> (e.g. exec -u root)")
 	workSessionCreateCmd.MarkFlagsMutuallyExclusive("expires-in", "expires-at")
