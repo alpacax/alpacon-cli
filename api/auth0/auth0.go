@@ -63,6 +63,10 @@ func IsRefreshTokenRejected(err error) bool {
 	if !errors.As(err, &oauthErr) || oauthErr.statusCode < http.StatusBadRequest || oauthErr.statusCode >= http.StatusInternalServerError {
 		return false
 	}
+	// A rate limit is transient whatever code and description it carries.
+	if oauthErr.statusCode == http.StatusTooManyRequests {
+		return false
+	}
 	switch oauthErr.Code {
 	case "invalid_grant", "unauthorized_client", "invalid_request", "invalid_client":
 		return true

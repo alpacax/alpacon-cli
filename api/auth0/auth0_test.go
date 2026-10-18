@@ -317,6 +317,8 @@ func TestIsRefreshTokenRejected(t *testing.T) {
 		{name: "Lowercase rate-limited access denied", status: http.StatusForbidden, code: "access_denied", desc: "global limit has been reached"},
 		{name: "Invalid scope", status: http.StatusBadRequest, code: "invalid_scope"},
 		{name: "Rate limit", status: http.StatusTooManyRequests, code: "too_many_requests"},
+		{name: "Rate limit reported as access denied", status: http.StatusTooManyRequests, code: "access_denied", desc: "Too many requests"},
+		{name: "Rate limit reported as invalid grant", status: http.StatusTooManyRequests, code: "invalid_grant"},
 		{name: "Server error", status: http.StatusInternalServerError, code: "invalid_grant"},
 		{name: "Success status", status: http.StatusOK, code: "invalid_grant"},
 		{name: "Redirect status", status: http.StatusFound, code: "invalid_grant"},
