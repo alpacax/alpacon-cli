@@ -1891,6 +1891,162 @@ func TestSendDeleteRequestWithContext_GivesUpAtTheDeadline(t *testing.T) {
 	assert.Less(t, time.Since(start), 2*time.Second)
 }
 
+func TestNewAlpaconAPIClient_RefreshFailureGuidance(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenCode int
+		tokenBody string
+		envCode   int
+		dropToken bool
+		wantLogin bool
+		cause     string
+	}{
+		{name: "Invalid grant requires login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"invalid_grant"}`, wantLogin: true, cause: "invalid_grant"},
+		{name: "Unauthorized client requires login", tokenCode: http.StatusUnauthorized, tokenBody: `{"error":"unauthorized_client"}`, wantLogin: true, cause: "unauthorized_client"},
+		{name: "Invalid request requires login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"invalid_request"}`, wantLogin: true, cause: "invalid_request"},
+		{name: "Invalid client requires login", tokenCode: http.StatusUnauthorized, tokenBody: `{"error":"invalid_client"}`, wantLogin: true, cause: "invalid_client"},
+		{name: "Access denied requires login", tokenCode: http.StatusForbidden, tokenBody: `{"error":"access_denied"}`, wantLogin: true, cause: "access_denied"},
+		{name: "Rate-limited access denied asks to retry", tokenCode: http.StatusForbidden, tokenBody: `{"error":"access_denied","error_description":"Global limit has been reached"}`, cause: "access_denied"},
+		{name: "Transport failure asks to retry", dropToken: true},
+		{name: "Non-JSON client failure asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `<html>request refused</html>`},
+		{name: "Client failure without OAuth code asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `{}`, cause: "400"},
+		{name: "Client failure with a token asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `{"access_token":"unexpected-token"}`, cause: "400"},
+		{name: "Empty access token asks to retry", tokenCode: http.StatusOK, tokenBody: `{"access_token":"","expires_in":3600}`, cause: "empty access token"},
+		{name: "Missing access token asks to retry", tokenCode: http.StatusOK, tokenBody: `{"expires_in":3600}`, cause: "empty access token"},
+		{name: "OAuth error with success status asks to retry", tokenCode: http.StatusOK, tokenBody: `{"error":"invalid_grant"}`, cause: "invalid_grant"},
+		{name: "Server error asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"server_error"}`, cause: "server_error"},
+		{name: "Server denial asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"access_denied"}`, cause: "access_denied"},
+		{name: "Server failure without OAuth code asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{}`, cause: "500"},
+		{name: "Env fetch failure asks to retry", envCode: http.StatusBadGateway, cause: "502"},
+		{name: "Description alone does not require login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"server_error","error_description":"invalid_grant"}`, cause: "invalid_grant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			mux := http.NewServeMux()
+			ts := httptest.NewTLSServer(mux)
+			t.Cleanup(ts.Close)
+			mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.envCode != 0 {
+					w.WriteHeader(tt.envCode)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"my-workspace"}}`)
+			})
+			mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.dropToken {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if assert.NoError(t, err) {
+						_ = conn.Close()
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.tokenCode)
+				_, _ = io.WriteString(w, tt.tokenBody)
+			})
+			require.NoError(t, config.CreateConfig(
+				ts.URL, "my-workspace", "", "", "stale", "refresh-token", "alpacon.io", 0, true,
+			))
+
+			ac, err := NewAlpaconAPIClient()
+
+			require.Error(t, err)
+			assert.Nil(t, ac)
+			if tt.cause != "" {
+				assert.Contains(t, err.Error(), tt.cause)
+			}
+			if tt.wantLogin {
+				assert.Contains(t, err.Error(), "authentication session expired. Please run 'alpacon login' again")
+				assert.Equal(t, 1, strings.Count(err.Error(), "alpacon login"))
+				assert.NotContains(t, err.Error(), "Please retry")
+			} else {
+				assert.Contains(t, err.Error(), "could not complete access token refresh. Please retry")
+				assert.NotContains(t, err.Error(), "alpacon login")
+				assert.NotContains(t, err.Error(), "session expired")
+			}
+			storedConfig, err := config.LoadConfig()
+			require.NoError(t, err)
+			assert.Equal(t, "stale", storedConfig.AccessToken)
+		})
+	}
+}
+
+func TestNewAlpaconAPIClient_EmptyRefreshTokenRequiresLoginWithoutARequest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(ts.Close)
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "my-workspace", "", "", "stale", "", "alpacon.io", 0, false,
+	))
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.EqualError(t, err, "authentication session expired. Please run 'alpacon login' again")
+	assert.Nil(t, ac)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, requests)
+}
+
+func TestNewAlpaconAPIClient_RefusedFallbackRequiresLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var scopes []string
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"my-workspace"}}`)
+	})
+	mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Scope string `json:"scope"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); !assert.NoError(t, err) {
+			http.Error(w, "invalid token request", http.StatusInternalServerError)
+			return
+		}
+		mu.Lock()
+		scopes = append(scopes, request.Scope)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if strings.Contains(request.Scope, "device:") {
+			_, _ = io.WriteString(w, `{"error":"invalid_scope"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"error":"invalid_grant"}`)
+	})
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "my-workspace", "", "", "stale", "refresh-token", "alpacon.io", 0, true,
+	))
+	deviceID, err := config.GetOrCreateDeviceID()
+	require.NoError(t, err)
+	require.NotEmpty(t, deviceID)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.Error(t, err)
+	assert.Nil(t, ac)
+	assert.Contains(t, err.Error(), "authentication session expired. Please run 'alpacon login' again")
+	assert.Contains(t, err.Error(), "invalid_grant")
+	assert.NotContains(t, err.Error(), "invalid_scope")
+	assert.NotContains(t, err.Error(), "Please retry")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"cli org:my-workspace device:" + deviceID, "cli org:my-workspace"}, scopes)
+}
+
 // Everything below cmd/ reads the workspace off the client, so dropping either
 // field here leaves every MFA link the process builds naming no workspace.
 func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {

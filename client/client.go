@@ -175,12 +175,18 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	client.SetAccessToken(validConfig.AccessToken)
 
 	if isAccessTokenExpired(validConfig) {
+		if validConfig.RefreshToken == "" {
+			return nil, fmt.Errorf("authentication session expired. Please run 'alpacon login' again")
+		}
 		spinner := utils.NewSpinner("Refreshing access token...")
 		spinner.Start()
 		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
 		spinner.Stop()
 		if err != nil {
-			return nil, fmt.Errorf("failed to refresh access token: %v. Your session may have expired completely. Please run 'alpacon login' to authenticate again", err)
+			if auth0.IsRefreshTokenRejected(err) {
+				return nil, fmt.Errorf("authentication session expired. Please run 'alpacon login' again: %w", err)
+			}
+			return nil, fmt.Errorf("could not complete access token refresh. Please retry: %w", err)
 		}
 
 		client.SetAccessToken(tokenRes.AccessToken)
