@@ -2,10 +2,15 @@ package approval
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	approvalapi "github.com/alpacax/alpacon-cli/api/approval"
+	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -170,6 +175,24 @@ func TestContextRows(t *testing.T) {
 			want: []describeRow{{"Command", "ls"}},
 		},
 		{
+			name: "sudo request shows the run-as account",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":"root"}}}`,
+			want: []describeRow{
+				{"Sudo command", "apt update"},
+				{"  Run as", "root"},
+			},
+		},
+		{
+			name: "sudo request without runas leaves out the row",
+			body: `{"metadata":{"sudo":{"command":"apt update"}}}`,
+			want: []describeRow{{"Sudo command", "apt update"}},
+		},
+		{
+			name: "sudo request with null runas leaves out the row",
+			body: `{"metadata":{"sudo":{"command":"apt update","runas":null}}}`,
+			want: []describeRow{{"Sudo command", "apt update"}},
+		},
+		{
 			name: "sudo request with description_aligned false",
 			body: `{"metadata":{"sudo":{"command":"apt update","server_name":"my-server","risk_level":"low","grant_status":"pending","declared_agent":"claude","tier2_reasoning":"routine","description_aligned":false}}}`,
 			want: []describeRow{
@@ -275,4 +298,25 @@ func TestDescribeRowsPutContextBetweenBaseAndFileExecution(t *testing.T) {
 		"Session purpose", "Command",
 		"File execution", "  Interpreter", "  Path", "  Arguments", "  SHA-256",
 	}, fields)
+}
+
+func TestApprovalDescribeJSONPreservesSudoRunAs(t *testing.T) {
+	const response = `{"id":"apr-abc","metadata":{"sudo":{"command":"apt update","runas":"root"}}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/approvals/approvals/apr-abc/", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(response))
+	}))
+	defer ts.Close()
+
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(ts.URL, "ws", "token", "", "", "", "", 0, false))
+	previousFormat := utils.OutputFormat
+	utils.OutputFormat = utils.OutputFormatJSON
+	t.Cleanup(func() { utils.OutputFormat = previousFormat })
+
+	stdout := testutil.CaptureStdout(t, func() {
+		approvalDescribeCmd.Run(approvalDescribeCmd, []string{"apr-abc"})
+	})
+	assert.JSONEq(t, response, stdout)
 }
