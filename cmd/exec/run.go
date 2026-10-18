@@ -32,10 +32,11 @@ const sudoDenialLinePrefix = "Alpacon denied this sudo command ("
 // the terminal.
 const sudoDenialCodelessLine = "Alpacon denied this sudo command."
 
-const (
-	sudoPresenceRequiredCode  = "SUDO_PRESENCE_REQUIRED"
-	sudoPolicyMFARequiredCode = "SUDO_POLICY_MFA_REQUIRED"
-)
+// sudoPresenceRequiredCode is the one denial code the CLI resolves in-flow (an
+// MFA step-up). The hint table and hasSudoPresenceDenial both name it from
+// here, so renaming it cannot leave one of them behind and silently stop the
+// step-up.
+const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 
 // commandInlineCredentialMessage is the exec-facing error line for the
 // server's inline-credential gate (utils.CommandInlineCredential).
@@ -82,8 +83,6 @@ var (
 	runPresenceStepUp     = RunExecWithPresenceStepUp
 	streamApprovedCommand = event.StreamApprovedCommand
 	mfaLinkByServerName   = mfa.GetMFALinkByServerName
-	stepUpForSudo         = mfa.StepUpForSudo
-	isInteractiveShell    = utils.IsInteractiveShell
 	// getCommandByID is the approval wait's own read of the command detail, kept
 	// as a var so a test can drive it without a server.
 	getCommandByID = event.GetCommandByID
@@ -165,16 +164,19 @@ var sudoDenialHints = []struct {
 	},
 	{
 		code: "SUDO_NO_WORKSESSION_POLICY",
-		guidance: "sudo was denied: this command is not covered by a sudo policy in your work session.\n" +
-			"A person can add it with MFA at sudo time, then re-run (omit SESSION_ID to use the active session):\n" +
+		guidance: "sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
+			"Add it and re-run (omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
-			"The addition may require approval before it takes effect.\n" +
-			"For an AI agent, request an MFA-bypass policy from the web console; the server may route it to an approver or, in an Advisory workspace, require it to be added there.\n",
+			"The addition may require approval before it takes effect.\n",
 	},
 	{
-		code: sudoPolicyMFARequiredCode,
-		guidance: "sudo needs MFA: a policy covers this command; complete an MFA step-up, then re-run.\n" +
-			"For an AI agent, request an MFA-bypass policy from the web console; the server may route it to an approver or, in an Advisory workspace, require it to be added there.\n",
+		// An MFA step-up does not resolve this one—only a policy that bypasses
+		// MFA does—so it stays out of the step-up path.
+		code: "SUDO_POLICY_MFA_REQUIRED",
+		guidance: "sudo was denied: a policy covers this command but requires MFA, which a non-interactive command cannot complete.\n" +
+			"Cover it with an MFA-bypass policy and re-run (omit SESSION_ID to use the active session):\n" +
+			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
+			"The addition may require approval before it takes effect.\n",
 	},
 	{
 		code:     sudoPresenceRequiredCode,
@@ -334,8 +336,11 @@ func sudoDenialHint(output string) string {
 	return ""
 }
 
+// hasSudoPresenceDenial reports whether output carries the non-interactive sudo
+// presence denial (SUDO_PRESENCE_REQUIRED), the only denial the CLI can resolve
+// in-flow via an MFA step-up.
 func hasSudoPresenceDenial(output string) bool {
-	return denialCodePresent(output, sudoPresenceRequiredCode) || denialCodePresent(output, sudoPolicyMFARequiredCode)
+	return denialCodePresent(output, sudoPresenceRequiredCode)
 }
 
 // hasSudoApprovalDenial reports whether output carries a denial that left an
@@ -412,8 +417,13 @@ func credentialInlineHint(invokedAs Invocation) string {
 		utils.Yellow("Hint:"), credentialInlineExample(invokedAs))
 }
 
-// RunExecWithPresenceStepUp offers interactive MFA for a sudo presence or policy denial
-// and retries once. Non-interactive callers receive a verification link without a retry.
+// RunExecWithPresenceStepUp runs a command via RunCommandWithRetry and, when it
+// is denied for a missing recent MFA (SUDO_PRESENCE_REQUIRED) on an interactive
+// terminal, offers an MFA step-up and retries once. Non-interactive callers
+// (scripts, CI, AI agents) fall through unchanged so HandleCommandResult prints
+// the static denial hint; non-interactive humans additionally get the
+// verification link they can complete out of band. Reached via RunRemoteExec by
+// exec and websh command mode; interactive websh keeps its own sudo MFA flow.
 func RunExecWithPresenceStepUp(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
 	return runWithPresenceStepUp(ac, serverName, func() error {
 		return RunCommandWithRetry(ac, serverName, command, username, groupname, env, workSessionID, purpose, out)
@@ -433,12 +443,12 @@ func runWithPresenceStepUp(ac *client.AlpaconClient, serverName string, run comm
 		return err
 	}
 
-	if !isInteractiveShell() {
+	if !utils.IsInteractiveShell() {
 		printPresenceStepUpLink(ac, serverName)
 		return err
 	}
 
-	if stepErr := stepUpForSudo(ac, serverName); stepErr != nil {
+	if stepErr := mfa.StepUpForSudo(ac, serverName); stepErr != nil {
 		utils.CliWarning("MFA step-up did not complete: %s", stepErr)
 		return err
 	}

@@ -3,15 +3,11 @@ package worksession
 import (
 	"testing"
 
-	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestBuildSudoPolicies(t *testing.T) {
-	for _, name := range aiagent.Variables() {
-		t.Setenv(name, "")
-	}
-	t.Setenv("AI_AGENT", "codex")
+	t.Parallel()
 	t.Run("one policy per --sudo value, commands split on comma", func(t *testing.T) {
 		policies := buildSudoPolicies(
 			[]string{"systemctl restart nginx,systemctl reload nginx", "tail -f /var/log/nginx/*.log"},

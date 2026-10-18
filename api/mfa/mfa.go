@@ -137,8 +137,8 @@ func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string
 	return GetMFALink(ac, serverID)
 }
 
-// StepUpForSudo runs an interactive MFA step-up for an exec-sudo presence or
-// policy denial. It prints the verification link, opens the browser
+// StepUpForSudo runs an interactive MFA step-up for an exec-sudo presence denial
+// (SUDO_PRESENCE_REQUIRED). It prints the verification link, opens the browser
 // when the user presses Enter, and polls until the server records the MFA
 // completion. It returns nil once presence is fresh, or an error on timeout.
 //

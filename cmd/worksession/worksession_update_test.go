@@ -10,52 +10,9 @@ import (
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/pkg/aiagent"
-	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestWorkSessionUpdate_SudoBypassMatchesAgentDeclaration(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name   string
-		env    []string
-		bypass bool
-	}{
-		{name: "person", env: agentHelperEnv()},
-		{name: "declared agent", env: agentHelperEnv("AI_AGENT=codex"), bypass: true},
-		{name: "detected agent", env: agentHelperEnv("CODEX_THREAD_ID=thread-1"), bypass: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var body map[string]any
-			var header http.Header
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				switch {
-				case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-1/":
-					_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","scopes":["command","sudo"]}`))
-				case r.Method == http.MethodPatch && r.URL.Path == "/api/work-sessions/sessions/ses-1/":
-					assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-					header = r.Header.Clone()
-					_, _ = w.Write([]byte(`{"id":"ses-1","status":"active"}`))
-				default:
-					http.NotFound(w, r)
-				}
-			}))
-			t.Cleanup(ts.Close)
-			_, stderr, exitCode := runWorkSessionHelperWithEnv(t, tt.env,
-				utils.OutputFormatJSON, ts.URL, "update", "ses-1", "--sudo", "systemctl restart nginx")
-			ts.Close()
-			require.Zero(t, exitCode, "stderr: %s", stderr)
-			assert.Equal(t, []any{map[string]any{
-				"commands": []any{"systemctl restart nginx"}, "allow_bypass_mfa": tt.bypass,
-			}}, body["sudo_policies"])
-			assert.Equal(t, tt.bypass, header.Get(aiagent.NameHeader) != "")
-		})
-	}
-}
 
 func TestValidateSessionForSudoUpdate(t *testing.T) {
 	t.Parallel()

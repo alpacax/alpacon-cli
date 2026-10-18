@@ -30,7 +30,7 @@ func TestSudoDenialHint(t *testing.T) {
 			// "Add it and re-run" alone would read as immediate.
 			name:         "no-policy names the policy edit and its own approval",
 			code:         "SUDO_NO_WORKSESSION_POLICY",
-			wantContains: []string{"work-session update", "may require approval", "MFA at sudo time", "AI agent", "web console"},
+			wantContains: []string{"work-session update", "may require approval"},
 		},
 		{
 			name:         "presence-required points to a step-up",
@@ -49,10 +49,9 @@ func TestSudoDenialHint(t *testing.T) {
 			wantContains: []string{"approv"},
 		},
 		{
-			name:            "policy-mfa-required names MFA as what blocks the covered command",
-			code:            "SUDO_POLICY_MFA_REQUIRED",
-			wantContains:    []string{"complete an MFA step-up", "AI agent", "web console"},
-			wantNotContains: []string{"Cover it with an MFA-bypass policy", "work-session update"},
+			name:         "policy-mfa-required names MFA as what blocks the covered command",
+			code:         "SUDO_POLICY_MFA_REQUIRED",
+			wantContains: []string{"MFA", "work-session update", "may require approval"},
 		},
 		{
 			// The AI judges the command against both the session title and its
@@ -122,6 +121,10 @@ func TestSudoDenialHint(t *testing.T) {
 	}
 }
 
+// TestSudoDenialHintSeparatesTheTwoPolicyDenials pins that a missing policy and
+// a policy that demands MFA do not answer with the same text. Both point at
+// `work-session update --sudo`, so identical wording would leave the user unable
+// to tell which of the two they hit.
 func TestSudoDenialHintSeparatesTheTwoPolicyDenials(t *testing.T) {
 	t.Parallel()
 	assert.NotEqual(t,
@@ -137,7 +140,6 @@ func TestHasSudoPresenceDenial(t *testing.T) {
 		want   bool
 	}{
 		{"the real presence denial line", denialLine(sudoPresenceRequiredCode), true},
-		{"a policy requiring MFA", denialLine("SUDO_POLICY_MFA_REQUIRED"), true},
 		{
 			// The denial line may be preceded by legitimate stdout; the detector
 			// must still fire.
