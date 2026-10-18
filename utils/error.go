@@ -45,9 +45,13 @@ const (
 	// the web console only.
 	ApprovalPolicyConsoleOnly = "approval_policy_console_only"
 
-	// SudoPolicyConsoleOnly rides a 403: MFA-bypass sudo policies are added or
+	// SudoPolicyConsoleOnly rides a 403: sudo policies are created or
 	// widened from the web console only.
 	SudoPolicyConsoleOnly = "sudo_policy_console_only"
+
+	// WorkSessionSudoBypassConsoleOnly rides a 403: a work session can receive an
+	// MFA-bypass sudo policy without a person's approval from the web console only.
+	WorkSessionSudoBypassConsoleOnly = "work_session_sudo_bypass_console_only"
 
 	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
 	// the credential is an API token, a service token or a non-interactive token,
