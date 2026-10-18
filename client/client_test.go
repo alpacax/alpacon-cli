@@ -347,6 +347,7 @@ func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
 	tests := []struct{ code, want string }{
 		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
 		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
+		{"sudo_policy_console_only", "MFA-bypass sudo policies are added from the web console only. Add the policy from the console, or request the session without an MFA bypass."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {

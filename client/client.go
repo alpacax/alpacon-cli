@@ -318,6 +318,8 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "this change loosens execution control and can only be made from the web console", true
 	case utils.ApprovalPolicyConsoleOnly:
 		return "approval policies can only be created, changed or deleted from the web console", true
+	case utils.SudoPolicyConsoleOnly:
+		return "MFA-bypass sudo policies are added from the web console only. Add the policy from the console, or request the session without an MFA bypass.", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
 	case utils.SudoPolicyBypassAgentSessionNeedsPresence:
