@@ -53,6 +53,7 @@ type RiskFactor struct {
 // DescriptionAligned reach deciders only; a null DescriptionAligned is no judgment.
 type SudoDetail struct {
 	Command            string `json:"command"`
+	RunAs              string `json:"runas"`
 	ServerName         string `json:"server_name"`
 	RiskLevel          string `json:"risk_level"`
 	GrantStatus        string `json:"grant_status"`

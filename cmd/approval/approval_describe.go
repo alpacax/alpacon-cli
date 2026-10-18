@@ -193,6 +193,7 @@ func contextRows(meta *approvalapi.ApprovalMetadata) []describeRow {
 	}
 	if s := meta.Sudo; s != nil {
 		add("Sudo command", s.Command)
+		add("  Run as", s.RunAs)
 		add("Server", s.ServerName)
 		add("Risk level", s.RiskLevel)
 		add("Grant status", s.GrantStatus)
