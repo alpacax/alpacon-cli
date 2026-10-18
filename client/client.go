@@ -318,6 +318,10 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "this change loosens execution control and can only be made from the web console", true
 	case utils.ApprovalPolicyConsoleOnly:
 		return "approval policies can only be created, changed or deleted from the web console", true
+	case utils.SudoPolicyConsoleOnly:
+		return "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'", true
+	case utils.WorkSessionSudoBypassConsoleOnly:
+		return "this workspace adds MFA-bypass sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
 	case utils.SudoPolicyBypassAgentSessionNeedsPresence:
