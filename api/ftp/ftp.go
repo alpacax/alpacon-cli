@@ -78,18 +78,6 @@ var (
 	downloadTransfer = transferKind{name: "download", apiURL: downloadAPIURL}
 )
 
-// PollTransferStatus polls the transfer status API until success/failure or timeout.
-// id is the transfer ID.
-// timeout controls how long to poll before giving up.
-// Returns true if transfer succeeded, false if failed, and error if polling timed out or failed.
-func PollTransferStatus(ac *client.AlpaconClient, kind transferKind, id string, timeout time.Duration) (bool, string, error) {
-	pathID, err := api.RequireID(id, "transfer")
-	if err != nil {
-		return false, "", err
-	}
-	return pollTransferStatus(ac, kind, pathID, timeout, pollTick)
-}
-
 // transferStatusURL is the status endpoint of an upload or download transfer.
 func transferStatusURL(kind transferKind, id api.PathID) string {
 	return api.IDURL(kind.apiURL, id, "status", nil)
@@ -1120,7 +1108,7 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 	}
 }
 
-// pollTransfer is PollTransferStatus with the poll as a retry unit. refusedAt is
+// pollTransfer is pollTransferStatus with the poll as a retry unit. refusedAt is
 // the time the command began, for polls queued behind a concurrency limit; the
 // zero time means the poll's own start (see transferStepProbed). A poll
 // refused for MFA cannot say how the transfer ended, so when it is refused and
