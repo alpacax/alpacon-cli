@@ -198,12 +198,7 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	if count == 0 {
 		return nil
 	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > count {
-		limit = count
-	}
+	limit = min(max(limit, 1), count)
 
 	failuresByIndex := make([]string, count)
 	sem := make(chan struct{}, limit)
