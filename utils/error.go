@@ -496,3 +496,20 @@ func ParseErrorGateAndMissing(err error) (string, []string) {
 	}
 	return "", nil
 }
+
+type redirectStatusError struct {
+	err        error
+	statusCode int
+}
+
+func (e *redirectStatusError) Error() string       { return e.err.Error() }
+func (e *redirectStatusError) Unwrap() error       { return e.err }
+func (e *redirectStatusError) HTTPStatusCode() int { return e.statusCode }
+
+// WithRedirectStatus keeps the 3xx a refused redirect leaves: Do returns it beside the error.
+func WithRedirectStatus(err error, resp *http.Response) error {
+	if err == nil || resp == nil {
+		return err
+	}
+	return &redirectStatusError{err: err, statusCode: resp.StatusCode}
+}
