@@ -4,7 +4,7 @@ import "github.com/spf13/cobra"
 
 var outputHelpCmd = &cobra.Command{
 	Use:   "output",
-	Short: "JSON output and error contract",
+	Short: "Describe the JSON output and error contract",
 	Long: `Under --output json, stdout carries one JSON value, or nothing, except output
 that is the caller's data: a remote command's output (exec, websh, and the child
 command tunnel runs after --), the response body alpacon api prints (and the
