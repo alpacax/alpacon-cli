@@ -956,9 +956,10 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 
 	delays := defaultStreamDelays
 	delays.pollTick = tick
+	pathID := testPathID(t, cmdID)
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, delays, waitApproval)
+		done <- streamSubscribed(ac, listener, pathID, serverID, out, 30*time.Second, delays, waitApproval)
 	}()
 	return done
 }
@@ -2403,7 +2404,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			var out bytes.Buffer
-			err := runCommandFallbackFromID(ac, cmdID, &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
+			err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
 
 			assert.Equal(t, tt.wantOut, out.String())
 			switch {

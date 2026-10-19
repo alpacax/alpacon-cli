@@ -303,6 +303,7 @@ func postCommand(ac *client.AlpaconClient, commandRequest *CommandRequest) (Comm
 		return CommandResponse{}, fmt.Errorf("the server created the command, but its ID is unusable (%w); check for it before submitting again", err)
 	}
 	created.ID = pathID.String()
+	created.pathID = pathID
 	return created, nil
 }
 
@@ -540,7 +541,7 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 	// is returned untagged, so it never submits the command again.
 	listener := s.listener
 	s.listener = nil
-	return streamSubscribed(s.ac, listener, cmdResp.ID, cmdResp.Server.ID, out, execTimeout(), s.delays, false)
+	return streamSubscribed(s.ac, listener, cmdResp.pathID, cmdResp.Server.ID, out, execTimeout(), s.delays, false)
 }
 
 // StreamApprovedCommand resubscribes to an already-submitted command and streams
@@ -562,7 +563,7 @@ func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDela
 	listener.Start()
 	if !listener.WaitConnected(delays.connectTimeout) {
 		listener.Stop()
-		return runCommandFallbackFromPathID(ac, pathID, out, delays.fallbackPollTick, true, listenerFailure(listener))
+		return runCommandFallbackFromID(ac, pathID, out, delays.fallbackPollTick, true, listenerFailure(listener))
 	}
 	// The fin event targets the server, which only the command itself names here.
 	// A failed read just skips the subscription; the poll still ends the run.
@@ -570,7 +571,7 @@ func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDela
 	if details, err := getCommandByPathID(ac, pathID); err == nil {
 		serverID = details.Server.ID
 	}
-	return streamSubscribedByPathID(ac, listener, pathID, serverID, out, timeout, delays, true)
+	return streamSubscribed(ac, listener, pathID, serverID, out, timeout, delays, true)
 }
 
 // listenerFailure names why the listener never connected: the last error a session
@@ -586,20 +587,11 @@ func listenerFailure(listener *CommandOutputListener) error {
 // channel, warm-fires persisted chunks, then writes live chunks to out until the
 // fin event or the poll reports a terminal state. Shared by the fresh-submit and
 // approval-resume paths.
-func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID, serverID string, out io.Writer, timeout time.Duration, delays streamDelays, waitApproval bool) error {
-	pathID, err := api.RequireResponseID(cmdID, "command")
-	if err != nil {
-		listener.Stop()
-		return err
-	}
-	return streamSubscribedByPathID(ac, listener, pathID, serverID, out, timeout, delays, waitApproval)
-}
-
-func streamSubscribedByPathID(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID api.PathID, serverID string, out io.Writer, timeout time.Duration, delays streamDelays, waitApproval bool) error {
+func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener, cmdID api.PathID, serverID string, out io.Writer, timeout time.Duration, delays streamDelays, waitApproval bool) error {
 	commandID := cmdID.String()
 	if err := listener.subscribeTo(commandID, serverID); err != nil {
 		listener.Stop()
-		return runCommandFallbackFromPathID(ac, cmdID, out, delays.fallbackPollTick, waitApproval, err)
+		return runCommandFallbackFromID(ac, cmdID, out, delays.fallbackPollTick, waitApproval, err)
 	}
 
 	// Warm-fire: drain any chunks already persisted. Advance lastSeq only over
@@ -858,22 +850,14 @@ func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out i
 	}
 	// The command exists now; a failed poll or output read is returned untagged,
 	// so it never submits the command again.
-	return runCommandFallbackFromID(ac, cmdResp.ID, out, tick, false, cause)
+	return runCommandFallbackFromID(ac, cmdResp.pathID, out, tick, false, cause)
 }
 
 // runCommandFallbackFromID polls an already-submitted command by ID (instead of
 // re-submitting) and writes its output to out. Used when streaming setup fails
 // after SubmitCommand has created the command. waitApproval keeps the poll
 // blocking through an awaiting_approval hold so --wait is honored on this path.
-func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
-	pathID, err := api.RequireResponseID(cmdID, "command")
-	if err != nil {
-		return err
-	}
-	return runCommandFallbackFromPathID(ac, pathID, out, tick, waitApproval, cause)
-}
-
-func runCommandFallbackFromPathID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
+func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
 	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
 	if err != nil {
