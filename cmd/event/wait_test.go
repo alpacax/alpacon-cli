@@ -93,3 +93,44 @@ func TestEventTargetHelperProcess(t *testing.T) {
 	run(cmd, nil)
 	os.Exit(0)
 }
+
+func TestExitNotApprovedEnds6WithAStderrEnvelopeUnderJSON(t *testing.T) {
+	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			helper := exec.Command(os.Args[0], "-test.run=^TestExitNotApprovedHelperProcess$")
+			helper.Env = append(os.Environ(), "GO_WANT_NOT_APPROVED_HELPER="+format)
+			var stdout, stderr bytes.Buffer
+			helper.Stdout, helper.Stderr = &stdout, &stderr
+
+			err := helper.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, utils.ExitCodeNotApproved, exitErr.ExitCode())
+			assert.Equal(t, `{"event":1}`+"\n", stdout.String())
+			if format == utils.OutputFormatTable {
+				assert.Empty(t, stderr.String())
+				return
+			}
+			var envelope struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Command   string `json:"command"`
+			}
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeNotApproved, envelope.ErrorCode)
+			assert.Equal(t, 1, bytes.Count(stderr.Bytes(), []byte("\n")))
+		})
+	}
+}
+
+func TestExitNotApprovedHelperProcess(t *testing.T) {
+	format := os.Getenv("GO_WANT_NOT_APPROVED_HELPER")
+	if format == "" {
+		return
+	}
+	utils.OutputFormat = format
+	_, _ = os.Stdout.WriteString(`{"event":1}` + "\n")
+	exitNotApproved("work_session")
+}

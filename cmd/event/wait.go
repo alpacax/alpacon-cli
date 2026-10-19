@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -121,7 +122,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 		waiter.Stop()
 	}()
 
-	go reportOutages(waiter)
+	stopOutages := startOutageReporter(waiter.CatchUpFailed(), waiter.ReconnectFailed(), warnOutage)
 
 	// Stripped for the same reason server text is: --type lands in a terminal, and a CI
 	// script or an agent may build it from a source the caller does not control.
@@ -130,6 +131,7 @@ func runWait(cmd *cobra.Command, _ []string) {
 	utils.CliInfo("Waiting for a %s event (timeout %s). Press Ctrl+C to stop.", displayType, timeout)
 
 	frame, outcome, err := waiter.Wait()
+	stopOutages()
 	if err != nil {
 		// Stripped because the server wrote it and it lands in a terminal.
 		utils.CliErrorEnvelopeWithExit(opWait, err, "%s.", strip(err.Error()))
@@ -159,21 +161,49 @@ func runWait(cmd *cobra.Command, _ []string) {
 	}
 
 	if outcome == eventapi.OutcomeFailed {
-		os.Exit(utils.ExitCodeNotApproved)
+		exitNotApproved(displayType)
 	}
 }
 
-// reportOutages runs for the life of the command. Both conditions can recur: a catch-up
-// can fail on the first check and again after any reconnect, and reconnects can keep
-// failing. Draining ReconnectFailed also keeps the watcher's one-slot notice free so a
-// later outage is not dropped.
-func reportOutages(waiter *eventapi.Waiter) {
-	for {
-		select {
-		case err := <-waiter.CatchUpFailed():
-			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", strip(err.Error()))
-		case err := <-waiter.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", strip(err.Error()))
+// exitNotApproved: the failure event is already on stdout, so under json only the envelope marks it.
+func exitNotApproved(displayType string) {
+	utils.ExitWithFailureJSON(utils.Failure{
+		ExitCode:  utils.ExitCodeNotApproved,
+		ErrorCode: utils.ErrorCodeNotApproved,
+		Operation: opWait,
+		Message:   fmt.Sprintf("A %s event in the failure set arrived.", displayType),
+	})
+	os.Exit(utils.ExitCodeNotApproved)
+}
+
+// startOutageReporter drains both outage channels (each can recur) until stop; stop returns
+// only after the goroutine exits, so nothing prints after an envelope.
+func startOutageReporter(catchUp, reconnect <-chan error, warn func(cause error, reconnect bool)) (stop func()) {
+	quit, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-quit:
+				return
+			case err := <-catchUp:
+				warn(err, false)
+			case err := <-reconnect:
+				warn(err, true)
+			}
 		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(quit) })
+		<-done
 	}
+}
+
+func warnOutage(cause error, reconnect bool) {
+	if reconnect {
+		utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", strip(cause.Error()))
+		return
+	}
+	utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", strip(cause.Error()))
 }

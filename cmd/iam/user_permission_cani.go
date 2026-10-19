@@ -26,8 +26,10 @@ object-scoped binding answers no here, because the command names no object; use
 
 Without -q the exit code is 0 for both answers, so a denial is never confused with a
 failed request. With -q the answer is never printed, --output json included, and a
-denial and a failed check share exit 1—only the failure writes a line to stderr. To
-tell them apart in a script, drop -q and read the allowed field of --output json.`,
+denial and a failed check share exit 1—only the failure writes a line to stderr, except
+that --output json ends both with an error envelope there, a denial under the code
+permission_not_held. To tell them apart in a script, drop -q and read the allowed field
+of --output json.`,
 	Example: `  alpacon user permission can-i server:update
   alpacon user permission can-i john server:update
   alpacon user permission can-i john rbac:manage --explain
@@ -63,7 +65,7 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 
 		if quiet {
 			if !allowed {
-				os.Exit(utils.ExitCodeGeneralError)
+				exitQuietDenied(permission)
 			}
 			return
 		}
@@ -82,6 +84,15 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 		}
 		fmt.Println("no")
 	},
+}
+
+func exitQuietDenied(permission string) {
+	utils.ExitWithFailureJSON(utils.Failure{
+		ExitCode:  utils.ExitCodeGeneralError,
+		ErrorCode: utils.ErrorCodePermissionNotHeld,
+		Message:   fmt.Sprintf("The permission %s is not held.", permission),
+	})
+	os.Exit(utils.ExitCodeGeneralError)
 }
 
 func init() {

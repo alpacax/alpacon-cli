@@ -29,7 +29,7 @@ func RunDisruptiveServerAction(serverName, action, confirmMsg, successMsg, failM
 
 	if err := requestServerActionWithMFA(serverName, action, force); err != nil {
 		if code, _ := utils.ParseErrorResponse(err); code == utils.ServerBusyWithUserWork {
-			utils.CliErrorWithExitCode(utils.ExitCodeServerBusy, "%s", busyGuardMessage(serverName, force))
+			utils.CliErrorWithCode(utils.ExitCodeServerBusy, utils.ServerBusyWithUserWork, "%s", busyGuardMessage(serverName, force))
 		}
 		utils.CliErrorWithExit("%s: %s.", failMsg, err)
 	}

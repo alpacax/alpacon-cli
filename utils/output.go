@@ -209,10 +209,18 @@ func PrintTable(slice any) {
 	_ = tw.Flush()
 }
 
-// PartialTableWithExit prints rows to stdout, the reason to stderr, and exits with
-// ExitCodeGeneralError. It is not for a walk that collected nothing: that is an
-// ordinary failure for CliErrorWithExit.
-func PartialTableWithExit(rows any, msg string, args ...any) {
+// PartialTableWithExit prints rows to stdout and the reason to stderr (under json the envelope,
+// with partial.count), then exits 1. Not for a walk that collected nothing.
+func PartialTableWithExit(rows any, cause error, msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		PrintTable(rows)
+		ExitWithFailureJSON(Failure{
+			ExitCode: ExitCodeGeneralError,
+			Err:      cause,
+			Message:  cliMessage(msg, args...),
+			Partial:  &PartialInfo{Count: reflect.ValueOf(rows).Len()},
+		})
+	}
 	CliWarning(msg, args...)
 	PrintTable(rows)
 	os.Exit(ExitCodeGeneralError)
@@ -224,7 +232,7 @@ func PartialTableWithExit(rows any, msg string, args ...any) {
 func PrintListOrExit[T any](rows []T, err error, failMsg string) {
 	switch {
 	case err != nil && len(rows) > 0:
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
+		PartialTableWithExit(rows, err, "Showing only the %d entries read before the request failed: %s.", len(rows), err)
 	case err != nil:
 		CliErrorWithExit("%s: %s.", failMsg, err)
 	}

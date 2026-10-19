@@ -46,6 +46,7 @@ func PromptForPassword(promptText string) string {
 		case 3: // Ctrl+C
 			fmt.Fprint(os.Stderr, "\r\n")
 			_ = term.Restore(int(os.Stdin.Fd()), oldState)
+			ExitWithFailureJSON(Failure{ExitCode: 1, ErrorCode: ErrorCodeCLI, Message: "Interrupted at the password prompt."})
 			os.Exit(1)
 		default:
 			if buf[0] >= 32 { // printable characters only
@@ -132,7 +133,7 @@ func PromptForListInput(promptText string) []string {
 // Returns on confirm; exits the program on decline.
 func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
-		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+		CliErrorWithCode(ExitCodeGeneralError, ErrorCodeConfirmationRequired, "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
 	}
 	message := fmt.Sprintf(msg, args...)
 	if !PromptForBool(message) {

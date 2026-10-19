@@ -854,6 +854,10 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
 			stderrLine, exitCode := remoteCommandOutcome(remoteErr)
+			if utils.OutputFormat == utils.OutputFormatJSON && exitCode != 0 {
+				// The envelope is the last stderr line, so the phase line and hint ride in its message.
+				utils.ExitWithFailureJSON(remoteFailure(remoteErr.ErrorPhase, "", sudoDenialHint(remoteErr.Output), exitCode, &exitCode))
+			}
 			if stderrLine != "" {
 				fmt.Fprint(os.Stderr, stderrLine)
 			}
@@ -864,6 +868,12 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		var clientTimeout *event.ClientTimeoutError
 		if errors.As(err, &clientTimeout) {
+			id, desc := sanitizedPhaseParts("client_timeout")
+			utils.ExitWithFailureJSON(utils.Failure{
+				ExitCode:  utils.ExitCodeGeneralError,
+				ErrorCode: utils.ErrorCodeCLI,
+				Message:   fmt.Sprintf("[%s] %s", id, desc),
+			})
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
 			os.Exit(1)
 		}
@@ -977,6 +987,30 @@ func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine strin
 			phaseHintLine(remoteErr.ErrorPhase)
 	}
 	return stderrLine, remoteErr.ExitCode
+}
+
+// phase, detail and hint fold into the message: the envelope must be the last stderr line.
+func remoteFailure(phase, detail, hint string, exitCode int, remoteExit *int) utils.Failure {
+	message := fmt.Sprintf("the remote command exited with code %d", exitCode)
+	if phase != "" {
+		id, desc := sanitizedPhaseParts(phase)
+		message = fmt.Sprintf("[%s] %s", id, desc)
+	}
+	if detail != "" {
+		message += " " + detail
+	}
+	if phaseHint := strings.TrimSpace(phaseHintLine(phase)); phaseHint != "" {
+		message += "\n" + phaseHint
+	}
+	if hint = strings.TrimSpace(utils.StripANSIEscapes(hint)); hint != "" {
+		message += "\n" + hint
+	}
+	return utils.Failure{
+		ExitCode:       exitCode,
+		ErrorCode:      utils.ErrorCodeRemoteCommandFailed,
+		Message:        message,
+		RemoteExitCode: remoteExit,
+	}
 }
 
 // HandleExecUserRefusal reports the missing execution user and exits 1, or

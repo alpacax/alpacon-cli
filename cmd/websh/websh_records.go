@@ -50,7 +50,7 @@ Use --query to search records by command text (fuzzy match).`,
 		}
 
 		if err != nil {
-			utils.PartialTableWithExit(rows, "Showing only the %d records read before the request failed: %s.", len(rows), err)
+			utils.PartialTableWithExit(rows, err, "Showing only the %d records read before the request failed: %s.", len(rows), err)
 		}
 		utils.PrintTable(rows)
 	},

@@ -113,6 +113,9 @@ Run the command again later to check for completion.`,
 		if stdoutLine != "" {
 			fmt.Println(stdoutLine)
 		}
+		if exitCode != 0 && utils.OutputFormat == utils.OutputFormatJSON {
+			utils.ExitWithFailureJSON(logsFailure(details, exitCode))
+		}
 		if stderrLine != "" {
 			fmt.Fprint(os.Stderr, stderrLine)
 		}
@@ -124,6 +127,33 @@ Run the command again later to check for completion.`,
 
 func init() {
 	ExecCmd.AddCommand(logsCmd)
+}
+
+// A remote exit code is reported only when the server recorded one.
+func logsFailure(details event.EventDetails, exitCode int) utils.Failure {
+	phase := ""
+	if details.ErrorPhase != nil {
+		phase = *details.ErrorPhase
+	}
+	switch {
+	case event.IsStatusOnlyFailure(details.Status):
+		f := remoteFailure(phase, fmt.Sprintf("(status=%s)", details.Status), "", exitCode, nil)
+		if phase == "" {
+			f.Message = fmt.Sprintf("command failed with status: %s", details.Status)
+		}
+		return f
+	case details.Success != nil && !*details.Success:
+		var remote *int
+		if details.ExitCode != nil {
+			remote = &exitCode
+		}
+		return remoteFailure(phase, "", "", exitCode, remote)
+	}
+	return utils.Failure{
+		ExitCode:  exitCode,
+		ErrorCode: utils.ErrorCodeCLI,
+		Message:   fmt.Sprintf("command ended with unrecognised status: %s", utils.SanitizeTerminalText(details.Status)),
+	}
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the

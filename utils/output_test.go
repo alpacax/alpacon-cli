@@ -374,6 +374,11 @@ func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 	}
 }
 
+type envelopeWant struct {
+	code    string
+	partial int
+}
+
 func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -384,6 +389,7 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 		wantJSON     string
 		wantStderr   string
 		stdoutIsNone bool
+		wantEnvelope *envelopeWant
 	}{
 		{
 			name:       "partial table",
@@ -395,11 +401,18 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 		{
 			// Only the exit code marks the list short here, so stdout must stay a
 			// plain array a script can parse.
-			name:       "partial json",
-			helperCase: "partial-json",
-			wantExit:   ExitCodeGeneralError,
-			wantJSON:   `[{"name":"alpha","id":1}]`,
-			wantStderr: "read before the request failed",
+			name:         "partial json",
+			helperCase:   "partial-json",
+			wantExit:     ExitCodeGeneralError,
+			wantJSON:     `[{"name":"alpha","id":1}]`,
+			wantEnvelope: &envelopeWant{code: ErrorCodeCLI, partial: 1},
+		},
+		{
+			name:         "list partial json",
+			helperCase:   "list-partial-json",
+			wantExit:     ExitCodeGeneralError,
+			wantJSON:     `[{"name":"alpha","id":1}]`,
+			wantEnvelope: &envelopeWant{code: "rate_limited", partial: 1},
 		},
 		{
 			name:       "list complete",
@@ -452,6 +465,13 @@ func TestPartialListOutput_RowsToStdoutReasonToStderrAndExitCode(t *testing.T) {
 			if tt.stdoutIsNone {
 				assert.Empty(t, strings.TrimSpace(stdout.String()))
 			}
+			if tt.wantEnvelope != nil {
+				env := decodeSingleLineEnvelope(t, stderr.String())
+				assert.Equal(t, tt.wantEnvelope.code, env.ErrorCode)
+				assert.Equal(t, tt.wantExit, env.ExitCode)
+				require.NotNil(t, env.Partial)
+				assert.Equal(t, tt.wantEnvelope.partial, env.Partial.Count)
+			}
 			if tt.wantStderr != "" {
 				assert.Contains(t, stderr.String(), tt.wantStderr)
 				assert.NotContains(t, stdout.String(), tt.wantStderr)
@@ -470,10 +490,14 @@ func TestPartialListOutputHelperProcess(t *testing.T) {
 	boom := errors.New("boom")
 	switch helperCase {
 	case "partial-table":
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		PartialTableWithExit(rows, boom, "Showing only the %d entries read before the request failed: %s.", 1, boom)
 	case "partial-json":
 		OutputFormat = OutputFormatJSON
-		PartialTableWithExit(rows, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+		PartialTableWithExit(rows, boom, "Showing only the %d entries read before the request failed: %s.", 1, boom)
+	case "list-partial-json":
+		OutputFormat = OutputFormatJSON
+		CommandName = "log ls"
+		PrintListOrExit(rows, &fakeAPIError{code: "rate_limited", status: 429}, "Failed to get logs")
 	case "list-complete":
 		PrintListOrExit(rows, nil, "Failed to get logs")
 	case "list-partial":

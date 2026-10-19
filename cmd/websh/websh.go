@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -299,22 +300,14 @@ Note: All flags must be placed before the server name.
 		// Set up sudo MFA listener in background so it doesn't delay
 		// terminal open. If the user types sudo before the listener is
 		// ready, the approval request will expire and they can retry.
-		listenerDone := make(chan *event.SudoListener, 1)
-		go func() {
-			listenerDone <- setupSudoListener(alpaconClient, serverName, session.ID)
-		}()
-		defer func() {
-			select {
-			case sl := <-listenerDone:
-				if sl != nil {
-					sl.Stop()
-				}
-			case <-time.After(3 * time.Second):
-				// Don't block exit if listener setup is stuck
-			}
-		}()
+		sudo := startSudoListener(func() sudoListener {
+			return event.NewSudoListener(alpaconClient, serverName, session.ID)
+		}, &noticeGate{})
+		defer sudo.stop()
 
 		if err = websh.OpenNewTerminal(alpaconClient, session); err != nil {
+			// The failure exits without running defers, and the envelope must stay the last stderr line.
+			sudo.stop()
 			// A session the client could not get back to says so on its own terms:
 			// wrapping it in "ended with error" would read as the shell having
 			// failed, when what failed is the connection to it.
@@ -352,24 +345,77 @@ func extractValue(args []string, i int) (string, int) {
 	return "", i
 }
 
-// setupSudoListener starts the sudo MFA listener for the given websh session.
-// Returns nil when it cannot connect.
-func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *event.SudoListener {
+// noticeGate lets the listener goroutine warn until close: after it returns nothing more is
+// written, so a failure envelope stays the last stderr line.
+type noticeGate struct {
+	mu     sync.Mutex
+	closed bool
+}
+
+func (g *noticeGate) print(format string, args ...any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.closed {
+		_, _ = fmt.Fprintf(os.Stderr, format, args...)
+	}
+}
+
+func (g *noticeGate) close() {
+	g.mu.Lock()
+	g.closed = true
+	g.mu.Unlock()
+}
+
+// sudoListener is the part of event.SudoListener websh drives, so a test can hold setup pending.
+type sudoListener interface {
+	Start()
+	Stop()
+	WaitConnected(time.Duration) bool
+	Err() error
+}
+
+// sudoListenerRun owns the listener from creation, so a failure can stop it while setup still waits.
+type sudoListenerRun struct {
+	listener sudoListener
+	notices  *noticeGate
+	done     chan struct{}
+}
+
+// startSudoListener starts the listener synchronously and waits for the connection in the background.
+func startSudoListener(newListener func() sudoListener, notices *noticeGate) *sudoListenerRun {
+	r := &sudoListenerRun{listener: newListener(), notices: notices, done: make(chan struct{})}
+	r.listener.Start()
+	go func() {
+		defer close(r.done)
+		awaitSudoListener(r.listener, notices)
+	}()
+	return r
+}
+
+// stop silences the setup warning, then stops the listener; nothing writes afterwards.
+func (r *sudoListenerRun) stop() {
+	r.notices.close()
+	r.listener.Stop()
+}
+
+// setupSudoListener starts the sudo MFA listener for the given websh session and waits for it.
+func setupSudoListener(ac *client.AlpaconClient, serverName, sessionID string, notices *noticeGate) {
 	listener := event.NewSudoListener(ac, serverName, sessionID)
 	listener.Start()
+	awaitSudoListener(listener, notices)
+}
 
-	if !listener.WaitConnected(5 * time.Second) {
-		listener.Stop()
-		if warning := sudoListenerWarning(listener.Err()); warning != "" {
-			// Not utils.CliWarning: this runs in a goroutine racing
-			// OpenNewTerminal, so the terminal may already be in raw mode,
-			// where a bare newline leaves the cursor where it stood.
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s: %s\r\n", utils.Yellow("Warning"), warning)
-		}
-		return nil
+func awaitSudoListener(listener sudoListener, notices *noticeGate) {
+	if listener.WaitConnected(5 * time.Second) {
+		return
 	}
-
-	return listener
+	listener.Stop()
+	if warning := sudoListenerWarning(listener.Err()); warning != "" {
+		// Not utils.CliWarning: this runs in a goroutine racing
+		// OpenNewTerminal, so the terminal may already be in raw mode,
+		// where a bare newline leaves the cursor where it stood.
+		notices.print("\r\n%s: %s\r\n", utils.Yellow("Warning"), warning)
+	}
 }
 
 // sudoListenerWarning explains why the sudo MFA listener never connected, or returns ""

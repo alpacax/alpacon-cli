@@ -96,6 +96,7 @@ func TestJSONContractFailuresThatAreNotBadFlags(t *testing.T) {
 		{"websh without a server", []string{"websh"}, 1, "websh", "usage_error"},
 		{"cp without arguments", []string{"cp"}, 1, "cp", "usage_error"},
 		{"cp with two local paths", []string{"cp", "a", "b"}, 1, "cp", "usage_error"},
+		{"no login on file", []string{"whoami"}, 1, "whoami", "not_logged_in"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

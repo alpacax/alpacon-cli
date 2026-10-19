@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
-	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/api/websh"
 	"github.com/alpacax/alpacon-cli/client"
@@ -469,12 +470,10 @@ func TestSetupSudoListener_StaysSilentOnNotFound(t *testing.T) {
 	ts := newSudoListenerTestServer(t, http.StatusNotFound, `{"detail":"Not found."}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	var listener *event.SudoListener
 	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "my-server", "session-1")
+		setupSudoListener(ac, "my-server", "session-1", &noticeGate{})
 	})
 
-	assert.Nil(t, listener)
 	assert.Empty(t, stderr, "an older server without the events API must not warn")
 }
 
@@ -482,12 +481,10 @@ func TestSetupSudoListener_WarnsOnOtherFailures(t *testing.T) {
 	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	var listener *event.SudoListener
 	_, stderr := testutil.CaptureOutput(t, func() {
-		listener = setupSudoListener(ac, "my-server", "session-1")
+		setupSudoListener(ac, "my-server", "session-1", &noticeGate{})
 	})
 
-	assert.Nil(t, listener)
 	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
 }
 
@@ -504,7 +501,7 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_ = setupSudoListener(ac, "my-server", "session-1")
+		setupSudoListener(ac, "my-server", "session-1", &noticeGate{})
 	})
 
 	require.NotEmpty(t, stderr, "a rejected request must warn, or there is nothing to check")
@@ -512,4 +509,65 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 		assert.True(t, strings.HasSuffix(line, "\r"),
 			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
 	}
+}
+
+func TestSetupSudoListener_StaysSilentOnceTheGateIsClosed(t *testing.T) {
+	ts := newSudoListenerTestServer(t, http.StatusBadRequest, `{"detail":"Invalid input."}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	gate := &noticeGate{}
+	gate.close()
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		setupSudoListener(ac, "my-server", "session-1", gate)
+	})
+
+	assert.Empty(t, stderr, "a warning after the failure envelope would stop it being the last stderr line")
+}
+
+type fakeSudoListener struct {
+	stopped chan struct{}
+	once    sync.Once
+	err     error
+}
+
+func (f *fakeSudoListener) Start() {}
+func (f *fakeSudoListener) Stop()  { f.once.Do(func() { close(f.stopped) }) }
+func (f *fakeSudoListener) Err() error {
+	return f.err
+}
+
+func (f *fakeSudoListener) WaitConnected(time.Duration) bool {
+	<-f.stopped
+	return false
+}
+
+// Serial: swaps os.Stderr.
+func TestSudoListenerRun_StopWhileSetupPendingLeavesNothingToWrite(t *testing.T) {
+	fake := &fakeSudoListener{stopped: make(chan struct{}), err: errors.New("dial refused")}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		run := startSudoListener(func() sudoListener { return fake }, &noticeGate{})
+		run.stop()
+		<-run.done
+	})
+
+	select {
+	case <-fake.stopped:
+	default:
+		t.Error("stop must stop the listener while setup is still waiting")
+	}
+	assert.Empty(t, stderr)
+}
+
+// Serial: swaps os.Stderr.
+func TestSudoListenerRun_SetupFailureStillWarnsInANormalSession(t *testing.T) {
+	fake := &fakeSudoListener{stopped: make(chan struct{}), err: errors.New("dial refused")}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		run := startSudoListener(func() sudoListener { return fake }, &noticeGate{})
+		fake.Stop()
+		<-run.done
+	})
+
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable: dial refused")
 }

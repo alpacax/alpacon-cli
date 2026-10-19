@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -40,6 +41,50 @@ var defaultStreamDelays = streamDelays{
 	reconnectBaseDelay: wsReconnectBaseDelay,
 	pollTick:           streamPollTick,
 	fallbackPollTick:   fallbackPollTick,
+}
+
+// streamPoll is the poll behind a stream. It ends when its stream does: an exit on
+// the fin event would otherwise leave it polling a command that is already over.
+type streamPoll struct {
+	result chan EventDetails
+	err    chan error
+	exited chan struct{}
+	cancel chan struct{}
+	gate   *stderrGate
+}
+
+func startStreamPoll(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool) *streamPoll {
+	p := &streamPoll{
+		result: make(chan EventDetails, 1),
+		err:    make(chan error, 1),
+		exited: make(chan struct{}),
+		cancel: make(chan struct{}),
+	}
+	// Only json mode needs the envelope to stay the last stderr line; table mode keeps its late warning.
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		p.gate = &stderrGate{}
+	}
+	go func() {
+		defer close(p.exited)
+		details, err := pollCommandExecution(ac, cmdID, timeout, tick, waitApproval, pollSeams{cancel: p.cancel, gate: p.gate})
+		switch {
+		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
+		case err != nil:
+			p.err <- err
+		default:
+			p.result <- details
+		}
+	}()
+	return p
+}
+
+// stop cancels the poll and waits only out a notice mid-write, never a request in
+// flight, so a caller may print its own last line afterwards.
+func (p *streamPoll) stop() {
+	close(p.cancel)
+	if p.gate != nil {
+		p.gate.close()
+	}
 }
 
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
@@ -82,6 +127,39 @@ type pollSeams struct {
 	// surfaceMFA returns an MFA refusal of the poll to the caller at once, for
 	// a caller that runs the MFA wait itself and polls again after it.
 	surfaceMFA bool
+	// gate, when set, carries the poll's stderr notices, so its owner can shut
+	// them off without waiting for a request in flight.
+	gate *stderrGate
+}
+
+// stderrGate lets a goroutine that outlives its owner keep running while its
+// notices stop: close returns once no notice is mid-write, and none follows.
+type stderrGate struct {
+	mu     sync.Mutex
+	closed bool
+}
+
+func (g *stderrGate) do(write func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return
+	}
+	write()
+}
+
+func (g *stderrGate) close() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed = true
+}
+
+func (s pollSeams) warnThrottled(b *utils.ThrottleBudget, delay time.Duration) {
+	if s.gate == nil {
+		b.WarnThrottled(delay)
+		return
+	}
+	s.gate.do(func() { b.WarnThrottled(delay) })
 }
 
 func (s pollSeams) Now() time.Time {
@@ -413,7 +491,7 @@ func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick 
 			if utils.HTTPStatusCode(err) == http.StatusTooManyRequests {
 				// The wait can reach two timeouts, and nothing else on this path
 				// prints while it lasts.
-				budget.WarnThrottled(delay)
+				seams.warnThrottled(budget, delay)
 				// The server is alive: the command may be done, only its result GET refused.
 				// Budgeted so a token stuck over quota gives up—extending by exactly the
 				// wait would keep the deadline ahead forever.
@@ -609,22 +687,9 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 
 	gap := &gapFillState{}
 
-	pollResult := make(chan EventDetails, 1)
-	pollErr := make(chan error, 1)
-	// The poll ends when this function does: an exit on the fin event would
-	// otherwise leave it polling a command that is already over.
-	pollCancel := make(chan struct{})
-	defer close(pollCancel)
-	go func() {
-		details, err := pollCommandExecution(ac, cmdID, timeout, delays.pollTick, waitApproval, pollSeams{cancel: pollCancel})
-		switch {
-		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
-		case err != nil:
-			pollErr <- err
-		default:
-			pollResult <- details
-		}
-	}()
+	poll := startStreamPoll(ac, cmdID, timeout, delays.pollTick, waitApproval)
+	defer poll.stop()
+	pollResult, pollErr := poll.result, poll.err
 
 	// Runs on whichever terminal signal arrives first, the fin event or the poll.
 	finish := func(details EventDetails) error {

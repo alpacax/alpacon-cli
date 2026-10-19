@@ -339,10 +339,12 @@ func TestExecLogsRejectedExits6(t *testing.T) {
 			OK       bool   `json:"ok"`
 			ExitCode int    `json:"exit_code"`
 			Message  string `json:"message"`
+			Code     string `json:"error_code"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
 		assert.False(t, got.OK)
 		assert.Equal(t, utils.ExitCodeNotApproved, got.ExitCode)
+		assert.Equal(t, utils.ErrorCodeNotApproved, got.Code)
 		assert.Contains(t, got.Message, "rejected by a reviewer")
 	})
 }
@@ -368,6 +370,31 @@ func TestExecRejectedExits6(t *testing.T) {
 	_, stderr, exitCode := runExecHelper(t, ts.URL, "prod", "--", "sudo", "reboot")
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
 	assert.Contains(t, stderr, "rejected by a reviewer")
+}
+
+func TestExecRejectedUnderJSONCarriesNotApproved(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "cmd-1", "status": "rejected"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "--output", "json", "prod", "--", "sudo", "reboot")
+
+	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+	env := lastStderrEnvelope(t, stderr)
+	assert.Equal(t, utils.ExitCodeNotApproved, env.ExitCode)
+	assert.Equal(t, utils.ErrorCodeNotApproved, env.ErrorCode)
 }
 
 // TestExecRejectedMidWaitExits6 traces the wait loop's rejection branch out to

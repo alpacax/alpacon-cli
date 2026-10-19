@@ -43,6 +43,8 @@ func TestGuardsEndWithTheirCodeUnderJSON(t *testing.T) {
 		format   string
 		wantCode string
 	}{
+		{"confirm", OutputFormatJSON, ErrorCodeConfirmationRequired},
+		{"confirm", OutputFormatTable, ""},
 		{"exit-failure", OutputFormatJSON, ErrorCodeNotApproved},
 		{"exit-failure", OutputFormatTable, ""},
 	}
@@ -76,6 +78,8 @@ func TestGuardsHelperProcess(t *testing.T) {
 	mode, format, _ := strings.Cut(spec, ":")
 	OutputFormat = format
 	switch mode {
+	case "confirm":
+		ConfirmAction("delete it?")
 	case "exit-failure":
 		ExitWithFailureJSON(Failure{ExitCode: ExitCodeNotApproved, ErrorCode: ErrorCodeNotApproved, Message: "no"})
 		os.Exit(ExitCodeNotApproved)

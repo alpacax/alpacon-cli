@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"sync"
@@ -69,6 +70,11 @@ type SudoListener struct {
 	pollInterval time.Duration
 	pollTimeout  time.Duration
 
+	// outMu serializes notices and lets Stop wait out a write in flight; out is
+	// nil means os.Stderr, read per write because tests swap it.
+	outMu sync.Mutex
+	out   io.Writer
+
 	stateMu    sync.Mutex // guards channelID, subscribed, warned, err
 	channelID  string
 	subscribed bool
@@ -92,6 +98,30 @@ func NewSudoListener(ac *client.AlpaconClient, serverName, sessionID string) *Su
 	sl.onConnected = sl.subscribe
 	sl.onDialFailed = sl.announceOutage
 	return sl
+}
+
+// printf writes a notice unless the listener has stopped.
+func (sl *SudoListener) printf(format string, args ...any) {
+	sl.outMu.Lock()
+	defer sl.outMu.Unlock()
+	select {
+	case <-sl.done:
+		return
+	default:
+	}
+	out := sl.out
+	if out == nil {
+		out = os.Stderr
+	}
+	_, _ = fmt.Fprintf(out, format, args...)
+}
+
+// Stop shuts the listener down and returns only once no notice is mid-write;
+// none is written afterwards, so a caller may print its own last line.
+func (sl *SudoListener) Stop() {
+	sl.wsListener.Stop()
+	sl.outMu.Lock()
+	defer sl.outMu.Unlock()
 }
 
 // Err returns the last reason the listener could not connect, so a caller that only
@@ -160,13 +190,9 @@ func (sl *SudoListener) fail(cause error) error {
 	}
 
 	if announce {
-		select {
-		case <-sl.done:
-			// Stop cancels neither an in-flight dial nor a session create, so a
-			// failure landing after it must not claim anything is still retrying.
-		default:
-			_, _ = fmt.Fprintf(os.Stderr, "\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
-		}
+		// printf drops it once stopped: Stop cancels neither an in-flight dial nor
+		// a session create, so a late failure must not claim anything is retrying.
+		sl.printf("\r\n%s\r\n", utils.Yellow(sudoOutageWarning))
 	}
 
 	return cause
@@ -214,7 +240,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 
 	grantID := event.Payload.SudoGrantID
 	if grantID == "" {
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA event is missing a grant ID; cannot verify. This likely indicates a server/CLI version mismatch.\033[0m\r\n")
+		sl.printf("\r\n\033[31mSudo MFA event is missing a grant ID; cannot verify. This likely indicates a server/CLI version mismatch.\033[0m\r\n")
 		return
 	}
 
@@ -237,23 +263,23 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
+		sl.printf("\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
-	fmt.Fprintf(os.Stderr, "%s\r\n", mfaURL)
+	sl.printf("\r\n\033[33mSudo MFA required. Opening browser...\033[0m\r\n")
+	sl.printf("%s\r\n", mfaURL)
 	utils.OpenBrowser(mfaURL)
 
 	if err := sl.retryVerifyUntilMFA(grantID); err != nil {
 		if errors.Is(err, errMFAWaitEnded) {
-			fmt.Fprintf(os.Stderr, "\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
+			sl.printf("\r\n\033[31mMFA verification timed out. Please re-run the sudo command.\033[0m\r\n")
 			return
 		}
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
+		sl.printf("\r\n\033[31mSudo verification failed: %s\033[0m\r\n", err)
 		return
 	}
 }
@@ -265,7 +291,7 @@ func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
 	if code, _ := utils.ParseErrorResponse(err); code != utils.SudoVerifyCredentialCannotProveMFA {
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA cannot be completed with this credential: sign in with `alpacon login` to complete sudo MFA.\033[0m\r\n")
+	sl.printf("\r\n\033[31mSudo MFA cannot be completed with this credential: sign in with `alpacon login` to complete sudo MFA.\033[0m\r\n")
 	return true
 }
 
