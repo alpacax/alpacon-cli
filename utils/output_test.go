@@ -266,6 +266,49 @@ func TestFormatJSON_DisablesHTMLEscaping(t *testing.T) {
 	assert.NotContains(t, got, "\\u003c")
 }
 
+func TestPrintJSONError_SingleLineFillsCommandAndKeepsExitCode(t *testing.T) {
+	withCommandName(t, "server ls")
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
+		Message: "a <b>\u202e",
+		Context: map[string]string{},
+	})
+
+	out := buf.String()
+	assert.Equal(t, 1, strings.Count(out, "\n"))
+	assert.True(t, strings.HasSuffix(out, "\n"))
+	assert.NotContains(t, out, `\u003c`)
+	assert.Contains(t, out, `\u202e`)
+	assert.Contains(t, out, `"exit_code":0`)
+	assert.Contains(t, out, `"error_code":""`)
+	assert.Contains(t, out, `"command":"server ls"`)
+}
+
+func TestPrintJSONError_KeepsExplicitCommandAndOptionalFields(t *testing.T) {
+	withCommandName(t, "server ls")
+	code := 3
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[map[string]string]{
+		ExitCode: 1, ErrorCode: "x", Message: "m", Command: "own",
+		HTTPStatus: 429, RetryAfter: 5, Server: map[string]any{"gate": "plan"},
+		RemoteExitCode: &code, Partial: &PartialInfo{Count: 2},
+	})
+
+	assert.JSONEq(t, `{"ok":false,"exit_code":1,"error_code":"x","message":"m","command":"own","context":null,
+		"http_status":429,"retry_after":5,"server":{"gate":"plan"},"remote_exit_code":3,"partial":{"count":2}}`, buf.String())
+}
+
+func TestPrintJSONError_FallsBackWhenMarshalFails(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	PrintJSONError(&buf, JSONErrorEnvelope[func()]{
+		ExitCode: 4, ErrorCode: "e\"x", Message: "line\nbreak", Context: func() {},
+	})
+
+	assert.Equal(t, 1, strings.Count(buf.String(), "\n"))
+	assert.JSONEq(t, `{"ok":false,"exit_code":4,"error_code":"e\"x","message":"line\nbreak"}`, buf.String())
+}
+
 func TestPrintJSONError(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

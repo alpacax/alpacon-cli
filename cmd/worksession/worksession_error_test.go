@@ -93,7 +93,7 @@ func TestExtendTableUsageError_ExitsTwo(t *testing.T) {
 func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 	t.Parallel()
 	// GET succeeds but the session is expired — local validation error with err,
-	// no server code: error_code must be omitted.
+	// no server code: error_code falls back to cli_error.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/ses-1/" {
@@ -112,10 +112,9 @@ func TestUseJSONErrorEnvelope_LocalStateError(t *testing.T) {
 	var env errorEnvelope
 	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
 	assert.False(t, env.OK)
-	assert.Empty(t, env.ErrorCode)
+	assert.Equal(t, utils.ErrorCodeCLI, env.ErrorCode)
 	assert.Equal(t, "use", env.Context.Operation)
 	assert.Contains(t, env.Message, "cannot be used")
-	assert.NotContains(t, stderr, "error_code")
 }
 
 // runWorkSessionHelper re-runs the test binary as a subprocess executing the given

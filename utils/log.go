@@ -51,8 +51,12 @@ func CliError(msg string, args ...any) {
 	reportCLIError()
 }
 
-// CliErrorWithExit handles all error messages in the CLI.
+// CliErrorWithExit handles all error messages in the CLI. Under --output json it prints
+// one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(1, "", msg, args)
+	}
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	reportCLIError()
 	os.Exit(1)
@@ -62,8 +66,38 @@ func CliErrorWithExit(msg string, args ...any) {
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(code, "", msg, args)
+	}
 	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	os.Exit(code)
+}
+
+// CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
+// exit code, so only exit 1 keeps the report footer.
+func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(exitCode, errorCode, msg, args)
+	}
+	if exitCode == ExitCodeGeneralError {
+		CliErrorWithExit(msg, args...)
+	}
+	CliErrorWithExitCode(exitCode, msg, args...)
+}
+
+func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
+	if errorCode == "" && exitCode == ExitCodeUsageError {
+		errorCode = UsageErrorCode
+	}
+	var cause error
+	for _, arg := range args {
+		if e, ok := arg.(error); ok && e != nil {
+			cause = e
+			break
+		}
+	}
+	PrintJSONError(os.Stderr, newFailureEnvelope(exitCode, errorCode, "", cause, cliMessage(msg, args...)))
+	os.Exit(exitCode)
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -132,6 +133,7 @@ type apiError struct {
 	// can emit a JSON object too. The stale-token retry reads it to drop
 	// gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
+	extra      map[string]any
 }
 
 // statusError carries an HTTP status on errors that aren't *apiError (e.g. an
@@ -240,6 +242,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		gate:       gate,
 		missing:    missing,
 		apiPayload: isJSONObject(body),
+		extra:      errorExtraFields(body),
 	}
 }
 
@@ -1119,6 +1122,13 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
+func (e *apiError) ErrorFields() map[string]any {
+	if len(e.extra) == 0 {
+		return nil
+	}
+	return maps.Clone(e.extra)
+}
+
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
@@ -1185,7 +1195,25 @@ func withRetryAfter(err error, header http.Header) error {
 // envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return newAPIError(message, code, source, gate, axis, next, missing)
+	err := newAPIError(message, code, source, gate, axis, next, missing)
+	if ae, ok := err.(*apiError); ok {
+		ae.extra = errorExtraFields(body)
+	}
+	return err
+}
+
+func errorExtraFields(body []byte) map[string]any {
+	var parsed map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
+	if decoder.Decode(&parsed) != nil {
+		return nil
+	}
+	delete(parsed, "code")
+	if len(parsed) == 0 {
+		return nil
+	}
+	return parsed
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
