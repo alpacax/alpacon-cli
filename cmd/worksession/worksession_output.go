@@ -79,7 +79,7 @@ func newWorkSessionCancelOutput(id string) workSessionMutationOutput {
 		Operation:     opCancel,
 		Message:       fmt.Sprintf("Work session %s cancelled.", id),
 		WorkSessionID: id,
-		Status:        cancelledWorkSessionStatus,
+		Status:        wsapi.StatusCancelled,
 	}
 }
 

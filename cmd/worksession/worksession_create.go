@@ -268,7 +268,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			// on "wait or check later" instead of treating the pending create as a
 			// success. Other statuses (e.g. auto-approved) keep the existing success
 			// output and exit 0.
-			if session.Status == pendingWorkSessionStatus {
+			if session.Status == wsapi.StatusPending {
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
 					session.ApprovalRequestID,
@@ -489,9 +489,9 @@ func decideUseAction(status string, useEnabled bool) useDecision {
 		return useDecisionNoop
 	}
 	switch status {
-	case activeWorkSessionStatus:
+	case wsapi.StatusActive:
 		return useDecisionUseNow
-	case approvedWorkSessionStatus:
+	case wsapi.StatusApproved:
 		return useDecisionSkipScheduled
 	default:
 		return useDecisionErrorNeedsWait
@@ -653,26 +653,26 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		}
 		lastStatus = s.Status
 		switch s.Status {
-		case activeWorkSessionStatus:
+		case wsapi.StatusActive:
 			return s, nil
-		case approvedWorkSessionStatus:
+		case wsapi.StatusApproved:
 			if !untilActive {
 				return s, nil
 			}
-		case rejectedWorkSessionStatus:
+		case wsapi.StatusRejected:
 			return nil, &terminalWaitError{message: "work session was rejected", sessionID: id}
-		case expiredWorkSessionStatus:
+		case wsapi.StatusExpired:
 			return nil, &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
-		case revokedWorkSessionStatus:
+		case wsapi.StatusRevoked:
 			return nil, &terminalWaitError{message: "work session was revoked", sessionID: id}
-		case cancelledWorkSessionStatus:
+		case wsapi.StatusCancelled:
 			return nil, &terminalWaitError{message: "work session was cancelled", sessionID: id}
-		case completedWorkSessionStatus:
+		case wsapi.StatusCompleted:
 			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
 		}
 
 		waitMsg := waitMsgApproval
-		if s.Status == approvedWorkSessionStatus {
+		if s.Status == wsapi.StatusApproved {
 			waitMsg = waitMsgActivation
 		}
 		// Measured from the start rather than from what is left before the

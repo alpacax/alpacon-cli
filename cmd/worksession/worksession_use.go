@@ -10,25 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	activeWorkSessionStatus    = "active"
-	approvedWorkSessionStatus  = "approved"
-	rejectedWorkSessionStatus  = "rejected"
-	expiredWorkSessionStatus   = "expired"
-	revokedWorkSessionStatus   = "revoked"
-	cancelledWorkSessionStatus = "cancelled"
-	completedWorkSessionStatus = "completed"
-)
-
-func isEndedStatus(status string) bool {
-	switch status {
-	case completedWorkSessionStatus, expiredWorkSessionStatus, revokedWorkSessionStatus,
-		rejectedWorkSessionStatus, cancelledWorkSessionStatus:
-		return true
-	}
-	return false
-}
-
 var unsetActiveWorkSession bool
 
 var workSessionUseCmd = &cobra.Command{
@@ -112,7 +93,7 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if err != nil {
 		return nil, err
 	}
-	if ws.Status != activeWorkSessionStatus {
+	if ws.Status != wsapi.StatusActive {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}
 	// Agent sessions are not workspace-attachable (mirrors the create --use guard):

@@ -40,7 +40,7 @@ func TestResolveWaitOptions_RegisteredTypeGetsItsDefaults(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"approved", "activated"}, opts.OK)
-	assert.Equal(t, []string{"rejected", "expired", "revoked", "cancelled", "completed"}, opts.Fail)
+	assert.ElementsMatch(t, []string{"rejected", "expired", "revoked", "cancelled", "completed"}, opts.Fail)
 	assert.NotNil(t, opts.CatchUp, "a registered type with a target must get catch-up")
 	assert.Equal(t, time.Minute, opts.Timeout)
 }

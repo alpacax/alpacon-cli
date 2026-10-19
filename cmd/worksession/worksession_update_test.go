@@ -19,7 +19,7 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 	t.Run("pending session is rejected with actionable message", func(t *testing.T) {
 		session := &wsapi.WorkSession{
 			ID:     "ses-pending",
-			Status: pendingWorkSessionStatus,
+			Status: wsapi.StatusPending,
 			Scopes: []string{"command", "sudo"},
 		}
 		err := validateSessionForSudoUpdate(session, session.Scopes)
@@ -276,7 +276,7 @@ func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
 					if tt.patchStatus != "" {
 						resp.Status = tt.patchStatus
 					}
-					if resp.Status == pendingWorkSessionStatus { // the server drops the time fields otherwise
+					if resp.Status == wsapi.StatusPending { // the server drops the time fields otherwise
 						if startsAt, err := time.Parse(time.RFC3339, cmp.Or(tt.storedStart, tt.req.StartsAt)); err == nil {
 							startsAt = startsAt.Truncate(time.Microsecond)
 							resp.StartsAt = &startsAt
