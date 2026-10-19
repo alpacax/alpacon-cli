@@ -224,7 +224,7 @@ Note: All flags must be placed before the server name.
 				_ = cmd.Help()
 				return
 			}
-			utils.CliErrorWithExit("%s", err)
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "%s", err)
 		}
 
 		username := parsed.Username
@@ -236,11 +236,11 @@ Note: All flags must be placed before the server name.
 		env := parsed.Env
 
 		if serverName == "" {
-			utils.CliErrorWithExit("Server name is required.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "Server name is required.")
 		}
 
 		if share && len(commandArgs) > 0 {
-			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
 		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
@@ -267,7 +267,7 @@ Note: All flags must be placed before the server name.
 
 		if parsed.OutputFormat != "" {
 			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+				utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
 			}
 			utils.OutputFormat = parsed.OutputFormat
 		}

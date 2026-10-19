@@ -88,9 +88,15 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
-	if err := RootCmd.Execute(); err != nil {
-		utils.CliErrorWithExit("While executing the command: %s", err)
+	jsonMode := prepareOutputMode(os.Args[1:])
+	err := RootCmd.Execute()
+	if err == nil {
+		return
 	}
+	if jsonMode {
+		utils.CliErrorWithCode(1, utils.ErrorCodeUsage, "%s", err)
+	}
+	utils.CliErrorWithExit("While executing the command: %s", err)
 }
 
 // kubernetesSurfaceEnabled reads the answer the last login or switch recorded;
@@ -108,6 +114,8 @@ func init() {
 		&utils.OutputFormat, "output", utils.OutputFormatTable,
 		"Output format: table or json",
 	)
+
+	routeHelpToStderr()
 
 	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
