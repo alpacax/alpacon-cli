@@ -348,7 +348,7 @@ func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetai
 // An MFA refusal (auth_mfa_required) of the poll is returned at once as the
 // typed error, so the caller can wait for MFA and poll again; the poll only
 // reads, so polling again is safe. Any other GET error is retried with backoff.
-func PollCommandExecution(ac *client.AlpaconClient, cmdID string) (EventDetails, error) {
+func PollCommandExecution(ac *client.AlpaconClient, cmdID api.PathID) (EventDetails, error) {
 	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{surfaceMFA: true})
 }
 
@@ -375,15 +375,7 @@ func isPollWaitStatus(status string, waitApproval bool) bool {
 // utils.PollMaxThrottleExtensions grants, whichever binds first, plus one backoff
 // wait—so an approved job resumes streaming. Without it the hold is terminal
 // (PendingApprovalError). A closed seams.cancel ends the poll with errPollCancelled.
-func pollCommandExecution(ac *client.AlpaconClient, cmdID string, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
-	pathID, err := api.RequireID(cmdID, "command")
-	if err != nil {
-		return EventDetails{}, err
-	}
-	return pollCommandExecutionByPathID(ac, pathID, timeout, tick, waitApproval, seams)
-}
-
-func pollCommandExecutionByPathID(ac *client.AlpaconClient, pathID api.PathID, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
+func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, tick time.Duration, waitApproval bool, seams pollSeams) (EventDetails, error) {
 	var response EventDetails
 
 	started := seams.Now()
@@ -635,7 +627,7 @@ func streamSubscribedByPathID(ac *client.AlpaconClient, listener *CommandOutputL
 	pollCancel := make(chan struct{})
 	defer close(pollCancel)
 	go func() {
-		details, err := pollCommandExecutionByPathID(ac, cmdID, timeout, delays.pollTick, waitApproval, pollSeams{cancel: pollCancel})
+		details, err := pollCommandExecution(ac, cmdID, timeout, delays.pollTick, waitApproval, pollSeams{cancel: pollCancel})
 		switch {
 		case errors.Is(err, errPollCancelled): // the stream is gone; nobody reads these
 		case err != nil:
@@ -883,7 +875,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID string, out io.Wri
 
 func runCommandFallbackFromPathID(ac *client.AlpaconClient, cmdID api.PathID, out io.Writer, tick time.Duration, waitApproval bool, cause error) error {
 	utils.CliWarning("real-time output unavailable (%v); falling back to polling", cause)
-	details, err := pollCommandExecutionByPathID(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
+	details, err := pollCommandExecution(ac, cmdID, execTimeout(), tick, waitApproval, pollSeams{})
 	if err != nil {
 		return err
 	}

@@ -797,7 +797,7 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 
 	var status event.EventDetails
 	if err := transferStep(ac, serverID, func() (err error) {
-		status, err = event.PollCommandExecution(ac, commandID.String())
+		status, err = event.PollCommandExecution(ac, commandID)
 		return err
 	}); err != nil {
 		return DownloadedFile{}, err
@@ -873,7 +873,7 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 
 	var status event.EventDetails
 	if err := transferStep(ac, serverID, func() (err error) {
-		status, err = event.PollCommandExecution(ac, commandID.String())
+		status, err = event.PollCommandExecution(ac, commandID)
 		return err
 	}); err != nil {
 		return err

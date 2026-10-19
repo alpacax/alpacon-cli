@@ -206,7 +206,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false, pollSeams{})
+			result, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 30*time.Second, 5*time.Millisecond, false, pollSeams{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -403,7 +403,7 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true, pollSeams{})
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -483,7 +483,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 
 	seams, delays := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
@@ -559,7 +559,7 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 			seams, delays := fakePollClock()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false, seams)
+			resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
 			require.NoError(t, err)
 			assert.Equal(t, "completed", resp.Status)
 			assert.Equal(t, tt.want, delays())
@@ -579,7 +579,7 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(2), reqCount.Load(),
@@ -597,7 +597,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T)
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -623,7 +623,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -660,7 +660,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(4), reqCount.Load())
@@ -694,7 +694,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -731,7 +731,7 @@ func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Hour, tick, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, slices.Concat(
@@ -754,7 +754,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	// checks, and a scheduling hiccup longer than the timeout times the poll out
 	// before it ever sends a request.
 	seams, _ := fakePollClock()
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -782,7 +782,7 @@ func TestPollCommandExecution_CancelledBeforeTheFirstWaitNeverRequests(t *testin
 
 	// A deadline the loop would reach quickly, so a poll that ignores the cancel
 	// fails here instead of running until the package timeout.
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
 
 	require.ErrorIs(t, err, errPollCancelled)
 	assert.Zero(t, calls.Load(), "a poll cancelled before its first wait must not request at all")
@@ -819,7 +819,7 @@ func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
 		},
 	}
 
-	_, err := pollCommandExecution(ac, "cmd-1", 3*time.Second, time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 3*time.Second, time.Millisecond, false, seams)
 
 	require.ErrorIs(t, err, errPollCancelled)
 	assert.Zero(t, calls.Load(), "the wait was cancelled, so no request follows it")
@@ -2505,7 +2505,7 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
 			require.Error(t, err)
 			if tc.wantCode {
 				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
@@ -2527,10 +2527,6 @@ func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 		{"AnswerPurposeDemand", func(ac *client.AlpaconClient) error { return AnswerPurposeDemand(ac, badID, "rotate logs") }},
 		{"GetCommandByID", func(ac *client.AlpaconClient) error {
 			_, err := GetCommandByID(ac, badID)
-			return err
-		}},
-		{"PollCommandExecution", func(ac *client.AlpaconClient) error {
-			_, err := PollCommandExecution(ac, badID)
 			return err
 		}},
 	}
