@@ -10,7 +10,7 @@ import (
 var certListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all certificates",
+	Short:   "List certificates",
 	Long: `
 	Retrieves and shows a detailed list of all the SSL/TLS certificates currently managed by the system, 
 	including their issuance status and validity.

@@ -32,8 +32,8 @@ func isEndedStatus(status string) bool {
 var unsetActiveWorkSession bool
 
 var workSessionUseCmd = &cobra.Command{
-	Use:   "use SESSION_ID",
-	Short: "Set or clear the active work-session for the current workspace",
+	Use:   "use [SESSION_ID]",
+	Short: "Set or clear the active work-session",
 	Long: `Set the active work-session for the current workspace by passing its SESSION_ID.
 Subsequent exec/websh/cp/tunnel commands attach to this session unless overridden with --work-session.
 Pass --unset (with no SESSION_ID) to clear the active work-session.`,

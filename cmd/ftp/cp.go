@@ -15,7 +15,7 @@ import (
 )
 
 var CpCmd = &cobra.Command{
-	Use:   "cp [SOURCE...] [DESTINATION]",
+	Use:   "cp SOURCE... DESTINATION",
 	Short: "Copy files between local and remote locations",
 	Long: `Copy files between your local machine and a remote server.
 Supports SSH-like user@host:path syntax for specifying the username inline with the remote path.

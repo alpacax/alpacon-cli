@@ -16,7 +16,7 @@ const approveRejectExcludedMessage = "Approvals must be done in the Alpacon cons
 	"Use 'alpacon work-session ls' to track a session's status."
 
 var workSessionApproveCmd = &cobra.Command{
-	Use:   "approve SESSION_ID",
+	Use:   "approve",
 	Short: "Approve a session (moved to the Alpacon console)",
 	Long: `Approving work sessions has moved to the Alpacon console (web).
 
