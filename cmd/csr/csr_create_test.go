@@ -41,32 +41,33 @@ func signRequestBody(t *testing.T, signRequest certApi.SignRequest) string {
 func TestNewSignRequestBody(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name         string
-		validDays    int
-		validDaysSet bool
-		want         string
+		name      string
+		domains   string
+		ips       string
+		validDays int
+		want      string
 	}{
 		{
-			name:      "omitted flag leaves valid_days to the CA",
-			validDays: 0,
-			want:      `{"domain_list":["a.com","b.com"],"ip_list":[]}`,
+			name:    "omitted flag leaves valid_days to the CA",
+			domains: "a.com, b.com",
+			want:    `{"domain_list":["a.com","b.com"],"ip_list":[]}`,
 		},
 		{
-			name:         "explicit flag is sent",
-			validDays:    90,
-			validDaysSet: true,
-			want:         `{"domain_list":["a.com","b.com"],"ip_list":[],"valid_days":90}`,
+			name:      "explicit flag is sent",
+			domains:   "a.com, b.com",
+			validDays: 90,
+			want:      `{"domain_list":["a.com","b.com"],"ip_list":[],"valid_days":90}`,
 		},
 		{
-			name:      "flag value without the flag set is ignored",
-			validDays: 365,
-			want:      `{"domain_list":["a.com","b.com"],"ip_list":[]}`,
+			name: "IP-only request fills ip_list",
+			ips:  "10.0.0.1",
+			want: `{"domain_list":[],"ip_list":["10.0.0.1"]}`,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := signRequestBody(t, newSignRequest("a.com, b.com", "", tt.validDays, tt.validDaysSet))
+			got := signRequestBody(t, newSignRequest(tt.domains, tt.ips, tt.validDays))
 			assert.JSONEq(t, tt.want, got)
 		})
 	}
@@ -92,7 +93,7 @@ func TestParseValidDaysInput(t *testing.T) {
 			t.Parallel()
 			got, err := parseValidDaysInput(tt.input)
 			if tt.wantErr {
-				require.Error(t, err)
+				require.EqualError(t, err, "valid days must be a positive integer")
 				return
 			}
 			require.NoError(t, err)
@@ -120,37 +121,37 @@ func createError(t *testing.T, body string) error {
 func TestCreateSignRequestErrorText(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name        string
-		body        string
-		transport   error
-		validDays   int
-		wantMatch   string
-		wantNoMatch string
+		name      string
+		body      string
+		transport error
+		validDays int
+		// want is the whole message; empty means the error is passed through
+		// behind the generic prefix.
+		want string
 	}{
 		{
-			name:        "invalid period with explicit valid days",
-			body:        `{"code":"cert_invalid_period"}`,
-			validDays:   900,
-			wantMatch:   "The CA refused a validity of 900 days",
-			wantNoMatch: "Failed to send sign request",
+			name:      "invalid period with explicit valid days",
+			body:      `{"code":"cert_invalid_period"}`,
+			validDays: 900,
+			want: "The CA refused a validity of 900 days: it must be between 1 and the CA's maximum " +
+				"(Max Valid Days in 'alpacon authority ls'). Request a validity within the maximum, or leave " +
+				"it out to use the CA's default.",
 		},
 		{
-			name:        "invalid period with the CA default",
-			body:        `{"code":"cert_invalid_period"}`,
-			wantMatch:   "The CA's default validity exceeds its own maximum",
-			wantNoMatch: "Failed to send sign request",
+			name: "invalid period with the CA default",
+			body: `{"code":"cert_invalid_period"}`,
+			want: "The CA's default validity exceeds its own maximum (Default and Max Valid Days in " +
+				"'alpacon authority ls'). Request a validity within the maximum, or ask the CA's owner to " +
+				"correct its settings.",
 		},
 		{
-			name:        "another coded 400 falls back",
-			body:        `{"code":"cert_request_in_progress"}`,
-			validDays:   90,
-			wantMatch:   "Failed to send sign request",
-			wantNoMatch: "Max Valid Days",
+			name:      "another coded 400 falls back",
+			body:      `{"code":"cert_request_in_progress"}`,
+			validDays: 90,
 		},
 		{
 			name:      "transport error falls back",
 			transport: errors.New("some network failure"),
-			wantMatch: "Failed to send sign request to server: some network failure",
 		},
 	}
 	for _, tt := range tests {
@@ -160,11 +161,11 @@ func TestCreateSignRequestErrorText(t *testing.T) {
 			if err == nil {
 				err = createError(t, tt.body)
 			}
-			got := createSignRequestErrorText(err, tt.validDays)
-			assert.Contains(t, got, tt.wantMatch)
-			if tt.wantNoMatch != "" {
-				assert.NotContains(t, got, tt.wantNoMatch)
+			want := tt.want
+			if want == "" {
+				want = "Failed to send sign request to server: " + err.Error() + "."
 			}
+			assert.Equal(t, want, createSignRequestErrorText(err, tt.validDays))
 		})
 	}
 }

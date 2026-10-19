@@ -20,13 +20,15 @@ const (
 	certURL        = "/api/cert/certificates/"
 )
 
-// CodeAuthorityCannotBeDeleted rides a 400 on a CA delete: the CA has received a
-// certificate sign request, so the server keeps it and its records.
-const CodeAuthorityCannotBeDeleted = "cert_authority_cannot_be_deleted"
-
-// CodeInvalidPeriod rides a 400 on a sign request whose valid_days falls outside
-// 1..max_valid_days of the CA.
-const CodeInvalidPeriod = "cert_invalid_period"
+// Server refusal codes, read off a 400 with utils.ParseErrorResponse.
+const (
+	// CodeAuthorityCannotBeDeleted rides a CA delete: the CA has received a
+	// certificate sign request, so the server keeps it and its records.
+	CodeAuthorityCannotBeDeleted = "cert_authority_cannot_be_deleted"
+	// CodeInvalidPeriod rides a sign request whose valid_days falls outside
+	// 1..max_valid_days of the CA.
+	CodeInvalidPeriod = "cert_invalid_period"
+)
 
 func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignRequestResponse, error) {
 	var response SignRequestResponse

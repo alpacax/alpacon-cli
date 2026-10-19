@@ -62,11 +62,10 @@ var csrCreateCmd = &cobra.Command{
 			utils.CliErrorWithExit("--valid-days, --key, and --out require --domain or --ip to be specified.")
 		}
 		if nonInteractive {
-			validDaysSet := cmd.Flags().Changed("valid-days")
-			if validDaysSet {
+			if cmd.Flags().Changed("valid-days") {
 				utils.RequirePositiveInt("valid-days", csrFlags.validDays)
 			}
-			signRequest = newSignRequest(csrFlags.domains, csrFlags.ips, csrFlags.validDays, validDaysSet)
+			signRequest = newSignRequest(csrFlags.domains, csrFlags.ips, csrFlags.validDays)
 			if len(signRequest.DomainList) == 0 && len(signRequest.IpList) == 0 {
 				utils.CliErrorWithExit("You must provide at least one valid domain or IP address.")
 			}
@@ -166,22 +165,16 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 }
 
 // newSignRequest builds the request body from the non-interactive flags.
-// valid_days is sent only when the user set --valid-days; otherwise it stays
-// zero, is omitted from the body, and the server applies the CA's default.
-func newSignRequest(domains, ips string, validDays int, validDaysSet bool) certApi.SignRequest {
-	signRequest := certApi.SignRequest{
+func newSignRequest(domains, ips string, validDays int) certApi.SignRequest {
+	return certApi.SignRequest{
 		DomainList: splitAndTrim(domains),
 		IpList:     splitAndTrim(ips),
+		ValidDays:  validDays,
 	}
-	if validDaysSet {
-		signRequest.ValidDays = validDays
-	}
-	return signRequest
 }
 
-// parseValidDaysInput reads the interactive valid-days answer. A blank answer
-// returns zero, which leaves valid_days out of the request so the CA's default
-// applies.
+// parseValidDaysInput reads the interactive valid-days answer; a blank answer
+// is zero.
 func parseValidDaysInput(input string) (int, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -194,19 +187,19 @@ func parseValidDaysInput(input string) (int, error) {
 	return validDays, nil
 }
 
-// createSignRequestErrorText explains a cert_invalid_period refusal. validDays
-// is what the request carried; zero means it left valid_days to the CA, so the
-// CA's own default is what fell outside its maximum.
+// createSignRequestErrorText words a failed sign request. validDays is what
+// the request carried, zero meaning the CA's default. The advice names no flag:
+// the interactive prompt reaches the same refusals.
 func createSignRequestErrorText(err error, validDays int) string {
 	if code, _ := utils.ParseErrorResponse(err); code == certApi.CodeInvalidPeriod {
 		if validDays == 0 {
 			return "The CA's default validity exceeds its own maximum (Default and Max Valid Days in " +
-				"'alpacon authority ls'). Pass --valid-days within the maximum, or ask the CA's owner to " +
+				"'alpacon authority ls'). Request a validity within the maximum, or ask the CA's owner to " +
 				"correct its settings."
 		}
 		return fmt.Sprintf("The CA refused a validity of %d days: it must be between 1 and the CA's maximum "+
-			"(Max Valid Days in 'alpacon authority ls'). Pass a smaller --valid-days, or omit it to use "+
-			"the CA's default.", validDays)
+			"(Max Valid Days in 'alpacon authority ls'). Request a validity within the maximum, or leave "+
+			"it out to use the CA's default.", validDays)
 	}
 	return fmt.Sprintf("Failed to send sign request to server: %s.", err)
 }
