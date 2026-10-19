@@ -226,18 +226,18 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		}
 
 		if parsed.Err != "" {
-			utils.CliErrorWithExit("%s", parsed.Err)
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "%s", parsed.Err)
 			return
 		}
 
 		if parsed.Server == "" {
 			_ = cmd.Help()
-			utils.CliErrorWithExit("server name is required.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "server name is required.")
 			return
 		}
 
 		if parsed.Command == "" && parsed.File == nil {
-			utils.CliErrorWithExit("You must specify a command to execute, or a script with --file.")
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "You must specify a command to execute, or a script with --file.")
 			return
 		}
 
@@ -250,7 +250,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 func RunRemoteExec(parsed RemoteExecArgs) {
 	if parsed.OutputFormat != "" {
 		if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-			utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
+			utils.CliErrorWithCode(utils.ExitCodeGeneralError, utils.ErrorCodeUsage, "invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
 		}
 		utils.OutputFormat = parsed.OutputFormat
 	}

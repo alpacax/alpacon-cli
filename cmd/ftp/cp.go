@@ -89,6 +89,16 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 
+		isUpload := isLocalPaths(sources) && isRemotePath(dest)
+		if !isUpload && (!isRemotePath(sources[0]) || !isLocalPath(dest)) {
+			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
+				"Valid operations:\n" +
+				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
+				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
+				"Note: Remote paths must be in format 'servername:/path' (e.g., myserver:/tmp/file.txt)")
+			return
+		}
+
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -103,7 +113,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
 
-		if isLocalPaths(sources) && isRemotePath(dest) {
+		if isUpload {
 			serverName, err := uploadObject(alpaconClient, sources, dest, username, groupname, recursive, allowOverwrite, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
@@ -119,7 +129,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			}
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Uploaded %s to %s", wrappedSrc, dest)
-		} else if isRemotePath(sources[0]) && isLocalPath(dest) {
+		} else {
 			serverName, err := downloadObject(alpaconClient, sources, dest, username, groupname, recursive, workSessionID)
 			if err != nil {
 				err = utils.HandleCommonErrors(err, serverName, mfa.ErrorCallbacks(alpaconClient, func() error {
@@ -136,12 +146,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			}
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
-		} else {
-			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
-				"Valid operations:\n" +
-				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
-				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +
-				"Note: Remote paths must be in format 'servername:/path' (e.g., myserver:/tmp/file.txt)")
 		}
 	},
 }
