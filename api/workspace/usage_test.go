@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -36,7 +36,7 @@ func TestGetWorkspaceID(t *testing.T) {
 
 	id, err := GetWorkspaceID(ac, ts.URL, "ws-beta")
 	require.NoError(t, err)
-	assert.Equal(t, "uuid-2", id)
+	assert.Equal(t, "uuid-2", id.String())
 }
 
 func TestGetWorkspaceID_NotFound(t *testing.T) {
@@ -84,7 +84,7 @@ func TestGetUsageEstimate(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	estimate, err := GetUsageEstimate(ac, ts.URL, "uuid-123")
+	estimate, err := GetUsageEstimate(ac, ts.URL, testPathID(t, "uuid-123"))
 	require.NoError(t, err)
 	assert.Equal(t, "KRW", estimate.Currency)
 	assert.Equal(t, 30, estimate.BillingPeriod.TotalDays)
@@ -101,7 +101,7 @@ func TestGetUsageEstimate_ServerError(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := GetUsageEstimate(ac, ts.URL, "uuid-123")
+	_, err := GetUsageEstimate(ac, ts.URL, testPathID(t, "uuid-123"))
 	assert.Error(t, err)
 }
 
@@ -138,30 +138,31 @@ func TestGetWorkspaceID_FindsWorkspaceAfterSlugRename(t *testing.T) {
 	id, err := GetWorkspaceID(ac, ts.URL, ac.WorkspaceName)
 
 	require.NoError(t, err)
-	assert.Equal(t, "uuid-1", id)
+	assert.Equal(t, "uuid-1", id.String())
 }
 
-func TestUsageEstimateCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+func TestGetWorkspaceID_RefusesAnIDThatIsNotOneSegment(t *testing.T) {
 	t.Parallel()
-	const badID = "../../etc/test"
-	tests := []struct {
-		name string
-		call func(ac *client.AlpaconClient, baseURL string) error
-	}{
-		{"GetUsageEstimate", func(ac *client.AlpaconClient, baseURL string) error {
-			_, err := GetUsageEstimate(ac, baseURL, badID)
-			return err
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ts := testutil.NewNoRequestServer(t)
-			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-			err := tt.call(ac, ts.URL)
-
-			require.ErrorIs(t, err, utils.ErrInvalidID)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"results": []map[string]any{
+				{"id": "../../etc/test", "schema_name": "ws-alpha"},
+			},
 		})
-	}
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := GetWorkspaceID(ac, ts.URL, "ws-alpha")
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.NotErrorIs(t, err, utils.ErrInvalidID)
+}
+
+func testPathID(t *testing.T, id string) api.PathID {
+	t.Helper()
+	pathID, err := api.RequireID(id, "workspace")
+	require.NoError(t, err)
+	return pathID
 }

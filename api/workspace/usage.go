@@ -16,14 +16,14 @@ const (
 // GetWorkspaceID retrieves the workspace UUID from the payment API by matching schema_name.
 // It follows pagination until the workspace is found or all pages are exhausted.
 // The payment API uses page-number pagination: next/previous are integers, not URLs.
-func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName string) (string, error) {
+func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName string) (api.PathID, error) {
 	baseURL := paymentBaseURL + paymentWorkspacesURL
 	page := 1
 
 	for {
 		body, err := ac.SendGetRequestToURL(fmt.Sprintf("%s?page=%d", baseURL, page))
 		if err != nil {
-			return "", fmt.Errorf("failed to list workspaces from payment API: %w", err)
+			return api.PathID{}, fmt.Errorf("failed to list workspaces from payment API: %w", err)
 		}
 
 		var response struct {
@@ -34,12 +34,12 @@ func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName stri
 			} `json:"results"`
 		}
 		if err := json.Unmarshal(body, &response); err != nil {
-			return "", fmt.Errorf("failed to parse workspace list: %w", err)
+			return api.PathID{}, fmt.Errorf("failed to parse workspace list: %w", err)
 		}
 
 		for _, ws := range response.Results {
 			if ws.SchemaName == workspaceName {
-				return ws.ID, nil
+				return api.RequireResponseID(ws.ID, "workspace")
 			}
 		}
 
@@ -49,7 +49,7 @@ func GetWorkspaceID(ac *client.AlpaconClient, paymentBaseURL, workspaceName stri
 		page = *response.Next
 	}
 
-	return "", fmt.Errorf("workspace %q not found in payment API", workspaceName)
+	return api.PathID{}, fmt.Errorf("workspace %q not found in payment API", workspaceName)
 }
 
 // BillingPeriod represents the billing period for a workspace.
@@ -106,12 +106,8 @@ type UsageEstimate struct {
 }
 
 // GetUsageEstimate retrieves the usage estimate for a workspace from the payment API.
-func GetUsageEstimate(ac *client.AlpaconClient, paymentBaseURL, workspaceID string) (*UsageEstimate, error) {
-	pathID, err := api.RequireID(workspaceID, "workspace")
-	if err != nil {
-		return nil, err
-	}
-	estimateURL := api.IDURL(paymentBaseURL+paymentWorkspacesURL, pathID, "estimate", nil)
+func GetUsageEstimate(ac *client.AlpaconClient, paymentBaseURL string, workspaceID api.PathID) (*UsageEstimate, error) {
+	estimateURL := api.IDURL(paymentBaseURL+paymentWorkspacesURL, workspaceID, "estimate", nil)
 	body, err := ac.SendGetRequestToURL(estimateURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve usage estimate: %w", err)
