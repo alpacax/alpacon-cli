@@ -64,7 +64,7 @@ func TestRequireIDAcceptsSinglePathSegments(t *testing.T) {
 			got, err := RequireID(tc.id, "work session")
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, got.String())
 		})
 	}
 }
@@ -124,7 +124,7 @@ func TestRequireResponseIDAcceptsSinglePathSegments(t *testing.T) {
 			got, err := RequireResponseID(tc.id, "work session")
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, got.String())
 		})
 	}
 }
@@ -140,4 +140,36 @@ func TestRequireResponseIDDoesNotExposeAPlantedErrorCode(t *testing.T) {
 	code, source := utils.ParseErrorResponse(err)
 	assert.Empty(t, code)
 	assert.Empty(t, source)
+}
+
+func TestIDURLJoinsTheCheckedIDAndAction(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		id     string
+		action string
+		params map[string]string
+		want   string
+	}{
+		{name: "id only", id: "42", want: "https://alpacon.test/api/notes/42/"},
+		{name: "id and action", id: " ses-1 ", action: "close", want: "https://alpacon.test/api/notes/ses-1/close/"},
+		{name: "query", id: "42", action: "timeline", params: map[string]string{"page": "2"}, want: "https://alpacon.test/api/notes/42/timeline/?page=2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			id, err := RequireID(tc.id, "note")
+			require.NoError(t, err)
+
+			got := IDURL("https://alpacon.test/api/notes/", id, tc.action, tc.params)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIDURLPanicsOnAnUncheckedPathID(t *testing.T) {
+	t.Parallel()
+
+	assert.Panics(t, func() { IDURL("https://alpacon.test/api/notes/", PathID{}, "", nil) })
 }

@@ -3,7 +3,6 @@ package security
 import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -27,11 +26,11 @@ func AddCommandAcl(ac *client.AlpaconClient, request CommandAclRequest) error {
 }
 
 func DeleteCommandAcl(ac *client.AlpaconClient, commandAclId string) error {
-	commandAclId, err := api.RequireID(commandAclId, "command ACL")
+	pathID, err := api.RequireID(commandAclId, "command ACL")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(commandAclURL, commandAclId, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(commandAclURL, pathID, "", nil))
 	return err
 }
 
@@ -68,11 +67,11 @@ func BulkDeleteServerAcl(ac *client.AlpaconClient, request ServerAclBulkRequest)
 }
 
 func DeleteServerAcl(ac *client.AlpaconClient, serverAclID string) error {
-	serverAclID, err := api.RequireID(serverAclID, "server ACL")
+	pathID, err := api.RequireID(serverAclID, "server ACL")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(serverAclURL, serverAclID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(serverAclURL, pathID, "", nil))
 	return err
 }
 
@@ -87,10 +86,10 @@ func AddFileAcl(ac *client.AlpaconClient, request FileAclRequest) error {
 }
 
 func DeleteFileAcl(ac *client.AlpaconClient, fileAclID string) error {
-	fileAclID, err := api.RequireID(fileAclID, "file ACL")
+	pathID, err := api.RequireID(fileAclID, "file ACL")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(fileAclURL, fileAclID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(fileAclURL, pathID, "", nil))
 	return err
 }

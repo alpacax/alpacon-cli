@@ -107,11 +107,11 @@ type UsageEstimate struct {
 
 // GetUsageEstimate retrieves the usage estimate for a workspace from the payment API.
 func GetUsageEstimate(ac *client.AlpaconClient, paymentBaseURL, workspaceID string) (*UsageEstimate, error) {
-	workspaceID, err := api.RequireID(workspaceID, "workspace")
+	pathID, err := api.RequireID(workspaceID, "workspace")
 	if err != nil {
 		return nil, err
 	}
-	estimateURL := fmt.Sprintf("%s%s%s/estimate/", paymentBaseURL, paymentWorkspacesURL, workspaceID)
+	estimateURL := api.IDURL(paymentBaseURL+paymentWorkspacesURL, pathID, "estimate", nil)
 	body, err := ac.SendGetRequestToURL(estimateURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve usage estimate: %w", err)

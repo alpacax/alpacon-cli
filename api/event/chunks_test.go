@@ -49,7 +49,7 @@ func TestGetCommandChunks_PassesSeqGteAndReturnsResults(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := getCommandChunks(ac, cmdID, 5, noSeqBound)
+	got, err := getCommandChunks(ac, testPathID(t, cmdID), 5, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 5, Content: "hello\n"},
@@ -109,7 +109,7 @@ func TestGetCommandChunks_SortsBySeq(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	got, err := getCommandChunks(ac, cmdID, 0, noSeqBound)
+	got, err := getCommandChunks(ac, testPathID(t, cmdID), 0, noSeqBound)
 	require.NoError(t, err)
 	assert.Equal(t, []Chunk{
 		{Seq: 0, Content: "a\n"},
@@ -145,7 +145,7 @@ func TestGetCommandChunks_SendsSeqLteWhenBounded(t *testing.T) {
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			_, err := getCommandChunks(ac, cmdID, tt.fromSeq, tt.toSeq)
+			_, err := getCommandChunks(ac, testPathID(t, cmdID), tt.fromSeq, tt.toSeq)
 			require.NoError(t, err)
 			for _, want := range tt.wantQ {
 				assert.Contains(t, capturedQuery, want)
@@ -230,12 +230,12 @@ func TestResolveCommandOutputSurfacesFetchFailure(t *testing.T) {
 	}
 }
 
-func TestGetCommandChunks_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+func TestGetCommandOutput_RefusesAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	ts := testutil.NewNoRequestServer(t)
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := getCommandChunks(ac, "../../etc/test", 0, noSeqBound)
+	_, err := GetCommandOutput(ac, "../../etc/test")
 
 	require.ErrorIs(t, err, utils.ErrInvalidID)
 }

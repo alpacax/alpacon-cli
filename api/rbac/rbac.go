@@ -52,7 +52,11 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 	nameOrID = strings.TrimSpace(nameOrID)
 
 	if utils.IsUUID(nameOrID) {
-		responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, nameOrID, nil))
+		pathID, err := api.RequireID(nameOrID, "role")
+		if err != nil {
+			return nil, err
+		}
+		responseBody, err := ac.SendGetRequest(api.IDURL(rolesURL, pathID, "", nil))
 		if err != nil {
 			return nil, err
 		}
@@ -74,11 +78,11 @@ func ResolveRole(ac *client.AlpaconClient, nameOrID string) (*RoleResponse, erro
 }
 
 func GetRoleScopes(ac *client.AlpaconClient, roleID string) (*RoleScopesResponse, error) {
-	roleID, err := api.RequireID(roleID, "role")
+	pathID, err := api.RequireID(roleID, "role")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(rolesURL, roleID+"/scopes", nil))
+	responseBody, err := ac.SendGetRequest(api.IDURL(rolesURL, pathID, "scopes", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -247,11 +251,11 @@ func GrantRole(ac *client.AlpaconClient, request BindingCreateRequest) error {
 }
 
 func RevokeRole(ac *client.AlpaconClient, bindingID, reason string) error {
-	bindingID, err := api.RequireID(bindingID, "role binding")
+	pathID, err := api.RequireID(bindingID, "role binding")
 	if err != nil {
 		return err
 	}
-	url := utils.BuildURL(userRolesURL, bindingID, nil)
+	url := api.IDURL(userRolesURL, pathID, "", nil)
 
 	if reason == "" {
 		_, err := ac.SendDeleteRequest(url)
@@ -270,11 +274,11 @@ func IsDuplicateBinding(err error) bool {
 // The IAM user endpoint, not /api/rbac/: an API token reaches it where the RBAC routes
 // refuse one.
 func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*EffectivePermissionsResponse, error) {
-	userID, err := api.RequireID(userID, "user")
+	pathID, err := api.RequireID(userID, "user")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/effective-permissions", nil))
+	responseBody, err := ac.SendGetRequest(api.IDURL(usersURL, pathID, "effective-permissions", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -288,11 +292,11 @@ func GetEffectivePermissions(ac *client.AlpaconClient, userID string) (*Effectiv
 }
 
 func GetPermissionPatterns(ac *client.AlpaconClient, userID string) (*PermissionPatternsResponse, error) {
-	userID, err := api.RequireID(userID, "user")
+	pathID, err := api.RequireID(userID, "user")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/permissions", nil))
+	responseBody, err := ac.SendGetRequest(api.IDURL(usersURL, pathID, "permissions", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -308,13 +312,13 @@ func GetPermissionPatterns(ac *client.AlpaconClient, userID string) (*Permission
 // Workspace-wide question only: a permission held through an object-scoped binding
 // answers false here, because no object is named.
 func CheckPermission(ac *client.AlpaconClient, userID, permission string) (bool, error) {
-	userID, err := api.RequireID(userID, "user")
+	pathID, err := api.RequireID(userID, "user")
 	if err != nil {
 		return false, err
 	}
 	params := map[string]string{"permission": permission}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(usersURL, userID+"/permissions", params))
+	responseBody, err := ac.SendGetRequest(api.IDURL(usersURL, pathID, "permissions", params))
 	if err != nil {
 		return false, err
 	}

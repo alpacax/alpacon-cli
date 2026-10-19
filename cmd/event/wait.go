@@ -65,7 +65,11 @@ func validateEventTarget(target string) (string, error) {
 	if target == "" {
 		return "", nil
 	}
-	return api.RequireID(target, "target")
+	pathID, err := api.RequireID(target, "target")
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
 }
 
 func runWait(cmd *cobra.Command, _ []string) {

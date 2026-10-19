@@ -83,7 +83,7 @@ func TestPollTransferStatus(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+			success, message, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantSuccess, success)
 			assert.Equal(t, tt.wantMessage, message)
@@ -791,7 +791,7 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 	}
 
 	// Use a very short timeout to make the test fast
-	success, _, err := PollTransferStatus(ac, "upload", "test-id", 1*time.Second)
+	success, _, err := PollTransferStatus(ac, uploadTransfer, "test-id", 1*time.Second)
 	require.Error(t, err)
 	assert.False(t, success)
 	assert.Contains(t, err.Error(), "timed out")
@@ -1320,7 +1320,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	start := time.Now()
-	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	success, message, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
@@ -1350,7 +1350,7 @@ func TestPollTransferStatus_PollsWhileSuccessIsNull(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	success, message, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 
 	require.NoError(t, err)
 	assert.False(t, success)
@@ -1371,7 +1371,7 @@ func TestPollTransferStatus_FatalErrorNoRetry(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, _, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	success, _, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 
 	require.Error(t, err)
 	assert.False(t, success)
@@ -1397,7 +1397,7 @@ func TestPollTransferStatus_ThrottleMidTransferDoesNotEndWait(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	success, message, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1428,7 +1428,9 @@ func TestPollTransferStatus_ThrottleBudgetIsBounded(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	start := time.Now()
-	success, _, err := pollTransferStatus(ac, "upload", "test-id", timeout, tick)
+	pathID, idErr := api.RequireID("test-id", "transfer")
+	require.NoError(t, idErr)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, timeout, tick)
 	elapsed := time.Since(start)
 
 	require.ErrorContains(t, err, "timed out")
@@ -1448,7 +1450,9 @@ func TestPollTransferStatus_ConsecutiveFailuresEndWait(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, _, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+	pathID, idErr := api.RequireID("test-id", "transfer")
+	require.NoError(t, idErr)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
 
 	require.ErrorContains(t, err, "failed to check transfer status")
 	assert.False(t, success)
@@ -1475,7 +1479,9 @@ func TestPollTransferStatus_SuccessfulPollResetsFailureCount(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+	pathID, idErr := api.RequireID("test-id", "transfer")
+	require.NoError(t, idErr)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1499,7 +1505,9 @@ func TestPollTransferStatus_ThrottlesDoNotCountAsFailures(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+	pathID, idErr := api.RequireID("test-id", "transfer")
+	require.NoError(t, idErr)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1523,7 +1531,9 @@ func TestPollTransferStatus_ThrottleDoesNotResetFailureCount(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, _, err := pollTransferStatus(ac, "upload", "test-id", 30*time.Second, time.Millisecond)
+	pathID, idErr := api.RequireID("test-id", "transfer")
+	require.NoError(t, idErr)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
 
 	require.ErrorContains(t, err, "failed to check transfer status")
 	assert.False(t, success)
@@ -1542,7 +1552,7 @@ func TestPollTransferStatus_ParseFailureReturnsEmptyMessage(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, message, err := PollTransferStatus(ac, "upload", "test-id", 30*time.Second)
+	success, message, err := PollTransferStatus(ac, uploadTransfer, "test-id", 30*time.Second)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse transfer status response")
@@ -1565,7 +1575,7 @@ func TestPollTransferStatus_TimesOut(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	success, _, err := PollTransferStatus(ac, "upload", "test-id", 50*time.Millisecond)
+	success, _, err := PollTransferStatus(ac, uploadTransfer, "test-id", 50*time.Millisecond)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "timed out")
@@ -1733,11 +1743,11 @@ func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T
 		call func(ac *client.AlpaconClient, baseURL string) error
 	}{
 		{"PollTransferStatus_upload", func(ac *client.AlpaconClient, _ string) error {
-			_, _, err := PollTransferStatus(ac, "upload", badID, time.Second)
+			_, _, err := PollTransferStatus(ac, uploadTransfer, badID, time.Second)
 			return err
 		}},
 		{"PollTransferStatus_download", func(ac *client.AlpaconClient, _ string) error {
-			_, _, err := PollTransferStatus(ac, "download", badID, time.Second)
+			_, _, err := PollTransferStatus(ac, downloadTransfer, badID, time.Second)
 			return err
 		}},
 	}

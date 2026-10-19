@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path"
 	"regexp"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -133,18 +132,26 @@ func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error)
 	}
 	for _, a := range authorities {
 		if a.Name == name {
-			return api.RequireResponseID(a.ID, "certificate authority")
+			pathID, err := api.RequireResponseID(a.ID, "certificate authority")
+			if err != nil {
+				return "", err
+			}
+			return pathID.String(), nil
 		}
 	}
 	return "", fmt.Errorf("no authority found with name %q", name)
 }
 
 func GetAuthorityDetail(ac *client.AlpaconClient, authorityId string) ([]byte, error) {
-	authorityId, err := api.RequireID(authorityId, "certificate authority")
+	pathID, err := api.RequireID(authorityId, "certificate authority")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(authorityURL, authorityId, nil))
+	return getAuthorityDetail(ac, pathID)
+}
+
+func getAuthorityDetail(ac *client.AlpaconClient, pathID api.PathID) ([]byte, error) {
+	body, err := ac.SendGetRequest(api.IDURL(authorityURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -153,11 +160,11 @@ func GetAuthorityDetail(ac *client.AlpaconClient, authorityId string) ([]byte, e
 }
 
 func GetCSRDetail(ac *client.AlpaconClient, csrId string) ([]byte, error) {
-	csrId, err := api.RequireID(csrId, "CSR")
+	pathID, err := api.RequireID(csrId, "CSR")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(signRequestURL, csrId, nil))
+	body, err := ac.SendGetRequest(api.IDURL(signRequestURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -166,11 +173,11 @@ func GetCSRDetail(ac *client.AlpaconClient, csrId string) ([]byte, error) {
 }
 
 func GetCertificateDetail(ac *client.AlpaconClient, certId string) ([]byte, error) {
-	certId, err := api.RequireID(certId, "certificate")
+	pathID, err := api.RequireID(certId, "certificate")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(certURL, certId, nil))
+	body, err := ac.SendGetRequest(api.IDURL(certURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -179,12 +186,11 @@ func GetCertificateDetail(ac *client.AlpaconClient, certId string) ([]byte, erro
 }
 
 func ApproveCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
-	csrId, err := api.RequireID(csrId, "CSR")
+	pathID, err := api.RequireID(csrId, "CSR")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(csrId, "approve")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(signRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(signRequestURL, pathID, "approve", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -193,12 +199,11 @@ func ApproveCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
 }
 
 func DenyCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
-	csrId, err := api.RequireID(csrId, "CSR")
+	pathID, err := api.RequireID(csrId, "CSR")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(csrId, "deny")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(signRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(signRequestURL, pathID, "deny", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +212,11 @@ func DenyCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
 }
 
 func RetryCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
-	csrId, err := api.RequireID(csrId, "CSR")
+	pathID, err := api.RequireID(csrId, "CSR")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(csrId, "retry")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(signRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(signRequestURL, pathID, "retry", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -221,11 +225,11 @@ func RetryCSR(ac *client.AlpaconClient, csrId string) ([]byte, error) {
 }
 
 func DeleteCSR(ac *client.AlpaconClient, csrId string) error {
-	csrId, err := api.RequireID(csrId, "CSR")
+	pathID, err := api.RequireID(csrId, "CSR")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(signRequestURL, csrId, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(signRequestURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -234,11 +238,11 @@ func DeleteCSR(ac *client.AlpaconClient, csrId string) error {
 }
 
 func DeleteCA(ac *client.AlpaconClient, authorityId string) error {
-	authorityId, err := api.RequireID(authorityId, "certificate authority")
+	pathID, err := api.RequireID(authorityId, "certificate authority")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(authorityURL, authorityId, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(authorityURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -312,11 +316,11 @@ func DownloadCertificate(ac *client.AlpaconClient, certId string, filePath strin
 }
 
 func UpdateAuthority(ac *client.AlpaconClient, authorityId string) ([]byte, error) {
-	authorityId, err := api.RequireID(authorityId, "certificate authority")
+	pathID, err := api.RequireID(authorityId, "certificate authority")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := GetAuthorityDetail(ac, authorityId)
+	responseBody, err := getAuthorityDetail(ac, pathID)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +330,7 @@ func UpdateAuthority(ac *client.AlpaconClient, authorityId string) ([]byte, erro
 		return nil, err
 	}
 
-	responseBody, err = ac.SendPatchRequest(utils.BuildURL(authorityURL, authorityId, nil), data)
+	responseBody, err = ac.SendPatchRequest(api.IDURL(authorityURL, pathID, "", nil), data)
 	if err != nil {
 		return nil, err
 	}
@@ -335,12 +339,11 @@ func UpdateAuthority(ac *client.AlpaconClient, authorityId string) ([]byte, erro
 }
 
 func DownloadCRL(ac *client.AlpaconClient, authorityId string, filePath string) error {
-	authorityId, err := api.RequireID(authorityId, "certificate authority")
+	pathID, err := api.RequireID(authorityId, "certificate authority")
 	if err != nil {
 		return err
 	}
-	relativePath := path.Join(authorityId, "crl")
-	body, err := ac.SendGetRequest(utils.BuildURL(authorityURL, relativePath, nil))
+	body, err := ac.SendGetRequest(api.IDURL(authorityURL, pathID, "crl", nil))
 	if err != nil {
 		return err
 	}
@@ -355,11 +358,11 @@ func DownloadCRL(ac *client.AlpaconClient, authorityId string, filePath string) 
 }
 
 func DownloadRootCertificate(ac *client.AlpaconClient, authorityId string, filePath string) error {
-	authorityId, err := api.RequireID(authorityId, "certificate authority")
+	pathID, err := api.RequireID(authorityId, "certificate authority")
 	if err != nil {
 		return err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(authorityURL, authorityId, nil))
+	body, err := ac.SendGetRequest(api.IDURL(authorityURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}

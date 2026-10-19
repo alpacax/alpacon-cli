@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
@@ -84,11 +83,11 @@ func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventT
 // CloseEventSession closes an event session. The server keeps a closed session and
 // answers 204 for one that is already closed.
 func CloseEventSession(ctx context.Context, ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "event session")
+	pathID, err := api.RequireID(id, "event session")
 	if err != nil {
 		return err
 	}
-	if _, err := ac.SendDeleteRequestWithContext(ctx, eventSessionsURL+url.PathEscape(id)+"/"); err != nil {
+	if _, err := ac.SendDeleteRequestWithContext(ctx, api.IDURL(eventSessionsURL, pathID, "", nil)); err != nil {
 		return fmt.Errorf("failed to close event session: %w", err)
 	}
 	return nil

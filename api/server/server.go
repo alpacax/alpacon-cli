@@ -60,12 +60,12 @@ func GetServerList(ac *client.AlpaconClient) ([]ServerAttributes, error) {
 }
 
 func GetServerDetail(ac *client.AlpaconClient, serverName string) ([]byte, error) {
-	serverID, err := GetServerIDByName(ac, serverName)
+	pathID, err := serverPathIDByName(ac, serverName)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err := ac.SendGetRequest(utils.BuildURL(serverURL, serverID, nil))
+	body, err := ac.SendGetRequest(api.IDURL(serverURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +74,12 @@ func GetServerDetail(ac *client.AlpaconClient, serverName string) ([]byte, error
 }
 
 func DeleteServer(ac *client.AlpaconClient, serverName string) error {
-	serverID, err := GetServerIDByName(ac, serverName)
+	pathID, err := serverPathIDByName(ac, serverName)
 	if err != nil {
 		return err
 	}
 
-	_, err = ac.SendDeleteRequest(utils.BuildURL(serverURL, serverID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(serverURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -88,17 +88,25 @@ func DeleteServer(ac *client.AlpaconClient, serverName string) error {
 }
 
 func RequestServerAction(ac *client.AlpaconClient, serverName, action string, force bool) error {
-	serverID, err := GetServerIDByName(ac, serverName)
+	pathID, err := serverPathIDByName(ac, serverName)
 	if err != nil {
 		return utils.MarkSubmission(err)
 	}
 
 	req := serverActionRequest{Action: action, Force: force}
-	_, err = ac.SendPostRequest(utils.BuildURL(serverURL, serverID+"/actions", nil), req)
+	_, err = ac.SendPostRequest(api.IDURL(serverURL, pathID, "actions", nil), req)
 	return utils.MarkSubmission(err)
 }
 
 func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, error) {
+	pathID, err := serverPathIDByName(ac, serverName)
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
+}
+
+func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID, error) {
 	result, err := api.ResolveByName[ServerDetails](ac, api.ResolveByNameOptions{
 		Endpoint:    serverURL,
 		FilterKey:   "name",
@@ -107,10 +115,14 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 		NotFoundMsg: "no server found with the given name",
 	})
 	if err != nil {
-		return "", err
+		return api.PathID{}, err
 	}
 
-	return api.RequireResponseID(result.ID, "server")
+	pathID, err := api.RequireResponseID(result.ID, "server")
+	if err != nil {
+		return api.PathID{}, err
+	}
+	return pathID, nil
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
@@ -127,12 +139,12 @@ func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, err
 }
 
 func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
-	serverID, err := GetServerIDByName(ac, serverName)
+	pathID, err := serverPathIDByName(ac, serverName)
 	if err != nil {
 		return nil, err
 	}
 
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(serverURL, serverID, nil))
+	responseBody, err := ac.SendGetRequest(api.IDURL(serverURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +154,7 @@ func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 		return nil, err
 	}
 
-	responseBody, err = ac.SendPatchRequest(utils.BuildURL(serverURL, serverID, nil), data)
+	responseBody, err = ac.SendPatchRequest(api.IDURL(serverURL, pathID, "", nil), data)
 	if err != nil {
 		return nil, err
 	}
@@ -207,11 +219,11 @@ func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
 	if err != nil {
 		return err
 	}
-	tokenID, err := api.RequireResponseID(token.ID, "registration token")
+	pathID, err := api.RequireResponseID(token.ID, "registration token")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, tokenID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(registrationTokenURL, pathID, "", nil))
 	return err
 }
 

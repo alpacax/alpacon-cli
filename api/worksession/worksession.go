@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"strconv"
 	"strings"
 
@@ -73,9 +72,11 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	if err = json.Unmarshal(body, &session); err != nil {
 		return nil, err
 	}
-	if session.ID, err = api.RequireResponseID(session.ID, "work session"); err != nil {
+	pathID, err := api.RequireResponseID(session.ID, "work session")
+	if err != nil {
 		return nil, fmt.Errorf("the server created the work session, but its ID is unusable (%w); check for it before creating another", err)
 	}
+	session.ID = pathID.String()
 	return &session, nil
 }
 
@@ -84,11 +85,11 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 // may queue the change for approval, in which case it takes effect only once
 // approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendPatchRequest(utils.BuildURL(workSessionURL, id, nil), req)
+	body, err := ac.SendPatchRequest(api.IDURL(workSessionURL, pathID, "", nil), req)
 	if err != nil {
 		return nil, err
 	}
@@ -100,11 +101,11 @@ func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdat
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
+	body, err := ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -116,20 +117,20 @@ func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
 }
 
 func ActivateWorkSession(ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "activate"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(workSessionURL, pathID, "activate", nil), struct{}{})
 	return err
 }
 
 func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "complete"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(workSessionURL, pathID, "complete", nil), struct{}{})
 	return err
 }
 
@@ -144,11 +145,11 @@ func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
 // a caller that branched on the field alone would report an already-applied
 // extension as still pending.
 func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) (*WorkSession, int, error) {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, 0, err
 	}
-	body, status, err := ac.SendPostRequestWithStatus(utils.BuildURL(workSessionURL, path.Join(id, "extend"), nil), req)
+	body, status, err := ac.SendPostRequestWithStatus(api.IDURL(workSessionURL, pathID, "extend", nil), req)
 	if err != nil {
 		return nil, status, err
 	}
@@ -160,30 +161,30 @@ func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExten
 }
 
 func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "revoke"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(workSessionURL, pathID, "revoke", nil), struct{}{})
 	return err
 }
 
 // CancelWorkSession withdraws the requester's own pending session; the server restricts it to the creator/superuser and rejects non-pending sessions (unlike superuser-only RevokeWorkSession).
 func CancelWorkSession(ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "cancel"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(workSessionURL, pathID, "cancel", nil), struct{}{})
 	return err
 }
 
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
+	return ac.SendGetRequest(api.IDURL(workSessionURL, pathID, "", nil))
 }
 
 // GetWorkSessionTimeline reads a work session's activity timeline. A request
@@ -192,11 +193,11 @@ func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
 // key. So includeRecords picks the shape. `include_records` rides on the
 // paginated read too, for a server that does not paginate this route.
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
-	id, err := api.RequireID(id, "work session")
+	pathID, err := api.RequireID(id, "work session")
 	if err != nil {
 		return nil, err
 	}
-	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), nil)
+	endpoint := api.IDURL(workSessionURL, pathID, "timeline", nil)
 	params := map[string]string{"include_records": strconv.FormatBool(includeRecords)}
 	if includeRecords {
 		return getWholeWorkSessionTimeline(ac, endpoint, params)
@@ -250,7 +251,11 @@ func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, erro
 // null `next` or an empty page; a short page is not the last one. addedAt is the
 // first chunk's added_at, and found is false when the session has no recording.
 func GetTerminalRecording(ac *client.AlpaconClient, id, webshSessionID string) (record, addedAt string, found bool, err error) {
-	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "records"), nil)
+	pathID, err := api.RequireID(id, "work session")
+	if err != nil {
+		return "", "", false, err
+	}
+	endpoint := api.IDURL(workSessionURL, pathID, "records", nil)
 	chunks, err := api.FetchAllCursorPages[RecordChunk](ac, endpoint, map[string]string{"session": webshSessionID})
 	if err != nil {
 		return "", "", false, err

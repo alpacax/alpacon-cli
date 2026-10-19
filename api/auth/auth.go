@@ -203,7 +203,11 @@ func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, er
 		return "", err
 	}
 
-	return api.RequireResponseID(result.ID, "API token")
+	pathID, err := api.RequireResponseID(result.ID, "API token")
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
 }
 
 func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
@@ -215,11 +219,11 @@ func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
 }
 
 func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
-	tokenID, err := api.RequireID(tokenID, "API token")
+	pathID, err := api.RequireID(tokenID, "API token")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(tokenURL, tokenID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(tokenURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -228,11 +232,11 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 }
 
 func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, error) {
-	tokenID, err := api.RequireID(tokenID, "API token")
+	pathID, err := api.RequireID(tokenID, "API token")
 	if err != nil {
 		return "", err
 	}
-	url := utils.BuildURL(tokenURL, tokenID+"/duplicate", nil)
+	url := api.IDURL(tokenURL, pathID, "duplicate", nil)
 	req := APITokenDuplicateRequest{Name: name}
 	resp, err := ac.SendPostRequest(url, req)
 	if err != nil {

@@ -3,7 +3,6 @@ package cert
 import (
 	"bytes"
 	"encoding/json"
-	"path"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -45,11 +44,11 @@ func GetRevokeRequestList(ac *client.AlpaconClient, status string, certificate s
 }
 
 func GetRevokeRequestDetail(ac *client.AlpaconClient, requestId string) ([]byte, error) {
-	requestId, err := api.RequireID(requestId, "revoke request")
+	pathID, err := api.RequireID(requestId, "revoke request")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(revokeRequestURL, requestId, nil))
+	body, err := ac.SendGetRequest(api.IDURL(revokeRequestURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +72,11 @@ func CreateRevokeRequest(ac *client.AlpaconClient, request RevokeRequestCreate) 
 }
 
 func ApproveRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
-	requestId, err := api.RequireID(requestId, "revoke request")
+	pathID, err := api.RequireID(requestId, "revoke request")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(requestId, "approve")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(revokeRequestURL, pathID, "approve", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -87,12 +85,11 @@ func ApproveRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, e
 }
 
 func DenyRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
-	requestId, err := api.RequireID(requestId, "revoke request")
+	pathID, err := api.RequireID(requestId, "revoke request")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(requestId, "deny")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(revokeRequestURL, pathID, "deny", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -101,12 +98,11 @@ func DenyRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, erro
 }
 
 func RetryRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, error) {
-	requestId, err := api.RequireID(requestId, "revoke request")
+	pathID, err := api.RequireID(requestId, "revoke request")
 	if err != nil {
 		return nil, err
 	}
-	relativePath := path.Join(requestId, "retry")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(revokeRequestURL, relativePath, nil), bytes.NewBuffer([]byte("{}")))
+	responseBody, err := ac.SendPostRequest(api.IDURL(revokeRequestURL, pathID, "retry", nil), bytes.NewBuffer([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +111,11 @@ func RetryRevokeRequest(ac *client.AlpaconClient, requestId string) ([]byte, err
 }
 
 func CancelRevokeRequest(ac *client.AlpaconClient, requestId string) error {
-	requestId, err := api.RequireID(requestId, "revoke request")
+	pathID, err := api.RequireID(requestId, "revoke request")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(revokeRequestURL, requestId, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(revokeRequestURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}

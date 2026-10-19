@@ -2,7 +2,6 @@ package event
 
 import (
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,12 +25,8 @@ type Chunk struct {
 // sorted by seq ascending. A negative toSeq (noSeqBound) omits the upper
 // bound. The streaming consumers rely on the order, so we sort defensively
 // in case the server does not honor the ordering param.
-func getCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int) ([]Chunk, error) {
-	cmdID, err := api.RequireID(cmdID, "command")
-	if err != nil {
-		return nil, err
-	}
-	endpoint := "/api/events/commands/" + url.PathEscape(cmdID) + "/chunks/"
+func getCommandChunks(ac *client.AlpaconClient, cmdID api.PathID, fromSeq, toSeq int) ([]Chunk, error) {
+	endpoint := api.IDURL(getEventURL, cmdID, "chunks", nil)
 	params := map[string]string{
 		"seq__gte": strconv.Itoa(fromSeq),
 		"ordering": "seq",
@@ -53,7 +48,15 @@ func getCommandChunks(ac *client.AlpaconClient, cmdID string, fromSeq, toSeq int
 // order. Empty when no chunks were produced. Used by non-streaming paths (exec
 // logs, polling fallback) where Result is empty under the chunk contract.
 func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
-	chunks, err := getCommandChunks(ac, cmdID, 0, noSeqBound)
+	pathID, err := api.RequireID(cmdID, "command")
+	if err != nil {
+		return "", err
+	}
+	return getCommandOutputByPathID(ac, pathID)
+}
+
+func getCommandOutputByPathID(ac *client.AlpaconClient, pathID api.PathID) (string, error) {
+	chunks, err := getCommandChunks(ac, pathID, 0, noSeqBound)
 	if err != nil {
 		return "", err
 	}
@@ -68,6 +71,11 @@ func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
 // falling back to the result field the command detail carries.
 func ResolveCommandOutput(ac *client.AlpaconClient, cmdID, result string) (string, error) {
 	chunked, err := GetCommandOutput(ac, cmdID)
+	return pickCommandOutput(result, chunked, err)
+}
+
+func resolveCommandOutputByPathID(ac *client.AlpaconClient, pathID api.PathID, result string) (string, error) {
+	chunked, err := getCommandOutputByPathID(ac, pathID)
 	return pickCommandOutput(result, chunked, err)
 }
 

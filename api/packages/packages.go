@@ -75,23 +75,35 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 // GetPackageIDByName matches client-side because the entries endpoints filter on package__name,
 // never name, so an unknown name query is dropped and the whole list comes back.
 func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
-	fileName, err := api.RequireName(fileName, "package name is required")
+	pathID, err := packagePathIDByName(ac, fileName, packageType)
 	if err != nil {
 		return "", err
+	}
+	return pathID.String(), nil
+}
+
+func packagePathIDByName(ac *client.AlpaconClient, fileName string, packageType string) (api.PathID, error) {
+	fileName, err := api.RequireName(fileName, "package name is required")
+	if err != nil {
+		return api.PathID{}, err
 	}
 
 	entries, err := api.FetchAllPages[packageEntryRef](ac, packageEntryURL(packageType), map[string]string{"search": fileName})
 	if err != nil {
-		return "", err
+		return api.PathID{}, err
 	}
 
 	for _, e := range entries {
 		if e.Name == fileName {
-			return api.RequireResponseID(e.ID, "package")
+			pathID, err := api.RequireResponseID(e.ID, "package")
+			if err != nil {
+				return api.PathID{}, err
+			}
+			return pathID, nil
 		}
 	}
 
-	return "", errors.New("no package found with the given name")
+	return api.PathID{}, errors.New("no package found with the given name")
 }
 
 func UploadPackage(ac *client.AlpaconClient, file string, packageType string) error {
@@ -137,12 +149,12 @@ func packageDownloadResponseError(resp *http.Response) error {
 
 func DownloadPackage(ac *client.AlpaconClient, fileName string, dest string, packageType string) error {
 	fileName = strings.TrimSpace(fileName)
-	packageID, err := GetPackageIDByName(ac, fileName, packageType)
+	pathID, err := packagePathIDByName(ac, fileName, packageType)
 	if err != nil {
 		return err
 	}
 
-	respBody, err := ac.SendGetRequest(utils.BuildURL(packageEntryURL(packageType), packageID, nil))
+	respBody, err := ac.SendGetRequest(api.IDURL(packageEntryURL(packageType), pathID, "", nil))
 	if err != nil {
 		return err
 	}

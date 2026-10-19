@@ -26,6 +26,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func testPathID(t *testing.T, id string) api.PathID {
+	t.Helper()
+	pathID, err := api.RequireID(id, "command")
+	require.NoError(t, err)
+	return pathID
+}
+
 // The page walk itself is pinned in api.TestFetchPagesUpTo_*; what is specific to
 // GetEventList is that tail reaches the helper as its limit, so a tail larger than the
 // server's 100-item page cap still yields exactly tail commands.
@@ -1940,7 +1947,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 	// Clock frozen: after the first (immediate) attempt, every further gapped
 	// chunk is inside the window and must be skipped without a fetch.
 	for seq := 2; seq <= 10; seq++ {
-		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+		lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
 	assert.Equal(t, int32(1), fetches.Load(), "only the first gapped chunk should fetch; rest throttled")
@@ -1963,7 +1970,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	lastSeq := 0
 	for seq := 2; seq <= 6; seq++ {
 		now = now.Add(10 * time.Millisecond) // advance past the window each time
-		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+		lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
 	assert.LessOrEqual(t, fetches.Load(), int32(3), "fetches bounded by gapFillMaxNoProgress")
@@ -1985,7 +1992,7 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	lastSeq := 0
-	lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	assert.Equal(t, 3, lastSeq)
 	assert.Equal(t, 0, g.noProgress, "progress resets the no-progress counter")
@@ -2013,7 +2020,7 @@ func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		for seq := 2; seq <= 8; seq++ {
 			now = now.Add(10 * time.Millisecond) // advance past the window each time
-			lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+			lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 		}
 	})
 
@@ -2035,7 +2042,7 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
 	stderr := captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
@@ -2050,7 +2057,7 @@ func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	g.recoverSkipped(ac, "cmd", out)
+	g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 
 	assert.Equal(t, int32(0), fetches.Load(), "no skipped seqs means no recovery fetch")
 	assert.Empty(t, out.String())
@@ -2066,7 +2073,7 @@ func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
 	out := &bytes.Buffer{}
 	var lastSeq int
 	stderr := captureStderr(t, func() {
-		lastSeq = drainRemainingChunks(ac, "cmd", 4, out)
+		lastSeq = drainRemainingChunks(ac, testPathID(t, "cmd"), 4, out)
 	})
 
 	assert.Equal(t, 8, lastSeq)
@@ -2134,7 +2141,7 @@ func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
 	out := &bytes.Buffer{}
 	var last int
 	_ = captureStderr(t, func() {
-		last = drainRemainingChunks(ac, "cmd", 0, out)
+		last = drainRemainingChunks(ac, testPathID(t, "cmd"), 0, out)
 	})
 
 	assert.Equal(t, 12, last)
@@ -2150,7 +2157,7 @@ func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	out := &bytes.Buffer{}
 	var last int
 	stderr := captureStderr(t, func() {
-		last = drainRemainingChunks(ac, "cmd", 0, out)
+		last = drainRemainingChunks(ac, testPathID(t, "cmd"), 0, out)
 	})
 
 	assert.Equal(t, huge, last)
@@ -2178,7 +2185,7 @@ func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	out := &bytes.Buffer{}
 	var lastSeq int
 	stderr := captureStderr(t, func() {
-		lastSeq = drainRemainingChunks(ac, "cmd", 2, out)
+		lastSeq = drainRemainingChunks(ac, testPathID(t, "cmd"), 2, out)
 	})
 
 	assert.Equal(t, 6, lastSeq)
@@ -2213,7 +2220,7 @@ func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	// lastSeq=0, live chunk seq=3 -> gap [1,2], bounds seq__gte=1, seq__lte=2.
-	_ = applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	_ = applyChunk(ac, testPathID(t, "cmd"), 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	gte, lte := bounds()
 	assert.Equal(t, "1", gte)
@@ -2228,7 +2235,7 @@ func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
 	_ = captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	gte, lte := bounds()
@@ -2257,7 +2264,7 @@ func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	// Gap [1,2] exposed by live chunk seq=3; server also returns 4,5 (ignored).
-	lastSeq := applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	lastSeq := applyChunk(ac, testPathID(t, "cmd"), 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	assert.Equal(t, 3, lastSeq, "advances only through the live chunk, not the extra tail")
 	assert.Equal(t, "c1\nc2\nc3\n", out.String(), "extra tail beyond the bound is not emitted")
@@ -2284,7 +2291,7 @@ func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing
 	out := &bytes.Buffer{}
 	// Server returns 1..6 (ignoring seq__lte=4); only skipped 1 and 4 are emitted.
 	_ = captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	assert.Equal(t, "c1\nc4\n", out.String(), "only skipped seqs emitted, extra tail ignored")
