@@ -4,10 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"path/filepath"
-	"strconv"
-	"strings"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,53 +38,33 @@ var (
 // walks the AST, so a comment naming config.LoadConfig is not one and an alias is.
 func TestAPILayerNeverReadsConfig(t *testing.T) {
 	t.Parallel()
-	var offenders []string
-
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-
-		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if parseErr != nil {
-			return parseErr
-		}
-		local, imported := configImportName(file)
-		if !imported {
-			return nil
-		}
-		if local == "." {
-			// A dot import leaves config.LoadConfig a bare identifier no selector
-			// walk can attribute, so the import itself is the offense.
-			offenders = append(offenders, "api/"+path+" dot-imports config")
-			return nil
-		}
-		if name, found := readsConfig(file, local); found {
-			// Repo-relative, since the walk starts in api/ and a CI log needs an openable path.
-			offenders = append(offenders, "api/"+path+" calls config."+name)
-		}
-		return nil
-	})
-
+	dirs, err := nonTestGoFiles()
 	require.NoError(t, err)
-	assert.Empty(t, offenders, "take the workspace from the client instead of reading config here")
-}
 
-func configImportName(file *ast.File) (string, bool) {
-	for _, spec := range file.Imports {
-		path, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || path != configPkgPath {
-			continue
+	var offenders []string
+	for _, paths := range dirs {
+		for _, path := range paths {
+			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			require.NoError(t, err)
+			local := importName(file, configPkgPath)
+			if local == "" {
+				continue
+			}
+			if local == "." {
+				// A dot import leaves config.LoadConfig a bare identifier no selector
+				// walk can attribute, so the import itself is the offense.
+				offenders = append(offenders, "api/"+path+" dot-imports config")
+				continue
+			}
+			if name, found := readsConfig(file, local); found {
+				// Repo-relative, since the walk starts in api/ and a CI log needs an openable path.
+				offenders = append(offenders, "api/"+path+" calls config."+name)
+			}
 		}
-		if spec.Name != nil {
-			return spec.Name.Name, true
-		}
-		return "config", true
 	}
-	return "", false
+	sort.Strings(offenders)
+
+	assert.Empty(t, offenders, "take the workspace from the client instead of reading config here")
 }
 
 // readsConfig matches the selector, not the call, so handing a config reader off
