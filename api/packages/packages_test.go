@@ -464,9 +464,9 @@ func TestGetPythonPackageEntry_Pagination(t *testing.T) {
 	}
 }
 
-// TestGetPackageIDByName names the decoy so that it merely contains fileName, which only the
+// TestPackagePathIDByName names the decoy so that it merely contains fileName, which only the
 // exact compare can reject.
-func TestGetPackageIDByName(t *testing.T) {
+func TestPackagePathIDByName(t *testing.T) {
 	t.Parallel()
 	entries := []packageEntryRef{
 		{ID: "id-decoy", Name: "numpy-2.0.0.whl.sig"},
@@ -514,14 +514,14 @@ func TestGetPackageIDByName(t *testing.T) {
 					defer ts.Close()
 
 					ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-					id, err := GetPackageIDByName(ac, tt.fileName, packageType)
+					pathID, err := packagePathIDByName(ac, tt.fileName, packageType)
 
 					if tt.wantErr {
 						require.Error(t, err)
-						assert.Empty(t, id)
+						assert.Empty(t, pathID.String())
 					} else {
 						require.NoError(t, err)
-						assert.Equal(t, tt.wantID, id)
+						assert.Equal(t, tt.wantID, pathID.String())
 					}
 					assert.Equal(t, tt.wantCall, called.Load(), "whether the name reached the API")
 				})
@@ -530,7 +530,7 @@ func TestGetPackageIDByName(t *testing.T) {
 	}
 }
 
-func TestGetPackageIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+func TestPackagePathIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, id, want string }{
 		{name: "padded_id", id: " id-1 ", want: "id-1"},
@@ -545,15 +545,15 @@ func TestGetPackageIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			defer ts.Close()
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			id, err := GetPackageIDByName(ac, "numpy-2.0.0.whl", "python")
+			pathID, err := packagePathIDByName(ac, "numpy-2.0.0.whl", "python")
 
 			if tc.want == "" {
 				require.ErrorIs(t, err, api.ErrUnusableID)
-				assert.Empty(t, id)
+				assert.Empty(t, pathID.String())
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, tc.want, id)
+			assert.Equal(t, tc.want, pathID.String())
 		})
 	}
 }

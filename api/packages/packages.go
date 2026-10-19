@@ -72,16 +72,8 @@ func GetPythonPackageEntry(ac *client.AlpaconClient) ([]PythonPackage, error) {
 	return packageList, nil
 }
 
-// GetPackageIDByName matches client-side because the entries endpoints filter on package__name,
+// packagePathIDByName matches client-side because the entries endpoints filter on package__name,
 // never name, so an unknown name query is dropped and the whole list comes back.
-func GetPackageIDByName(ac *client.AlpaconClient, fileName string, packageType string) (string, error) {
-	pathID, err := packagePathIDByName(ac, fileName, packageType)
-	if err != nil {
-		return "", err
-	}
-	return pathID.String(), nil
-}
-
 func packagePathIDByName(ac *client.AlpaconClient, fileName string, packageType string) (api.PathID, error) {
 	fileName, err := api.RequireName(fileName, "package name is required")
 	if err != nil {
