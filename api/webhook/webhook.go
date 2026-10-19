@@ -115,9 +115,5 @@ func webhookPathIDByName(ac *client.AlpaconClient, webhookName string) (api.Path
 		return api.PathID{}, err
 	}
 
-	pathID, err := api.RequireResponseID(result.ID, "webhook")
-	if err != nil {
-		return api.PathID{}, err
-	}
-	return pathID, nil
+	return api.RequireResponseID(result.ID, "webhook")
 }

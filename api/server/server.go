@@ -118,11 +118,7 @@ func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID
 		return api.PathID{}, err
 	}
 
-	pathID, err := api.RequireResponseID(result.ID, "server")
-	if err != nil {
-		return api.PathID{}, err
-	}
-	return pathID, nil
+	return api.RequireResponseID(result.ID, "server")
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).

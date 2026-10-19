@@ -261,11 +261,7 @@ func userPathIDByName(ac *client.AlpaconClient, userName string) (api.PathID, er
 		return api.PathID{}, err
 	}
 
-	pathID, err := api.RequireResponseID(result.ID, "user")
-	if err != nil {
-		return api.PathID{}, err
-	}
-	return pathID, nil
+	return api.RequireResponseID(result.ID, "user")
 }
 
 // A role binding embeds a display name, not the username other commands accept.
@@ -303,11 +299,7 @@ func groupPathIDByName(ac *client.AlpaconClient, groupName string) (api.PathID, 
 		return api.PathID{}, err
 	}
 
-	pathID, err := api.RequireResponseID(result.ID, "group")
-	if err != nil {
-		return api.PathID{}, err
-	}
-	return pathID, nil
+	return api.RequireResponseID(result.ID, "group")
 }
 
 func getUserStatus(isActive bool, isStaff bool, isSuperuser bool) string {

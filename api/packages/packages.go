@@ -87,11 +87,7 @@ func packagePathIDByName(ac *client.AlpaconClient, fileName string, packageType 
 
 	for _, e := range entries {
 		if e.Name == fileName {
-			pathID, err := api.RequireResponseID(e.ID, "package")
-			if err != nil {
-				return api.PathID{}, err
-			}
-			return pathID, nil
+			return api.RequireResponseID(e.ID, "package")
 		}
 	}
 
