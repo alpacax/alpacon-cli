@@ -352,16 +352,14 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	var start sync.WaitGroup
 	var done sync.WaitGroup
 	start.Add(1)
-	done.Add(callers)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
 	for i := range callers {
-		go func(i int) {
-			defer done.Done()
+		done.Go(func() {
 			start.Wait()
 			results[i], errs[i] = GetOrCreateDeviceID()
-		}(i)
+		})
 	}
 	start.Done()
 	done.Wait()
@@ -398,16 +396,14 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 	var start sync.WaitGroup
 	var done sync.WaitGroup
 	start.Add(1)
-	done.Add(callers)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
 	for i := range callers {
-		go func(i int) {
-			defer done.Done()
+		done.Go(func() {
 			start.Wait()
 			results[i], errs[i] = GetOrCreateDeviceID()
-		}(i)
+		})
 	}
 	start.Done()
 	done.Wait()
