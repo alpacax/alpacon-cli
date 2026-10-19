@@ -256,7 +256,7 @@ func diagnosticNextCommands(t *testing.T, diagnostic string) []string {
 	require.True(t, found, "diagnostic has no Next block: %q", diagnostic)
 	block, _, _ = strings.Cut(block, "\n\n")
 	var cmds []string
-	for _, line := range strings.Split(block, "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		cmd, _, _ := strings.Cut(strings.TrimPrefix(line, "  "), "  # ")
 		cmds = append(cmds, cmd)
 	}

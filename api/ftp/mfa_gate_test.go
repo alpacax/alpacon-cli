@@ -65,11 +65,9 @@ func runGatePolls(t *testing.T, ac *client.AlpaconClient) []error {
 	errs := make([]error, gatePolls)
 	var wg sync.WaitGroup
 	for i := range gatePolls {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _, errs[i] = pollTransfer(ac, "srv-id", "upload", "t-1", 30*time.Second, time.Time{})
-		}()
+		})
 	}
 	wg.Wait()
 	return errs
@@ -120,14 +118,15 @@ type bulkGateStub struct {
 }
 
 func (s *bulkGateStub) client() *client.AlpaconClient {
-	slots := `[`
+	var slots strings.Builder
+	slots.WriteString(`[`)
 	for i := range bulkFiles {
 		if i > 0 {
-			slots += `,`
+			slots.WriteString(`,`)
 		}
-		slots += fmt.Sprintf(`{"id": "t-%d"}`, i)
+		fmt.Fprintf(&slots, `{"id": "t-%d"}`, i)
 	}
-	slots += `]`
+	slots.WriteString(`]`)
 	return &client.AlpaconClient{
 		BaseURL:       testutil.StubBaseURL,
 		WorkspaceName: "my-workspace",
@@ -139,7 +138,7 @@ func (s *bulkGateStub) client() *client.AlpaconClient {
 			case r.URL.Path == "/api/servers/servers/":
 				return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
 			case r.Method == http.MethodPost && r.URL.Path == uploadBulkAPIURL:
-				return http.StatusCreated, slots
+				return http.StatusCreated, slots.String()
 			case r.Method == http.MethodPost && r.URL.Path == uploadBulkTriggerURL:
 				return http.StatusOK, `{}`
 			case strings.HasSuffix(r.URL.Path, "/status/"):

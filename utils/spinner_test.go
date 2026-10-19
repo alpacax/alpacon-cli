@@ -155,15 +155,13 @@ func TestSpinner_RestartAndStopRaceOnTheSameSpinner(t *testing.T) {
 		s.interval = time.Millisecond
 
 		var wg sync.WaitGroup
-		wg.Add(2)
 		for range 2 {
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for range 50 {
 					s.Start()
 					s.Stop()
 				}
-			}()
+			})
 		}
 		wg.Wait()
 

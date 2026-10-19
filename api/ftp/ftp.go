@@ -198,24 +198,17 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	if count == 0 {
 		return nil
 	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > count {
-		limit = count
-	}
+	limit = min(max(limit, 1), count)
 
 	failuresByIndex := make([]string, count)
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	for i := range count {
 		sem <- struct{}{}
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
-			failuresByIndex[index] = fn(index)
-		}(i)
+			failuresByIndex[i] = fn(i)
+		})
 	}
 	wg.Wait()
 

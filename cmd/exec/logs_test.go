@@ -14,10 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func boolPtr(b bool) *bool    { return &b }
-func intPtr(i int) *int       { return &i }
-func strPtr(s string) *string { return &s }
-
 func TestIsRunningStatus(t *testing.T) {
 	t.Parallel()
 	running := []string{"queued", "scheduled", "delivered", "verifying", "running", "acked"}
@@ -91,7 +87,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 		},
 		{
 			name:               "stuck with agent_timeout phase",
-			details:            event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
+			details:            event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: new("agent_timeout")},
 			wantStdoutLine:     "",
 			wantStderrContains: []string{"agent_timeout", "status=stuck"},
 			wantExitCode:       1,
@@ -105,7 +101,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 		},
 		{
 			name:               "cancelled with phase",
-			details:            event.EventDetails{ID: "job-1", Status: "cancelled", ErrorPhase: strPtr("agent_disconnected")},
+			details:            event.EventDetails{ID: "job-1", Status: "cancelled", ErrorPhase: new("agent_disconnected")},
 			wantStdoutLine:     "",
 			wantStderrContains: []string{"agent_disconnected", "status=cancelled"},
 			wantExitCode:       1,
@@ -115,7 +111,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 			details: event.EventDetails{
 				ID:         "job-1",
 				Status:     "error",
-				ErrorPhase: strPtr("agent_disconnected"),
+				ErrorPhase: new("agent_disconnected"),
 			},
 			wantStdoutLine:     "",
 			wantStderrContains: []string{"agent_disconnected", "status=error"},
@@ -126,8 +122,8 @@ func TestLogsCommandOutcome(t *testing.T) {
 			details: event.EventDetails{
 				ID:       "job-1",
 				Status:   "completed",
-				Success:  boolPtr(false),
-				ExitCode: intPtr(23),
+				Success:  new(false),
+				ExitCode: new(23),
 				Result:   "partial transfer",
 			},
 			wantStdoutLine:  "partial transfer",
@@ -139,9 +135,9 @@ func TestLogsCommandOutcome(t *testing.T) {
 			details: event.EventDetails{
 				ID:         "job-1",
 				Status:     "completed",
-				Success:    boolPtr(false),
-				ExitCode:   intPtr(124),
-				ErrorPhase: strPtr("remote_command_exceeded_timeout"),
+				Success:    new(false),
+				ExitCode:   new(124),
+				ErrorPhase: new("remote_command_exceeded_timeout"),
 				Result:     "timed out",
 			},
 			wantStdoutLine:     "timed out",
@@ -153,7 +149,7 @@ func TestLogsCommandOutcome(t *testing.T) {
 			details: event.EventDetails{
 				ID:      "job-1",
 				Status:  "completed",
-				Success: boolPtr(false),
+				Success: new(false),
 				Result:  "old alpamon output",
 			},
 			wantStdoutLine:  "old alpamon output",
@@ -214,7 +210,7 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 		},
 		{
 			name:       "stuck branch strips escape in unknown phase",
-			details:    event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: strPtr("boom\x1b[31m\u202e")},
+			details:    event.EventDetails{ID: "job-1", Status: "stuck", ErrorPhase: new("boom\x1b[31m\u202e")},
 			wantStderr: utils.Red("Error") + ": [boom] boom (status=stuck)\n",
 		},
 		{
@@ -222,9 +218,9 @@ func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 			details: event.EventDetails{
 				ID:         "job-1",
 				Status:     "completed",
-				Success:    boolPtr(false),
-				ExitCode:   intPtr(2),
-				ErrorPhase: strPtr("phase\x1b]0;pwn\x07\u202e"),
+				Success:    new(false),
+				ExitCode:   new(2),
+				ErrorPhase: new("phase\x1b]0;pwn\x07\u202e"),
 			},
 			wantStderr: utils.Red("Error") + ": [phase] phase\n",
 		},
