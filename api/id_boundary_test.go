@@ -64,6 +64,40 @@ func TestAPILayerBuildsIDPathsFromCheckedSegments(t *testing.T) {
 	assert.Empty(t, offenders, "check the ID with api.RequireID or api.RequireResponseID and build the URL with api.IDURL")
 }
 
+func TestURLOffenders_FlagsAPathIDHandedToAPathAssembler(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, imp, expr, want string }{
+		{name: "value_to_sprintf", imp: "fmt", expr: `fmt.Sprintf("/api/notes/%s/", pathID)`, want: "hands a PathID to fmt.Sprintf"},
+		{name: "pointer_to_sprint", imp: "fmt", expr: `fmt.Sprint(&pathID)`, want: "hands a PathID to fmt.Sprint"},
+		{name: "string_call_to_path_join", imp: "path", expr: `path.Join("/api/notes", pathID.String())`, want: "hands a PathID to path.Join"},
+		{name: "checked_idurl", expr: `api.IDURL("/api/notes/", pathID, "", nil)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			imp := ""
+			if tc.imp != "" {
+				imp = fmt.Sprintf("%q\n", tc.imp)
+			}
+			src := fmt.Sprintf("package fixture\n\nimport (\n%s%q\n)\n\nfunc build(pathID api.PathID) string { return %s }\n", imp, apiPkgPath, tc.expr)
+			file := filepath.Join(t.TempDir(), "fixture.go")
+			require.NoError(t, os.WriteFile(file, []byte(src), 0o600))
+
+			imports, err := exportDataImporter()
+			require.NoError(t, err)
+			pkg, err := checkPackage("example.com/fixture", []string{file}, imports)
+			require.NoError(t, err)
+			offenders := pkg.urlOffenders()
+
+			if tc.want == "" {
+				assert.Empty(t, offenders)
+				return
+			}
+			require.Len(t, offenders, 1)
+			assert.Contains(t, offenders[0], tc.want)
+		})
+	}
+}
+
 func exportDataImporter() (types.Importer, error) {
 	out, err := exec.Command("go", "list", "-export", "-deps", "-f", "{{if .Export}}{{.ImportPath}}={{.Export}}{{end}}", "./...").Output()
 	if err != nil {
@@ -165,15 +199,16 @@ func (p checkedPackage) urlOffenders() []string {
 }
 
 func (p checkedPackage) isPathIDString(expr ast.Expr) bool {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok || len(call.Args) != 0 {
-		return false
+	if call, ok := expr.(*ast.CallExpr); ok && len(call.Args) == 0 {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == stringName {
+			expr = sel.X
+		}
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != stringName {
-		return false
+	typ := types.Unalias(p.info.Types[expr].Type)
+	if ptr, ok := typ.(*types.Pointer); ok {
+		typ = types.Unalias(ptr.Elem())
 	}
-	named, ok := types.Unalias(p.info.Types[sel.X].Type).(*types.Named)
+	named, ok := typ.(*types.Named)
 	return ok && named.Obj().Name() == pathIDName && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == apiPkgPath
 }
 

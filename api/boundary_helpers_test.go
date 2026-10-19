@@ -2,24 +2,34 @@ package api
 
 import (
 	"go/ast"
-	"io/fs"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 func nonTestGoFiles() (map[string][]string, error) {
+	out, err := exec.Command("go", "list", "-f", "{{.Dir}}{{range .GoFiles}}\t{{.}}{{end}}", "./...").Output()
+	if err != nil {
+		return nil, err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
 	dirs := map[string][]string{}
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	for line := range strings.Lines(string(out)) {
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		dir, err := filepath.Rel(wd, fields[0])
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if !d.IsDir() && strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
-			dirs[filepath.Dir(path)] = append(dirs[filepath.Dir(path)], path)
+		for _, name := range fields[1:] {
+			dirs[dir] = append(dirs[dir], filepath.Join(dir, name))
 		}
-		return nil
-	})
-	return dirs, err
+	}
+	return dirs, nil
 }
 
 func importName(file *ast.File, pkgPath string) string {
