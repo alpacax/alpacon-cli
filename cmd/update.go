@@ -44,9 +44,12 @@ never has to parse prose:
 			message, code := checkOutcome(utils.Version, release.Version)
 			utils.CliInfo("%s", message)
 			if code != 0 {
-				utils.CliInfo("%s", checkAction(installKind())) // CliInfo, not CliError: the check succeeded, and "Error" would contradict the exit code the README tells scripts to branch on.
+				action := checkAction(installKind())
+				utils.CliInfo("%s", action) // not CliError: the check succeeded
+				printCheckStatus("update_available", release.Version, action)
 				os.Exit(code)
 			}
+			printCheckStatus("up_to_date", release.Version, "")
 			return
 		}
 
@@ -81,6 +84,23 @@ never has to parse prose:
 
 func init() {
 	updateCmd.Flags().BoolVar(&checkOnly, "check", false, "Report whether a newer release exists without installing it")
+}
+
+// A status object on stdout, not an envelope: exit 8 means a newer release exists, not a failure.
+func printCheckStatus(status, latest, action string) {
+	if utils.OutputFormat != utils.OutputFormatJSON {
+		return
+	}
+	out := struct {
+		OK      bool   `json:"ok"`
+		Status  string `json:"status"`
+		Current string `json:"current"`
+		Latest  string `json:"latest"`
+		Action  string `json:"action,omitempty"`
+	}{true, status, utils.Version, latest, action}
+	if err := utils.PrintJSONValue(os.Stdout, out); err != nil {
+		utils.CliErrorWithExit("Failed to render the answer: %s.", err)
+	}
 }
 
 func upToDateMessage(current string) string {

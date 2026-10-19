@@ -62,7 +62,8 @@ AI agents add --requester-type agent to step 2 and drop --use and websh, which a
 agent session refuses; step 3 then names the session before the server:
   alpacon exec --work-session <SESSION_ID> <SERVER> -- <COMMAND>
 
-See 'alpacon work-session --help' for session lifecycle and error codes.`,
+See 'alpacon work-session --help' for session lifecycle and error codes.
+See 'alpacon help output' for the JSON output and error contract.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
 		case utils.OutputFormatTable, utils.OutputFormatJSON:
@@ -111,6 +112,7 @@ func init() {
 		"Output format: table or json",
 	)
 
+	RootCmd.AddCommand(outputHelpCmd)
 	routeHelpToStderr()
 
 	// version

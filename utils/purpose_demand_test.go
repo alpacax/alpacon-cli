@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -180,26 +181,29 @@ func TestPrintPurposeAccepted_JSONNamesWhereToReadTheOutcome(t *testing.T) {
 	assert.Contains(t, got.NextActions[0].Command, "alpacon exec logs "+purposeTestCommandID)
 }
 
-func TestPrintPurposeRefused_JSONDoesNotSendTheCallerToResubmit(t *testing.T) {
+func TestPrintPurposeRefused_JSONIsAStderrEnvelopeThatDoesNotSendTheCallerToResubmit(t *testing.T) {
 	// A settled command and a bystander's answer share one server code, so the
 	// envelope cannot say which happened—and must not turn that uncertainty
 	// into a resubmission, which would create a second command.
-	var out string
+	var stdout, stderr string
 	withFormat(OutputFormatJSON, func() {
-		out = testutil.CaptureStdout(t, func() {
+		stdout, stderr = testutil.CaptureOutput(t, func() {
 			PrintPurposeRefused(purposeTestCommandID, errors.New("400 Bad Request"))
 		})
 	})
 
-	var got purposeAnswerSignal
-	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
-	assert.False(t, got.OK)
-	assert.Equal(t, "purpose_refused", got.Status)
-	assert.Equal(t, ExitCodeGeneralError, got.ExitCode)
-	assert.Equal(t, purposeTestCommandID, got.CommandID)
-	require.Len(t, got.NextActions, 1)
-	assert.Contains(t, got.NextActions[0].Command, "alpacon exec logs")
-	assert.Contains(t, got.NextActions[0].Description, "do not re-submit")
+	assert.Empty(t, stdout)
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 1,
+		"error_code": "purpose_refused",
+		"message": "failed to state the purpose for `+purposeTestCommandID+`: 400 Bad Request. The demand may have expired, it may already have been answered, or this credential may not be the one that submitted the command.",
+		"context": {"operation": "", "command_id": "`+purposeTestCommandID+`"},
+		"next_actions": [{
+			"command": "alpacon exec logs `+purposeTestCommandID+`",
+			"description": "Read the command's state; do not re-submit it, which would create a second command"
+		}]
+	}`, strings.TrimSpace(stderr))
 }
 
 func TestPrintPurposeAnswer_TableModeKeepsStdoutClean(t *testing.T) {
