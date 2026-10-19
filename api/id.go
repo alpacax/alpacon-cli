@@ -56,10 +56,13 @@ func RequireResponseID(id, what string) (PathID, error) {
 	return PathID{s: id}, nil
 }
 
-// IDURL builds base/id/action/ with params as the query. action is a constant such as "close", or "" for none.
+// IDURL builds base/id/action/ with params as the query. action is one constant segment such as "close", or "" for none.
 func IDURL(base string, id PathID, action string, params map[string]string) string {
 	if id.s == "" {
 		panic("api.IDURL: zero PathID")
+	}
+	if segment, ok := pathSegmentID(action); action != "" && (!ok || segment != action) {
+		panic(fmt.Sprintf("api.IDURL: action %q is not one path segment", action))
 	}
 	return utils.BuildURL(base, path.Join(id.s, action), params)
 }

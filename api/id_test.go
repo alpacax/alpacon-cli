@@ -173,3 +173,23 @@ func TestIDURLPanicsOnAnUncheckedPathID(t *testing.T) {
 
 	assert.Panics(t, func() { IDURL("https://alpacon.test/api/notes/", PathID{}, "", nil) })
 }
+
+func TestIDURLPanicsOnAnActionThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	id, err := RequireID("42", "note")
+	require.NoError(t, err)
+
+	for _, tc := range []struct{ name, action string }{
+		{"parent segment", "../other"},
+		{"nested traversal", "close/../.."},
+		{"dot", "."},
+		{"dot dot", ".."},
+		{"surrounding space", " close"},
+		{"query mark", "a?b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Panics(t, func() { IDURL("https://alpacon.test/api/notes/", id, tc.action, nil) })
+		})
+	}
+}
