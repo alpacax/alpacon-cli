@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -98,7 +99,7 @@ func TestURLOffenders_FlagsAPathIDHandedToAPathAssembler(t *testing.T) {
 	}
 }
 
-func exportDataImporter() (types.Importer, error) {
+var exportFiles = sync.OnceValues(func() (map[string]string, error) {
 	out, err := exec.Command("go", "list", "-export", "-deps", "-f", "{{if .Export}}{{.ImportPath}}={{.Export}}{{end}}", "./...").Output()
 	if err != nil {
 		return nil, err
@@ -108,6 +109,14 @@ func exportDataImporter() (types.Importer, error) {
 		if pkgPath, file, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
 			exports[pkgPath] = file
 		}
+	}
+	return exports, nil
+})
+
+func exportDataImporter() (types.Importer, error) {
+	exports, err := exportFiles()
+	if err != nil {
+		return nil, err
 	}
 	return importer.ForCompiler(token.NewFileSet(), "gc", func(pkgPath string) (io.ReadCloser, error) {
 		file, ok := exports[pkgPath]
