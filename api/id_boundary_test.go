@@ -3,9 +3,13 @@ package api
 import (
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -43,14 +47,15 @@ func TestAPILayerBuildsIDPathsFromCheckedSegments(t *testing.T) {
 	dirs, err := nonTestGoFiles()
 	require.NoError(t, err)
 
-	root, err := checkPackage(apiPkgPath, dirs["."], apiOnlyImporter{})
+	imports, err := exportDataImporter()
 	require.NoError(t, err)
-	offenders := root.urlOffenders()
+	var offenders []string
 	for dir, paths := range dirs {
-		if dir == "." {
-			continue
+		pkgPath := apiPkgPath
+		if dir != "." {
+			pkgPath += "/" + filepath.ToSlash(dir)
 		}
-		pkg, err := checkPackage(apiPkgPath+"/"+filepath.ToSlash(dir), paths, apiOnlyImporter{api: root.types})
+		pkg, err := checkPackage(pkgPath, paths, imports)
 		require.NoError(t, err)
 		offenders = append(offenders, pkg.urlOffenders()...)
 	}
@@ -59,15 +64,24 @@ func TestAPILayerBuildsIDPathsFromCheckedSegments(t *testing.T) {
 	assert.Empty(t, offenders, "check the ID with api.RequireID or api.RequireResponseID and build the URL with api.IDURL")
 }
 
-type apiOnlyImporter struct{ api *types.Package }
-
-func (s apiOnlyImporter) Import(path string) (*types.Package, error) {
-	if path == apiPkgPath {
-		return s.api, nil
+func exportDataImporter() (types.Importer, error) {
+	out, err := exec.Command("go", "list", "-export", "-deps", "-f", "{{if .Export}}{{.ImportPath}}={{.Export}}{{end}}", "./...").Output()
+	if err != nil {
+		return nil, err
 	}
-	pkg := types.NewPackage(path, filepath.Base(path))
-	pkg.MarkComplete()
-	return pkg, nil
+	exports := map[string]string{}
+	for line := range strings.Lines(string(out)) {
+		if pkgPath, file, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			exports[pkgPath] = file
+		}
+	}
+	return importer.ForCompiler(token.NewFileSet(), "gc", func(pkgPath string) (io.ReadCloser, error) {
+		file, ok := exports[pkgPath]
+		if !ok {
+			return nil, fmt.Errorf("no export data for %s", pkgPath)
+		}
+		return os.Open(file)
+	}), nil
 }
 
 type checkedPackage struct {
@@ -76,10 +90,9 @@ type checkedPackage struct {
 	paths []string
 	files []*ast.File
 	info  *types.Info
-	types *types.Package
 }
 
-func checkPackage(pkgPath string, paths []string, importer types.Importer) (checkedPackage, error) {
+func checkPackage(pkgPath string, paths []string, imports types.Importer) (checkedPackage, error) {
 	p := checkedPackage{path: pkgPath, fset: token.NewFileSet(), paths: paths, info: &types.Info{Types: map[ast.Expr]types.TypeAndValue{}}}
 	for _, path := range paths {
 		file, err := parser.ParseFile(p.fset, path, nil, 0)
@@ -88,9 +101,9 @@ func checkPackage(pkgPath string, paths []string, importer types.Importer) (chec
 		}
 		p.files = append(p.files, file)
 	}
-	conf := types.Config{Importer: importer, Error: func(error) {}}
-	p.types, _ = conf.Check(pkgPath, p.fset, p.files, p.info)
-	return p, nil
+	conf := types.Config{Importer: imports}
+	_, err := conf.Check(pkgPath, p.fset, p.files, p.info)
+	return p, err
 }
 
 func (p checkedPackage) urlOffenders() []string {
