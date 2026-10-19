@@ -14,8 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const pendingWorkSessionStatus = "pending"
-
 var (
 	updateTitle       string
 	updateDescription string
@@ -167,7 +165,7 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 
 // scopes is the effective scope list: req.Scopes when --scope replaces the list, else the session's current scopes.
 func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) error {
-	if session.Status == pendingWorkSessionStatus {
+	if session.Status == wsapi.StatusPending {
 		return fmt.Errorf(
 			"work session %s is pending approval; sudo policies cannot be modified yet. Set them at create time with --sudo, or wait until it is approved",
 			session.ID,
@@ -183,11 +181,11 @@ func validateSessionForSudoUpdate(session *wsapi.WorkSession, scopes []string) e
 }
 
 func validateSessionForTimeUpdate(session *wsapi.WorkSession, req wsapi.WorkSessionUpdateRequest) error {
-	if session.Status == pendingWorkSessionStatus {
+	if session.Status == wsapi.StatusPending {
 		return nil
 	}
 	msg := fmt.Sprintf("work session %s is %s; --starts-at and --expires-at can only change while the session is pending", session.ID, session.Status)
-	extendable := session.Status == approvedWorkSessionStatus || session.Status == activeWorkSessionStatus
+	extendable := session.Status == wsapi.StatusApproved || session.Status == wsapi.StatusActive
 	if req.ExpiresAt != "" && extendable {
 		msg += fmt.Sprintf(". To change the expiry, run 'alpacon work-session extend %s --expires-at <time> --reason <reason>'", session.ID)
 	}
@@ -228,7 +226,7 @@ func applyWorkSessionUpdate(ac *client.AlpaconClient, sessionID string, req wsap
 	}
 	if checkTime {
 		if stored := unappliedTimes(updated, req); len(stored) > 0 {
-			if updated.Status == pendingWorkSessionStatus {
+			if updated.Status == wsapi.StatusPending {
 				return nil, fmt.Errorf("work session %s is still pending, but the server stored different times than sent: %s; the other fields in this update were still sent", updated.ID, strings.Join(stored, ", "))
 			}
 			flags := sentTimeFlags(req)
