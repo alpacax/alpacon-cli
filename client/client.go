@@ -582,7 +582,7 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, utils.RedactURLError(err)
+		return nil, redirectRefusedStatus(resp), withRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -850,7 +850,7 @@ func hasRawSpaceOrBadEscape(query string) bool {
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 	resp, err := httpclient.StopAtCrossOrigin(ac.HTTPClient).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, withRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
@@ -1006,7 +1006,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		// A download URL may be presigned, and a transport error prints it whole.
-		return nil, utils.RedactURLError(err)
+		return nil, withRedirectStatus(utils.RedactURLError(err), resp)
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -1125,6 +1125,21 @@ func (e *apiError) HTTPStatusCode() int {
 
 func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
 	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
+}
+
+// withRedirectStatus keeps the 3xx a refused redirect leaves: Do returns it beside the error.
+func withRedirectStatus(err error, resp *http.Response) error {
+	if resp == nil {
+		return err
+	}
+	return withStatus(err, resp.StatusCode)
+}
+
+func redirectRefusedStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
 }
 
 // withStatus tags err with its HTTP status so callers can tell 404 from 401,

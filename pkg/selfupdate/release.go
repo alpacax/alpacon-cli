@@ -62,7 +62,7 @@ func LatestRelease(apiURL string) (*Release, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
