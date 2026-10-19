@@ -6,7 +6,7 @@ import (
 )
 
 var workSessionRejectCmd = &cobra.Command{
-	Use:   "reject SESSION_ID",
+	Use:   "reject",
 	Short: "Reject a session (moved to the Alpacon console)",
 	Long: `Rejecting work sessions has moved to the Alpacon console (web).
 

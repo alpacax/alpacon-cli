@@ -10,7 +10,7 @@ import (
 var userListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
-	Short:   "Display a list of all users",
+	Short:   "List users",
 	Long: `
 	Display a detailed list of all users registered in the Alpacon.
 	This command provides information such as name, email, status, and other relevant details.

@@ -90,6 +90,10 @@ func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
 }
 
 func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
+	userId, err := api.RequireID(userId, "user")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, userId, nil))
 	if err != nil {
 		return nil, err
@@ -99,6 +103,10 @@ func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
 }
 
 func GetGroupDetail(ac *client.AlpaconClient, groupId string) ([]byte, error) {
+	groupId, err := api.RequireID(groupId, "group")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(groupURL, groupId, nil))
 	if err != nil {
 		return nil, err
@@ -112,14 +120,25 @@ func InviteUser(ac *client.AlpaconClient, request UserInviteRequest) error {
 	return err
 }
 
-func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) error {
+// CreateUser returns the password the server generated for the new user, or "" when the response carries none.
+func CreateUser(ac *client.AlpaconClient, userRequest UserCreateRequest) (string, error) {
 	userRequest.IsActive = true
-	_, err := ac.SendPostRequest(userURL, userRequest)
+	body, err := ac.SendPostRequest(userURL, userRequest)
 	if err != nil {
-		return err
+		return "", err
+	}
+	if len(body) == 0 {
+		return "", nil
 	}
 
-	return nil
+	var created struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		return "", err
+	}
+
+	return created.Password, nil
 }
 
 func CreateGroup(ac *client.AlpaconClient, groupRequest GroupCreateRequest) error {
@@ -194,13 +213,7 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		"user":  memberID,
 		"group": groupID,
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(membershipURL, "", params))
-	if err != nil {
-		return err
-	}
-
-	var memberDetails []MemberDetailResponse
-	err = json.Unmarshal(responseBody, &memberDetails)
+	memberDetails, err := api.FetchPagesUpTo[MemberDetailResponse](ac, membershipURL, params, 1)
 	if err != nil {
 		return err
 	}
@@ -208,7 +221,11 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		return errors.New("no membership found for the given user and group")
 	}
 
-	_, err = ac.SendDeleteRequest(utils.BuildURL(membershipURL, memberDetails[0].ID, nil))
+	membershipID, err := api.RequireResponseID(memberDetails[0].ID, "membership")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(membershipURL, membershipID, nil))
 	if err != nil {
 		return err
 	}
@@ -228,7 +245,7 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "user")
 }
 
 // A role binding embeds a display name, not the username other commands accept.
@@ -258,7 +275,7 @@ func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "group")
 }
 
 func getUserStatus(isActive bool, isStaff bool, isSuperuser bool) string {
@@ -334,6 +351,10 @@ func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *User
 }
 
 func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) ([]byte, error) {
+	userID, err := api.RequireID(userID, "user")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
 }
 

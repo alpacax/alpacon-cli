@@ -25,7 +25,6 @@ func GetWebhookList(ac *client.AlpaconClient) ([]WebhookAttributes, error) {
 			Provider:  wh.Provider,
 			SSLVerify: wh.SSLVerify,
 			Enabled:   wh.Enabled,
-			Owner:     wh.Owner.Name,
 		})
 	}
 
@@ -33,6 +32,10 @@ func GetWebhookList(ac *client.AlpaconClient) ([]WebhookAttributes, error) {
 }
 
 func GetWebhookDetail(ac *client.AlpaconClient, webhookId string) ([]byte, error) {
+	webhookId, err := api.RequireID(webhookId, "webhook")
+	if err != nil {
+		return nil, err
+	}
 	responseBody, err := ac.SendGetRequest(utils.BuildURL(webhookURL, webhookId, nil))
 	if err != nil {
 		return nil, err
@@ -100,5 +103,5 @@ func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, e
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "webhook")
 }

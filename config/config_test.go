@@ -417,9 +417,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 	writeErrs := make([]error, 2)
 	done := make(chan struct{})
 	for w := range 2 {
-		writers.Add(1)
-		go func() {
-			defer writers.Done()
+		writers.Go(func() {
 			// Varying lengths so a half-written file differs in size from the
 			// one it replaced, which is what a reader would catch.
 			for i := range 300 {
@@ -428,7 +426,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	go func() {
 		writers.Wait()
@@ -622,4 +620,84 @@ func TestUnsetActiveWorkSession_DoesNotRevealTheLegacySession(t *testing.T) {
 	got, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, got, "unsetting the newer session must not bring the older one back")
+}
+
+func TestClearActiveWorkSessionFor_ClearsTheSessionThatEnded(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-1"))
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "uuid-1")
+
+	require.NoError(t, err)
+	assert.True(t, cleared)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestClearActiveWorkSessionFor_KeepsAnotherActiveSession(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-2"))
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "uuid-1")
+
+	require.NoError(t, err)
+	assert.False(t, cleared)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-2", got)
+}
+
+func TestClearActiveWorkSessionFor_KeepsTheSameIDUnderAnotherWorkspace(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-1"))
+
+	cleared, err := ClearActiveWorkSessionFor("ws-b", "uuid-1")
+
+	require.NoError(t, err)
+	assert.False(t, cleared)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-1", got)
+}
+
+func TestClearActiveWorkSessionFor_ReachesTheLegacyHostLabelKey(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-old"))
+	require.NoError(t, SetSchemaName("frozen"))
+
+	cleared, err := ClearActiveWorkSessionFor("frozen", "uuid-old")
+
+	require.NoError(t, err)
+	assert.True(t, cleared)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestClearActiveWorkSessionFor_NoConfigIsNotAnError(t *testing.T) {
+	setupTestConfig(t)
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "uuid-1")
+
+	require.NoError(t, err)
+	assert.False(t, cleared)
+}
+
+func TestClearActiveWorkSessionFor_MatchesAnIDThatDiffersOnlyInCase(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("05443c7f-0000-4000-8000-00000000abcd"))
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "05443C7F-0000-4000-8000-00000000ABCD")
+
+	require.NoError(t, err)
+	assert.True(t, cleared)
+	got, err := GetActiveWorkSession()
+	require.NoError(t, err)
+	assert.Empty(t, got)
 }

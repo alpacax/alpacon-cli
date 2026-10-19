@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -346,6 +347,8 @@ func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
 	tests := []struct{ code, want string }{
 		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
 		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
+		{"sudo_policy_console_only", "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'"},
+		{"work_session_sudo_bypass_console_only", "this workspace adds MFA-bypass sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
@@ -772,9 +775,59 @@ func TestSendRequest_401MissingOrFailedAuthCodeShowsLoginAgain(t *testing.T) {
 	}
 }
 
+func TestSendRequest_401LoginCodeWithDetailKeepsLoginHint(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code": "` + code + `", "detail": "Sign-in rejected."}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			_, err := ac.SendGetRequest("/api/test/")
+
+			require.Error(t, err)
+			assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+			assert.Equal(t, "Sign-in rejected. (run 'alpacon login' again)", err.Error())
+			gotCode, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, code, gotCode)
+		})
+	}
+}
+
+// TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal covers a token
+// issued without sign-in MFA, which stays refused however often it is renewed.
+func TestSendRequest_401TokenMFAMissingAsksForLoginWithoutRenewal(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code": "auth_token_mfa_missing"}`))
+	}))
+	defer ts.Close()
+
+	ac := newBearerTestClient(ts.URL, "stale")
+	_, err := ac.SendGetRequest("/api/test/")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+	assert.Equal(t, "multi-factor authentication required at sign-in: please run 'alpacon login' again", err.Error())
+	assert.Equal(t, 0, *renewals)
+	assert.Equal(t, 1, requests)
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, utils.AuthTokenMFAMissing, code)
+}
+
 func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 	t.Parallel()
-	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed} {
+	for _, code := range []string{utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing} {
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -787,6 +840,7 @@ func TestSendRequest_403AuthTokenMissingCodeGetsGenericMessage(t *testing.T) {
 			ac := newTestClient(ts.URL)
 			_, err := ac.SendGetRequest("/api/test/")
 			require.Error(t, err)
+			assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
 			assert.Equal(t, "permission denied: you do not have the required privileges for this action", err.Error())
 			assert.NotContains(t, err.Error(), "alpacon login")
 
@@ -1700,11 +1754,9 @@ func TestSendRequest_ConcurrentStaleRequestsRenewOnce(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, errs[i] = ac.SendGetRequest("/api/test/")
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -1821,6 +1873,201 @@ func TestRenewAccessToken_DoesNotBlockTokenReads(t *testing.T) {
 	assert.True(t, <-renewed, "the stubbed grant installs a token: %q", "fresh")
 }
 
+func TestSendDeleteRequestWithContext_SendsADelete(t *testing.T) {
+	t.Parallel()
+	var method, path string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method, path = r.Method, r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := ac.SendDeleteRequestWithContext(t.Context(), "/api/test/1/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.MethodDelete, method)
+	assert.Equal(t, "/api/test/1/", path)
+}
+
+// The event session close in api/event depends on this: a server that never answers
+// must not hold the caller past its deadline.
+func TestSendDeleteRequestWithContext_GivesUpAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second): // a request sent without the deadline fails the elapsed check, not the run
+		}
+	}))
+	defer ts.Close()
+	ac := &AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ac.SendDeleteRequestWithContext(ctx, "/api/test/1/")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
+}
+
+func TestNewAlpaconAPIClient_RefreshFailureGuidance(t *testing.T) {
+	tests := []struct {
+		name      string
+		tokenCode int
+		tokenBody string
+		envCode   int
+		dropToken bool
+		wantLogin bool
+		cause     string
+	}{
+		{name: "Invalid grant requires login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"invalid_grant"}`, wantLogin: true, cause: "invalid_grant"},
+		{name: "Unauthorized client requires login", tokenCode: http.StatusUnauthorized, tokenBody: `{"error":"unauthorized_client"}`, wantLogin: true, cause: "unauthorized_client"},
+		{name: "Invalid request requires login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"invalid_request"}`, wantLogin: true, cause: "invalid_request"},
+		{name: "Invalid client requires login", tokenCode: http.StatusUnauthorized, tokenBody: `{"error":"invalid_client"}`, wantLogin: true, cause: "invalid_client"},
+		{name: "Access denied requires login", tokenCode: http.StatusForbidden, tokenBody: `{"error":"access_denied"}`, wantLogin: true, cause: "access_denied"},
+		{name: "Rate-limited access denied asks to retry", tokenCode: http.StatusForbidden, tokenBody: `{"error":"access_denied","error_description":"Global limit has been reached"}`, cause: "access_denied"},
+		{name: "Transport failure asks to retry", dropToken: true},
+		{name: "Non-JSON client failure asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `<html>request refused</html>`},
+		{name: "Client failure without OAuth code asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `{}`, cause: "400"},
+		{name: "Client failure with a token asks to retry", tokenCode: http.StatusBadRequest, tokenBody: `{"access_token":"unexpected-token"}`, cause: "400"},
+		{name: "Empty access token asks to retry", tokenCode: http.StatusOK, tokenBody: `{"access_token":"","expires_in":3600}`, cause: "empty access token"},
+		{name: "Missing access token asks to retry", tokenCode: http.StatusOK, tokenBody: `{"expires_in":3600}`, cause: "empty access token"},
+		{name: "OAuth error with success status asks to retry", tokenCode: http.StatusOK, tokenBody: `{"error":"invalid_grant"}`, cause: "invalid_grant"},
+		{name: "Server error asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"server_error"}`, cause: "server_error"},
+		{name: "Server denial asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{"error":"access_denied"}`, cause: "access_denied"},
+		{name: "Server failure without OAuth code asks to retry", tokenCode: http.StatusInternalServerError, tokenBody: `{}`, cause: "500"},
+		{name: "Env fetch failure asks to retry", envCode: http.StatusBadGateway, cause: "502"},
+		{name: "Description alone does not require login", tokenCode: http.StatusBadRequest, tokenBody: `{"error":"server_error","error_description":"invalid_grant"}`, cause: "invalid_grant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			mux := http.NewServeMux()
+			ts := httptest.NewTLSServer(mux)
+			t.Cleanup(ts.Close)
+			mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.envCode != 0 {
+					w.WriteHeader(tt.envCode)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"my-workspace"}}`)
+			})
+			mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+				if tt.dropToken {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if assert.NoError(t, err) {
+						_ = conn.Close()
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.tokenCode)
+				_, _ = io.WriteString(w, tt.tokenBody)
+			})
+			require.NoError(t, config.CreateConfig(
+				ts.URL, "my-workspace", "", "", "stale", "refresh-token", "alpacon.io", 0, true,
+			))
+
+			ac, err := NewAlpaconAPIClient()
+
+			require.Error(t, err)
+			assert.Nil(t, ac)
+			if tt.cause != "" {
+				assert.Contains(t, err.Error(), tt.cause)
+			}
+			if tt.wantLogin {
+				assert.Contains(t, err.Error(), "authentication session expired. Please run 'alpacon login' again")
+				assert.Equal(t, 1, strings.Count(err.Error(), "alpacon login"))
+				assert.NotContains(t, err.Error(), "Please retry")
+			} else {
+				assert.Contains(t, err.Error(), "could not complete access token refresh. Please retry")
+				assert.NotContains(t, err.Error(), "alpacon login")
+				assert.NotContains(t, err.Error(), "session expired")
+			}
+			storedConfig, err := config.LoadConfig()
+			require.NoError(t, err)
+			assert.Equal(t, "stale", storedConfig.AccessToken)
+		})
+	}
+}
+
+func TestNewAlpaconAPIClient_EmptyRefreshTokenRequiresLoginWithoutARequest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	t.Cleanup(ts.Close)
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "my-workspace", "", "", "stale", "", "alpacon.io", 0, false,
+	))
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.EqualError(t, err, "authentication session expired. Please run 'alpacon login' again")
+	assert.Nil(t, ac)
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Zero(t, requests)
+}
+
+func TestNewAlpaconAPIClient_RefusedFallbackRequiresLogin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var mu sync.Mutex
+	var scopes []string
+	mux := http.NewServeMux()
+	ts := httptest.NewTLSServer(mux)
+	t.Cleanup(ts.Close)
+	mux.HandleFunc("/api/auth/env/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"auth0":{"client_id":"cli","domain":"`+strings.TrimPrefix(ts.URL, "https://")+`","schema_name":"my-workspace"}}`)
+	})
+	mux.HandleFunc("/oauth/token/", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Scope string `json:"scope"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); !assert.NoError(t, err) {
+			http.Error(w, "invalid token request", http.StatusInternalServerError)
+			return
+		}
+		mu.Lock()
+		scopes = append(scopes, request.Scope)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		if strings.Contains(request.Scope, "device:") {
+			_, _ = io.WriteString(w, `{"error":"invalid_scope"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"error":"invalid_grant"}`)
+	})
+	require.NoError(t, config.CreateConfig(
+		ts.URL, "my-workspace", "", "", "stale", "refresh-token", "alpacon.io", 0, true,
+	))
+	deviceID, err := config.GetOrCreateDeviceID()
+	require.NoError(t, err)
+	require.NotEmpty(t, deviceID)
+
+	ac, err := NewAlpaconAPIClient()
+
+	require.Error(t, err)
+	assert.Nil(t, ac)
+	assert.Contains(t, err.Error(), "authentication session expired. Please run 'alpacon login' again")
+	assert.Contains(t, err.Error(), "invalid_grant")
+	assert.NotContains(t, err.Error(), "invalid_scope")
+	assert.NotContains(t, err.Error(), "Please retry")
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"cli org:my-workspace device:" + deviceID, "cli org:my-workspace"}, scopes)
+}
+
 // Everything below cmd/ reads the workspace off the client, so dropping either
 // field here leaves every MFA link the process builds naming no workspace.
 func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
@@ -1835,6 +2082,32 @@ func TestNewAlpaconAPIClient_PinsWorkspaceIdentityFromConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://my-workspace.alpacon.io", ac.BaseURL)
 	assert.Equal(t, "my-workspace", ac.WorkspaceName)
+}
+
+// A credential the CLI writes for another client (a kubeconfig) reads the
+// workspace's TLS choice off the client, so it must survive construction.
+func TestNewAlpaconAPIClient_CarriesInsecureFromConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		insecure bool
+	}{
+		{name: "verifying", insecure: false},
+		{name: "insecure", insecure: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			require.NoError(t, config.CreateConfig(
+				"https://my-workspace.alpacon.io", "my-workspace", "alpat-token",
+				"", "", "", "alpacon.io", 0, tt.insecure,
+			))
+
+			ac, err := NewAlpaconAPIClient()
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.insecure, ac.Insecure)
+		})
+	}
 }
 
 // A workspace's URL slug can be renamed while its schema_name stays fixed, so a
@@ -2003,22 +2276,18 @@ func TestRefreshTokenRacesConcurrentRequests(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range reads {
 				_, err := ac.SendGetRequest("/api/test/")
 				errs <- err
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for range refreshes {
 			errs <- ac.RefreshToken()
 		}
-	}()
+	})
 	wg.Wait()
 	close(errs)
 
@@ -2637,6 +2906,57 @@ func TestSendRawRequest_RenewalPreservesCustomUserAgent(t *testing.T) {
 	assert.Equal(t, []string{"custom-agent", "custom-agent"}, agents)
 }
 
+// The install_pam refusals arrive with no detail, so each message names the
+// remedy rather than echoing the code.
+func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		code   string
+		want   string
+	}{
+		{
+			name:   "unsupported host",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallUnsupported,
+			want:   "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package",
+		},
+		{
+			name:   "sudo with MFA off",
+			status: http.StatusBadRequest,
+			code:   utils.ServerPAMInstallRequiresSudoWithMFA,
+			want:   "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon",
+		},
+		{
+			name:   "install already pending",
+			status: http.StatusConflict,
+			code:   utils.ServerPAMInstallInProgress,
+			want:   "an alpamon-pam install is already pending on this server—wait for it to finish",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = fmt.Fprintf(w, `{"code":%q}`, tt.code)
+			}))
+			defer ts.Close()
+
+			_, err := newTestClient(ts.URL).SendPostRequest("/api/servers/servers/my-server-id/actions/", map[string]string{"action": "install_pam"})
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, err.Error())
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Equal(t, tt.code, code)
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+		})
+	}
+}
+
 // The cursor-paginator codes reach a user only after api.FetchCursorPages has spent
 // its restarts, so the message has to name the remedy rather than echo the code.
 func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
@@ -2686,4 +3006,51 @@ func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
 		})
 	}
+}
+
+func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ code, want string }{
+		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
+		{utils.SudoPolicyBypassAgentSessionNeedsApproval, "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.code, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"code": "` + tt.code + `"}`))
+			}))
+			defer ts.Close()
+
+			ac := newTestClient(ts.URL)
+			// Create and update both reach the server through these two verbs.
+			for name, send := range map[string]func() error{
+				"create": func() error { _, err := ac.SendPostRequest("/api/test/", map[string]any{}); return err },
+				"update": func() error { _, err := ac.SendPatchRequest("/api/test/", map[string]any{}); return err },
+			} {
+				err := send()
+				require.Error(t, err, name)
+				assert.Equal(t, tt.want, err.Error(), name)
+				code, _ := utils.ParseErrorResponse(err)
+				assert.Equal(t, tt.code, code, name)
+			}
+		})
+	}
+}
+
+func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
+	cases := map[string]string{
+		utils.WorkSessionTargetAccountAbsent:       "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account",
+		utils.WorkSessionTargetAccountNotReachable: "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account",
+		utils.TargetAccountOtherPerson:             "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account",
+	}
+	for code, want := range cases {
+		assert.Equal(t, want, codeOnlyMessage(code), code)
+	}
+	assert.Equal(t, "work_session_target_account_absent", utils.WorkSessionTargetAccountAbsent)
+	assert.Equal(t, "work_session_target_account_not_reachable", utils.WorkSessionTargetAccountNotReachable)
+	assert.Equal(t, "target_account_other_person", utils.TargetAccountOtherPerson)
+	assert.Equal(t, "work_session_account_not_approved", utils.WorkSessionAccountNotApproved)
 }

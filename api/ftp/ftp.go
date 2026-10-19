@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/server"
@@ -80,15 +81,22 @@ func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeo
 }
 
 // transferStatusURL is the status endpoint of an upload or download transfer.
-func transferStatusURL(transferType, id string) string {
-	if transferType == "upload" {
-		return fmt.Sprintf(uploadStatusURL, id)
+func transferStatusURL(transferType, id string) (string, error) {
+	id, err := api.RequireID(id, "transfer")
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf(downloadStatusURL, id)
+	if transferType == "upload" {
+		return fmt.Sprintf(uploadStatusURL, id), nil
+	}
+	return fmt.Sprintf(downloadStatusURL, id), nil
 }
 
 func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
-	statusURL := transferStatusURL(transferType, id)
+	statusURL, err := transferStatusURL(transferType, id)
+	if err != nil {
+		return false, "", err
+	}
 
 	start := time.Now()
 	deadline := start.Add(timeout)
@@ -190,24 +198,17 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	if count == 0 {
 		return nil
 	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > count {
-		limit = count
-	}
+	limit = min(max(limit, 1), count)
 
 	failuresByIndex := make([]string, count)
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	for i := range count {
 		sem <- struct{}{}
-		wg.Add(1)
-		go func(index int) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-sem }()
-			failuresByIndex[index] = fn(index)
-		}(i)
+			failuresByIndex[i] = fn(i)
+		})
 	}
 	wg.Wait()
 
@@ -252,6 +253,10 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
+	uploadID, err := api.RequireResponseID(response.ID, "upload")
+	if err != nil {
+		return err
+	}
 
 	file, size, cleanup, err := open()
 	if err != nil {
@@ -265,7 +270,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 		}
 	}
 
-	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", response.ID), nil)
+	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", uploadID), nil)
 	if err := transferStep(ac, serverID, func() error {
 		_, err := ac.SendGetRequest(triggerURL)
 		return err
@@ -274,7 +279,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(1, size)
-	success, message, err := pollTransfer(ac, serverID, "upload", response.ID, timeout, time.Time{})
+	success, message, err := pollTransfer(ac, serverID, "upload", uploadID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -308,6 +313,13 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	var responses []UploadResponse
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
+	}
+	for i := range responses {
+		id, err := api.RequireResponseID(responses[i].ID, "upload")
+		if err != nil {
+			return err
+		}
+		responses[i].ID = id
 	}
 
 	files, sizes, cleanup, err := open()
@@ -766,12 +778,30 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 	return completeSingleDownload(ac, serverID, postBody, remotePath, dest, recursive)
 }
 
+// downloadIDs checks the transfer and command IDs a download create returned,
+// before any of them reaches a path.
+func downloadIDs(transferID, commandID string) (string, string, error) {
+	transferID, err := api.RequireResponseID(transferID, "download")
+	if err != nil {
+		return "", "", err
+	}
+	commandID, err = api.RequireResponseID(commandID, "command")
+	if err != nil {
+		return "", "", err
+	}
+	return transferID, commandID, nil
+}
+
 // completeSingleDownload waits for the download the server started, fetches
 // the file and confirms the transfer. Each request after the create is its own
 // retry unit (transferStep).
 func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
+		return DownloadedFile{}, err
+	}
+	var err error
+	if downloadResponse.ID, downloadResponse.Command, err = downloadIDs(downloadResponse.ID, downloadResponse.Command); err != nil {
 		return DownloadedFile{}, err
 	}
 
@@ -844,6 +874,10 @@ func downloadBulk(ac *client.AlpaconClient, remotePaths []string, dest, serverID
 func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []byte, remotePaths []string, dest string) error {
 	var response BulkDownloadResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
+		return err
+	}
+	var err error
+	if response.ID, response.Command, err = downloadIDs(response.ID, response.Command); err != nil {
 		return err
 	}
 
@@ -1109,9 +1143,12 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 			// running the whole poll under the gate. A transient failure is
 			// ridden through as the full poll rides through it, so a flaky read
 			// does not end the wait.
-			var probeErr error
+			statusURL, probeErr := transferStatusURL(transferType, id)
+			if probeErr != nil {
+				return probeErr
+			}
 			for failures := range utils.MaxConsecutivePollFailures {
-				_, probeErr = ac.SendGetRequest(transferStatusURL(transferType, id))
+				_, probeErr = ac.SendGetRequest(statusURL)
 				if probeErr == nil || !utils.IsTransientRequestError(probeErr) {
 					break
 				}

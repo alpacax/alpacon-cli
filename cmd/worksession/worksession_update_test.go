@@ -1,10 +1,12 @@
 package worksession
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
@@ -17,7 +19,7 @@ func TestValidateSessionForSudoUpdate(t *testing.T) {
 	t.Run("pending session is rejected with actionable message", func(t *testing.T) {
 		session := &wsapi.WorkSession{
 			ID:     "ses-pending",
-			Status: pendingWorkSessionStatus,
+			Status: wsapi.StatusPending,
 			Scopes: []string{"command", "sudo"},
 		}
 		err := validateSessionForSudoUpdate(session, session.Scopes)
@@ -160,22 +162,156 @@ func TestApplyWorkSessionUpdate_FieldsOnlySkipsGet(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{
-		Title:    "deploy v2",
-		Servers:  []string{"srv-1", "srv-2"},
-		StartsAt: "2027-01-15T10:00:00Z",
+		Title:   "deploy v2",
+		Servers: []string{"srv-1", "srv-2"},
 	}, nil)
 	require.NoError(t, err)
 	assert.False(t, getCalled, "no GET should be issued when sudo is not touched")
 	assert.True(t, patchCalled)
 	assert.Equal(t, "deploy v2", raw["title"])
 	assert.Equal(t, []any{"srv-1", "srv-2"}, raw["servers"])
-	assert.Equal(t, "2027-01-15T10:00:00Z", raw["starts_at"])
 	_, hasDesc := raw["description"]
 	assert.False(t, hasDesc, "unset description must be omitted")
 	_, hasSudo := raw["sudo_policies"]
 	assert.False(t, hasSudo, "unset sudo_policies must be omitted so existing policies are kept")
 	_, hasScopes := raw["scopes"]
 	assert.False(t, hasScopes, "unset scopes must be omitted")
+}
+
+func TestApplyWorkSessionUpdate_TimeFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		status       string
+		patchStatus  string // status the PATCH answers with; empty means unchanged since the GET
+		storedStart  string // start the PATCH answers with while still pending; empty means the one sent
+		storedExpiry string // expiry the PATCH answers with while still pending; empty means the one sent
+		req          wsapi.WorkSessionUpdateRequest
+		wantErr      []string
+		notWant      []string
+		wantPatch    bool
+	}{
+		{
+			name:    "expires-at on an active session is refused",
+			status:  "active",
+			req:     wsapi.WorkSessionUpdateRequest{Title: "deploy v2", ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr: []string{"ses-1", "--expires-at", "alpacon work-session extend", "--reason"},
+		},
+		{
+			name:    "starts-at on an approved session is refused",
+			status:  "approved",
+			req:     wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z"},
+			wantErr: []string{"ses-1", "--starts-at", "pending"},
+		},
+		{
+			name:    "expires-at on an expired session is refused without an extend hint",
+			status:  "expired",
+			req:     wsapi.WorkSessionUpdateRequest{ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr: []string{"ses-1", "--expires-at", "pending"},
+			notWant: []string{"extend"},
+		},
+		{
+			name:      "both on a pending session are sent",
+			status:    "pending",
+			req:       wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z", ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantPatch: true,
+		},
+		{
+			name:      "nanosecond times the server keeps to microseconds are applied",
+			status:    "pending",
+			req:       wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00.123456789Z", ExpiresAt: "2027-01-15T12:00:00.123456789Z"},
+			wantPatch: true,
+		},
+		{
+			name:        "session approved between the check and the update is reported",
+			status:      "pending",
+			patchStatus: "approved",
+			req:         wsapi.WorkSessionUpdateRequest{Title: "deploy v2", ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr:     []string{"ses-1", "approved", "--expires-at was not applied"},
+			notWant:     []string{"--starts-at"},
+			wantPatch:   true,
+		},
+		{
+			name:        "session approved with both times sent names both flags",
+			status:      "pending",
+			patchStatus: "approved",
+			req:         wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z", ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr:     []string{"ses-1", "--starts-at and --expires-at were not applied"},
+			wantPatch:   true,
+		},
+		{
+			name:         "pending session whose stored expiry differs is not blamed on an approval",
+			status:       "pending",
+			storedExpiry: "2027-01-15T11:00:00Z",
+			req:          wsapi.WorkSessionUpdateRequest{ExpiresAt: "2027-01-15T12:00:00Z"},
+			wantErr:      []string{"ses-1", "still pending", "--expires-at stored as 2027-01-15T11:00:00Z"},
+			notWant:      []string{"became", "--starts-at"},
+			wantPatch:    true,
+		},
+		{
+			name:        "pending session whose stored start differs names only the start",
+			status:      "pending",
+			storedStart: "2027-01-15T09:00:00Z",
+			req:         wsapi.WorkSessionUpdateRequest{StartsAt: "2027-01-15T10:00:00Z"},
+			wantErr:     []string{"ses-1", "still pending", "--starts-at stored as 2027-01-15T09:00:00Z"},
+			notWant:     []string{"became", "--expires-at"},
+			wantPatch:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var raw map[string]any
+			patchCalled := false
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.Method {
+				case http.MethodGet:
+					_ = json.NewEncoder(w).Encode(wsapi.WorkSession{ID: "ses-1", Status: tt.status})
+				case http.MethodPatch:
+					patchCalled = true
+					assert.NoError(t, json.NewDecoder(r.Body).Decode(&raw))
+					resp := wsapi.WorkSession{ID: "ses-1", Status: tt.status}
+					if tt.patchStatus != "" {
+						resp.Status = tt.patchStatus
+					}
+					if resp.Status == wsapi.StatusPending { // the server drops the time fields otherwise
+						if startsAt, err := time.Parse(time.RFC3339, cmp.Or(tt.storedStart, tt.req.StartsAt)); err == nil {
+							startsAt = startsAt.Truncate(time.Microsecond)
+							resp.StartsAt = &startsAt
+						}
+						if expiresAt, err := time.Parse(time.RFC3339, cmp.Or(tt.storedExpiry, tt.req.ExpiresAt)); err == nil {
+							resp.ExpiresAt = expiresAt.Truncate(time.Microsecond)
+						}
+					}
+					_ = json.NewEncoder(w).Encode(resp)
+				default:
+					assert.Failf(t, "unexpected method", "%s", r.Method)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := applyWorkSessionUpdate(ac, "ses-1", tt.req, nil)
+
+			assert.Equal(t, tt.wantPatch, patchCalled)
+			if len(tt.wantErr) == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, tt.req.StartsAt, raw["starts_at"])
+				assert.Equal(t, tt.req.ExpiresAt, raw["expires_at"])
+				return
+			}
+			require.Error(t, err)
+			for _, want := range tt.wantErr {
+				assert.Contains(t, err.Error(), want)
+			}
+			for _, unwanted := range tt.notWant {
+				assert.NotContains(t, err.Error(), unwanted)
+			}
+		})
+	}
 }
 
 func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {

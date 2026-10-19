@@ -249,9 +249,7 @@ func (r *Runtime) acceptConnections() {
 				} else {
 					tempDelay *= 2
 				}
-				if tempDelay > time.Second {
-					tempDelay = time.Second
-				}
+				tempDelay = min(tempDelay, time.Second)
 				if r.verbose {
 					utils.CliWarning("Failed to accept connection (retrying in %v): %s", tempDelay, err)
 				}

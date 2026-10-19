@@ -113,10 +113,18 @@ func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, erro
 }
 
 func GetSessionDetail(ac *client.AlpaconClient, sessionID string) ([]byte, error) {
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, sessionID, nil))
 }
 
 func GetSessionRecords(ac *client.AlpaconClient, sessionID, query string, limit int) ([]SessionRecord, error) {
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return nil, err
+	}
 	action := "records"
 	params := map[string]string{}
 	if query != "" {
@@ -129,12 +137,20 @@ func GetSessionRecords(ac *client.AlpaconClient, sessionID, query string, limit 
 }
 
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "close"), nil), nil)
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "close"), nil), nil)
 	return err
 }
 
 func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
 	return err
 }
 
@@ -164,6 +180,10 @@ func ReconnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResp
 // resizes the remote PTY on every update, so this also redraws a shell that spent
 // a reconnect talking to nobody, even when the size itself has not changed.
 func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return err
+	}
 	rows, cols, err := terminalSize()
 	if err != nil {
 		return err
@@ -189,11 +209,15 @@ func createUserChannel(ac *client.AlpaconClient, req *ConnectRequest) (SessionRe
 }
 
 func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string, readOnly bool) error {
+	sessionID, err := api.RequireID(sessionID, "Websh session")
+	if err != nil {
+		return err
+	}
 	req := &InviteRequest{
 		Emails:   emails,
 		ReadOnly: readOnly,
 	}
-	_, err := ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "invite"), nil), req)
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "invite"), nil), req)
 	return err
 }
 
@@ -206,6 +230,10 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	channelID := parsedURL.Query().Get("channel")
 	if channelID == "" {
 		return SessionResponse{}, errors.New("invalid URL format")
+	}
+	channelID, err = api.RequireID(channelID, "Websh channel")
+	if err != nil {
+		return SessionResponse{}, err
 	}
 	joinRequest := &JoinRequest{
 		Password: password,
@@ -268,6 +296,10 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 	err := json.Unmarshal(responseBody, &response)
 	if err != nil {
 		return SessionResponse{}, err
+	}
+	response.ID, err = api.RequireResponseID(response.ID, "Websh session")
+	if err != nil {
+		return SessionResponse{}, fmt.Errorf("the server created the Websh session, but its ID is unusable (%w)", err)
 	}
 
 	if share {
@@ -336,22 +368,18 @@ func (c *connection) close() {
 
 // startReader reads server output for as long as the connection lasts.
 func (c *connection) startReader() {
-	c.pumps.Add(1)
-	go func() {
-		defer c.pumps.Done()
+	c.pumps.Go(func() {
 		c.readFromServer()
-	}()
+	})
 }
 
 // startWriter forwards user input for as long as the connection lasts. The input
 // channel outlives the connection: one stdin reader feeds every connection of the
 // session, since a goroutine parked in a terminal read cannot be released.
 func (c *connection) startWriter(inputChan <-chan string) {
-	c.pumps.Add(1)
-	go func() {
-		defer c.pumps.Done()
+	c.pumps.Go(func() {
 		c.writeToServer(inputChan)
-	}()
+	})
 }
 
 // closeConn releases the current connection, if the session ever had one.

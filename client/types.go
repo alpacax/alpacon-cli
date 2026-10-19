@@ -14,6 +14,10 @@ type AlpaconClient struct {
 	Privileges    string
 	Username      string
 	UserAgent     string
+	// Insecure records that this workspace was configured to skip TLS
+	// verification, so a credential written for another client (a kubeconfig)
+	// can say the same instead of failing where this client succeeds.
+	Insecure bool
 
 	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
 	// the field keeps other packages out, token_boundary_test.go keeps this one out.

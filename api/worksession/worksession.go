@@ -2,6 +2,8 @@ package worksession
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -12,6 +14,14 @@ import (
 )
 
 const workSessionURL = "/api/work-sessions/sessions/"
+
+// ErrTimelinePaginated is returned when a whole-timeline read is answered with
+// a `next`, so a page is never shown as the whole session.
+var ErrTimelinePaginated = errors.New(
+	"this server paginates the work session timeline, which this version of alpacon reads only whole, " +
+		"so it would show the first page as the whole session; run 'alpacon update' to install a version " +
+		"that reads the timeline page by page and its recordings through the per-session recording route",
+)
 
 func GetWorkSessionList(ac *client.AlpaconClient, status, requesterType, assignedUser string) ([]WorkSessionAttributes, error) {
 	params := map[string]string{}
@@ -63,6 +73,9 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 	if err = json.Unmarshal(body, &session); err != nil {
 		return nil, err
 	}
+	if session.ID, err = api.RequireResponseID(session.ID, "work session"); err != nil {
+		return nil, fmt.Errorf("the server created the work session, but its ID is unusable (%w); check for it before creating another", err)
+	}
 	return &session, nil
 }
 
@@ -71,6 +84,10 @@ func CreateWorkSession(ac *client.AlpaconClient, req WorkSessionCreateRequest) (
 // may queue the change for approval, in which case it takes effect only once
 // approved.
 func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdateRequest) (*WorkSession, error) {
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return nil, err
+	}
 	body, err := ac.SendPatchRequest(utils.BuildURL(workSessionURL, id, nil), req)
 	if err != nil {
 		return nil, err
@@ -83,6 +100,10 @@ func UpdateWorkSession(ac *client.AlpaconClient, id string, req WorkSessionUpdat
 }
 
 func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return nil, err
+	}
 	body, err := ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 	if err != nil {
 		return nil, err
@@ -95,12 +116,20 @@ func GetWorkSession(ac *client.AlpaconClient, id string) (*WorkSession, error) {
 }
 
 func ActivateWorkSession(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "activate"), nil), struct{}{})
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "activate"), nil), struct{}{})
 	return err
 }
 
 func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "complete"), nil), struct{}{})
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "complete"), nil), struct{}{})
 	return err
 }
 
@@ -115,6 +144,10 @@ func CompleteWorkSession(ac *client.AlpaconClient, id string) error {
 // a caller that branched on the field alone would report an already-applied
 // extension as still pending.
 func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExtendRequest) (*WorkSession, int, error) {
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return nil, 0, err
+	}
 	body, status, err := ac.SendPostRequestWithStatus(utils.BuildURL(workSessionURL, path.Join(id, "extend"), nil), req)
 	if err != nil {
 		return nil, status, err
@@ -127,23 +160,107 @@ func ExtendWorkSession(ac *client.AlpaconClient, id string, req WorkSessionExten
 }
 
 func RevokeWorkSession(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "revoke"), nil), struct{}{})
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "revoke"), nil), struct{}{})
 	return err
 }
 
 // CancelWorkSession withdraws the requester's own pending session; the server restricts it to the creator/superuser and rejects non-pending sessions (unlike superuser-only RevokeWorkSession).
 func CancelWorkSession(ac *client.AlpaconClient, id string) error {
-	_, err := ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "cancel"), nil), struct{}{})
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(workSessionURL, path.Join(id, "cancel"), nil), struct{}{})
 	return err
 }
 
 func GetWorkSessionRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(workSessionURL, id, nil))
 }
 
+// GetWorkSessionTimeline reads a work session's activity timeline. A request
+// naming `cursor`, even empty, is paginated and its pages carry no recordings;
+// one naming no `cursor` gets the whole timeline with recordings and no `next`
+// key. So includeRecords picks the shape. `include_records` rides on the
+// paginated read too, for a server that does not paginate this route.
 func GetWorkSessionTimeline(ac *client.AlpaconClient, id string, includeRecords bool) ([]TimelineItem, error) {
+	id, err := api.RequireID(id, "work session")
+	if err != nil {
+		return nil, err
+	}
 	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "timeline"), nil)
-	return api.FetchAllPages[TimelineItem](ac, endpoint, map[string]string{
-		"include_records": strconv.FormatBool(includeRecords),
-	})
+	params := map[string]string{"include_records": strconv.FormatBool(includeRecords)}
+	if includeRecords {
+		return getWholeWorkSessionTimeline(ac, endpoint, params)
+	}
+	return api.FetchAllCursorPages[TimelineItem](ac, endpoint, params)
+}
+
+// getWholeWorkSessionTimeline takes the unpaginated shape in one request. It
+// names no `cursor`, which is what holds the server to that shape, so nothing
+// here may add one; `page_size` stays off too, since a whole list has no page
+// to size.
+func getWholeWorkSessionTimeline(ac *client.AlpaconClient, endpoint string, params map[string]string) ([]TimelineItem, error) {
+	body, err := ac.SendGetRequest(utils.BuildURL(endpoint, "", params))
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Results []TimelineItem  `json:"results"`
+		Next    json.RawMessage `json:"next"`
+	}
+	if err = json.Unmarshal(body, &response); err != nil {
+		return nil, err
+	}
+	// A null `next` counts: it is a paginator's last page.
+	if len(response.Next) > 0 {
+		return nil, ErrTimelinePaginated
+	}
+	return response.Results, nil
+}
+
+// ListTerminalSessionIDs returns the ids of a work session's Websh terminals in
+// timeline order. Tunnels are Websh sessions the server lists under their own
+// type and have no recording, so they are not terminals. It reads the paginated
+// timeline, which carries no recordings.
+func ListTerminalSessionIDs(ac *client.AlpaconClient, id string) ([]string, error) {
+	items, err := GetWorkSessionTimeline(ac, id, false /* includeRecords */)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, item := range items {
+		if item.Type == "websh_session" && !item.IsTunnel {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids, nil
+}
+
+// GetTerminalRecording reads one Websh session's recording through the work
+// session's records route, concatenating the chunks in order. The walk ends on a
+// null `next` or an empty page; a short page is not the last one. addedAt is the
+// first chunk's added_at, and found is false when the session has no recording.
+func GetTerminalRecording(ac *client.AlpaconClient, id, webshSessionID string) (record, addedAt string, found bool, err error) {
+	endpoint := utils.BuildURL(workSessionURL, path.Join(id, "records"), nil)
+	chunks, err := api.FetchAllCursorPages[RecordChunk](ac, endpoint, map[string]string{"session": webshSessionID})
+	if err != nil {
+		return "", "", false, err
+	}
+	if len(chunks) == 0 {
+		return "", "", false, nil
+	}
+	var b strings.Builder
+	for _, chunk := range chunks {
+		b.WriteString(chunk.Record)
+	}
+	return b.String(), chunks[0].AddedAt, true, nil
 }

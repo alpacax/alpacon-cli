@@ -12,9 +12,7 @@ import (
 // to the outage announcer; the token must not reach it.
 func TestListenerDialFailureOmitsThePathToken(t *testing.T) {
 	t.Parallel()
-	listener := newProvisionedWSListener(nil, func() (string, error) {
-		return "wss://proxy.example.com/ws/event/sid/cid/PATHTOKEN123/%zz", nil
-	}, time.Second)
+	listener := newProvisionedWSListener(nil, provisionURL("wss://proxy.example.com/ws/event/sid/cid/PATHTOKEN123/%zz"), time.Second)
 	var announced error
 	listener.onDialFailed = func(err error) { announced = err }
 

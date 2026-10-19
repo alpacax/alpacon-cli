@@ -83,6 +83,8 @@ go build && sudo mv alpacon-cli /usr/local/bin/alpacon
 
 If the binary or its directory is group- or world-writable, the update says so on stderr rather than narrowing anything—re-permissioning what you set up is your call. The directory is the one that usually matters: replacing a file is a rename, which needs no permission on the file itself, so a `0755` root-owned `alpacon` inside a `0775` directory can still be swapped by anyone in that group. Close it with `chmod go-w`.
 
+`alpacon version --output json` prints one object on stdout with `version`, `latest`, `update_available`, and `release_url`. `update_available` is `true` only when `alpacon update` has a newer release to install, so a `dev` build reports `false`. When the latest release cannot be fetched, `latest` and `release_url` are `null`, a warning goes to stderr, and the command still exits `0`—branch on `alpacon update --check` instead.
+
 #### What the checksum and the attestation do and do not prove
 
 `alpacon update` compares SHA-256 checksums and nothing else. That comparison proves the archive arrived intact and matches the checksums file the release publishes; it proves nothing about who published either, because both come from the same release. Anyone who could write to a release—a leaked token, a compromised account, a poisoned release workflow—could upload a trojaned archive together with a checksums file that matches it, and the update would install it. Teaching the CLI to verify the publisher is tracked in [#412](https://github.com/alpacax/alpacon-cli/issues/412).
@@ -151,6 +153,17 @@ $ alpacon websh <server>
 $ alpacon exec <server> "uptime"
 $ alpacon cp ./file.txt <server>:/tmp/
 $ alpacon tunnel <server> -l 9000 -r 8082
+
+# An AI agent replaces steps 3 and 4: it drops --use and websh, which an agent session
+# refuses, and names the session before the server on each command.
+$ alpacon work-session create \
+    --purpose "describe the task" \
+    --scope command \
+    --server <server> \
+    --expires-in 1h \
+    --requester-type agent \
+    --wait
+$ alpacon exec --work-session <SESSION_ID> <server> "uptime"
 ```
 
 CI/CD and API automation use token auth, which bypasses work sessions for `exec`, `cp`, `edit`, and `websh <server> "<command>"`:
@@ -187,6 +200,15 @@ An installation that logged in before this identifier existed holds a refresh to
 
 For Auth0 and MFA authentication the CLI opens the auth URL in your default browser; this is skipped automatically in SSH sessions and headless environments. To force it off, use `--no-browser` or set `ALPACON_NO_BROWSER=1`. The same env var also suppresses MFA browser prompts triggered by other commands.
 
+## Shell completion
+
+```bash
+source <(alpacon completion bash)                                  # bash (needs the bash-completion package; add to ~/.bashrc)
+source <(alpacon completion zsh)                                   # zsh (add to ~/.zshrc after compinit)
+mkdir -p ~/.config/fish/completions && alpacon completion fish > ~/.config/fish/completions/alpacon.fish  # fish
+alpacon completion powershell | Out-String | Invoke-Expression     # PowerShell (add to $PROFILE)
+```
+
 ## Commands
 
 Run `alpacon --help` for the full command list. Common workflows below.
@@ -222,9 +244,25 @@ $ alpacon server rm <server>
 $ alpacon kube ls                                # aliases: k8s, clusters
 $ alpacon kube describe <cluster>
 $ alpacon kube ls --output json
+
+# Write a kubeconfig context for a cluster, then use kubectl as usual
+$ alpacon kube config <cluster>                  # context alpacon-<cluster>, made current
+$ kubectl get pods -A
+
+# A separate file is read only when kubectl is pointed at it
+$ alpacon kube config <cluster> --work-session <ID> --kubeconfig ~/.kube/alpacon
+$ kubectl --kubeconfig ~/.kube/alpacon get pods -A
+
+# Optional: send kubectl through a local proxy
+$ alpacon kube config <cluster> --proxy-port 18443
+$ alpacon kube proxy <cluster>                   # --port 18443 by default; Ctrl+C to stop
 ```
 
 The `kube` group appears only on workspaces whose server reports Kubernetes support. The CLI records that answer at `alpacon login` and `alpacon workspace switch`; elsewhere `kube` is hidden from help, and calling it prints a notice and exits with `1`. If support was turned on after you logged in, run `alpacon login` again.
+
+`kube config` opens a kube session under your active WorkSession and needs an interactive login: a token from `alpacon login -t` cannot open one. Without an active WorkSession it exits with `3` and lists what to run next. It writes to the file `kubectl config` itself writes (`--kubeconfig`, else the first existing file in `KUBECONFIG` or the last one listed when none exists, else `~/.kube/config`), keeps the other entries in it, and rewrites the file in kubectl's layout. The context holds the session's token in plain text until a credential plugin replaces it, so keep the file private (`chmod 600`). The token stops working when the WorkSession ends; run `kube config` again for a new one.
+
+`kube proxy` is optional. It listens on `127.0.0.1` and relays HTTP CONNECT only to the cluster's proxy host, without reading the traffic, so kubectl's TLS stays end to end. kubectl uses it only for a context written with `--proxy-port` set to the same port. It finds the context the way kubectl does, across every file in `KUBECONFIG` (or the one `--kubeconfig` names). One proxy runs per cluster and port.
 
 ### Websh (terminal in your shell)
 ```bash
@@ -309,6 +347,31 @@ $ alpacon work-session cancel <session-id>       # requester withdraws own pendi
 
 Override the active session per command with `--work-session <id>` or `ALPACON_WORK_SESSION=<id>`. Resolution order: `--work-session` flag > env var > active session.
 
+`complete` and `revoke` clear the active session when they end it. A session that ends anywhere else—it expires, an admin revokes it, or it is completed from the console—stays set until you run `alpacon work-session use --unset`; `ls` stops marking it as active and `current` warns that it has ended.
+
+`create --account <name>` names the account the work runs as on the servers (for example `root`), so the approver sees it with the request. The session runs only as that account, so pass it to later commands with `-u <name>` (for example `alpacon exec -u root web-01 -- uptime`); without it `exec` is refused with `work_session_account_not_approved`.
+
+#### AI agents
+
+The CLI detects when an AI coding agent runs it, from environment variables only, and names the agent on every request with the `X-Alpacon-Declared-Agent-Name` header (and `X-Alpacon-Declared-Agent-Version` when the environment states a version). The first match names the agent:
+
+| Variable | Agent |
+|---|---|
+| `AI_AGENT=<name>` | the name given |
+| `CLAUDE_CODE_CHILD_SESSION=1` | `claude-code` |
+| `CODEX_CI=1`, `CODEX_THREAD_ID`, or `CODEX_SANDBOX` | `codex` |
+| `GEMINI_CLI=1` | `gemini-cli` |
+| `COPILOT_AGENT=1` or `COPILOT_CLI=1` | `github-copilot` |
+| `CURSOR_AGENT=1` | `cursor` |
+| `CLINE_ACTIVE=true` | `cline` |
+| `GOOSE_TERMINAL=1` or `AGENT=goose` | `goose` |
+
+Commands run through Claude Code's `!` prefix count as an agent too.
+
+None of these count: no TTY, `CI`, `TERM_PROGRAM` or any other editor terminal, `CLAUDECODE` on its own, `REPL_ID`, `GOOSE_PROVIDER`, and `AGENT` with any value but `goose`. For an agent that sets none of the variables (for example Aider), set `AI_AGENT=<name>` in its environment.
+
+When an agent is detected, `work-session create` opens an agent session. `--requester-type agent` opens one without naming an agent, and `--requester-type user` is refused with exit code `2` and a message naming every variable found—unset them, or run the command from your own terminal.
+
 `extend` reads the session's `expires_at` back from the server rather than echoing the `--expires-in`/`--expires-at` value it sent, so the printed result is always what was actually applied.
 
 `--reason` is required on every `extend`—a short justification an approver judges the request by. Whether the extension applies immediately or waits for approval follows the workspace's approval policy, the same rule `work-session create` uses: the CLI reports a queued extension pending (`status` `pending_approval` under `--output json`, with `requested_expires_at` and the request's own deadline in `context`; exit `4`) instead of the session already extended. Check `alpacon work-session describe <id>` for the request's status (`--output json` shows it under `pending_extension_request`), then run `extend` again with a new reason once it settles—`extend` does not wait on its own. `error_code` `work_session_extension_reason_required` means `--reason` was missing or blank; `work_session_extension_already_pending` means a decision is already outstanding for this session (find its id with `alpacon work-session describe <id> --output json`)—wait for it before asking again.
@@ -364,10 +427,13 @@ $ alpacon token acl <type> delete <acl-id>
 ```bash
 $ alpacon agent restart <server>
 $ alpacon agent upgrade <server>
+$ alpacon agent install-pam <server>             # install alpamon-pam through the agent
 $ alpacon server refresh <server>                # re-collect system information
 ```
 
 `agent restart` and `agent upgrade` ask for confirmation first; pass `-y` to skip the prompt, which a non-interactive run (a script or CI job) needs. If the server has active user work—an open Websh/WebFTP session or an in-flight command—they are refused with exit code `5`; retry when idle, or pass `--force` to override. When the workspace asks for MFA, the CLI walks you through it and retries the request.
+
+`agent install-pam` installs the `alpamon-pam` package on the server as root through the host's package manager, and leaves a server that already has the current version as is. It asks for confirmation and takes `-y` the same way, but it is not disruptive: active user work does not refuse it, and it has no `--force`. The server refuses it with `server_pam_install_unsupported` on a host with no `alpamon-pam` package (macOS, Windows, or an unknown package manager), with `server_pam_install_requires_sudo_with_mfa` while the workspace's "Use sudo with MFA" setting is off or the deployment cannot complete the MFA step-up (a self-hosted site without Auth0), and with `server_pam_install_in_progress` while an install is already pending on that server.
 
 The CLI does not reboot, shut down, or upgrade the operating system of a server. Run those inside a work session instead, where sudo, MFA, policy or approval, and recording apply:
 
@@ -440,6 +506,7 @@ What each refusal code means and what to do next:
 | `work_session_scope_not_allowed` | operation not in session scopes | create a session with the right `--scope` |
 | `work_session_server_not_allowed` | target server not in session | create a session with the right `--server` |
 | `work_session_assignee_mismatch` | session assigned to another principal | `work-session use <ID>` with your own session |
+| `work_session_agent_session_required` | the CLI runs under an AI agent, and the session is a user session | create an agent session and pass its ID with `--work-session`; not an AI agent? unset the variables the diagnostic names, or run from your own terminal |
 | `work_session_not_usable` | session is no longer usable | `work-session create --use` |
 
 `work-session` subcommand failures (`create`, `use`, `extend`, ...), `event wait` / `event watch` failures, and the inline-credential refusal below also emit a JSON error envelope under `--output json`, with `error_code` carrying the server code when available, and `exit_code` matching the process exit code—`1` for a failed request, `2` with `error_code` `usage_error` for a flag or argument the command rejected. These envelopes may share an `error_code` with the gate-denial envelopes above—distinguish a subcommand failure (`exit_code: 1` or `2`) from a gate denial (`exit_code: 3`) via `exit_code`, not `error_code` alone. Run `alpacon whoami` to check upfront whether a work session is required for your auth.

@@ -1,6 +1,8 @@
 package worksession
 
 import (
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -58,6 +60,7 @@ Error codes returned when a session check fails:
   work_session_scope_not_allowed  operation not in session scopes
   work_session_server_not_allowed target server not in session
   work_session_assignee_mismatch  session assigned to another principal
+  work_session_agent_session_required  the CLI runs under an AI agent; use an agent session
   work_session_not_usable         session is no longer usable
 
 Run 'alpacon whoami' to check your WorkSession requirement and active session.`,
@@ -82,4 +85,17 @@ func init() {
 	WorkSessionCmd.AddCommand(workSessionRejectCmd)
 	WorkSessionCmd.AddCommand(workSessionRevokeCmd)
 	WorkSessionCmd.AddCommand(workSessionCancelCmd)
+}
+
+// endSession ends the session with end and, when it is the workspace's active one, clears it.
+// The error is the server's alone; a failed clear only warns. Reports whether it cleared.
+func endSession(ac *client.AlpaconClient, id string, end func(*client.AlpaconClient, string) error) (bool, error) {
+	if err := end(ac, id); err != nil {
+		return false, err
+	}
+	cleared, err := config.ClearActiveWorkSessionFor(ac.WorkspaceName, id)
+	if err != nil {
+		utils.CliWarning("Work session %s has ended but is still the active work-session: %s. Run 'alpacon work-session use --unset' to clear it.", id, err)
+	}
+	return cleared, nil
 }

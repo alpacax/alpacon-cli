@@ -8,7 +8,7 @@ import (
 )
 
 var aclCommandDeleteCmd = &cobra.Command{
-	Use:     "delete ACL-ID",
+	Use:     "delete ACL_ID",
 	Aliases: []string{"rm"},
 	Short:   "Delete a command ACL rule by ID",
 	Example: `  alpacon token acl command delete 550e8400-e29b-41d4-a716-446655440000

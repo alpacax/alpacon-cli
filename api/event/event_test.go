@@ -309,25 +309,25 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 	}{
 		{
 			name:         "exit_1",
-			respSuccess:  boolPtr(false),
-			respExitCode: intPtr(1),
+			respSuccess:  new(false),
+			respExitCode: new(1),
 			respResult:   "boom",
 			wantExitCode: 1,
 			wantOutput:   "boom",
 		},
 		{
 			name:         "exit_23_rsync_partial",
-			respSuccess:  boolPtr(false),
-			respExitCode: intPtr(23),
+			respSuccess:  new(false),
+			respExitCode: new(23),
 			respResult:   "rsync: partial transfer",
 			wantExitCode: 23,
 			wantOutput:   "rsync: partial transfer",
 		},
 		{
 			name:           "exit_124_with_phase",
-			respSuccess:    boolPtr(false),
-			respExitCode:   intPtr(124),
-			respErrorPhase: strPtr("remote_command_exceeded_timeout"),
+			respSuccess:    new(false),
+			respExitCode:   new(124),
+			respErrorPhase: new("remote_command_exceeded_timeout"),
 			respResult:     "timed out",
 			wantExitCode:   124,
 			wantErrorPhase: "remote_command_exceeded_timeout",
@@ -335,7 +335,7 @@ func TestErrorFromDetails_PropagatesExitCode(t *testing.T) {
 		},
 		{
 			name:         "legacy_null_exit_code_falls_back_to_1",
-			respSuccess:  boolPtr(false),
+			respSuccess:  new(false),
 			respExitCode: nil,
 			respResult:   "old alpamon",
 			wantExitCode: 1,
@@ -391,7 +391,7 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 		if i >= len(seq) {
 			i = len(seq) - 1
 		}
-		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: boolPtr(true)})
+		_ = json.NewEncoder(w).Encode(EventDetails{ID: "cmd-1", Status: seq[i], Success: new(true)})
 	}))
 	defer ts.Close()
 
@@ -418,10 +418,10 @@ func TestStreamApprovedCommand_StreamsAfterApproval(t *testing.T) {
 		// One for StreamApprovedCommand's server-id lookup, two for the poll loop.
 		heldPolls:    3,
 		runningPolls: 1,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -452,10 +452,10 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 		},
 		// The lookup is the first read of the command, so this is the one that fails.
 		detailFails: 1,
-		terminal:    EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:    EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := StreamApprovedCommand(ac, "cmd-uuid", stdoutBuf, 30*time.Second)
+	err := streamApprovedCommandWithDelays(ac, testStreamDelays, "cmd-uuid", stdoutBuf, 30*time.Second)
 	require.NoError(t, err)
 	assert.Equal(t, "approved\n", stdoutBuf.String())
 
@@ -464,10 +464,6 @@ func TestStreamApprovedCommand_ServerLookupFailureSkipsFinSubscription(t *testin
 	assert.Equal(t, [][2]string{{EventTypeCommandOutput, "cmd-uuid"}}, subscriptions,
 		"with no server to target, the fin subscription must be skipped rather than sent empty")
 }
-
-func boolPtr(b bool) *bool    { return &b }
-func intPtr(i int) *int       { return &i }
-func strPtr(s string) *string { return &s }
 
 func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	t.Parallel()
@@ -478,12 +474,14 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	seams, delays := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{})
+	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, seams)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "deadline expiry must surface a client timeout")
+	assert.NotEmpty(t, delays(), "the loop must have waited on the fake clock before giving up")
 }
 
 // throttleServer replies 429 to the first throttled requests, then serves a
@@ -933,10 +931,10 @@ func TestRunCommandStreaming_NormalFlow(t *testing.T) {
 		serverID:     "srv-uuid",
 		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
 		runningPolls: 2,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
 }
@@ -949,9 +947,11 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
+	delays := defaultStreamDelays
+	delays.pollTick = tick
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, tick, waitApproval)
+		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, delays, waitApproval)
 	}()
 	return done
 }
@@ -988,7 +988,7 @@ func TestStreamSubscribed_FinEndsRunWithoutThePoll(t *testing.T) {
 		},
 		// A command that prints nothing—the case that started #309—so the run can
 		// only end on a terminal signal, never on output.
-		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+		terminal: EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, time.Hour, false))
@@ -1015,7 +1015,7 @@ func TestStreamSubscribed_FinCancelsThePoll(t *testing.T) {
 		serverID: "srv-uuid",
 		wsFinFor: "cmd-uuid",
 		onDetail: func() { details.Add(1) },
-		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+		terminal: EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", &bytes.Buffer{}, tick, false))
@@ -1046,10 +1046,10 @@ func TestRunCommandStreaming_FinSubscriptionTargetsTheCommandsServer(t *testing.
 			defer mu.Unlock()
 			subscriptions = append(subscriptions, [2]string{eventType, targetID})
 		},
-		terminal: EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+		terminal: EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", &bytes.Buffer{})
 	require.NoError(t, err)
 
 	mu.Lock()
@@ -1074,7 +1074,7 @@ func TestStreamSubscribed_FinOnStillRunningStatusWaitsForPoll(t *testing.T) {
 		// The fin arrives before the first poll, so this "running" is the read the
 		// fin triggers; the terminal one goes to the poll.
 		runningPolls: 1,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+		terminal:     EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
@@ -1095,7 +1095,7 @@ func TestStreamSubscribed_FinWithFailedReadWaitsForPoll(t *testing.T) {
 		wsFinFor:    "cmd-uuid",
 		onDetail:    func() { details.Add(1) },
 		detailFails: 1,
-		terminal:    EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+		terminal:    EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 	})
 
 	err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, false))
@@ -1121,7 +1121,7 @@ func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
 				onDetail:   func() { details.Add(1) },
 				heldPolls:  1,
 				heldStatus: status,
-				terminal:   EventDetails{Status: "completed", Success: boolPtr(true), Result: "done\n"},
+				terminal:   EventDetails{Status: "completed", Success: new(true), Result: "done\n"},
 			})
 
 			err := awaitStream(t, startStream(t, ac, "cmd-uuid", "srv-uuid", stdoutBuf, 100*time.Millisecond, true))
@@ -1148,10 +1148,10 @@ func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 			return nil
 		},
 		runningPolls: 2,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1181,10 +1181,10 @@ func TestRunCommandStreaming_WarmFireGapDoesNotSkipLaterChunk(t *testing.T) {
 			return out
 		},
 		runningPolls: 1,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1203,10 +1203,10 @@ func TestRunCommandStreaming_DuplicateSeqIgnored(t *testing.T) {
 			{Seq: 2, Content: "s2\n"},
 		},
 		runningPolls: 2,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1221,10 +1221,10 @@ func TestRunCommandStreaming_FailedStatusPropagatesExitCode(t *testing.T) {
 		serverID:     "srv-uuid",
 		wsChunks:     []ChunkEvent{{Seq: 0, Content: "before-exit\n"}},
 		runningPolls: 1,
-		terminal:     EventDetails{Status: "failed", Success: boolPtr(false), ExitCode: intPtr(23)},
+		terminal:     EventDetails{Status: "failed", Success: new(false), ExitCode: new(23)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "exit 23", "", "", nil, "", "", stdoutBuf)
 	require.Error(t, err)
 	var remoteErr *RemoteCommandError
 	require.ErrorAs(t, err, &remoteErr)
@@ -1258,10 +1258,10 @@ func TestRunCommandStreaming_GapFillRaceDoesNotDropChunk(t *testing.T) {
 			return out
 		},
 		runningPolls: 3,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "seq", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "seq", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\ns3\n", stdoutBuf.String())
 }
@@ -1331,7 +1331,7 @@ func TestRunCommandStreaming_FallbackOnSubscribeFailureReusesCommand(t *testing.
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "reused-output\n", stdoutBuf.String())
 
@@ -1373,7 +1373,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 				_, _ = w.Write([]byte(`{"id":"` + cmdID + `","status":"running"}`))
 			} else {
 				// Result empty: output lives only in chunks (server contract).
-				_ = json.NewEncoder(w).Encode(EventDetails{ID: cmdID, Status: "completed", Success: boolPtr(true), Result: ""})
+				_ = json.NewEncoder(w).Encode(EventDetails{ID: cmdID, Status: "completed", Success: new(true), Result: ""})
 			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -1383,7 +1383,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "chunk-a\nchunk-b\n", stdoutBuf.String())
 }
@@ -1429,7 +1429,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "fallback-output\n", stdoutBuf.String())
 }
@@ -1475,9 +1475,27 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: apiServer.Client(), BaseURL: apiServer.URL}
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testFallbackDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-output\n", stdoutBuf.String())
+}
+
+// testStreamDelays keeps the production connect budget, which a stream that
+// connects never waits out, and shortens the waits the tests would sit through.
+var testStreamDelays = streamDelays{
+	connectTimeout:     commandOutputConnectTimeout,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
+}
+
+// testFallbackDelays is for a stream whose session the server refuses: it
+// never connects, so the whole connect budget is spent before the fallback.
+var testFallbackDelays = streamDelays{
+	connectTimeout:     100 * time.Millisecond,
+	reconnectBaseDelay: testReconnectBaseDelay,
+	pollTick:           10 * time.Millisecond,
+	fallbackPollTick:   10 * time.Millisecond,
 }
 
 // streamingServerConfig configures the fake event servers for streaming tests.
@@ -1517,6 +1535,8 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	subscribed := make(chan struct{})
 	var subOnce sync.Once
+	delivered, wsGone := make(chan struct{}), make(chan struct{})
+	var deliveredOnce, wsGoneOnce sync.Once
 
 	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -1524,6 +1544,12 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			return
 		}
 		defer func() { _ = conn.Close() }()
+		defer wsGoneOnce.Do(func() { close(wsGone) })
+		// A pong means the client has handled every frame sent before the ping.
+		conn.SetPongHandler(func(string) error {
+			deliveredOnce.Do(func() { close(delivered) })
+			return nil
+		})
 		select {
 		case <-subscribed:
 		case <-time.After(10 * time.Second):
@@ -1545,6 +1571,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 			})
 			_ = conn.WriteMessage(websocket.TextMessage, b)
 		}
+		_ = conn.WriteControl(websocket.PingMessage, nil, time.Time{})
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				return
@@ -1640,10 +1667,18 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"running","server":{"id":"` + cfg.serverID + `"}}`))
 				return
 			}
+			if cfg.sessionStatus == 0 { // a refused session never opens the WS
+				select {
+				case <-delivered:
+				case <-wsGone:
+				}
+			}
 			term := cfg.terminal
 			term.ID = cfg.cmdID
 			term.Server.ID = cfg.serverID
 			_ = json.NewEncoder(w).Encode(term)
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/events/sessions/"):
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Logf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -1666,10 +1701,10 @@ func TestRunCommandStreaming_NoDuplicateOutputOnFailure(t *testing.T) {
 		serverID:     "srv-uuid",
 		wsChunks:     []ChunkEvent{{Seq: 0, Content: "hello\n"}, {Seq: 1, Content: "world\n"}},
 		runningPolls: 2,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(false), Result: "hello\nworld\n"},
+		terminal:     EventDetails{Status: "completed", Success: new(false), Result: "hello\nworld\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 
 	// Streamed once: the buffered Result is not appended to the writer.
 	assert.Equal(t, "hello\nworld\n", stdoutBuf.String())
@@ -1690,7 +1725,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 	}{
 		{
 			name:     "success false returns RemoteCommandError with exit code",
-			terminal: EventDetails{Status: "completed", Success: boolPtr(false), ExitCode: intPtr(7)},
+			terminal: EventDetails{Status: "completed", Success: new(false), ExitCode: new(7)},
 			check: func(t *testing.T, err error) {
 				t.Helper()
 				var re *RemoteCommandError
@@ -1727,7 +1762,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 		},
 		{
 			name:     "stuck status with phase carries phase identifier",
-			terminal: EventDetails{Status: "stuck", ErrorPhase: strPtr("agent_timeout")},
+			terminal: EventDetails{Status: "stuck", ErrorPhase: new("agent_timeout")},
 			check: func(t *testing.T, err error) {
 				t.Helper()
 				require.Error(t, err)
@@ -1754,7 +1789,7 @@ func TestRunCommandStreaming_TerminalStatusErrors(t *testing.T) {
 				runningPolls: 1,
 				terminal:     tt.terminal,
 			})
-			err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+			err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 			tt.check(t, err)
 		})
 	}
@@ -1777,10 +1812,10 @@ func TestRunCommandStreaming_DrainsTrailingChunksOnTerminal(t *testing.T) {
 			return nil
 		},
 		runningPolls: 2,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:     EventDetails{Status: "completed", Success: new(true)},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "s0\ns1\ns2\n", stdoutBuf.String())
 }
@@ -1795,10 +1830,10 @@ func TestRunCommandStreaming_FallbackToResultWhenNothingStreamed(t *testing.T) {
 		cmdID:        "cmd-uuid",
 		serverID:     "srv-uuid",
 		runningPolls: 1,
-		terminal:     EventDetails{Status: "completed", Success: boolPtr(true), Result: "buffered-only\n"},
+		terminal:     EventDetails{Status: "completed", Success: new(true), Result: "buffered-only\n"},
 	})
 
-	err := runCommandStreamingWithWriter(ac, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
+	err := runCommandStreamingWithDelays(ac, testStreamDelays, "srv", "echo hi", "", "", nil, "", "", stdoutBuf)
 	require.NoError(t, err)
 	assert.Equal(t, "buffered-only\n", stdoutBuf.String())
 }
@@ -2361,7 +2396,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			var out bytes.Buffer
-			err := runCommandFallbackFromID(ac, cmdID, &out, false, fmt.Errorf("websocket dial failed"))
+			err := runCommandFallbackFromID(ac, cmdID, &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
 
 			assert.Equal(t, tt.wantOut, out.String())
 			switch {
@@ -2389,13 +2424,13 @@ func TestCommandStream_RefusedSubmissionsShareOneSession(t *testing.T) {
 		cmdID:          "cmd-uuid",
 		serverID:       "srv-uuid",
 		wsChunks:       []ChunkEvent{{Seq: 0, Content: "hello\n"}},
-		terminal:       EventDetails{Status: "completed", Success: boolPtr(true)},
+		terminal:       EventDetails{Status: "completed", Success: new(true)},
 		submitRefusals: 3,
 		sessions:       &sessions,
 		submits:        &submits,
 	})
 
-	stream := NewCommandStream(ac)
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
 	defer stream.Close()
 	for range 3 {
 		err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
@@ -2417,7 +2452,7 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 	ac := newStreamingServers(t, streamingServerConfig{
 		cmdID:          "cmd-uuid",
 		serverID:       "srv-uuid",
-		terminal:       EventDetails{Status: "completed", Success: boolPtr(true), Result: "hello\n"},
+		terminal:       EventDetails{Status: "completed", Success: new(true), Result: "hello\n"},
 		submitRefusals: 1,
 		// A 403 is fatal before the first subscribe, so the connect gives up at once.
 		sessionStatus: http.StatusForbidden,
@@ -2425,7 +2460,7 @@ func TestCommandStream_DoesNotRedialAListenerThatFailed(t *testing.T) {
 		submits:       &submits,
 	})
 
-	stream := NewCommandStream(ac)
+	stream := &CommandStream{ac: ac, delays: testStreamDelays}
 	defer stream.Close()
 	stdoutBuf := &bytes.Buffer{}
 	err := stream.RunCommand("srv", "echo hi", "", "", nil, "", "", stdoutBuf)
@@ -2473,4 +2508,72 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 			require.ErrorAs(t, err, &clientTimeout)
 		})
 	}
+}
+
+func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"AnswerPurposeDemand", func(ac *client.AlpaconClient) error { return AnswerPurposeDemand(ac, badID, "rotate logs") }},
+		{"GetCommandByID", func(ac *client.AlpaconClient) error {
+			_, err := GetCommandByID(ac, badID)
+			return err
+		}},
+		{"PollCommandExecution", func(ac *client.AlpaconClient) error {
+			_, err := PollCommandExecution(ac, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestPostCommand_ReturnsOnlyAOneSegmentCommandID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " cmd-1 ", want: "cmd-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode([]CommandResponse{{ID: tc.id}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			created, err := postCommand(ac, &CommandRequest{})
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Contains(t, err.Error(), "the server created the command")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, created.ID)
+		})
+	}
+}
+
+func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
+
+	require.ErrorIs(t, err, utils.ErrInvalidID)
 }

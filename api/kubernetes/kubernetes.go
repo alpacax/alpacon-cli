@@ -2,6 +2,8 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"fmt"
+	"path"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -10,6 +12,7 @@ import (
 
 const (
 	clusterURL = "/api/kubernetes/clusters/"
+	sessionURL = "/api/kubernetes/sessions/"
 	// iamGroupURL is duplicated from api/iam so this package can build a lean
 	// UUID→name projection without pulling in the full iam.GroupResponse type.
 	iamGroupURL = "/api/iam/groups/"
@@ -57,7 +60,7 @@ func GetClusterIDByName(ac *client.AlpaconClient, clusterName string) (string, e
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "cluster")
 }
 
 // GetClusterDetail fetches one cluster by ID.
@@ -77,6 +80,10 @@ func GetClusterDetail(ac *client.AlpaconClient, clusterID string) (*ClusterDetai
 
 // GetClusterDetailRaw fetches one cluster by ID and returns the body as the server sent it.
 func GetClusterDetailRaw(ac *client.AlpaconClient, clusterID string) ([]byte, error) {
+	clusterID, err := api.RequireID(clusterID, "cluster")
+	if err != nil {
+		return nil, err
+	}
 	return ac.SendGetRequest(utils.BuildURL(clusterURL, clusterID, nil))
 }
 
@@ -109,4 +116,34 @@ func ResolveGroupNames(ac *client.AlpaconClient, groupIDs []string) []string {
 	}
 
 	return names
+}
+
+// CreateSession opens a proxy session to a cluster. The channel token appears
+// only in this response—the server never returns it again—so the caller must
+// persist it at once.
+func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*KubeSessionResponse, error) {
+	body, err := ac.SendPostRequest(sessionURL, req)
+	if err != nil {
+		return nil, err
+	}
+
+	var session KubeSessionResponse
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	if session.ID, err = api.RequireResponseID(session.ID, "kube session"); err != nil {
+		return nil, fmt.Errorf("the server created the kube session, but its ID is unusable (%w)", err)
+	}
+
+	return &session, nil
+}
+
+// CloseSession ends a proxy session.
+func CloseSession(ac *client.AlpaconClient, sessionID string) error {
+	sessionID, err := api.RequireID(sessionID, "kube session")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
+	return err
 }

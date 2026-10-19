@@ -3,6 +3,7 @@ package ftp
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/ftp"
@@ -15,7 +16,7 @@ import (
 )
 
 var CpCmd = &cobra.Command{
-	Use:   "cp [SOURCE...] [DESTINATION]",
+	Use:   "cp SOURCE... DESTINATION",
 	Short: "Copy files between local and remote locations",
 	Long: `Copy files between your local machine and a remote server.
 Supports SSH-like user@host:path syntax for specifying the username inline with the remote path.
@@ -169,12 +170,7 @@ func isLocalPath(path string) bool {
 }
 
 func isLocalPaths(paths []string) bool {
-	for _, path := range paths {
-		if isRemotePath(path) {
-			return false
-		}
-	}
-	return true
+	return !slices.ContainsFunc(paths, isRemotePath)
 }
 
 // normalizeArgs resolves the username, then strips the inline user prefixes in

@@ -554,14 +554,17 @@ func TestRequestServerAction(t *testing.T) {
 	t.Parallel()
 	const serverID = "action-server-id"
 
+	// wire is the literal the server reads, so a drifting constant fails here.
 	tests := []struct {
 		name   string
 		action string
+		wire   string
 		force  bool
 	}{
-		{"restart agent with force", ActionRestartAgent, true},
-		{"upgrade agent without force", ActionUpgradeAgent, false},
-		{"refresh without force", ActionUpdateInformation, false},
+		{"restart agent with force", ActionRestartAgent, "restart_agent", true},
+		{"upgrade agent without force", ActionUpgradeAgent, "upgrade_agent", false},
+		{"refresh without force", ActionUpdateInformation, "update_information", false},
+		{"install pam without force", ActionInstallPAM, "install_pam", false},
 	}
 
 	for _, tt := range tests {
@@ -588,8 +591,8 @@ func TestRequestServerAction(t *testing.T) {
 						w.WriteHeader(http.StatusInternalServerError)
 						return
 					}
-					if req.Action != tt.action {
-						t.Errorf("expected action %q, got %q", tt.action, req.Action)
+					if req.Action != tt.wire {
+						t.Errorf("expected action %q, got %q", tt.wire, req.Action)
 					}
 					if req.Force != tt.force {
 						t.Errorf("expected force %v, got %v", tt.force, req.Force)
@@ -660,6 +663,67 @@ func TestResolveServerNames(t *testing.T) {
 				assert.Equal(t, tt.wantIDs, ids)
 			}
 			assert.Equal(t, tt.wantRequested, requested)
+		})
+	}
+}
+
+func TestGetServerIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, want string }{
+		{name: "padded_id", id: " id-1 ", want: "id-1"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[ServerDetails]{Count: 1, Results: []ServerDetails{{ID: tc.id, Name: "my-server"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			id, err := GetServerIDByName(ac, "my-server")
+
+			if tc.want == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+				assert.Empty(t, id)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, id)
+		})
+	}
+}
+
+func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, id, wantDelete string }{
+		{name: "padded_id", id: " tok-1 ", wantDelete: "/api/servers/registration-tokens/tok-1/"},
+		{name: "parent_traversal", id: "../x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var deleted string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					deleted = r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.ListResponse[RegistrationTokenDetails]{Count: 1, Results: []RegistrationTokenDetails{{ID: tc.id, Name: "my-token"}}})
+			}))
+			defer ts.Close()
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := DeleteRegistrationToken(ac, "my-token")
+
+			if tc.wantDelete == "" {
+				require.ErrorIs(t, err, api.ErrUnusableID)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tc.wantDelete, deleted)
 		})
 	}
 }

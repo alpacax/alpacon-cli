@@ -308,9 +308,7 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 		stop := make(chan struct{})
 		seen := make(chan string, 1)
 		var watching sync.WaitGroup
-		watching.Add(1)
-		go func() {
-			defer watching.Done()
+		watching.Go(func() {
 			for {
 				data, err := os.ReadFile(path)
 				if err == nil {
@@ -325,7 +323,7 @@ func TestCreateDeviceIDFile_NeverPublishesAnEmptyFile(t *testing.T) {
 				default:
 				}
 			}
-		}()
+		})
 
 		err := createDeviceIDFile(path, deviceID)
 		close(stop)
@@ -354,16 +352,14 @@ func TestGetOrCreateDeviceID_ConcurrentCreation(t *testing.T) {
 	var start sync.WaitGroup
 	var done sync.WaitGroup
 	start.Add(1)
-	done.Add(callers)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
 	for i := range callers {
-		go func(i int) {
-			defer done.Done()
+		done.Go(func() {
 			start.Wait()
 			results[i], errs[i] = GetOrCreateDeviceID()
-		}(i)
+		})
 	}
 	start.Done()
 	done.Wait()
@@ -400,16 +396,14 @@ func TestGetOrCreateDeviceID_ConcurrentReplacementOfMalformedValue(t *testing.T)
 	var start sync.WaitGroup
 	var done sync.WaitGroup
 	start.Add(1)
-	done.Add(callers)
 
 	results := make([]string, callers)
 	errs := make([]error, callers)
 	for i := range callers {
-		go func(i int) {
-			defer done.Done()
+		done.Go(func() {
 			start.Wait()
 			results[i], errs[i] = GetOrCreateDeviceID()
-		}(i)
+		})
 	}
 	start.Done()
 	done.Wait()

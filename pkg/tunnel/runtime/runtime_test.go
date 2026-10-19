@@ -94,19 +94,19 @@ func (c *writeCountingConn) Write(b []byte) (int, error) {
 func TestShutdownRunsOnce(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("shutdown cause")
-	var listenerCloseCount int32
-	var sessionCloseCount int32
+	var listenerCloseCount atomic.Int32
+	var sessionCloseCount atomic.Int32
 
 	r := &Runtime{
 		listener: &mockListener{
 			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
+				listenerCloseCount.Add(1)
 				return nil
 			},
 		},
 		session: &mockSession{
 			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
+				sessionCloseCount.Add(1)
 				return nil
 			},
 		},
@@ -115,12 +115,10 @@ func TestShutdownRunsOnce(t *testing.T) {
 
 	const workers = 8
 	var wg sync.WaitGroup
-	wg.Add(workers)
 	for range workers {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			r.shutdown(cause)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -130,10 +128,10 @@ func TestShutdownRunsOnce(t *testing.T) {
 		t.Fatal("expected done channel to be closed")
 	}
 
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+	if got := listenerCloseCount.Load(); got != 1 {
 		t.Fatalf("listener Close() called %d times, want 1", got)
 	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+	if got := sessionCloseCount.Load(); got != 1 {
 		t.Fatalf("session Close() called %d times, want 1", got)
 	}
 
@@ -144,13 +142,13 @@ func TestShutdownRunsOnce(t *testing.T) {
 
 func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 	t.Parallel()
-	var attempts int32
+	var attempts atomic.Int32
 	const retryCount = 3
 
 	r := &Runtime{
 		listener: &mockListener{
 			acceptFn: func() (net.Conn, error) {
-				n := atomic.AddInt32(&attempts, 1)
+				n := attempts.Add(1)
 				if int(n) <= retryCount {
 					return nil, &tempNetError{
 						msg:       "temporary accept error",
@@ -168,7 +166,7 @@ func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 
 	r.acceptConnections()
 
-	got := atomic.LoadInt32(&attempts)
+	got := attempts.Load()
 	if got <= int32(retryCount) {
 		t.Fatalf("expected more than %d attempts, got %d", retryCount, got)
 	}
@@ -180,8 +178,8 @@ func TestAcceptConnectionsRetriesOnTemporaryError(t *testing.T) {
 
 func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T) {
 	t.Parallel()
-	var listenerCloseCount int32
-	var sessionCloseCount int32
+	var listenerCloseCount atomic.Int32
+	var sessionCloseCount atomic.Int32
 
 	r := &Runtime{
 		listener: &mockListener{
@@ -193,13 +191,13 @@ func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T)
 				}
 			},
 			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
+				listenerCloseCount.Add(1)
 				return nil
 			},
 		},
 		session: &mockSession{
 			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
+				sessionCloseCount.Add(1)
 				return nil
 			},
 		},
@@ -218,10 +216,10 @@ func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T)
 		t.Fatal("expected shutdown cause, got nil")
 	}
 
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+	if got := listenerCloseCount.Load(); got != 1 {
 		t.Fatalf("listener Close() called %d times, want 1", got)
 	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+	if got := sessionCloseCount.Load(); got != 1 {
 		t.Fatalf("session Close() called %d times, want 1", got)
 	}
 }
@@ -229,8 +227,8 @@ func TestAcceptConnectionsTemporaryNonTimeoutErrorTriggersShutdown(t *testing.T)
 func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 	t.Parallel()
 	acceptErr := errors.New("accept failure")
-	var listenerCloseCount int32
-	var sessionCloseCount int32
+	var listenerCloseCount atomic.Int32
+	var sessionCloseCount atomic.Int32
 
 	r := &Runtime{
 		listener: &mockListener{
@@ -238,13 +236,13 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 				return nil, acceptErr
 			},
 			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
+				listenerCloseCount.Add(1)
 				return nil
 			},
 		},
 		session: &mockSession{
 			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
+				sessionCloseCount.Add(1)
 				return nil
 			},
 		},
@@ -263,10 +261,10 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 		t.Fatalf("shutdown cause = %v, want wrapped acceptErr", r.Cause())
 	}
 
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+	if got := listenerCloseCount.Load(); got != 1 {
 		t.Fatalf("listener Close() called %d times, want 1", got)
 	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+	if got := sessionCloseCount.Load(); got != 1 {
 		t.Fatalf("session Close() called %d times, want 1", got)
 	}
 }
@@ -274,20 +272,20 @@ func TestAcceptConnectionsErrorTriggersShutdown(t *testing.T) {
 func TestSessionCloseChanTriggersShutdown(t *testing.T) {
 	t.Parallel()
 	closeChan := make(chan struct{})
-	var listenerCloseCount int32
-	var sessionCloseCount int32
+	var listenerCloseCount atomic.Int32
+	var sessionCloseCount atomic.Int32
 
 	r := &Runtime{
 		listener: &mockListener{
 			closeFn: func() error {
-				atomic.AddInt32(&listenerCloseCount, 1)
+				listenerCloseCount.Add(1)
 				return nil
 			},
 		},
 		session: &mockSession{
 			closeChan: closeChan,
 			closeFn: func() error {
-				atomic.AddInt32(&sessionCloseCount, 1)
+				sessionCloseCount.Add(1)
 				return nil
 			},
 		},
@@ -311,10 +309,10 @@ func TestSessionCloseChanTriggersShutdown(t *testing.T) {
 		t.Fatalf("shutdown cause = %v, want 'session closed by remote'", cause)
 	}
 
-	if got := atomic.LoadInt32(&listenerCloseCount); got != 1 {
+	if got := listenerCloseCount.Load(); got != 1 {
 		t.Fatalf("listener Close() called %d times, want 1", got)
 	}
-	if got := atomic.LoadInt32(&sessionCloseCount); got != 1 {
+	if got := sessionCloseCount.Load(); got != 1 {
 		t.Fatalf("session Close() called %d times, want 1", got)
 	}
 }

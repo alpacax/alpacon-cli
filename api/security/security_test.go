@@ -10,6 +10,10 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetCommandAclList_Pagination(t *testing.T) {
@@ -211,5 +215,63 @@ func TestGetFileAclList_Pagination(t *testing.T) {
 	}
 	if len(acls) != 120 {
 		t.Errorf("expected 120 ACLs, got %d", len(acls))
+	}
+}
+
+func TestACLDeletesRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+
+	const traversal = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"DeleteCommandAcl", func(ac *client.AlpaconClient) error { return DeleteCommandAcl(ac, traversal) }},
+		{"DeleteServerAcl", func(ac *client.AlpaconClient) error { return DeleteServerAcl(ac, traversal) }},
+		{"DeleteFileAcl", func(ac *client.AlpaconClient) error { return DeleteFileAcl(ac, traversal) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestACLDeletesTrimAValidIDIntoOnePathSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+		want string
+	}{
+		{"DeleteCommandAcl", func(ac *client.AlpaconClient) error { return DeleteCommandAcl(ac, " 42 ") }, "DELETE /api/security/command-acl/42/"},
+		{"DeleteServerAcl", func(ac *client.AlpaconClient) error { return DeleteServerAcl(ac, " 42 ") }, "DELETE /api/security/server-acl/42/"},
+		{"DeleteFileAcl", func(ac *client.AlpaconClient) error { return DeleteFileAcl(ac, " 42 ") }, "DELETE /api/security/file-acl/42/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var rec atomic.Value
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.Store(r.Method + " " + r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(ts.Close)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, rec.Load())
+		})
 	}
 }

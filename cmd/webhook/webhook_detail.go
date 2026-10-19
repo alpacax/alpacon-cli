@@ -10,10 +10,10 @@ import (
 var webhookDetailCmd = &cobra.Command{
 	Use:     "describe WEBHOOK",
 	Aliases: []string{"desc"},
-	Short:   "Display detailed information about a specific webhook",
+	Short:   "Show details of a webhook",
 	Long: `
 	The describe command fetches and displays detailed information about a specific webhook,
-	including its URL, SSL verification setting, enabled status, and owner.
+	including its URL, SSL verification setting, and enabled status.
 	`,
 	Example: `
 	alpacon webhook describe my-webhook

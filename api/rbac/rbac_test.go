@@ -16,6 +16,8 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -572,4 +574,60 @@ func TestTierLabel(t *testing.T) {
 	assert.Equal(t, "type", tierLabel("content_type"))
 	assert.Equal(t, "object", tierLabel("object"))
 	assert.Empty(t, tierLabel(""), "a scope the server omitted stays blank rather than becoming 'workspace'")
+}
+
+func TestRBACCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{"GetRoleScopes", func(ac *client.AlpaconClient) error {
+			_, err := GetRoleScopes(ac, badID)
+			return err
+		}},
+		{"RevokeRole", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "") }},
+		{"RevokeRole_with_reason", func(ac *client.AlpaconClient) error { return RevokeRole(ac, badID, "left the team") }},
+		{"GetEffectivePermissions", func(ac *client.AlpaconClient) error {
+			_, err := GetEffectivePermissions(ac, badID)
+			return err
+		}},
+		{"GetPermissionPatterns", func(ac *client.AlpaconClient) error {
+			_, err := GetPermissionPatterns(ac, badID)
+			return err
+		}},
+		{"CheckPermission", func(ac *client.AlpaconClient) error {
+			_, err := CheckPermission(ac, badID, "server:read")
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestUserIDDashMeansSelfAndReachesTheServer(t *testing.T) {
+	t.Parallel()
+	var path atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path.Store(r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, err := GetEffectivePermissions(ac, "-")
+
+	require.NoError(t, err)
+	assert.Equal(t, "/api/iam/users/-/effective-permissions/", path.Load())
 }

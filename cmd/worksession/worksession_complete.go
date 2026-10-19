@@ -18,10 +18,19 @@ var workSessionCompleteCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opComplete, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
-		if err := wsapi.CompleteWorkSession(ac, args[0]); err != nil {
+		cleared, err := RunComplete(ac, args[0])
+		if err != nil {
 			utils.CliErrorEnvelopeWithExit(opComplete, err, "Failed to complete work session: %s.", err)
 		}
 
 		utils.CliSuccess("Work session %s completed.", args[0])
+		if cleared {
+			utils.CliInfo("Active work-session cleared.")
+		}
 	},
+}
+
+// RunComplete completes the session; see endSession.
+func RunComplete(ac *client.AlpaconClient, id string) (bool, error) {
+	return endSession(ac, id, wsapi.CompleteWorkSession)
 }

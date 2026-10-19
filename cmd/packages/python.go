@@ -7,7 +7,7 @@ import (
 
 var pythonCmd = &cobra.Command{
 	Use:   "python",
-	Short: "Python packages",
+	Short: "Manage Python packages",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return utils.RequireSubcommand(cmd)
 	},

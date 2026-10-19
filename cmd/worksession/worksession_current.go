@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -13,7 +14,7 @@ import (
 
 var workSessionCurrentCmd = &cobra.Command{
 	Use:     "current",
-	Short:   "Show the active work-session for the current workspace",
+	Short:   "Show the active work-session in this workspace",
 	Example: `  alpacon work-session current`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if utils.OutputFormat == utils.OutputFormatJSON {
@@ -59,16 +60,26 @@ func printCurrentRaw() error {
 	if err != nil {
 		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
 	}
+	return WriteCurrentRaw(ac, uuid)
+}
+
+func WriteCurrentRaw(ac *client.AlpaconClient, uuid string) error {
 	body, err := wsapi.GetWorkSessionRaw(ac, uuid)
 	if err != nil {
 		return staleActiveSessionError(uuid, err)
+	}
+	var session struct {
+		Status string `json:"status"`
+	}
+	if json.Unmarshal(body, &session) == nil {
+		warnIfEnded(uuid, session.Status)
 	}
 	utils.PrintJson(body)
 	return nil
 }
 
 // printCurrentTable projects the active session through ProjectAttributes so
-// the columns stay consistent with 'work-session ls', and marks the active row.
+// the columns stay consistent with 'work-session ls', and marks it as 'ls' does.
 func printCurrentTable() error {
 	uuid, err := config.GetActiveWorkSession()
 	if err != nil {
@@ -82,14 +93,25 @@ func printCurrentTable() error {
 	if err != nil {
 		return fmt.Errorf("connection to Alpacon API failed: %w (consider re-logging)", err)
 	}
+	return WriteCurrentTable(ac, uuid)
+}
+
+func WriteCurrentTable(ac *client.AlpaconClient, uuid string) error {
 	ws, err := wsapi.GetWorkSession(ac, uuid)
 	if err != nil {
 		return staleActiveSessionError(uuid, err)
 	}
-	row := wsapi.ProjectAttributes(ws)
-	row.Active = "*"
-	utils.PrintTable([]wsapi.WorkSessionAttributes{row})
+	rows := []wsapi.WorkSessionAttributes{wsapi.ProjectAttributes(ws)}
+	MarkActive(rows, uuid)
+	warnIfEnded(uuid, ws.Status)
+	utils.PrintTable(rows)
 	return nil
+}
+
+func warnIfEnded(uuid, status string) {
+	if wsapi.IsEndedStatus(status) {
+		utils.CliWarning("Active work-session %s has ended (%s). Run 'alpacon work-session use --unset' to clear it.", uuid, status)
+	}
 }
 
 func staleActiveSessionError(uuid string, cause error) error {

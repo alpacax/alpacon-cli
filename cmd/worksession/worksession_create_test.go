@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -55,9 +56,9 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 }
 
 func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
-	var polls int32
+	var polls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&polls, 1)
+		polls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"ws-1","status":"pending"}`))
 	}))
@@ -68,7 +69,7 @@ func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
 	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
 
 	require.Error(t, err)
-	got := atomic.LoadInt32(&polls)
+	got := polls.Load()
 	assert.Less(t, got, int32(40), "a fixed 1ms tick would poll about 60 times")
 }
 
@@ -804,4 +805,25 @@ func TestPrintTerminalWaitErrorSanitizesTheSessionID(t *testing.T) {
 
 	assert.NotContains(t, stderr, "\x1b[2K")
 	assert.Contains(t, stderr, "work session was rejected")
+}
+
+func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
+	t.Parallel()
+	// If the switch has no case for a status that IsEndedStatus accepts, the wait
+	// falls through to polling until the timeout instead of ending.
+	for _, status := range wsapi.EndedStatuses() {
+		t.Run(status, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":"ws-uuid","status":%q}`, status)
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+
+			var terminal *terminalWaitError
+			assert.ErrorAs(t, err, &terminal, "no case for ended status %q in the create --wait switch", status)
+		})
+	}
 }

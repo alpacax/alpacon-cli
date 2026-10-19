@@ -8,7 +8,7 @@ import (
 
 var upgradeAgentCmd = &cobra.Command{
 	Use:   "upgrade SERVER",
-	Short: "Upgrade server's agent(alpamon)",
+	Short: "Upgrade the Alpamon agent on a server",
 	Long: `
 	This command upgrades the agent (Alpamon) on a specified server to the latest version.
 	By default it asks for confirmation; pass -y to skip the prompt.
@@ -27,7 +27,7 @@ var upgradeAgentCmd = &cobra.Command{
 			args[0],
 			server.ActionUpgradeAgent,
 			"Upgrade the agent on server '%s'?",
-			"Agent upgrade requested. Run 'alpacon events' to monitor progress.",
+			"Agent upgrade requested. Run 'alpacon exec ls' to monitor progress.",
 			"Failed to upgrade the agent",
 			yes, force,
 		)

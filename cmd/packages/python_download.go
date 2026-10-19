@@ -8,11 +8,11 @@ import (
 )
 
 var pythonPackageDownloadCmd = &cobra.Command{
-	Use:   "download PACKAGE FILE",
-	Short: "Download a python package from alpacon",
+	Use:   "download PACKAGE DIRECTORY",
+	Short: "Download a Python package from Alpacon",
 	Long: `
-	The 'download' command allows users to download a Python package from the alpacon.
-	This command is designed to facilitate the transfer of your locally developed Python packages to a remote server environment for further usage or distribution.
+	The 'download' command allows users to download a Python package from Alpacon.
+	The package is saved into DIRECTORY on this machine.
 	`,
 	Example: `
 	alpacon package python download alpamon-1.1.0-py3-none-any.whl .
@@ -29,7 +29,7 @@ var pythonPackageDownloadCmd = &cobra.Command{
 
 		err = packages.DownloadPackage(alpaconClient, file, dest, "python")
 		if err != nil {
-			utils.CliErrorWithExit("Failed to download the python packages from alpacon: %s.", err)
+			utils.CliErrorWithExit("Failed to download the Python package from Alpacon: %s.", err)
 		}
 
 		utils.CliSuccess("Package downloaded: %s", file)

@@ -20,7 +20,7 @@ import (
 )
 
 var ExecCmd = &cobra.Command{
-	Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]",
+	Use:   "exec [flags] [USER@]SERVER [--] [COMMAND...]", // [flags] stays first: words after SERVER go to the remote command
 	Short: "Execute a command on a remote server",
 	Long: `Execute a command on a remote server.
 
@@ -261,6 +261,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 			if HandleFileExecRefusal(err, parsed.Server) {
 				return
 			}
+			if HandleExecUserRefusal(err, parsed) {
+				return
+			}
 			if file != nil && HandleFileExecInlineCredential(err) {
 				return
 			}
@@ -315,6 +318,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// A file-lane refusal names the server in its guidance, which
 	// HandleCommandResult does not know; it answers only its own codes.
 	if HandleFileExecRefusal(err, parsed.Server) {
+		return
+	}
+	if HandleExecUserRefusal(err, parsed) {
 		return
 	}
 	if file != nil && HandleFileExecInlineCredential(err) {

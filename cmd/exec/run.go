@@ -42,6 +42,13 @@ const sudoPresenceRequiredCode = "SUDO_PRESENCE_REQUIRED"
 // server's inline-credential gate (utils.CommandInlineCredential).
 const commandInlineCredentialMessage = "server rejected this command—the command line carries a credential"
 
+const (
+	// usernameGroupnameInvalidCode is the code the server answers with when the
+	// command carries no execution user and the server has no default one.
+	usernameGroupnameInvalidCode = "server_username_groupname_invalid"
+	execUserRequiredHint         = "Specify an execution user with -u USERNAME (and optionally -g GROUP), or use USERNAME@SERVER.\n%s"
+)
+
 // ExecInvocation and WebshInvocation are the two Invocation values (see the
 // Invocation type below).
 const (
@@ -970,4 +977,37 @@ func remoteCommandOutcome(remoteErr *event.RemoteCommandError) (stderrLine strin
 			phaseHintLine(remoteErr.ErrorPhase)
 	}
 	return stderrLine, remoteErr.ExitCode
+}
+
+// HandleExecUserRefusal reports the missing execution user and exits 1, or
+// returns false when err is something else. Under --output json it returns
+// false so the envelope stays what it is today.
+func HandleExecUserRefusal(err error, parsed RemoteExecArgs) bool {
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		return false
+	}
+	message, hint, ok := execUserRefusal(err, parsed)
+	if !ok {
+		return false
+	}
+	reportCodedRefusal("command", err, message, hint)
+	return true
+}
+
+// execUserRefusal renders the refusal for a command sent with no execution user.
+// One that named a user or group keeps the server's own error, which this hint would contradict.
+func execUserRefusal(err error, parsed RemoteExecArgs) (message, hint string, ok bool) {
+	if parsed.Username != "" || parsed.Groupname != "" ||
+		utils.StructuredErrorCode(err) != usernameGroupnameInvalidCode {
+		return "", "", false
+	}
+	return fmt.Sprintf("no execution user was resolved for '%s' server", utils.SanitizeTerminalText(parsed.Server)),
+		denialHintLine(fmt.Sprintf(execUserRequiredHint, execUserRequiredExamples(parsed.InvokedAs))), true
+}
+
+func execUserRequiredExamples(invokedAs Invocation) string {
+	if invokedAs == WebshInvocation {
+		return "  alpacon websh -u USERNAME SERVER 'COMMAND'\n  alpacon websh USERNAME@SERVER 'COMMAND'\n"
+	}
+	return "  alpacon exec -u USERNAME SERVER -- COMMAND\n  alpacon exec USERNAME@SERVER -- COMMAND\n"
 }

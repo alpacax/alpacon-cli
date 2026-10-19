@@ -20,7 +20,7 @@ type fakeRunRuntime struct {
 	causeMu sync.RWMutex
 	cause   error
 
-	closeCalls int32
+	closeCalls atomic.Int32
 	closeOnce  sync.Once
 }
 
@@ -53,7 +53,7 @@ func (f *fakeRunRuntime) Cause() error {
 }
 
 func (f *fakeRunRuntime) Close(cause error) {
-	atomic.AddInt32(&f.closeCalls, 1)
+	f.closeCalls.Add(1)
 	if cause != nil {
 		f.setCause(cause)
 	}
@@ -207,7 +207,7 @@ func TestMonitorLocalCommandClosesRuntimeOnProcessExit(t *testing.T) {
 		t.Fatalf("exitCode = %d, want 0", exitCode)
 	}
 
-	if got := atomic.LoadInt32(&runtime.closeCalls); got != 1 {
+	if got := runtime.closeCalls.Load(); got != 1 {
 		t.Fatalf("runtime.Close called %d times, want 1", got)
 	}
 	select {

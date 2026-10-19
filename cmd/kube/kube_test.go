@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -197,9 +199,95 @@ func TestKubeCommandNamesAndAliases(t *testing.T) {
 	assert.Equal(t, []string{"list"}, kubeListCmd.Aliases)
 	assert.Equal(t, []string{"desc"}, kubeDescribeCmd.Aliases)
 
-	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}} {
+	for _, path := range [][]string{{"ls"}, {"list"}, {"describe"}, {"desc"}, {"config"}, {"proxy"}} {
 		found, _, err := KubeCmd.Find(path)
 		require.NoError(t, err, "%v", path)
 		assert.NotSame(t, KubeCmd, found, "%v must resolve to a subcommand", path)
+	}
+}
+
+// The suggested kubectl command must reach the file just written: one kubectl
+// does not read by default is named with --kubeconfig.
+func TestKubeConfigNextStepNamesAFileKubectlDoesNotRead(t *testing.T) {
+	dir := t.TempDir()
+	read := filepath.Join(dir, "read")
+	t.Setenv("KUBECONFIG", read)
+	withOutputFormat(t, utils.OutputFormatTable)
+
+	tests := []struct {
+		name    string
+		written string
+		want    string
+	}{
+		{name: "file kubectl reads", written: read, want: "Next: kubectl get pods -A"},
+		{name: "separate file", written: filepath.Join(dir, "alpacon"), want: "Next: kubectl --kubeconfig " + shellQuote(filepath.Join(dir, "alpacon")) + " get pods -A"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr := testutil.CaptureOutput(t, func() {
+				printKubeConfigResult(&kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+			})
+
+			assert.Contains(t, stderr, tt.want)
+		})
+	}
+}
+
+func TestShellQuoteFor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		goos string
+		in   string
+		want string
+	}{
+		{name: "plain path", goos: "linux", in: "/home/alice/.kube/alpacon", want: "/home/alice/.kube/alpacon"},
+		{name: "space", goos: "linux", in: "/tmp/my kube", want: "'/tmp/my kube'"},
+		{name: "single quote", goos: "darwin", in: "/tmp/it's", want: `'/tmp/it'\''s'`},
+		{name: "leading tilde stays literal", goos: "linux", in: "~/kc", want: "'~/kc'"},
+		{name: "dollar sign", goos: "linux", in: "/tmp/$HOME", want: "'/tmp/$HOME'"},
+		{name: "empty", goos: "linux", in: "", want: "''"},
+		{name: "windows plain path", goos: "windows", in: `C:\Users\alice\.kube\alpacon`, want: `C:\Users\alice\.kube\alpacon`},
+		{name: "windows space", goos: "windows", in: `C:\Users\Alice Kim\kc`, want: `"C:\Users\Alice Kim\kc"`},
+		{name: "windows apostrophe", goos: "windows", in: `C:\Users\o'brien\kc`, want: `"C:\Users\o'brien\kc"`},
+		{name: "windows empty", goos: "windows", in: "", want: `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, shellQuoteFor(tt.goos, tt.in))
+		})
+	}
+}
+
+// The warning names a real risk only when an earlier KUBECONFIG entry can
+// override what was written.
+func TestKubeConfigWarnsOnlyWhenAnEarlierFileCanOverride(t *testing.T) {
+	dir := t.TempDir()
+	first, second := filepath.Join(dir, "first"), filepath.Join(dir, "second")
+	t.Setenv("KUBECONFIG", first+string(os.PathListSeparator)+second)
+	withOutputFormat(t, utils.OutputFormatTable)
+
+	tests := []struct {
+		name    string
+		written string
+		warned  bool
+	}{
+		{name: "first file", written: first},
+		{name: "later file", written: second, warned: true},
+		{name: "file outside KUBECONFIG", written: filepath.Join(dir, "other")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr := testutil.CaptureOutput(t, func() {
+				printKubeConfigResult(&kubeConfigResult{Context: "alpacon-prod-east", Kubeconfig: tt.written}, false)
+			})
+
+			if tt.warned {
+				assert.Contains(t, stderr, "KUBECONFIG lists files before")
+			} else {
+				assert.NotContains(t, stderr, "KUBECONFIG lists files before")
+			}
+		})
 	}
 }

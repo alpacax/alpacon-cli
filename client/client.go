@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -46,6 +48,10 @@ const (
 	// reauthenticateMessage covers a detail-less 401 that is uncoded or coded
 	// auth_token_missing/auth_authentication_failed.
 	reauthenticateMessage = "authentication failed: please run 'alpacon login' again"
+
+	// signInMFAMessage covers a 401 coded auth_token_mfa_missing: a refresh keeps
+	// the token's MFA state, so only a new login, which runs MFA, can lift it.
+	signInMFAMessage = "multi-factor authentication required at sign-in: please run 'alpacon login' again"
 
 	// gatePlan is the "gate" value the server sends on every 402 plan
 	// refusal, limit or feature lock alike.
@@ -164,16 +170,23 @@ func NewAlpaconAPIClient() (*AlpaconClient, error) {
 		WorkspaceName: validConfig.WorkspaceIdentity(),
 		Token:         validConfig.Token,
 		UserAgent:     utils.GetUserAgent(),
+		Insecure:      validConfig.Insecure,
 	}
 	client.SetAccessToken(validConfig.AccessToken)
 
 	if isAccessTokenExpired(validConfig) {
+		if validConfig.RefreshToken == "" {
+			return nil, fmt.Errorf("authentication session expired. Please run 'alpacon login' again")
+		}
 		spinner := utils.NewSpinner("Refreshing access token...")
 		spinner.Start()
 		tokenRes, err := auth0.RefreshAccessToken(validConfig.WorkspaceURL, httpClient, validConfig.RefreshToken)
 		spinner.Stop()
 		if err != nil {
-			return nil, fmt.Errorf("failed to refresh access token: %v. Your session may have expired completely. Please run 'alpacon login' to authenticate again", err)
+			if auth0.IsRefreshTokenRejected(err) {
+				return nil, fmt.Errorf("authentication session expired. Please run 'alpacon login' again: %w", err)
+			}
+			return nil, fmt.Errorf("could not complete access token refresh. Please retry: %w", err)
 		}
 
 		client.SetAccessToken(tokenRes.AccessToken)
@@ -242,12 +255,18 @@ func isJSONObject(body []byte) bool {
 // authStatusMessage renders the user-facing message for a 401/403. It prefers
 // the server's human detail; absent that, a known structured code maps to a
 // clear message. Re-login is suggested only for a code-less 401 or one coded
-// auth_token_missing/auth_authentication_failed—an authenticated user who
-// merely needs MFA, or who hit a policy denial, must not be told to log in again.
+// auth_token_missing/auth_authentication_failed/auth_token_mfa_missing—a user
+// who merely needs step-up MFA, or who hit a policy denial, must not be told
+// to log in again.
 func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
 	if hasDetail {
-		if statusCode == http.StatusUnauthorized && code == "" {
-			return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
+		if statusCode == http.StatusUnauthorized {
+			switch code {
+			case "":
+				return fmt.Sprintf("%s (run 'alpacon login' if your session has expired)", detail)
+			case utils.AuthTokenMissing, utils.AuthAuthenticationFailed, utils.AuthTokenMFAMissing:
+				return fmt.Sprintf("%s (run 'alpacon login' again)", detail)
+			}
 		}
 		return detail
 	}
@@ -283,9 +302,10 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
-// without a human detail to a clear, actionable message. The login hint for
-// auth_token_missing/auth_authentication_failed is 401-only; a 403 carrying
-// either falls through to the generic permission-denied floor.
+// without a human detail to a clear, actionable message. The login hints for
+// auth_token_missing/auth_authentication_failed/auth_token_mfa_missing are
+// 401-only; a 403 carrying any of them falls through to the generic
+// permission-denied floor.
 func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	switch code {
 	case utils.AuthMFARequired:
@@ -300,11 +320,23 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "this change loosens execution control and can only be made from the web console", true
 	case utils.ApprovalPolicyConsoleOnly:
 		return "approval policies can only be created, changed or deleted from the web console", true
+	case utils.SudoPolicyConsoleOnly:
+		return "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'", true
+	case utils.WorkSessionSudoBypassConsoleOnly:
+		return "this workspace adds MFA-bypass sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
+	case utils.SudoPolicyBypassAgentSessionNeedsPresence:
+		return "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA", true
+	case utils.SudoPolicyBypassAgentSessionNeedsApproval:
+		return "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
 		if statusCode == http.StatusUnauthorized {
 			return reauthenticateMessage, true
+		}
+	case utils.AuthTokenMFAMissing:
+		if statusCode == http.StatusUnauthorized {
+			return signInMFAMessage, true
 		}
 	}
 	return "", false
@@ -339,7 +371,8 @@ func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, c
 // SetWebsocketHeader builds the header for a WebSocket dial. gorilla sends no
 // User-Agent of its own, so a client assembled without one—every client outside
 // NewAlpaconAPIClient—would dial anonymously; fall back to the same string the
-// HTTP requests carry.
+// HTTP requests carry. The handshake declares a detected AI agent the same way
+// every HTTP request does.
 func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	userAgent := ac.UserAgent
 	if userAgent == "" {
@@ -349,6 +382,7 @@ func (ac *AlpaconClient) SetWebsocketHeader() http.Header {
 	headers := http.Header{}
 	headers.Set("Origin", ac.BaseURL)
 	headers.Set("User-Agent", userAgent)
+	aiagent.FromEnvironment().SetHeaders(headers)
 
 	return headers
 }
@@ -367,8 +401,11 @@ func (ac *AlpaconClient) SetWebsocketHeaderWithCapabilities(capabilities ...stri
 	return headers
 }
 
+// setHTTPHeader signs req and declares a detected AI agent. Every request the
+// client sends passes through here, the stale-token replay included.
 func (ac *AlpaconClient) setHTTPHeader(req *http.Request) *http.Request {
 	req.Header.Set("User-Agent", ac.UserAgent)
+	aiagent.FromEnvironment().SetHeaders(req.Header)
 	if accessToken := ac.AccessToken(); accessToken != "" {
 		req.Header.Set("Authorization", bearerPrefix+accessToken)
 	} else if ac.Token != "" {
@@ -496,8 +533,8 @@ func (ac *AlpaconClient) renewAccessToken(sent string) bool {
 // an uninvited user—also land there and cost one renewal and one replay before
 // surfacing the same error. So that 401 is not proof of expiry—it is the only
 // one worth spending one retry on, because a coded refusal (MFA required, IP
-// not allowed, token ACL, auth_authentication_failed) names what it wants and
-// a new token is not it.
+// not allowed, token ACL, auth_authentication_failed, auth_token_mfa_missing)
+// names what it wants and a new token is not it.
 func isStaleCredential(err error) bool {
 	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
 		return false
@@ -643,10 +680,7 @@ func planLimitRemedy(axis string, retryAfter time.Duration) string {
 // rounded to the nearest day and floored at one so a delay under twelve hours
 // never reads as "0 days".
 func monthlyRemedy(retryAfter time.Duration) string {
-	days := int(retryAfter.Round(24*time.Hour) / (24 * time.Hour))
-	if days < 1 {
-		days = 1
-	}
+	days := max(int(retryAfter.Round(24*time.Hour)/(24*time.Hour)), 1)
 	return fmt.Sprintf("Resets in %d days.", days)
 }
 
@@ -714,6 +748,9 @@ func (ac *AlpaconClient) SendRawRequest(method, path string, body io.Reader, hea
 	for name, values := range header {
 		setHeaderValues(req.Header, name, values)
 	}
+	// A caller-supplied header does not replace the declaration: an agent could
+	// otherwise send itself as a person through a raw request.
+	aiagent.FromEnvironment().SetHeaders(req.Header)
 	return ac.sendRawRequest(req, header)
 }
 
@@ -864,11 +901,17 @@ func (ac *AlpaconClient) SendPostRequestWithStatus(url string, body any) ([]byte
 }
 
 func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
+	return ac.SendDeleteRequestWithContext(context.Background(), url)
+}
+
+// SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx. A token renewal the
+// request runs is not: it waits out the grant as any other request does.
+func (ac *AlpaconClient) SendDeleteRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodDelete, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // SendDeleteRequestWithBody sends a DELETE carrying a JSON body: an endpoint wanting a
@@ -1300,8 +1343,8 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors.
-// It serves every status, so it carries no denial-specific wording.
+// codeOnlyMessage renders a code sent with no detail or field errors; a case
+// here names the remedy where the bare code would not.
 func codeOnlyMessage(code string) string {
 	switch code {
 	case utils.APINotFound:
@@ -1320,6 +1363,20 @@ func codeOnlyMessage(code string) string {
 		return "the server would not take this page's cursor—read the listing again from the start"
 	case utils.APISearchUnavailable:
 		return "the search backend would not start this read right now—try again in a moment"
+	case utils.ServerPAMInstallUnsupported:
+		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
+	case utils.ServerPAMInstallRequiresSudoWithMFA:
+		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
+	case utils.ServerPAMInstallInProgress:
+		return "an alpamon-pam install is already pending on this server—wait for it to finish"
+	case utils.WorkSessionTargetAccountAbsent:
+		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account"
+	case utils.WorkSessionTargetAccountNotReachable:
+		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account"
+	case utils.TargetAccountOtherPerson:
+		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account"
+	case utils.WorkSessionAgentSessionRequired:
+		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}

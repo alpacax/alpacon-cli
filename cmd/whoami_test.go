@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
@@ -150,28 +151,47 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-func TestFormatExpiresHuman(t *testing.T) {
+func TestFormatExpiresHuman_PassesThroughANonTimestamp(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		input    string
-		contains string
+		name  string
+		input string
 	}{
-		{"empty string", "", ""},
-		{"invalid format", "not-a-date", "not-a-date"},
-		{"expired token", time.Now().Add(-1 * time.Hour).Format(time.RFC3339), "expired"},
-		{"future token with days", time.Now().Add(48 * time.Hour).Format(time.RFC3339), "remaining"},
-		{"future token under 1 hour", time.Now().Add(30 * time.Minute).Format(time.RFC3339), "remaining"},
+		{name: "empty string", input: ""},
+		{name: "invalid format", input: "not-a-date"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := formatExpiresHuman(tt.input)
-			if tt.contains == "" {
-				assert.Empty(t, result)
-			} else {
-				assert.Contains(t, result, tt.contains)
-			}
+			t.Parallel()
+			assert.Equal(t, tt.input, formatExpiresHuman(tt.input))
+		})
+	}
+}
+
+func TestFormatExpiresHuman_AppendsTheTimeLeft(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		offset     time.Duration
+		wantSuffix string
+	}{
+		{name: "expired token", offset: -time.Hour, wantSuffix: " (expired)"},
+		{name: "future token with days", offset: 48 * time.Hour, wantSuffix: " (2d 0h remaining)"},
+		{name: "future token under 1 hour", offset: 30 * time.Minute, wantSuffix: " (30m remaining)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			// t.Run cannot be called from inside a bubble, so each case enters its own.
+			synctest.Test(t, func(t *testing.T) {
+				expires := time.Now().Add(tt.offset)
+
+				got := formatExpiresHuman(expires.Format(time.RFC3339))
+
+				assert.Equal(t, expires.Local().Format("2006-01-02 15:04 MST")+tt.wantSuffix, got)
+			})
 		})
 	}
 }

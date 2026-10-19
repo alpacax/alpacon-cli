@@ -11,6 +11,7 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -475,6 +476,13 @@ func withWorkSessionCommandJSONMode(t *testing.T) {
 
 func resetCreateCommandState(t *testing.T) {
 	t.Helper()
+	// create reads the environment for an AI agent; a run inside one must not
+	// turn these sessions into agent sessions.
+	for _, name := range aiagent.Variables() {
+		t.Setenv(name, "")
+	}
+	createAccount = ""
+	t.Cleanup(func() { createAccount = "" })
 	purpose = ""
 	createScopes = nil
 	createServers = nil

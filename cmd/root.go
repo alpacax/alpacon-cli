@@ -37,10 +37,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var showVersion bool
+
 var RootCmd = &cobra.Command{
 	Use:     "alpacon",
 	Aliases: []string{"ac"},
-	Short:   "Command-line client for Alpacon, the AI-native PAM",
+	Short:   "Use Alpacon, the AI-native PAM, from the terminal",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
@@ -56,6 +58,10 @@ Quick start (for humans and AI agents):
   3. alpacon exec <SERVER> -- <COMMAND>     # run work inside the session
   4. alpacon work-session complete <SESSION_ID>  # finish the session when done
 
+AI agents add --requester-type agent to step 2 and drop --use and websh, which an
+agent session refuses; step 3 then names the session before the server:
+  alpacon exec --work-session <SESSION_ID> <SERVER> -- <COMMAND>
+
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {
@@ -67,6 +73,10 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 		}
 	},
 	Run: func(cmd *cobra.Command, args []string) {
+		if showVersion {
+			runVersion()
+			return
+		}
 		utils.ShowLogo(buildWelcomeLines())
 	},
 }
@@ -96,6 +106,7 @@ func init() {
 	)
 
 	// version
+	RootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, versionCmd.Short)
 	RootCmd.AddCommand(versionCmd)
 
 	// update

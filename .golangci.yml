@@ -12,6 +12,7 @@ linters:
     - govet
     - ineffassign
     - intrange
+    - modernize
     - staticcheck
     - testifylint
     - thelper

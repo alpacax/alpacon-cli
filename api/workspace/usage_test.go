@@ -10,6 +10,8 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -137,4 +139,29 @@ func TestGetWorkspaceID_FindsWorkspaceAfterSlugRename(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-1", id)
+}
+
+func TestUsageEstimateCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient, baseURL string) error
+	}{
+		{"GetUsageEstimate", func(ac *client.AlpaconClient, baseURL string) error {
+			_, err := GetUsageEstimate(ac, baseURL, badID)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac, ts.URL)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
 }

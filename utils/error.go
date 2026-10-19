@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"math"
 	"net"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"time"
 )
 
+// ErrInvalidID marks a local refusal of an ID that is unsafe as a URL path segment.
+var ErrInvalidID = errors.New("invalid id")
+
 const (
 	AuthMFARequired  = "auth_mfa_required"
 	UsernameRequired = "user_username_required"
@@ -19,6 +23,10 @@ const (
 	// Codes the server sends on its own 401s.
 	AuthTokenMissing         = "auth_token_missing"
 	AuthAuthenticationFailed = "auth_authentication_failed"
+
+	// AuthTokenMFAMissing rides a 401: the token was issued without the
+	// workspace's sign-in MFA, and only a new login, which runs it, can lift it.
+	AuthTokenMFAMissing = "auth_token_mfa_missing"
 
 	// AuthVerificationUnavailable rides a 503: the server could not check the
 	// credential, did not reject it, and a retry can succeed.
@@ -37,10 +45,27 @@ const (
 	// the web console only.
 	ApprovalPolicyConsoleOnly = "approval_policy_console_only"
 
+	// SudoPolicyConsoleOnly rides a 403: sudo policies are created or
+	// widened from the web console only.
+	SudoPolicyConsoleOnly = "sudo_policy_console_only"
+
+	// WorkSessionSudoBypassConsoleOnly rides a 403: a work session can receive an
+	// MFA-bypass sudo policy without a person's approval from the web console only.
+	WorkSessionSudoBypassConsoleOnly = "work_session_sudo_bypass_console_only"
+
 	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
 	// the credential is an API token, a service token or a non-interactive token,
 	// so it cannot complete sudo MFA. Signing in interactively can.
 	SudoVerifyCredentialCannotProveMFA = "sudo_verify_credential_cannot_prove_mfa"
+
+	// Refusals of an MFA-bypass sudo policy bound to an AI agent session, both
+	// on a 403. NeedsPresence: the write would leave the policy on an agent
+	// session without a person proving presence for that request (a fresh MFA
+	// on an interactive login). NeedsApproval: a direct write of such a policy
+	// is refused; it has to arrive as a modification of the session, which a
+	// person approves.
+	SudoPolicyBypassAgentSessionNeedsPresence = "sudo_policy_bypass_agent_session_needs_presence"
+	SudoPolicyBypassAgentSessionNeedsApproval = "sudo_policy_bypass_agent_session_needs_approval"
 
 	// Codes the server sends on its own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"
@@ -56,6 +81,17 @@ const (
 
 	// ServerBusyWithUserWork: disruptive action refused; --force overrides it.
 	ServerBusyWithUserWork = "server_busy_with_user_work"
+
+	// ServerPAMInstallUnsupported rides a 400: the host has no alpamon-pam
+	// package path (macOS, Windows, or an unknown package manager).
+	ServerPAMInstallUnsupported = "server_pam_install_unsupported"
+
+	// ServerPAMInstallRequiresSudoWithMFA rides a 400: refused while "Use sudo with MFA"
+	// is off, or always on a deployment that cannot complete an MFA step-up.
+	ServerPAMInstallRequiresSudoWithMFA = "server_pam_install_requires_sudo_with_mfa"
+
+	// ServerPAMInstallInProgress rides a 409: an alpamon-pam install is already pending.
+	ServerPAMInstallInProgress = "server_pam_install_in_progress"
 
 	// CommandInlineCredential: the server refused a command because its command
 	// line carries a credential (e.g. a -p/--password flag, a KEY=VALUE secret such
@@ -100,6 +136,27 @@ const (
 	WorkSessionScopeNotAllowed  = "work_session_scope_not_allowed"
 	WorkSessionServerNotAllowed = "work_session_server_not_allowed"
 	WorkSessionAssigneeMismatch = "work_session_assignee_mismatch"
+	// WorkSessionAgentSessionRequired: the CLI declared an AI agent, and the
+	// session it named is a user session. Only an agent session serves it.
+	WorkSessionAgentSessionRequired = "work_session_agent_session_required"
+
+	// WorkSessionAccountNotApproved: the command names an account other than
+	// the one the session was approved to run as.
+	WorkSessionAccountNotApproved = "work_session_account_not_approved"
+
+	// Refusals of the account a work session create names with --account.
+	WorkSessionTargetAccountAbsent       = "work_session_target_account_absent"
+	WorkSessionTargetAccountNotReachable = "work_session_target_account_not_reachable"
+	TargetAccountOtherPerson             = "target_account_other_person"
+
+	// Refusals of a kube session the server names itself. An AI agent's
+	// WorkSession cannot open one yet; the cluster's agent is not connected;
+	// the agent did not accept the session, which the server then closed; and
+	// the caller has no user name the session could act as.
+	KubeSessionAgentModeNotSupported = "kube_session_agent_mode_not_supported"
+	ClusterNotConnected              = "cluster_not_connected"
+	KubeSessionChannelOpenFailed     = "kube_session_channel_open_failed"
+	KubeSessionPrincipalNotSupported = "kube_session_principal_not_supported"
 
 	// WorkSession extension approval. Every 'work-session extend' request
 	// requires a reason and follows the workspace's approval policy, the same
@@ -332,25 +389,18 @@ func RetryAfterFromHeader(header http.Header) time.Duration {
 // message text, so a code that only appears inside a message, such as an
 // agent's transfer report, does not count.
 func StructuredErrorCode(err error) string {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if coded, ok := e.(codedError); ok {
-			if code := coded.ErrorCode(); code != "" {
-				return code
-			}
-		}
-	}
-	return ""
+	code, _ := typedCode(err, func(code, _ string) bool { return code != "" })
+	return code
 }
 
+// ParseErrorResponse prefers a typed code anywhere in the chain over text: a wrapper's
+// message can quote server-supplied text, such as a rejected ID, that reads as a code.
 func ParseErrorResponse(err error) (string, string) {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if coded, ok := e.(codedError); ok {
-			code, source := coded.ErrorCode(), coded.ErrorSource()
-			if code != "" || source != "" {
-				return code, source
-			}
-		}
+	if code, source := typedCode(err, func(code, source string) bool { return code != "" || source != "" }); code != "" || source != "" {
+		return code, source
+	}
 
+	for e := range errorChain(err) {
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}
@@ -378,6 +428,44 @@ func ParseErrorResponse(err error) (string, string) {
 	}
 
 	return "", ""
+}
+
+func typedCode(err error, accept func(code, source string) bool) (string, string) {
+	for e := range errorChain(err) {
+		if coded, ok := e.(codedError); ok {
+			code, source := coded.ErrorCode(), coded.ErrorSource()
+			if accept(code, source) {
+				return code, source
+			}
+		}
+	}
+	return "", ""
+}
+
+func errorChain(err error) iter.Seq[error] {
+	return func(yield func(error) bool) {
+		var walk func(error) bool
+		walk = func(current error) bool {
+			if current == nil {
+				return true
+			}
+			if !yield(current) {
+				return false
+			}
+			switch wrapped := current.(type) {
+			case interface{ Unwrap() []error }:
+				for _, child := range wrapped.Unwrap() {
+					if !walk(child) {
+						return false
+					}
+				}
+			case interface{ Unwrap() error }:
+				return walk(wrapped.Unwrap())
+			}
+			return true
+		}
+		walk(err)
+	}
 }
 
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may

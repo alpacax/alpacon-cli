@@ -1,7 +1,12 @@
 package utils
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,4 +104,57 @@ func TestBuildCliErrorEnvelope_DefaultsExitCodeToOne(t *testing.T) {
 	envelope := buildCliErrorEnvelope("work-session create", "", "work session was rejected")
 
 	assert.Equal(t, 1, envelope.ExitCode)
+}
+
+func TestCliErrorEnvelopeWithExit_InvalidIDUsesUsageExit(t *testing.T) {
+	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitInvalidIDHelperProcess$")
+			help.Env = append(os.Environ(), "GO_WANT_INVALID_ID_ENVELOPE_HELPER="+format)
+			var stderr bytes.Buffer
+			help.Stderr = &stderr
+
+			err := help.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, ExitCodeUsageError, exitErr.ExitCode())
+			if format == OutputFormatTable {
+				assert.Contains(t, stderr.String(), "Failed to wait: invalid target ID: invalid id.")
+				return
+			}
+			var envelope JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, UsageErrorCode, envelope.ErrorCode)
+			assert.Equal(t, "wait", envelope.Context.Operation)
+		})
+	}
+}
+
+func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
+	format := os.Getenv("GO_WANT_INVALID_ID_ENVELOPE_HELPER")
+	if format == "" {
+		return
+	}
+	OutputFormat = format
+	err := fmt.Errorf("invalid target ID: %w", ErrInvalidID)
+	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
+}
+
+func TestBuildCliErrorEnvelopeFromErr_SudoBypassAgentSessionRefusals(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{SudoPolicyBypassAgentSessionNeedsPresence, SudoPolicyBypassAgentSessionNeedsApproval} {
+		t.Run(code, func(t *testing.T) {
+			t.Parallel()
+			err := errors.New("code: " + code + "; source: ")
+			env := buildCliErrorEnvelopeFromErr("create", err, "Failed to create work session: next step.")
+			assert.False(t, env.OK)
+			assert.Equal(t, code, env.ErrorCode)
+			assert.Equal(t, "create", env.Context.Operation)
+			rendered, jerr := FormatJSON(env)
+			require.NoError(t, jerr)
+			assert.Contains(t, rendered, `"error_code": "`+code+`"`)
+		})
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/alpacax/alpacon-cli/client"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 	"github.com/alpacax/alpacon-cli/pkg/httpclient"
 	"github.com/alpacax/alpacon-cli/utils"
 )
@@ -88,6 +89,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 
 	httpReq.Header.Add("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", utils.GetUserAgent())
+	aiagent.FromEnvironment().SetHeaders(httpReq.Header)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -201,7 +203,7 @@ func GetAPITokenIDByName(ac *client.AlpaconClient, tokenName string) (string, er
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "API token")
 }
 
 func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
@@ -213,7 +215,11 @@ func ResolveTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
 }
 
 func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
-	_, err := ac.SendDeleteRequest(utils.BuildURL(tokenURL, tokenID, nil))
+	tokenID, err := api.RequireID(tokenID, "API token")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(tokenURL, tokenID, nil))
 	if err != nil {
 		return err
 	}
@@ -222,6 +228,10 @@ func DeleteAPIToken(ac *client.AlpaconClient, tokenID string) error {
 }
 
 func DuplicateAPIToken(ac *client.AlpaconClient, tokenID, name string) (string, error) {
+	tokenID, err := api.RequireID(tokenID, "API token")
+	if err != nil {
+		return "", err
+	}
 	url := utils.BuildURL(tokenURL, tokenID+"/duplicate", nil)
 	req := APITokenDuplicateRequest{Name: name}
 	resp, err := ac.SendPostRequest(url, req)

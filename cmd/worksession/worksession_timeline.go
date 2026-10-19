@@ -46,16 +46,12 @@ var workSessionTimelineCmd = &cobra.Command{
 			timelineErr error
 			wg          sync.WaitGroup
 		)
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			// Sent on the request so the recording bytes are never downloaded.
+		wg.Go(func() {
 			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
-		}()
+		})
 		wg.Wait()
 
 		if timelineErr != nil {

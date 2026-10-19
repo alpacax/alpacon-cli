@@ -19,12 +19,11 @@ import (
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func boolPtr(b bool) *bool { return &b }
 
 // swapDownloadRetryDelays keeps the retry assertions off the production backoff,
 // which sleeps ~8s per exhausted budget.
@@ -59,13 +58,13 @@ func TestPollTransferStatus(t *testing.T) {
 	}{
 		{
 			name:        "immediate success",
-			response:    TransferStatusResponse{Success: boolPtr(true), Message: "completed"},
+			response:    TransferStatusResponse{Success: new(true), Message: "completed"},
 			wantSuccess: true,
 			wantMessage: "completed",
 		},
 		{
 			name:        "immediate failure",
-			response:    TransferStatusResponse{Success: boolPtr(false), Message: "permission denied"},
+			response:    TransferStatusResponse{Success: new(false), Message: "permission denied"},
 			wantSuccess: false,
 			wantMessage: "permission denied",
 		},
@@ -153,7 +152,7 @@ func TestExecuteBulkUpload(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 		}
@@ -220,7 +219,7 @@ func TestExecuteBulkUpload_UploadsConcurrently(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -281,7 +280,7 @@ func TestExecuteBulkUpload_PollsConcurrently(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			pollsEntered <- struct{}{}
 			<-releasePolls
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -340,7 +339,7 @@ func TestExecuteBulkUpload_NoOverwrite(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 			})
 		}
 	}))
@@ -388,7 +387,7 @@ func TestExecuteBulkUpload_WithUnzip(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		}
 	}))
 	defer ts.Close()
@@ -451,7 +450,7 @@ func TestDownloadBulk(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 		}
@@ -516,7 +515,7 @@ func TestDownloadBulk_PreservesExistingArchiveName(t *testing.T) {
 			w.Header().Set("Content-Type", "application/zip")
 			_, _ = w.Write(zipContent)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		default:
 			http.NotFound(w, r)
 		}
@@ -569,7 +568,7 @@ func TestExecuteSingleUpload(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(true),
+				Success: new(true),
 				Message: "completed",
 			})
 
@@ -627,7 +626,7 @@ func TestExecuteSingleUpload_TransferFailure(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(false),
+				Success: new(false),
 				Message: "permission denied",
 			})
 
@@ -673,7 +672,7 @@ func TestExecuteSingleUpload_WithUnzip(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 			w.WriteHeader(http.StatusOK)
@@ -720,7 +719,7 @@ func TestExecuteBulkUpload_TransferFailure(t *testing.T) {
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{
-				Success: boolPtr(false),
+				Success: new(false),
 				Message: "disk full",
 			})
 		}
@@ -1069,7 +1068,7 @@ func TestExecuteSingleUpload_WorkSession(t *testing.T) {
 				case r.Method == http.MethodPut:
 					w.WriteHeader(http.StatusOK)
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 					w.WriteHeader(http.StatusOK)
 				}
@@ -1122,7 +1121,7 @@ func TestUploadLocalFileAsUsesRemoteBasenameAndDirectory(t *testing.T) {
 			assert.Equal(t, "edited", string(body))
 			w.WriteHeader(http.StatusOK)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
 			w.WriteHeader(http.StatusOK)
 		default:
@@ -1190,7 +1189,7 @@ func TestExecuteBulkUpload_WorkSession(t *testing.T) {
 				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk-upload/":
 					w.WriteHeader(http.StatusCreated)
 				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
-					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true)})
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
 				}
 			}))
 			defer ts.Close()
@@ -1314,7 +1313,7 @@ func TestPollTransferStatus_BacksOffThenSucceeds(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: boolPtr(true), Message: "done"})
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "done"})
 	}))
 	defer ts.Close()
 
@@ -1724,4 +1723,160 @@ func TestBackoffDelay_CapsAnInitialAlreadyOverTheLimit(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, time.Second, backoffDelay(0, 5*time.Second, time.Second))
 	assert.Equal(t, time.Second, backoffDelay(3, 5*time.Second, time.Second))
+}
+
+func TestTransferStatusCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const badID = "../../etc/test"
+	tests := []struct {
+		name string
+		call func(ac *client.AlpaconClient, baseURL string) error
+	}{
+		{"PollTransferStatus_upload", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "upload", badID, time.Second)
+			return err
+		}},
+		{"PollTransferStatus_download", func(ac *client.AlpaconClient, _ string) error {
+			_, _, err := PollTransferStatus(ac, "download", badID, time.Second)
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := testutil.NewNoRequestServer(t)
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+			err := tt.call(ac, ts.URL)
+
+			require.ErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
+}
+
+func TestCompleteSingleUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() (io.Reader, int64, func(), error) {
+		opened = true
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":"../x"}`), open)
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, opened, "the file must not be read for an upload that is refused")
+}
+
+func TestCompleteSingleUpload_TriggersAndPollsTheTrimmedUploadID(t *testing.T) {
+	t.Parallel()
+	var paths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths.Store(r.URL.Path, true)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() (io.Reader, int64, func(), error) {
+		return strings.NewReader(""), 0, func() {}, nil
+	}
+
+	err := completeSingleUpload(ac, "server-1", []byte(`{"id":" id-1 "}`), open)
+
+	require.NoError(t, err)
+	for _, path := range []string{"/api/webftp/uploads/id-1/upload/", "/api/webftp/uploads/id-1/status/"} {
+		_, sent := paths.Load(path)
+		assert.True(t, sent, "no request reached %s", path)
+	}
+}
+
+func TestCompleteBulkUpload_RefusesAnUploadIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	ts := testutil.NewNoRequestServer(t)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	opened := false
+	open := func() ([]io.Reader, []int64, func(), error) {
+		opened = true
+		return []io.Reader{strings.NewReader(""), strings.NewReader("")}, []int64{0, 0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":"id-1"},{"id":"../x"}]`), open)
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.False(t, opened, "the files must not be read for an upload that is refused")
+}
+
+func TestCompleteBulkUpload_TriggersAndPollsTheTrimmedUploadIDs(t *testing.T) {
+	t.Parallel()
+	var triggerReq BulkUploadTriggerRequest
+	var statusPaths sync.Map
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&triggerReq)
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		statusPaths.Store(r.URL.Path, true)
+		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true), Message: "completed"})
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	open := func() ([]io.Reader, []int64, func(), error) {
+		return []io.Reader{strings.NewReader("")}, []int64{0}, func() {}, nil
+	}
+
+	err := completeBulkUpload(ac, "server-1", []byte(`[{"id":" id-1 "}]`), open)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"id-1"}, triggerReq.IDs)
+	_, polled := statusPaths.Load("/api/webftp/uploads/id-1/status/")
+	assert.True(t, polled, "status must be polled at the trimmed ID")
+}
+
+// noDownloadRequestClient fails the test on any request and answers it with a
+// finished command, so a missed check ends the download instead of polling on.
+func noDownloadRequestClient(t *testing.T) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"error"}`))
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "transfer ID", body: `{"id":"../x","command":"cmd-1"}`},
+		{name: "command ID", body: `{"id":"dl-1","command":"../x"}`},
+	}
+	for _, tc := range tests {
+		t.Run("single "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			_, err := completeSingleDownload(ac, "server-1", []byte(tc.body), "/remote/file", t.TempDir(), false)
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+		t.Run("bulk "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			ac := noDownloadRequestClient(t)
+
+			err := completeBulkDownload(ac, "server-1", []byte(tc.body), []string{"/remote/a", "/remote/b"}, t.TempDir())
+
+			require.ErrorIs(t, err, api.ErrUnusableID)
+			assert.NotErrorIs(t, err, utils.ErrInvalidID)
+		})
+	}
 }

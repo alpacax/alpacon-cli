@@ -1,10 +1,15 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 const (
@@ -18,6 +23,9 @@ const (
 	// Subscribed with a server id, not a command id: that is the channel
 	// the server publishes it on.
 	EventTypeCommandFin = "command_fin"
+
+	// eventSessionCloseTimeout bounds one close attempt; a token renewal inside it is not bounded.
+	eventSessionCloseTimeout = 10 * time.Second
 )
 
 // EventType is a server event channel type, marshalled as a plain string. The server
@@ -71,4 +79,27 @@ func SubscribeEvent(ac *client.AlpaconClient, channelID string, eventType EventT
 	}
 
 	return nil
+}
+
+// CloseEventSession closes an event session. The server keeps a closed session and
+// answers 204 for one that is already closed.
+func CloseEventSession(ctx context.Context, ac *client.AlpaconClient, id string) error {
+	id, err := api.RequireID(id, "event session")
+	if err != nil {
+		return err
+	}
+	if _, err := ac.SendDeleteRequestWithContext(ctx, eventSessionsURL+url.PathEscape(id)+"/"); err != nil {
+		return fmt.Errorf("failed to close event session: %w", err)
+	}
+	return nil
+}
+
+// closeSession tries once: a session left open only reads as open, so a failure is
+// worth a debug line and nothing more.
+func closeSession(ac *client.AlpaconClient, id string, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := CloseEventSession(ctx, ac, id); err != nil {
+		utils.CliDebug("could not close unopened event session %s: %v", id, err)
+	}
 }

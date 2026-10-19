@@ -508,7 +508,7 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 	})
 
 	require.NotEmpty(t, stderr, "a rejected request must warn, or there is nothing to check")
-	for _, line := range strings.Split(strings.TrimSuffix(stderr, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
 		assert.True(t, strings.HasSuffix(line, "\r"),
 			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
 	}

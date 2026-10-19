@@ -1,10 +1,26 @@
 package worksession
 
 import (
+	"slices"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/types"
 )
+
+const (
+	StatusPending   = "pending"
+	StatusApproved  = "approved"
+	StatusActive    = "active"
+	StatusCompleted = "completed"
+	StatusExpired   = "expired"
+	StatusRevoked   = "revoked"
+	StatusRejected  = "rejected"
+	StatusCancelled = "cancelled"
+)
+
+// endedStatuses are the statuses after which a work session never runs again.
+// A new status also needs a case in the create --wait switch in cmd/worksession.
+var endedStatuses = []string{StatusCompleted, StatusExpired, StatusRevoked, StatusRejected, StatusCancelled}
 
 type WorkSession struct {
 	ID                string                `json:"id"`
@@ -97,6 +113,9 @@ type WorkSessionCreateRequest struct {
 	Servers       []string           `json:"servers"`
 	ExpiresAt     string             `json:"expires_at"`
 	SudoPolicies  []SudoPolicyInline `json:"sudo_policies,omitempty"`
+	// TargetAccountUsername is the account the work runs as on the servers.
+	// Left out, the server decides the account itself.
+	TargetAccountUsername string `json:"target_account_username,omitempty"`
 }
 
 // SudoPolicyInline is a sudo policy bound to a work session. It serves three
@@ -189,4 +208,18 @@ type TimelineAttributes struct {
 	Server  string `json:"server"    table:"Server"`
 	User    string `json:"user"      table:"User"`
 	Details string `json:"details"   table:"Details"`
+}
+
+// RecordChunk is one entry of the per-session recording route's cursor envelope.
+type RecordChunk struct {
+	AddedAt string `json:"added_at"`
+	Record  string `json:"record"`
+}
+
+func EndedStatuses() []string {
+	return append([]string(nil), endedStatuses...)
+}
+
+func IsEndedStatus(status string) bool {
+	return slices.Contains(endedStatuses, status)
 }

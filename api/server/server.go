@@ -26,6 +26,7 @@ const (
 	ActionUpdateInformation = "update_information"
 	ActionUpgradeAgent      = "upgrade_agent"
 	ActionRestartAgent      = "restart_agent"
+	ActionInstallPAM        = "install_pam"
 )
 
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
@@ -109,7 +110,7 @@ func GetServerIDByName(ac *client.AlpaconClient, serverName string) (string, err
 		return "", err
 	}
 
-	return result.ID, nil
+	return api.RequireResponseID(result.ID, "server")
 }
 
 // ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
@@ -206,7 +207,11 @@ func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, token.ID, nil))
+	tokenID, err := api.RequireResponseID(token.ID, "registration token")
+	if err != nil {
+		return err
+	}
+	_, err = ac.SendDeleteRequest(utils.BuildURL(registrationTokenURL, tokenID, nil))
 	return err
 }
 

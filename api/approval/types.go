@@ -16,14 +16,73 @@ type ApprovalRequest struct {
 	ReviewedBy  *types.UserSummary `json:"reviewed_by"`
 	ReviewedAt  *time.Time         `json:"reviewed_at"`
 	AddedAt     time.Time          `json:"added_at"`
-	// Command is the command_exec detail payload; nil for other request types.
-	Command *CommandDetail `json:"command,omitempty"`
+	Metadata    *ApprovalMetadata  `json:"metadata"`
+}
+
+// ApprovalMetadata is the part of an approval's metadata the CLI renders.
+type ApprovalMetadata struct {
+	Command     *CommandDetail    `json:"command"`
+	Sudo        *SudoDetail       `json:"sudo"`
+	Intent      string            `json:"intent"`
+	WorkSession *WorkSessionRef   `json:"work_session"`
+	Changes     *RequestedChanges `json:"changes"`
 }
 
 // CommandDetail is the part of a command_exec approval's detail payload the
 // CLI renders. The full payload is available with --output json.
 type CommandDetail struct {
-	FileExecution *FileExecution `json:"file_execution,omitempty"`
+	Line          string `json:"line"`
+	ServerName    string `json:"server_name"`
+	RiskLevel     string `json:"risk_level"`
+	RunsWithSudo  bool   `json:"runs_with_sudo"`
+	Purpose       string `json:"purpose"`
+	DeclaredAgent string `json:"declared_agent"`
+	// ReviewSummary, Tier2Reasoning and Factors reach only a viewer who may decide the request.
+	ReviewSummary  string         `json:"review_summary"`
+	Tier2Reasoning string         `json:"tier2_reasoning"`
+	Factors        []RiskFactor   `json:"factors"`
+	FileExecution  *FileExecution `json:"file_execution"`
+}
+
+type RiskFactor struct {
+	Type   string `json:"type"`
+	Detail string `json:"detail"`
+}
+
+// SudoDetail is the sudo approval's detail payload. Tier2Reasoning and
+// DescriptionAligned reach deciders only; a null DescriptionAligned is no judgment.
+type SudoDetail struct {
+	Command            string `json:"command"`
+	RunAs              string `json:"runas"`
+	ServerName         string `json:"server_name"`
+	RiskLevel          string `json:"risk_level"`
+	GrantStatus        string `json:"grant_status"`
+	DeclaredAgent      string `json:"declared_agent"`
+	Tier2Reasoning     string `json:"tier2_reasoning"`
+	DescriptionAligned *bool  `json:"description_aligned"`
+}
+
+type WorkSessionRef struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+}
+
+type RequestedChanges struct {
+	Title                 string       `json:"title"`
+	Description           string       `json:"description"`
+	Scopes                []string     `json:"scopes"`
+	Servers               []ServerRef  `json:"servers"`
+	SudoPolicies          []SudoPolicy `json:"sudo_policies"`
+	TargetAccountUsername string       `json:"target_account_username"`
+}
+
+type ServerRef struct {
+	Name string `json:"name"`
+}
+
+type SudoPolicy struct {
+	Commands []string `json:"commands"`
 }
 
 // FileExecution is what the approver is asked to clear for a file execution

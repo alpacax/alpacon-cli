@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -45,11 +46,28 @@ type purposeAnswerSignal struct {
 
 func capturePurposeJSON(t *testing.T, expiresAt *time.Time) purposeRequiredSignal {
 	t.Helper()
+	return capturePurposeOutput(t, func() {
+		PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, expiresAt)
+	})
+}
+
+// capturePurposeJSONIn prints a demand whose window ends window from now on a frozen
+// clock; the pipe stays outside the bubble, which cannot block on it.
+func capturePurposeJSONIn(t *testing.T, window time.Duration) purposeRequiredSignal {
+	t.Helper()
+	return capturePurposeOutput(t, func() {
+		synctest.Test(t, func(*testing.T) {
+			expires := time.Now().Add(window)
+			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, &expires)
+		})
+	})
+}
+
+func capturePurposeOutput(t *testing.T, emit func()) purposeRequiredSignal {
+	t.Helper()
 	var out string
 	withFormat(OutputFormatJSON, func() {
-		out = testutil.CaptureStdout(t, func() {
-			PrintPurposeDemand(PurposeDemandLead, purposeTestCommandID, expiresAt)
-		})
+		out = testutil.CaptureStdout(t, emit)
 	})
 	var got purposeRequiredSignal
 	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
@@ -88,18 +106,16 @@ func TestPrintPurposeDemand_DeadlineMeasuresAgainstTheServersExpiry(t *testing.T
 	// The server derives the expiry because the window's length is a setting no
 	// endpoint publishes—so this client has no length to assume and cannot be
 	// wrong about one.
-	expires := time.Now().Add(30 * time.Second)
-	got := capturePurposeJSON(t, &expires)
+	got := capturePurposeJSONIn(t, 30*time.Second)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
-	assert.InDelta(t, 30, *got.Context.DeadlineSeconds, 2)
+	assert.Equal(t, 30, *got.Context.DeadlineSeconds)
 }
 
 func TestPrintPurposeDemand_AnExpiredWindowReportsZeroNotNegative(t *testing.T) {
 	// The answer is late either way, and a negative number invites a consumer
 	// to do arithmetic with it.
-	past := time.Now().Add(-10 * time.Minute)
-	got := capturePurposeJSON(t, &past)
+	got := capturePurposeJSONIn(t, -10*time.Minute)
 
 	require.NotNil(t, got.Context.DeadlineSeconds)
 	assert.Equal(t, 0, *got.Context.DeadlineSeconds)

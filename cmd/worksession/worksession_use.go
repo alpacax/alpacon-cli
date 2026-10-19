@@ -10,21 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	activeWorkSessionStatus    = "active"
-	approvedWorkSessionStatus  = "approved"
-	rejectedWorkSessionStatus  = "rejected"
-	expiredWorkSessionStatus   = "expired"
-	revokedWorkSessionStatus   = "revoked"
-	cancelledWorkSessionStatus = "cancelled"
-	completedWorkSessionStatus = "completed"
-)
-
 var unsetActiveWorkSession bool
 
 var workSessionUseCmd = &cobra.Command{
-	Use:   "use SESSION_ID",
-	Short: "Set or clear the active work-session for the current workspace",
+	Use:   "use [SESSION_ID]",
+	Short: "Set or clear the active work-session",
 	Long: `Set the active work-session for the current workspace by passing its SESSION_ID.
 Subsequent exec/websh/cp/tunnel commands attach to this session unless overridden with --work-session.
 Pass --unset (with no SESSION_ID) to clear the active work-session.`,
@@ -103,7 +93,7 @@ func RunUseSession(ac *client.AlpaconClient, uuid string) (*wsapi.WorkSession, e
 	if err != nil {
 		return nil, err
 	}
-	if ws.Status != activeWorkSessionStatus {
+	if ws.Status != wsapi.StatusActive {
 		return nil, fmt.Errorf("work-session %s is in '%s' state and cannot be used", ws.ID, ws.Status)
 	}
 	// Agent sessions are not workspace-attachable (mirrors the create --use guard):
