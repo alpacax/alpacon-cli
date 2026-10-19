@@ -137,9 +137,9 @@ func agentSessionNote(d aiagent.Detection) string {
 func workSessionTokenNote(operation string) string {
 	switch operation {
 	case OperationWebsh:
-		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs 'alpacon login' without -t (add --no-browser on a machine without a browser)."
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open an interactive terminal; it needs " + LoginWithoutTokenHint + "."
 	case OperationKube:
-		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs 'alpacon login' without -t."
+		return "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs " + LoginWithoutTokenHint + "."
 	}
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }

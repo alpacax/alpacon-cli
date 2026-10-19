@@ -390,9 +390,8 @@ func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testi
 
 func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
 	t.Parallel()
-	// The server's refusal of an interactive channel to a token. An older server
-	// sends it as api_token_acl_not_allowed, whose message sends the user to the
-	// token's ACL rules, which cannot lift this refusal.
+	// An older server sends this refusal as api_token_acl_not_allowed, whose
+	// message points at ACL rules that cannot lift it.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -403,7 +402,7 @@ func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	require.Error(t, err)
-	assert.Equal(t, "a token cannot open an interactive session (a Websh terminal, a tunnel or a WebFTP session)—sign in with 'alpacon login' without -t (add --no-browser on a machine without a browser)", err.Error())
+	assert.Equal(t, "a token cannot open an interactive session—sign in with 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device)", err.Error())
 	assert.NotContains(t, err.Error(), "alpacon token acl")
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, "auth_interactive_channel_requires_presence", code)

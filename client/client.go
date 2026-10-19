@@ -313,7 +313,7 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	case utils.APITokenACLNotAllowed:
 		return "denied by token access control—this token may not perform that action; review its rules with 'alpacon token acl'", true
 	case utils.AuthInteractiveChannelRequiresPresence:
-		return "a token cannot open an interactive session (a Websh terminal, a tunnel or a WebFTP session)—sign in with 'alpacon login' without -t (add --no-browser on a machine without a browser)", true
+		return "a token cannot open an interactive session—sign in with " + utils.LoginWithoutTokenHint, true
 	case utils.WorkspaceSudoWithMFAStepUpUnavailable:
 		return "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", true
 	case utils.WorkspaceExecutionControlConsoleOnly:

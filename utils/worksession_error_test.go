@@ -87,7 +87,7 @@ func TestBuildWorkSessionDiagnostic_TokenNoteMatchesOperation(t *testing.T) {
 		want      string
 		notWant   string
 	}{
-		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t (add --no-browser on a machine without a browser)", "bypass this check"},
+		{"interactive Websh needs a login without a token", OperationWebsh, "cannot open an interactive terminal; it needs 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device)", "bypass this check"},
 		{"command is bypassed by a token", OperationCommand, "bypass this check", "cannot open an interactive terminal"},
 		{"webftp is bypassed by a token", OperationWebFTP, "bypass this check", "cannot open an interactive terminal"},
 	}
@@ -306,7 +306,7 @@ func TestBuildWorkSessionDiagnostic_Kube(t *testing.T) {
 			assert.NotContains(t, got, "--requester-type")
 			assert.NotContains(t, got, "the kube operation")
 			assert.Equal(t, tc.want, diagnosticNextCommands(t, got))
-			assert.Equal(t, "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs 'alpacon login' without -t.", lines[len(lines)-1])
+			assert.Equal(t, "Note: Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device).", lines[len(lines)-1])
 		})
 	}
 }

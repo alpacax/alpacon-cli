@@ -53,7 +53,7 @@ var TunnelCmd = &cobra.Command{
 
 	Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 	token or Service token) cannot open a tunnel—that needs 'alpacon login' without -t
-	(add --no-browser on a machine without a browser).
+	(on a machine without a browser, open the printed URL on another device).
 	`,
 	Example: `
 	# Forward local 9000 to remote 8082

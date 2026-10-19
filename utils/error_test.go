@@ -344,7 +344,7 @@ func TestInteractiveOnly_RewritesTokenRefusal(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			got := InteractiveOnly(tt.err, "open a tunnel")
-			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (add --no-browser on a machine without a browser) and try again")
+			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
 	}
 }
