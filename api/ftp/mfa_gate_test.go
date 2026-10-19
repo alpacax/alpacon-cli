@@ -11,7 +11,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
@@ -63,8 +62,7 @@ func (s *gateStub) client() *client.AlpaconClient {
 
 func runGatePolls(t *testing.T, ac *client.AlpaconClient) []error {
 	t.Helper()
-	pathID, idErr := api.RequireID("t-1", "transfer")
-	require.NoError(t, idErr)
+	pathID := testPathID(t, "t-1")
 	errs := make([]error, gatePolls)
 	var wg sync.WaitGroup
 	for i := range gatePolls {
@@ -231,9 +229,7 @@ func TestPollTransfer_ProbeRidesThroughATransientError(t *testing.T) {
 
 	var err error
 	synctest.Test(t, func(t *testing.T) {
-		pathID, idErr := api.RequireID("t-1", "transfer")
-		require.NoError(t, idErr)
-		_, _, err = pollTransfer(ac, "srv-id", uploadTransfer, pathID, 30*time.Second, time.Time{})
+		_, _, err = pollTransfer(ac, "srv-id", uploadTransfer, testPathID(t, "t-1"), 30*time.Second, time.Time{})
 	})
 
 	require.NoError(t, err)

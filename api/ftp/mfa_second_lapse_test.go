@@ -8,7 +8,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -167,9 +166,7 @@ func TestPollTransfer_RefusedAfterEveryWaitEnds(t *testing.T) {
 
 	var err error
 	synctest.Test(t, func(t *testing.T) {
-		pathID, idErr := api.RequireID("t-1", "transfer")
-		require.NoError(t, idErr)
-		_, _, err = pollTransfer(ac, "srv-id", uploadTransfer, pathID, 30*time.Second, time.Time{})
+		_, _, err = pollTransfer(ac, "srv-id", uploadTransfer, testPathID(t, "t-1"), 30*time.Second, time.Time{})
 	})
 
 	require.Error(t, err)

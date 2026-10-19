@@ -1435,9 +1435,7 @@ func TestPollTransferStatus_ThrottleBudgetIsBounded(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	start := time.Now()
-	pathID, idErr := api.RequireID("test-id", "transfer")
-	require.NoError(t, idErr)
-	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, timeout, tick)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), timeout, tick)
 	elapsed := time.Since(start)
 
 	require.ErrorContains(t, err, "timed out")
@@ -1457,9 +1455,7 @@ func TestPollTransferStatus_ConsecutiveFailuresEndWait(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	pathID, idErr := api.RequireID("test-id", "transfer")
-	require.NoError(t, idErr)
-	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, time.Millisecond)
 
 	require.ErrorContains(t, err, "failed to check transfer status")
 	assert.False(t, success)
@@ -1486,9 +1482,7 @@ func TestPollTransferStatus_SuccessfulPollResetsFailureCount(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	pathID, idErr := api.RequireID("test-id", "transfer")
-	require.NoError(t, idErr)
-	success, message, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, time.Millisecond)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1512,9 +1506,7 @@ func TestPollTransferStatus_ThrottlesDoNotCountAsFailures(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	pathID, idErr := api.RequireID("test-id", "transfer")
-	require.NoError(t, idErr)
-	success, message, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
+	success, message, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, time.Millisecond)
 
 	require.NoError(t, err)
 	assert.True(t, success)
@@ -1538,9 +1530,7 @@ func TestPollTransferStatus_ThrottleDoesNotResetFailureCount(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	pathID, idErr := api.RequireID("test-id", "transfer")
-	require.NoError(t, idErr)
-	success, _, err := pollTransferStatus(ac, uploadTransfer, pathID, 30*time.Second, time.Millisecond)
+	success, _, err := pollTransferStatus(ac, uploadTransfer, testPathID(t, "test-id"), 30*time.Second, time.Millisecond)
 
 	require.ErrorContains(t, err, "failed to check transfer status")
 	assert.False(t, success)
