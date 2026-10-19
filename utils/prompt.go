@@ -13,7 +13,7 @@ import (
 )
 
 func PromptForPassword(promptText string) string {
-	fmt.Fprint(os.Stderr, promptText)
+	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
@@ -22,7 +22,7 @@ func PromptForPassword(promptText string) string {
 		if err != nil {
 			return ""
 		}
-		fmt.Fprintln(os.Stderr)
+		_, _ = fmt.Fprintln(TrackedStderr())
 		return strings.TrimSpace(string(bytePassword))
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), oldState) }()
@@ -36,26 +36,26 @@ func PromptForPassword(promptText string) string {
 		}
 		switch buf[0] {
 		case '\n', '\r':
-			fmt.Fprint(os.Stderr, "\r\n")
+			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
 			return strings.TrimSpace(string(password))
 		case 127, '\b': // backspace
 			if len(password) > 0 {
 				password = password[:len(password)-1]
-				fmt.Fprint(os.Stderr, "\b \b")
+				_, _ = fmt.Fprint(TrackedStderr(), "\b \b")
 			}
 		case 3: // Ctrl+C
-			fmt.Fprint(os.Stderr, "\r\n")
+			_, _ = fmt.Fprint(TrackedStderr(), "\r\n")
 			_ = term.Restore(int(os.Stdin.Fd()), oldState)
 			os.Exit(1)
 		default:
 			if buf[0] >= 32 { // printable characters only
 				password = append(password, buf[0])
-				fmt.Fprint(os.Stderr, "*")
+				_, _ = fmt.Fprint(TrackedStderr(), "*")
 			}
 		}
 	}
 
-	fmt.Fprintln(os.Stderr)
+	_, _ = fmt.Fprintln(TrackedStderr())
 	return strings.TrimSpace(string(password))
 }
 
@@ -69,13 +69,21 @@ func PromptForInput(promptText string) string {
 
 func promptForInput(r io.Reader, promptText string) (string, error) {
 	reader := bufio.NewReader(r)
-	fmt.Fprint(os.Stderr, promptText)
+	_, _ = fmt.Fprint(TrackedStderr(), promptText)
 	line, err := reader.ReadString('\n')
+	noteEchoedNewline(r, err)
 	input := strings.TrimSpace(line)
 	if err != nil && (input == "" || !errors.Is(err, io.EOF)) {
 		return "", err
 	}
 	return input, nil
+}
+
+// noteEchoedNewline records the Enter a terminal echoes, which lands on stderr only when stderr is that terminal.
+func noteEchoedNewline(r io.Reader, readErr error) {
+	if f, ok := r.(*os.File); ok && readErr == nil && term.IsTerminal(int(f.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
+		stderrMidLine.Store(false)
+	}
 }
 
 func PromptForRequiredInput(promptText string) string {
@@ -148,8 +156,9 @@ func promptForBool(r io.Reader, prompt string) bool {
 	reader := bufio.NewReader(r)
 
 	for {
-		fmt.Fprintf(os.Stderr, "%s [y/n]: ", prompt)
+		fmt.Fprintf(TrackedStderr(), "%s [y/n]: ", prompt)
 		line, err := reader.ReadString('\n')
+		noteEchoedNewline(r, err)
 		input := strings.TrimSpace(strings.ToLower(line))
 
 		switch input {
@@ -159,7 +168,7 @@ func promptForBool(r io.Reader, prompt string) bool {
 			return false
 		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr)
+			_, _ = fmt.Fprintln(TrackedStderr())
 			return false
 		}
 		CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")

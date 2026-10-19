@@ -2133,6 +2133,16 @@ func TestNewAlpaconAPIClient_CarriesInsecureFromConfig(t *testing.T) {
 // login through the new URL leaves a host label that the server never calls the
 // workspace. The client must carry the schema_name, because that is what MFA
 // links and the usage lookup name the workspace by.
+func TestNewAlpaconAPIClient_MissingConfigIsNotLoggedIn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := NewAlpaconAPIClient()
+
+	require.Error(t, err)
+	assert.Equal(t, utils.ErrorCodeNotLoggedIn, utils.ClassifyError(err))
+	assert.Contains(t, err.Error(), "Please run 'alpacon login'")
+}
+
 func TestNewAlpaconAPIClient_PinsSchemaNameWhenSlugWasRenamed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -2817,6 +2827,7 @@ func TestSendRawRequest_RedirectLoopKeepsStatus(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, http.StatusFound, utils.HTTPStatusCode(err))
+	assert.Equal(t, "http_302", utils.ClassifyError(err))
 }
 
 func TestNormalizeRawEndpoint_RestrictsToWorkspacePath(t *testing.T) {
@@ -3094,6 +3105,44 @@ func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing
 	}
 }
 
+func TestAPIErrorFieldsKeepEveryKeyButTheEnvelopeCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want map[string]any
+	}{
+		{
+			name: "every key but code",
+			body: `{"code":"plan_limit","gate":"plan","axis":"servers","next":"/api/x/","missing":["a"],"field_errors":{"n":[{"code":"required"}]}}`,
+			want: map[string]any{
+				"gate": "plan", "axis": "servers", "next": "/api/x/", "missing": []any{"a"},
+				"field_errors": map[string]any{"n": []any{map[string]any{"code": "required"}}},
+			},
+		},
+		{name: "code only", body: `{"code":"x"}`},
+		{name: "field error on a code field", body: `{"code":["This field is required."]}`, want: map[string]any{"code": []any{"This field is required."}}},
+		{name: "html body", body: `<html>502</html>`},
+		{name: "empty body", body: ``},
+		{name: "json array", body: `["a"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := parseAPIError([]byte(tt.body), 400)
+
+			var carrier interface{ ErrorFields() map[string]any }
+			require.ErrorAs(t, err, &carrier)
+			got := carrier.ErrorFields()
+			assert.Equal(t, tt.want, got)
+			if got != nil {
+				got["mutated"] = true
+				assert.NotContains(t, carrier.ErrorFields(), "mutated")
+			}
+		})
+	}
+}
+
 func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
 	cases := map[string]string{
 		utils.WorkSessionTargetAccountAbsent:       "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account",
@@ -3107,4 +3156,22 @@ func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
 	assert.Equal(t, "work_session_target_account_not_reachable", utils.WorkSessionTargetAccountNotReachable)
 	assert.Equal(t, "target_account_other_person", utils.TargetAccountOtherPerson)
 	assert.Equal(t, "work_session_account_not_approved", utils.WorkSessionAccountNotApproved)
+}
+
+func TestCheckAuthStatusKeepsExtraFields(t *testing.T) {
+	t.Parallel()
+	err := checkAuthStatus(http.StatusForbidden, []byte(`{"code":"rbac_permission_required","gate":"role"}`))
+
+	assert.Equal(t, map[string]any{"gate": "role"}, utils.ServerErrorFields(err))
+}
+
+func TestAPIErrorFieldsKeepLargeIntegersVerbatim(t *testing.T) {
+	t.Parallel()
+	err := parseAPIError([]byte(`{"code":"x","detail":"d","sequence":9007199254740993}`), http.StatusConflict)
+
+	encoded, marshalErr := json.Marshal(utils.ServerErrorFields(err))
+
+	require.NoError(t, marshalErr)
+	assert.JSONEq(t, `{"detail":"d","sequence":9007199254740993}`, string(encoded))
+	assert.Contains(t, string(encoded), "9007199254740993")
 }

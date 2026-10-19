@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -423,6 +424,30 @@ func TestLoadConfig_LegacyWithoutActiveWorkSessions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, cfg.ActiveWorkSessions)
 	assert.False(t, cfg.KubernetesSurface)
+}
+
+func TestLoadConfig_MissingFileIsNotLoggedIn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := LoadConfig()
+
+	require.ErrorIs(t, err, utils.ErrNotLoggedIn)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.Equal(t, utils.ErrorCodeNotLoggedIn, utils.ClassifyError(err))
+}
+
+func TestLoadConfig_MalformedFileIsNotMissing(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	cfgDir := filepath.Join(tmpHome, ConfigFileDir)
+	require.NoError(t, os.MkdirAll(cfgDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, ConfigFileName), []byte("{not json"), 0600))
+
+	_, err := LoadConfig()
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, utils.ErrNotLoggedIn)
+	assert.Equal(t, utils.ErrorCodeCLI, utils.ClassifyError(err))
 }
 
 func TestActiveWorkSession_RoundTrip(t *testing.T) {

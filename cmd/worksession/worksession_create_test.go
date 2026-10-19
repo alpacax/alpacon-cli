@@ -766,6 +766,7 @@ func TestWorkSessionCreateWaitRejectedJSONCarriesTheSessionID(t *testing.T) {
 	assert.JSONEq(t, `{
 		"ok": false,
 		"exit_code": 6,
+		"error_code": "not_approved",
 		"message": "work session was rejected (work session ses-x)",
 		"context": {"operation": "create", "work_session_id": "ses-x"},
 		"next_actions": [

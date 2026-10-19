@@ -24,14 +24,26 @@ const (
 // Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
 
+type PartialInfo struct {
+	Count int `json:"count"`
+}
+
+// JSONErrorEnvelope is the --output json failure line. Fields are additive only; exit_code
+// and error_code are always present.
 type JSONErrorEnvelope[T any] struct {
-	OK          bool         `json:"ok"`
-	ExitCode    int          `json:"exit_code,omitempty"`
-	ErrorCode   string       `json:"error_code,omitempty"`
-	Message     string       `json:"message"`
-	Reason      string       `json:"reason,omitempty"`
-	Context     T            `json:"context"`
-	NextActions []NextAction `json:"next_actions,omitempty"`
+	OK             bool           `json:"ok"`
+	ExitCode       int            `json:"exit_code"`
+	ErrorCode      string         `json:"error_code"`
+	Message        string         `json:"message"`
+	Command        string         `json:"command,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	Context        T              `json:"context"`
+	HTTPStatus     int            `json:"http_status,omitempty"`
+	RetryAfter     int            `json:"retry_after,omitempty"`
+	Server         map[string]any `json:"server,omitempty"`
+	RemoteExitCode *int           `json:"remote_exit_code,omitempty"`
+	Partial        *PartialInfo   `json:"partial,omitempty"`
+	NextActions    []NextAction   `json:"next_actions,omitempty"`
 }
 
 // NextAction is one actionable follow-up. Command is a pure, runnable command
@@ -98,14 +110,19 @@ func appendUnicodeEscape(out []byte, r rune) []byte {
 }
 
 func FormatJSON(value any) (string, error) {
+	out, err := encodeJSON(value, "  ")
+	return string(out), err
+}
+
+func encodeJSON(value any, indent string) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
+	enc.SetIndent("", indent)
 	if err := enc.Encode(value); err != nil {
-		return "", err
+		return nil, err
 	}
-	return strings.TrimRight(string(escapeJSONControls(buf.Bytes())), "\n"), nil
+	return escapeJSONControls(bytes.TrimRight(buf.Bytes(), "\n")), nil
 }
 
 func PrintJSONValue(w io.Writer, value any) error {
@@ -119,9 +136,25 @@ func PrintJSONValue(w io.Writer, value any) error {
 
 func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 	envelope.OK = false
-	if err := PrintJSONValue(w, envelope); err != nil {
-		_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":%q}`+"\n", envelope.ErrorCode)
+	if envelope.Command == "" {
+		envelope.Command = CommandName
 	}
+	if envelope.ErrorCode == "" {
+		envelope.ErrorCode = exitCodeFallback(envelope.ExitCode)
+	}
+	line, err := encodeJSON(envelope, "")
+	if err != nil {
+		line, _ = encodeJSON(JSONErrorEnvelope[struct{}]{
+			ExitCode: envelope.ExitCode, ErrorCode: envelope.ErrorCode, Message: envelope.Message, Command: envelope.Command,
+		}, "")
+	}
+	line = append(line, '\n')
+	if w == io.Writer(os.Stderr) {
+		if stderrMidLine.Swap(false) || activeSpinners.Load() > 0 {
+			line = append([]byte{'\n'}, line...)
+		}
+	}
+	_, _ = w.Write(line)
 }
 
 func PrintTable(slice any) {
