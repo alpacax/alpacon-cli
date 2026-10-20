@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"unicode"
 
@@ -31,23 +32,39 @@ func (e *unusableResponseIDError) Error() string {
 }
 func (e *unusableResponseIDError) Unwrap() error { return ErrUnusableID }
 
+// PathID is an ID that passed RequireID or RequireResponseID, the only way to make one outside this package.
+type PathID struct{ s string }
+
+func (id PathID) String() string { return id.s }
+
 // RequireID trims id and refuses anything that is not one URL path segment. BuildURL's
 // path.Join resolves "..", and a server or proxy may decode "%2F", so either would retarget the request.
-func RequireID(id, what string) (string, error) {
+func RequireID(id, what string) (PathID, error) {
 	id, ok := pathSegmentID(id)
 	if !ok {
-		return "", &invalidIDError{id: id, what: what}
+		return PathID{}, &invalidIDError{id: id, what: what}
 	}
-	return id, nil
+	return PathID{s: id}, nil
 }
 
 // RequireResponseID trims an ID from a server response and refuses it unless it is one URL path segment.
-func RequireResponseID(id, what string) (string, error) {
+func RequireResponseID(id, what string) (PathID, error) {
 	id, ok := pathSegmentID(id)
 	if !ok {
-		return "", &unusableResponseIDError{what: what}
+		return PathID{}, &unusableResponseIDError{what: what}
 	}
-	return id, nil
+	return PathID{s: id}, nil
+}
+
+// IDURL builds base/id/action/ with params as the query. action is one constant segment such as "close", or "" for none.
+func IDURL(base string, id PathID, action string, params map[string]string) string {
+	if id.s == "" {
+		panic("api.IDURL: zero PathID")
+	}
+	if segment, ok := pathSegmentID(action); action != "" && (!ok || segment != action) {
+		panic(fmt.Sprintf("api.IDURL: action %q is not one path segment", action))
+	}
+	return utils.BuildURL(base, path.Join(id.s, action), params)
 }
 
 func pathSegmentID(id string) (string, bool) {

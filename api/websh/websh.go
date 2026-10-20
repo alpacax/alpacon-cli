@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -113,44 +112,39 @@ func GetSessionList(ac *client.AlpaconClient, tail int) ([]SessionListItem, erro
 }
 
 func GetSessionDetail(ac *client.AlpaconClient, sessionID string) ([]byte, error) {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendGetRequest(utils.BuildURL(sessionsBaseURL, sessionID, nil))
+	return ac.SendGetRequest(api.IDURL(sessionsBaseURL, pathID, "", nil))
 }
 
 func GetSessionRecords(ac *client.AlpaconClient, sessionID, query string, limit int) ([]SessionRecord, error) {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return nil, err
 	}
-	action := "records"
-	params := map[string]string{}
-	if query != "" {
-		action = "search"
-		params["q"] = query
+	if query == "" {
+		return api.FetchCursorPages[SessionRecord](ac, api.IDURL(sessionsBaseURL, pathID, "records", nil), map[string]string{}, limit)
 	}
-
-	endpoint := path.Join(sessionsBaseURL, sessionID, action)
-	return api.FetchCursorPages[SessionRecord](ac, endpoint, params, limit)
+	return api.FetchCursorPages[SessionRecord](ac, api.IDURL(sessionsBaseURL, pathID, "search", nil), map[string]string{"q": query}, limit)
 }
 
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "close"), nil), nil)
+	_, err = ac.SendPostRequest(api.IDURL(sessionsBaseURL, pathID, "close", nil), nil)
 	return err
 }
 
 func ForceCloseSession(ac *client.AlpaconClient, sessionID string) error {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "force-close"), nil), nil)
+	_, err = ac.SendPostRequest(api.IDURL(sessionsBaseURL, pathID, "force-close", nil), nil)
 	return err
 }
 
@@ -180,7 +174,7 @@ func ReconnectToSession(ac *client.AlpaconClient, sessionID string) (SessionResp
 // resizes the remote PTY on every update, so this also redraws a shell that spent
 // a reconnect talking to nobody, even when the size itself has not changed.
 func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}
@@ -190,7 +184,7 @@ func SendTerminalSize(ac *client.AlpaconClient, sessionID string) error {
 	}
 
 	_, err = ac.SendPatchRequest(
-		utils.BuildURL(sessionsBaseURL, sessionID, nil),
+		api.IDURL(sessionsBaseURL, pathID, "", nil),
 		&SessionSizeRequest{Rows: rows, Cols: cols},
 	)
 	return err
@@ -209,7 +203,7 @@ func createUserChannel(ac *client.AlpaconClient, req *ConnectRequest) (SessionRe
 }
 
 func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string, readOnly bool) error {
-	sessionID, err := api.RequireID(sessionID, "Websh session")
+	pathID, err := api.RequireID(sessionID, "Websh session")
 	if err != nil {
 		return err
 	}
@@ -217,7 +211,7 @@ func InviteToSession(ac *client.AlpaconClient, sessionID string, emails []string
 		Emails:   emails,
 		ReadOnly: readOnly,
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, path.Join(sessionID, "invite"), nil), req)
+	_, err = ac.SendPostRequest(api.IDURL(sessionsBaseURL, pathID, "invite", nil), req)
 	return err
 }
 
@@ -231,7 +225,7 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	if channelID == "" {
 		return SessionResponse{}, errors.New("invalid URL format")
 	}
-	channelID, err = api.RequireID(channelID, "Websh channel")
+	pathID, err := api.RequireID(channelID, "Websh channel")
 	if err != nil {
 		return SessionResponse{}, err
 	}
@@ -239,8 +233,7 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 		Password: password,
 	}
 
-	relativePath := path.Join(channelID, "join")
-	responseBody, err := ac.SendPostRequest(utils.BuildURL(userChannelsBaseURL, relativePath, nil), joinRequest)
+	responseBody, err := ac.SendPostRequest(api.IDURL(userChannelsBaseURL, pathID, "join", nil), joinRequest)
 	if err != nil {
 		return SessionResponse{}, err
 	}
@@ -297,18 +290,18 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 	if err != nil {
 		return SessionResponse{}, err
 	}
-	response.ID, err = api.RequireResponseID(response.ID, "Websh session")
+	pathID, err := api.RequireResponseID(response.ID, "Websh session")
 	if err != nil {
 		return SessionResponse{}, fmt.Errorf("the server created the Websh session, but its ID is unusable (%w)", err)
 	}
+	response.ID = pathID.String()
 
 	if share {
 		shareRequest := &ShareRequest{
 			ReadOnly: readOnly,
 		}
 		var shareResponse ShareResponse
-		relativePath := path.Join(response.ID, "share")
-		responseBody, err = ac.SendPostRequest(utils.BuildURL(sessionsBaseURL, relativePath, nil), shareRequest)
+		responseBody, err = ac.SendPostRequest(api.IDURL(sessionsBaseURL, pathID, "share", nil), shareRequest)
 		if err != nil {
 			return SessionResponse{}, err
 		}

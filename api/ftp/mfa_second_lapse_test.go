@@ -166,7 +166,7 @@ func TestPollTransfer_RefusedAfterEveryWaitEnds(t *testing.T) {
 
 	var err error
 	synctest.Test(t, func(t *testing.T) {
-		_, _, err = pollTransfer(ac, "srv-id", "upload", "t-1", 30*time.Second, time.Time{})
+		_, _, err = pollTransfer(ac, "srv-id", uploadTransfer, testPathID(t, "t-1"), 30*time.Second, time.Time{})
 	})
 
 	require.Error(t, err)

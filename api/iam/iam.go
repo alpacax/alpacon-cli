@@ -90,11 +90,15 @@ func GetGroupList(ac *client.AlpaconClient) ([]GroupAttributes, error) {
 }
 
 func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
-	userId, err := api.RequireID(userId, "user")
+	pathID, err := api.RequireID(userId, "user")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(userURL, userId, nil))
+	return getUserDetail(ac, pathID)
+}
+
+func getUserDetail(ac *client.AlpaconClient, pathID api.PathID) ([]byte, error) {
+	responseBody, err := ac.SendGetRequest(api.IDURL(userURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -103,11 +107,15 @@ func GetUserDetail(ac *client.AlpaconClient, userId string) ([]byte, error) {
 }
 
 func GetGroupDetail(ac *client.AlpaconClient, groupId string) ([]byte, error) {
-	groupId, err := api.RequireID(groupId, "group")
+	pathID, err := api.RequireID(groupId, "group")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(groupURL, groupId, nil))
+	return getGroupDetail(ac, pathID)
+}
+
+func getGroupDetail(ac *client.AlpaconClient, pathID api.PathID) ([]byte, error) {
+	responseBody, err := ac.SendGetRequest(api.IDURL(groupURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -151,12 +159,12 @@ func CreateGroup(ac *client.AlpaconClient, groupRequest GroupCreateRequest) erro
 }
 
 func DeleteUser(ac *client.AlpaconClient, userName string) error {
-	userID, err := GetUserIDByName(ac, userName)
+	pathID, err := userPathIDByName(ac, userName)
 	if err != nil {
 		return err
 	}
 
-	_, err = ac.SendDeleteRequest(utils.BuildURL(userURL, userID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(userURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -165,12 +173,12 @@ func DeleteUser(ac *client.AlpaconClient, userName string) error {
 }
 
 func DeleteGroup(ac *client.AlpaconClient, groupName string) error {
-	groupID, err := GetGroupIDByName(ac, groupName)
+	pathID, err := groupPathIDByName(ac, groupName)
 	if err != nil {
 		return err
 	}
 
-	_, err = ac.SendDeleteRequest(utils.BuildURL(groupURL, groupID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(groupURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -221,11 +229,11 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 		return errors.New("no membership found for the given user and group")
 	}
 
-	membershipID, err := api.RequireResponseID(memberDetails[0].ID, "membership")
+	pathID, err := api.RequireResponseID(memberDetails[0].ID, "membership")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendDeleteRequest(utils.BuildURL(membershipURL, membershipID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(membershipURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -234,6 +242,14 @@ func DeleteMember(ac *client.AlpaconClient, memberDeleteRequest MemberDeleteRequ
 }
 
 func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) {
+	pathID, err := userPathIDByName(ac, userName)
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
+}
+
+func userPathIDByName(ac *client.AlpaconClient, userName string) (api.PathID, error) {
 	result, err := api.ResolveByName[UserResponse](ac, api.ResolveByNameOptions{
 		Endpoint:    userURL,
 		FilterKey:   "username",
@@ -242,7 +258,7 @@ func GetUserIDByName(ac *client.AlpaconClient, userName string) (string, error) 
 		NotFoundMsg: "no user found with the given name",
 	})
 	if err != nil {
-		return "", err
+		return api.PathID{}, err
 	}
 
 	return api.RequireResponseID(result.ID, "user")
@@ -264,6 +280,14 @@ func GetUsernamesByID(ac *client.AlpaconClient) (map[string]string, error) {
 }
 
 func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error) {
+	pathID, err := groupPathIDByName(ac, groupName)
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
+}
+
+func groupPathIDByName(ac *client.AlpaconClient, groupName string) (api.PathID, error) {
 	result, err := api.ResolveByName[GroupResponse](ac, api.ResolveByNameOptions{
 		Endpoint:    groupURL,
 		FilterKey:   "name",
@@ -272,7 +296,7 @@ func GetGroupIDByName(ac *client.AlpaconClient, groupName string) (string, error
 		NotFoundMsg: "no group found with the given name",
 	})
 	if err != nil {
-		return "", err
+		return api.PathID{}, err
 	}
 
 	return api.RequireResponseID(result.ID, "group")
@@ -300,12 +324,12 @@ func getLDAPStatus(isLDAP bool) string {
 }
 
 func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
-	groupID, err := GetGroupIDByName(ac, groupName)
+	pathID, err := groupPathIDByName(ac, groupName)
 	if err != nil {
 		return nil, err
 	}
 
-	responseBody, err := GetGroupDetail(ac, groupID)
+	responseBody, err := getGroupDetail(ac, pathID)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +339,7 @@ func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
 		return nil, err
 	}
 
-	responseBody, err = ac.SendPatchRequest(utils.BuildURL(groupURL, groupID, nil), data)
+	responseBody, err = ac.SendPatchRequest(api.IDURL(groupURL, pathID, "", nil), data)
 	if err != nil {
 		return nil, err
 	}
@@ -327,12 +351,12 @@ func UpdateGroup(ac *client.AlpaconClient, groupName string) ([]byte, error) {
 // sends nothing. The patch is sparse so untouched fields are not re-submitted:
 // forwarding an unchanged is_ldap_user makes the server run a live LDAP bind.
 func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *UserEdit, error) {
-	userID, err := GetUserIDByName(ac, userName)
+	pathID, err := userPathIDByName(ac, userName)
 	if err != nil {
 		return "", nil, err
 	}
 
-	responseBody, err := GetUserDetail(ac, userID)
+	responseBody, err := getUserDetail(ac, pathID)
 	if err != nil {
 		return "", nil, err
 	}
@@ -347,15 +371,15 @@ func PrepareUserUpdate(ac *client.AlpaconClient, userName string) (string, *User
 		return "", nil, err
 	}
 
-	return userID, edit, nil
+	return pathID.String(), edit, nil
 }
 
 func PatchUser(ac *client.AlpaconClient, userID string, changes map[string]any) ([]byte, error) {
-	userID, err := api.RequireID(userID, "user")
+	pathID, err := api.RequireID(userID, "user")
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendPatchRequest(utils.BuildURL(userURL, userID, nil), changes)
+	return ac.SendPatchRequest(api.IDURL(userURL, pathID, "", nil), changes)
 }
 
 // A key the operator deleted counts as untouched—a PATCH names what to change, and

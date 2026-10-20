@@ -32,11 +32,15 @@ func GetWebhookList(ac *client.AlpaconClient) ([]WebhookAttributes, error) {
 }
 
 func GetWebhookDetail(ac *client.AlpaconClient, webhookId string) ([]byte, error) {
-	webhookId, err := api.RequireID(webhookId, "webhook")
+	pathID, err := api.RequireID(webhookId, "webhook")
 	if err != nil {
 		return nil, err
 	}
-	responseBody, err := ac.SendGetRequest(utils.BuildURL(webhookURL, webhookId, nil))
+	return getWebhookDetail(ac, pathID)
+}
+
+func getWebhookDetail(ac *client.AlpaconClient, pathID api.PathID) ([]byte, error) {
+	responseBody, err := ac.SendGetRequest(api.IDURL(webhookURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -54,12 +58,12 @@ func CreateWebhook(ac *client.AlpaconClient, webhookRequest WebhookCreateRequest
 }
 
 func UpdateWebhook(ac *client.AlpaconClient, webhookName string) ([]byte, error) {
-	webhookID, err := GetWebhookIDByName(ac, webhookName)
+	pathID, err := webhookPathIDByName(ac, webhookName)
 	if err != nil {
 		return nil, err
 	}
 
-	responseBody, err := GetWebhookDetail(ac, webhookID)
+	responseBody, err := getWebhookDetail(ac, pathID)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +73,7 @@ func UpdateWebhook(ac *client.AlpaconClient, webhookName string) ([]byte, error)
 		return nil, err
 	}
 
-	responseBody, err = ac.SendPatchRequest(utils.BuildURL(webhookURL, webhookID, nil), data)
+	responseBody, err = ac.SendPatchRequest(api.IDURL(webhookURL, pathID, "", nil), data)
 	if err != nil {
 		return nil, err
 	}
@@ -78,12 +82,12 @@ func UpdateWebhook(ac *client.AlpaconClient, webhookName string) ([]byte, error)
 }
 
 func DeleteWebhook(ac *client.AlpaconClient, webhookName string) error {
-	webhookID, err := GetWebhookIDByName(ac, webhookName)
+	pathID, err := webhookPathIDByName(ac, webhookName)
 	if err != nil {
 		return err
 	}
 
-	_, err = ac.SendDeleteRequest(utils.BuildURL(webhookURL, webhookID, nil))
+	_, err = ac.SendDeleteRequest(api.IDURL(webhookURL, pathID, "", nil))
 	if err != nil {
 		return err
 	}
@@ -92,6 +96,14 @@ func DeleteWebhook(ac *client.AlpaconClient, webhookName string) error {
 }
 
 func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, error) {
+	pathID, err := webhookPathIDByName(ac, webhookName)
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
+}
+
+func webhookPathIDByName(ac *client.AlpaconClient, webhookName string) (api.PathID, error) {
 	result, err := api.ResolveByName[WebhookResponse](ac, api.ResolveByNameOptions{
 		Endpoint:    webhookURL,
 		FilterKey:   "name",
@@ -100,7 +112,7 @@ func GetWebhookIDByName(ac *client.AlpaconClient, webhookName string) (string, e
 		NotFoundMsg: "no webhook found with the given name",
 	})
 	if err != nil {
-		return "", err
+		return api.PathID{}, err
 	}
 
 	return api.RequireResponseID(result.ID, "webhook")

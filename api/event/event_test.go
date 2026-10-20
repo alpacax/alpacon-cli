@@ -26,6 +26,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func testPathID(t *testing.T, id string) api.PathID {
+	t.Helper()
+	pathID, err := api.RequireID(id, "command")
+	require.NoError(t, err)
+	return pathID
+}
+
 // The page walk itself is pinned in api.TestFetchPagesUpTo_*; what is specific to
 // GetEventList is that tail reaches the helper as its limit, so a tail larger than the
 // server's 100-item page cap still yields exactly tail commands.
@@ -199,7 +206,7 @@ func TestPollCommandExecution(t *testing.T) {
 				BaseURL:    ts.URL,
 			}
 
-			result, err := pollCommandExecution(ac, "cmd-1", 30*time.Second, 5*time.Millisecond, false, pollSeams{})
+			result, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 30*time.Second, 5*time.Millisecond, false, pollSeams{})
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantStatus, result.Status)
 			assert.Equal(t, tt.wantResult, result.Result)
@@ -396,7 +403,7 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	defer ts.Close()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Second, 5*time.Millisecond, true, pollSeams{})
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, pollSeams{})
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -476,7 +483,7 @@ func TestPollCommandExecution_ClientTimeout(t *testing.T) {
 
 	seams, delays := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
 	require.Error(t, err)
 
 	var clientTimeout *ClientTimeoutError
@@ -552,7 +559,7 @@ func TestPollCommandExecution_ThrottleBacksOff(t *testing.T) {
 			seams, delays := fakePollClock()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			resp, err := pollCommandExecution(ac, "cmd-1", time.Minute, tick, false, seams)
+			resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Minute, tick, false, seams)
 			require.NoError(t, err)
 			assert.Equal(t, "completed", resp.Status)
 			assert.Equal(t, tt.want, delays())
@@ -572,7 +579,7 @@ func TestPollCommandExecution_ThrottleDoesNotStarveDeadline(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(2), reqCount.Load(),
@@ -590,7 +597,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByDuration(t *testing.T)
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -616,7 +623,7 @@ func TestPollCommandExecution_ThrottleExtensionIsBoundedByCount(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -653,7 +660,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleAllowance(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", 100*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 100*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, int32(4), reqCount.Load())
@@ -687,7 +694,7 @@ func TestPollCommandExecution_ProgressRestoresThrottleExtensions(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	_, err := pollCommandExecution(ac, "cmd-1", timeout, tick, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), timeout, tick, false, seams)
 
 	var clientTimeout *ClientTimeoutError
 	require.ErrorAs(t, err, &clientTimeout, "a permanently throttled poll must surface a client timeout")
@@ -724,7 +731,7 @@ func TestPollCommandExecution_PacingWidensWithPollAge(t *testing.T) {
 	seams, delays := fakePollClock()
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, "cmd-1", time.Hour, tick, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Hour, tick, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 	assert.Equal(t, slices.Concat(
@@ -747,7 +754,7 @@ func TestPollCommandExecution_TerminalStatusReturnsBeforeTimeout(t *testing.T) {
 	// checks, and a scheduling hiccup longer than the timeout times the poll out
 	// before it ever sends a request.
 	seams, _ := fakePollClock()
-	resp, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 5*time.Millisecond, false, seams)
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 5*time.Millisecond, false, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -775,7 +782,7 @@ func TestPollCommandExecution_CancelledBeforeTheFirstWaitNeverRequests(t *testin
 
 	// A deadline the loop would reach quickly, so a poll that ignores the cancel
 	// fails here instead of running until the package timeout.
-	_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, time.Millisecond, false, pollSeams{cancel: cancel})
 
 	require.ErrorIs(t, err, errPollCancelled)
 	assert.Zero(t, calls.Load(), "a poll cancelled before its first wait must not request at all")
@@ -812,7 +819,7 @@ func TestPollCommandExecution_CancelEndsAWaitAlreadyRunning(t *testing.T) {
 		},
 	}
 
-	_, err := pollCommandExecution(ac, "cmd-1", 3*time.Second, time.Millisecond, false, seams)
+	_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 3*time.Second, time.Millisecond, false, seams)
 
 	require.ErrorIs(t, err, errPollCancelled)
 	assert.Zero(t, calls.Load(), "the wait was cancelled, so no request follows it")
@@ -949,9 +956,10 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 
 	delays := defaultStreamDelays
 	delays.pollTick = tick
+	pathID := testPathID(t, cmdID)
 	done := make(chan error, 1)
 	go func() {
-		done <- streamSubscribed(ac, listener, cmdID, serverID, out, 30*time.Second, delays, waitApproval)
+		done <- streamSubscribed(ac, listener, pathID, serverID, out, 30*time.Second, delays, waitApproval)
 	}()
 	return done
 }
@@ -1940,7 +1948,7 @@ func TestApplyChunk_ThrottlesRefetchWithinBackoffWindow(t *testing.T) {
 	// Clock frozen: after the first (immediate) attempt, every further gapped
 	// chunk is inside the window and must be skipped without a fetch.
 	for seq := 2; seq <= 10; seq++ {
-		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+		lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
 	assert.Equal(t, int32(1), fetches.Load(), "only the first gapped chunk should fetch; rest throttled")
@@ -1963,7 +1971,7 @@ func TestApplyChunk_GivesUpAndSkipsPermanentGap(t *testing.T) {
 	lastSeq := 0
 	for seq := 2; seq <= 6; seq++ {
 		now = now.Add(10 * time.Millisecond) // advance past the window each time
-		lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+		lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 	}
 
 	assert.LessOrEqual(t, fetches.Load(), int32(3), "fetches bounded by gapFillMaxNoProgress")
@@ -1985,7 +1993,7 @@ func TestApplyChunk_ResetsBackoffWhenGapHeals(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	lastSeq := 0
-	lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	assert.Equal(t, 3, lastSeq)
 	assert.Equal(t, 0, g.noProgress, "progress resets the no-progress counter")
@@ -2013,7 +2021,7 @@ func TestApplyChunk_FetchErrorBacksOffButNeverGivesUp(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		for seq := 2; seq <= 8; seq++ {
 			now = now.Add(10 * time.Millisecond) // advance past the window each time
-			lastSeq = applyChunk(ac, "cmd", lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
+			lastSeq = applyChunk(ac, testPathID(t, "cmd"), lastSeq, ChunkEvent{Seq: seq, Content: fmt.Sprintf("c%d\n", seq)}, out, g)
 		}
 	})
 
@@ -2035,7 +2043,7 @@ func TestRecoverSkippedChunks_RecoversLatePersistedSeq(t *testing.T) {
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
 	stderr := captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	assert.Equal(t, "c1\n", out.String(), "recovered seq 1 printed; seq 4 stays missing")
@@ -2050,7 +2058,7 @@ func TestRecoverSkippedChunks_NoopWhenNothingSkipped(t *testing.T) {
 
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
-	g.recoverSkipped(ac, "cmd", out)
+	g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 
 	assert.Equal(t, int32(0), fetches.Load(), "no skipped seqs means no recovery fetch")
 	assert.Empty(t, out.String())
@@ -2066,7 +2074,7 @@ func TestDrainRemainingChunks_WarnsOnPermanentGap(t *testing.T) {
 	out := &bytes.Buffer{}
 	var lastSeq int
 	stderr := captureStderr(t, func() {
-		lastSeq = drainRemainingChunks(ac, "cmd", 4, out)
+		lastSeq = drainRemainingChunks(ac, testPathID(t, "cmd"), 4, out)
 	})
 
 	assert.Equal(t, 8, lastSeq)
@@ -2134,7 +2142,7 @@ func TestDrainRemainingChunks_BoundsCumulativeMissing(t *testing.T) {
 	out := &bytes.Buffer{}
 	var last int
 	_ = captureStderr(t, func() {
-		last = drainRemainingChunks(ac, "cmd", 0, out)
+		last = drainRemainingChunks(ac, testPathID(t, "cmd"), 0, out)
 	})
 
 	assert.Equal(t, 12, last)
@@ -2150,7 +2158,7 @@ func TestDrainRemainingChunks_BoundsHugeServerSeq(t *testing.T) {
 	out := &bytes.Buffer{}
 	var last int
 	stderr := captureStderr(t, func() {
-		last = drainRemainingChunks(ac, "cmd", 0, out)
+		last = drainRemainingChunks(ac, testPathID(t, "cmd"), 0, out)
 	})
 
 	assert.Equal(t, huge, last)
@@ -2178,7 +2186,7 @@ func TestDrainRemainingChunks_NoWarnWhenContiguous(t *testing.T) {
 	out := &bytes.Buffer{}
 	var lastSeq int
 	stderr := captureStderr(t, func() {
-		lastSeq = drainRemainingChunks(ac, "cmd", 2, out)
+		lastSeq = drainRemainingChunks(ac, testPathID(t, "cmd"), 2, out)
 	})
 
 	assert.Equal(t, 6, lastSeq)
@@ -2213,7 +2221,7 @@ func TestApplyChunk_SendsSeqLteBound(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	// lastSeq=0, live chunk seq=3 -> gap [1,2], bounds seq__gte=1, seq__lte=2.
-	_ = applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	_ = applyChunk(ac, testPathID(t, "cmd"), 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	gte, lte := bounds()
 	assert.Equal(t, "1", gte)
@@ -2228,7 +2236,7 @@ func TestRecoverSkippedChunks_SendsSeqLteBound(t *testing.T) {
 	g := &gapFillState{skipped: []int{1, 4}}
 	out := &bytes.Buffer{}
 	_ = captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	gte, lte := bounds()
@@ -2257,7 +2265,7 @@ func TestApplyChunk_OldServerIgnoringSeqLte_OutputIdentical(t *testing.T) {
 	g := &gapFillState{}
 	out := &bytes.Buffer{}
 	// Gap [1,2] exposed by live chunk seq=3; server also returns 4,5 (ignored).
-	lastSeq := applyChunk(ac, "cmd", 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
+	lastSeq := applyChunk(ac, testPathID(t, "cmd"), 0, ChunkEvent{Seq: 3, Content: "c3\n"}, out, g)
 
 	assert.Equal(t, 3, lastSeq, "advances only through the live chunk, not the extra tail")
 	assert.Equal(t, "c1\nc2\nc3\n", out.String(), "extra tail beyond the bound is not emitted")
@@ -2284,7 +2292,7 @@ func TestRecoverSkippedChunks_OldServerIgnoringSeqLte_OutputIdentical(t *testing
 	out := &bytes.Buffer{}
 	// Server returns 1..6 (ignoring seq__lte=4); only skipped 1 and 4 are emitted.
 	_ = captureStderr(t, func() {
-		g.recoverSkipped(ac, "cmd", out)
+		g.recoverSkipped(ac, testPathID(t, "cmd"), out)
 	})
 
 	assert.Equal(t, "c1\nc4\n", out.String(), "only skipped seqs emitted, extra tail ignored")
@@ -2396,7 +2404,7 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 			var out bytes.Buffer
-			err := runCommandFallbackFromID(ac, cmdID, &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
+			err := runCommandFallbackFromID(ac, testPathID(t, cmdID), &out, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
 
 			assert.Equal(t, tt.wantOut, out.String())
 			switch {
@@ -2498,7 +2506,7 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, "cmd-1", 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
 			require.Error(t, err)
 			if tc.wantCode {
 				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
@@ -2520,10 +2528,6 @@ func TestCommandCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 		{"AnswerPurposeDemand", func(ac *client.AlpaconClient) error { return AnswerPurposeDemand(ac, badID, "rotate logs") }},
 		{"GetCommandByID", func(ac *client.AlpaconClient) error {
 			_, err := GetCommandByID(ac, badID)
-			return err
-		}},
-		{"PollCommandExecution", func(ac *client.AlpaconClient) error {
-			_, err := PollCommandExecution(ac, badID)
 			return err
 		}},
 	}

@@ -25,17 +25,12 @@ const rfc8628PollIntervalSeconds = 5
 // conversion from overflowing, including on 32-bit int.
 const maxDeviceCodeLifetimeSeconds = math.MaxInt32 / 2
 
-var path = struct {
-	env        string
-	deviceCode string
-	token      string
-	revoke     string
-}{
-	env:        "/api/auth/env",
-	deviceCode: "/oauth/device/code",
-	token:      "/oauth/token",
-	revoke:     "/oauth/revoke",
-}
+const (
+	envPath        = "/api/auth/env"
+	deviceCodePath = "/oauth/device/code"
+	tokenPath      = "/oauth/token"
+	revokePath     = "/oauth/revoke"
+)
 
 var (
 	requestAccessTokenFunc = requestAccessToken
@@ -80,7 +75,7 @@ func IsRefreshTokenRejected(err error) bool {
 }
 
 func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvResponse, error) {
-	apiURL := utils.BuildURL(workspaceURL, path.env, map[string]string{"client": "cli"})
+	apiURL := utils.BuildURL(workspaceURL, envPath, map[string]string{"client": "cli"})
 
 	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -182,7 +177,7 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, path.deviceCode, nil)
+	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, deviceCodePath, nil)
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
@@ -418,7 +413,7 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, path.token, nil)
+	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
@@ -471,7 +466,7 @@ func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken stri
 		return err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, path.revoke, nil)
+	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, revokePath, nil)
 
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -505,7 +500,7 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 		return nil, err
 	}
 
-	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, path.token, nil)
+	apiURL := utils.BuildURL("https://"+envInfo.Auth0.Domain, tokenPath, nil)
 	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err

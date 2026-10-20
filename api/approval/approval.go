@@ -2,7 +2,6 @@ package approval
 
 import (
 	"encoding/json"
-	"path"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -59,11 +58,11 @@ func projectAttributes(r *ApprovalRequest) ApprovalRequestAttributes {
 }
 
 func GetApprovalRequest(ac *client.AlpaconClient, id string) (*ApprovalRequest, error) {
-	id, err := api.RequireID(id, "approval request")
+	pathID, err := api.RequireID(id, "approval request")
 	if err != nil {
 		return nil, err
 	}
-	body, err := ac.SendGetRequest(utils.BuildURL(approvalURL, id, nil))
+	body, err := ac.SendGetRequest(api.IDURL(approvalURL, pathID, "", nil))
 	if err != nil {
 		return nil, err
 	}
@@ -75,18 +74,18 @@ func GetApprovalRequest(ac *client.AlpaconClient, id string) (*ApprovalRequest, 
 }
 
 func GetApprovalRequestRaw(ac *client.AlpaconClient, id string) ([]byte, error) {
-	id, err := api.RequireID(id, "approval request")
+	pathID, err := api.RequireID(id, "approval request")
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendGetRequest(utils.BuildURL(approvalURL, id, nil))
+	return ac.SendGetRequest(api.IDURL(approvalURL, pathID, "", nil))
 }
 
 func CancelRequest(ac *client.AlpaconClient, id string) error {
-	id, err := api.RequireID(id, "approval request")
+	pathID, err := api.RequireID(id, "approval request")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(approvalURL, path.Join(id, "cancel"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(approvalURL, pathID, "cancel", nil), struct{}{})
 	return err
 }

@@ -25,10 +25,8 @@ const (
 	uploadAPIURL         = "/api/webftp/uploads/"
 	uploadBulkAPIURL     = "/api/webftp/uploads/bulk/"
 	uploadBulkTriggerURL = "/api/webftp/uploads/bulk-upload/"
-	uploadStatusURL      = "/api/webftp/uploads/%s/status/"
 	downloadAPIURL       = "/api/webftp/downloads/"
 	downloadBulkAPIURL   = "/api/webftp/downloads/bulk/"
-	downloadStatusURL    = "/api/webftp/downloads/%s/status/"
 
 	backoffFactor = 2
 
@@ -72,31 +70,21 @@ func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
 	return d
 }
 
-// PollTransferStatus polls the transfer status API until success/failure or timeout.
-// transferType should be "upload" or "download", id is the transfer ID.
-// timeout controls how long to poll before giving up.
-// Returns true if transfer succeeded, false if failed, and error if polling timed out or failed.
-func PollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout time.Duration) (bool, string, error) {
-	return pollTransferStatus(ac, transferType, id, timeout, pollTick)
-}
+// transferKind names an upload or a download and the route its transfers live under.
+type transferKind struct{ name, apiURL string }
+
+var (
+	uploadTransfer   = transferKind{name: "upload", apiURL: uploadAPIURL}
+	downloadTransfer = transferKind{name: "download", apiURL: downloadAPIURL}
+)
 
 // transferStatusURL is the status endpoint of an upload or download transfer.
-func transferStatusURL(transferType, id string) (string, error) {
-	id, err := api.RequireID(id, "transfer")
-	if err != nil {
-		return "", err
-	}
-	if transferType == "upload" {
-		return fmt.Sprintf(uploadStatusURL, id), nil
-	}
-	return fmt.Sprintf(downloadStatusURL, id), nil
+func transferStatusURL(kind transferKind, id api.PathID) string {
+	return api.IDURL(kind.apiURL, id, "status", nil)
 }
 
-func pollTransferStatus(ac *client.AlpaconClient, transferType, id string, timeout, tick time.Duration) (bool, string, error) {
-	statusURL, err := transferStatusURL(transferType, id)
-	if err != nil {
-		return false, "", err
-	}
+func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.PathID, timeout, tick time.Duration) (bool, string, error) {
+	statusURL := transferStatusURL(kind, id)
 
 	start := time.Now()
 	deadline := start.Add(timeout)
@@ -253,7 +241,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
-	uploadID, err := api.RequireResponseID(response.ID, "upload")
+	pathID, err := api.RequireResponseID(response.ID, "upload")
 	if err != nil {
 		return err
 	}
@@ -270,7 +258,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 		}
 	}
 
-	triggerURL := utils.BuildURL(uploadAPIURL, fmt.Sprintf("%s/upload", uploadID), nil)
+	triggerURL := api.IDURL(uploadAPIURL, pathID, "upload", nil)
 	if err := transferStep(ac, serverID, func() error {
 		_, err := ac.SendGetRequest(triggerURL)
 		return err
@@ -279,7 +267,7 @@ func completeSingleUpload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(1, size)
-	success, message, err := pollTransfer(ac, serverID, "upload", uploadID, timeout, time.Time{})
+	success, message, err := pollTransfer(ac, serverID, uploadTransfer, pathID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("upload transfer status check failed: %w", err)
 	}
@@ -314,12 +302,14 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	if err := json.Unmarshal(respBody, &responses); err != nil {
 		return err
 	}
+	pathIDs := make([]api.PathID, len(responses))
 	for i := range responses {
-		id, err := api.RequireResponseID(responses[i].ID, "upload")
+		pathID, err := api.RequireResponseID(responses[i].ID, "upload")
 		if err != nil {
 			return err
 		}
-		responses[i].ID = id
+		pathIDs[i] = pathID
+		responses[i].ID = pathID.String()
 	}
 
 	files, sizes, cleanup, err := open()
@@ -372,7 +362,7 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	batchStart := time.Now()
 	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) string {
 		resp := responses[i]
-		success, message, err := pollTransfer(ac, serverID, "upload", resp.ID, timeout, batchStart)
+		success, message, err := pollTransfer(ac, serverID, uploadTransfer, pathIDs[i], timeout, batchStart)
 		if err != nil {
 			return fmt.Sprintf("%s: %v", uploadResponseLabel(resp), err)
 		}
@@ -780,16 +770,16 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 
 // downloadIDs checks the transfer and command IDs a download create returned,
 // before any of them reaches a path.
-func downloadIDs(transferID, commandID string) (string, string, error) {
-	transferID, err := api.RequireResponseID(transferID, "download")
+func downloadIDs(transferID, commandID string) (api.PathID, api.PathID, error) {
+	transferPathID, err := api.RequireResponseID(transferID, "download")
 	if err != nil {
-		return "", "", err
+		return api.PathID{}, api.PathID{}, err
 	}
-	commandID, err = api.RequireResponseID(commandID, "command")
+	commandPathID, err := api.RequireResponseID(commandID, "command")
 	if err != nil {
-		return "", "", err
+		return api.PathID{}, api.PathID{}, err
 	}
-	return transferID, commandID, nil
+	return transferPathID, commandPathID, nil
 }
 
 // completeSingleDownload waits for the download the server started, fetches
@@ -800,14 +790,14 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
 		return DownloadedFile{}, err
 	}
-	var err error
-	if downloadResponse.ID, downloadResponse.Command, err = downloadIDs(downloadResponse.ID, downloadResponse.Command); err != nil {
+	transferID, commandID, err := downloadIDs(downloadResponse.ID, downloadResponse.Command)
+	if err != nil {
 		return DownloadedFile{}, err
 	}
 
 	var status event.EventDetails
 	if err := transferStep(ac, serverID, func() (err error) {
-		status, err = event.PollCommandExecution(ac, downloadResponse.Command)
+		status, err = event.PollCommandExecution(ac, commandID)
 		return err
 	}); err != nil {
 		return DownloadedFile{}, err
@@ -832,7 +822,7 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 	}
 
 	timeout := calcPollTimeout(1, written)
-	success, message, err := pollTransfer(ac, serverID, "download", downloadResponse.ID, timeout, time.Time{})
+	success, message, err := pollTransfer(ac, serverID, downloadTransfer, transferID, timeout, time.Time{})
 	if err != nil {
 		return DownloadedFile{}, fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -876,14 +866,14 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return err
 	}
-	var err error
-	if response.ID, response.Command, err = downloadIDs(response.ID, response.Command); err != nil {
+	transferID, commandID, err := downloadIDs(response.ID, response.Command)
+	if err != nil {
 		return err
 	}
 
 	var status event.EventDetails
 	if err := transferStep(ac, serverID, func() (err error) {
-		status, err = event.PollCommandExecution(ac, response.Command)
+		status, err = event.PollCommandExecution(ac, commandID)
 		return err
 	}); err != nil {
 		return err
@@ -914,7 +904,7 @@ func completeBulkDownload(ac *client.AlpaconClient, serverID string, respBody []
 	}
 
 	timeout := calcPollTimeout(len(remotePaths), written)
-	success, message, err := pollTransfer(ac, serverID, "download", response.ID, timeout, time.Time{})
+	success, message, err := pollTransfer(ac, serverID, downloadTransfer, transferID, timeout, time.Time{})
 	if err != nil {
 		return fmt.Errorf("download transfer status check failed: %w", err)
 	}
@@ -1118,13 +1108,13 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 	}
 }
 
-// pollTransfer is PollTransferStatus with the poll as a retry unit. refusedAt is
+// pollTransfer is pollTransferStatus with the poll as a retry unit. refusedAt is
 // the time the command began, for polls queued behind a concurrency limit; the
 // zero time means the poll's own start (see transferStepProbed). A poll
 // refused for MFA cannot say how the transfer ended, so when it is refused and
 // the wait does not end in an answer, the error says the transfer may already
 // have completed.
-func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, timeout time.Duration, refusedAt time.Time) (success bool, message string, err error) {
+func pollTransfer(ac *client.AlpaconClient, serverID string, kind transferKind, id api.PathID, timeout time.Duration, refusedAt time.Time) (success bool, message string, err error) {
 	refused := false
 	note := func(stepErr error) error {
 		if utils.StructuredErrorCode(stepErr) == utils.AuthMFARequired {
@@ -1135,7 +1125,7 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 	err = transferStepProbed(ac, serverID, refusedAt,
 		func() error {
 			var stepErr error
-			success, message, stepErr = PollTransferStatus(ac, transferType, id, timeout)
+			success, message, stepErr = pollTransferStatus(ac, kind, id, timeout, pollTick)
 			return note(stepErr)
 		},
 		func() error {
@@ -1143,10 +1133,8 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 			// running the whole poll under the gate. A transient failure is
 			// ridden through as the full poll rides through it, so a flaky read
 			// does not end the wait.
-			statusURL, probeErr := transferStatusURL(transferType, id)
-			if probeErr != nil {
-				return probeErr
-			}
+			statusURL := transferStatusURL(kind, id)
+			var probeErr error
 			for failures := range utils.MaxConsecutivePollFailures {
 				_, probeErr = ac.SendGetRequest(statusURL)
 				if probeErr == nil || !utils.IsTransientRequestError(probeErr) {
@@ -1157,7 +1145,7 @@ func pollTransfer(ac *client.AlpaconClient, serverID, transferType, id string, t
 			return note(probeErr)
 		})
 	if err != nil && refused {
-		err = fmt.Errorf("%w (the %s may already have completed on the server; check before running it again)", err, transferType)
+		err = fmt.Errorf("%w (the %s may already have completed on the server; check before running it again)", err, kind.name)
 	}
 	return success, message, err
 }

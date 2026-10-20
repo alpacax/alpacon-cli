@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"encoding/json"
 	"fmt"
-	"path"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -60,7 +59,11 @@ func GetClusterIDByName(ac *client.AlpaconClient, clusterName string) (string, e
 		return "", err
 	}
 
-	return api.RequireResponseID(result.ID, "cluster")
+	pathID, err := api.RequireResponseID(result.ID, "cluster")
+	if err != nil {
+		return "", err
+	}
+	return pathID.String(), nil
 }
 
 // GetClusterDetail fetches one cluster by ID.
@@ -80,11 +83,11 @@ func GetClusterDetail(ac *client.AlpaconClient, clusterID string) (*ClusterDetai
 
 // GetClusterDetailRaw fetches one cluster by ID and returns the body as the server sent it.
 func GetClusterDetailRaw(ac *client.AlpaconClient, clusterID string) ([]byte, error) {
-	clusterID, err := api.RequireID(clusterID, "cluster")
+	pathID, err := api.RequireID(clusterID, "cluster")
 	if err != nil {
 		return nil, err
 	}
-	return ac.SendGetRequest(utils.BuildURL(clusterURL, clusterID, nil))
+	return ac.SendGetRequest(api.IDURL(clusterURL, pathID, "", nil))
 }
 
 // ResolveGroupNames maps group UUIDs to names in one batched lookup. A UUID
@@ -131,19 +134,21 @@ func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*Kub
 	if err := json.Unmarshal(body, &session); err != nil {
 		return nil, err
 	}
-	if session.ID, err = api.RequireResponseID(session.ID, "kube session"); err != nil {
+	pathID, err := api.RequireResponseID(session.ID, "kube session")
+	if err != nil {
 		return nil, fmt.Errorf("the server created the kube session, but its ID is unusable (%w)", err)
 	}
+	session.ID = pathID.String()
 
 	return &session, nil
 }
 
 // CloseSession ends a proxy session.
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
-	sessionID, err := api.RequireID(sessionID, "kube session")
+	pathID, err := api.RequireID(sessionID, "kube session")
 	if err != nil {
 		return err
 	}
-	_, err = ac.SendPostRequest(utils.BuildURL(sessionURL, path.Join(sessionID, "close"), nil), struct{}{})
+	_, err = ac.SendPostRequest(api.IDURL(sessionURL, pathID, "close", nil), struct{}{})
 	return err
 }

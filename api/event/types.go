@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
 )
 
@@ -224,6 +225,7 @@ type CommandResponse struct {
 	Server      types.ServerSummary `json:"server"`
 	RequestedBy types.UserSummary   `json:"requested_by"`
 	RunAfter    []any               `json:"run_after"`
+	pathID      api.PathID
 }
 
 // MarshalJSON renders a generic-lane request as its fields stand and a file-lane

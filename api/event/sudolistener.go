@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -16,9 +15,7 @@ import (
 )
 
 const (
-	// sudoVerifyURLFmt is the sudo-grant MFA verify endpoint; the grant ID is
-	// substituted into the path. Replaces the removed self-approve route.
-	sudoVerifyURLFmt = "/api/sudo/grants/%s/verify/"
+	sudoGrantsURL = "/api/sudo/grants/"
 
 	sudoHandshakeTimeout = 10 * time.Second
 
@@ -334,11 +331,11 @@ func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 }
 
 func (sl *SudoListener) verifySudoGrant(grantID string) error {
-	grantID, err := api.RequireResponseID(grantID, "sudo grant")
+	pathID, err := api.RequireResponseID(grantID, "sudo grant")
 	if err != nil {
 		return err
 	}
-	endpoint := fmt.Sprintf(sudoVerifyURLFmt, url.PathEscape(grantID))
+	endpoint := api.IDURL(sudoGrantsURL, pathID, "verify", nil)
 
 	_, err = sl.ac.SendPostRequest(endpoint, struct{}{})
 	if err != nil {
