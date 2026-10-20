@@ -158,7 +158,7 @@ stderr with error_code command_inline_credential.
 Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
 but cannot open an interactive terminal or watch, join, or invite to a session—those
-need 'alpacon login' without -t.`,
+need 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device).`,
 	Example: `  # Open a websh terminal
   alpacon websh my-server
 

@@ -134,7 +134,8 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 		name string
 		code string
 	}{
-		{"token access control refusal", utils.APITokenACLNotAllowed},
+		{"interactive channel refusal", utils.AuthInteractiveChannelRequiresPresence},
+		{"token access control refusal from an older server", utils.APITokenACLNotAllowed},
 		{"token scope refusal", utils.APITokenScopeMissing},
 	}
 	for _, tt := range tests {
@@ -144,7 +145,7 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 
 			got := handleTunnelStartError(err, "my-server", nil)
 
-			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t and try again")
+			assert.EqualError(t, got, "a token cannot open a tunnel; run 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and try again")
 		})
 	}
 }

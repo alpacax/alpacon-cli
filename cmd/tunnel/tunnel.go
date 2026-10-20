@@ -52,7 +52,8 @@ var TunnelCmd = &cobra.Command{
 	overrides the workspace's active work-session set via 'alpacon work-session use'.
 
 	Requires an active WorkSession when using Browser login (Auth0). Token auth (API
-	token or Service token) cannot open a tunnel—that needs 'alpacon login' without -t.
+	token or Service token) cannot open a tunnel—that needs 'alpacon login' without -t
+	(on a machine without a browser, open the printed URL on another device).
 	`,
 	Example: `
 	# Forward local 9000 to remote 8082

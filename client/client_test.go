@@ -388,6 +388,26 @@ func TestSendRequest_403SudoVerifyCredentialCannotProveMFAPointsToLogin(t *testi
 	assert.Equal(t, "sudo_verify_credential_cannot_prove_mfa", code)
 }
 
+func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
+	t.Parallel()
+	// An older server sends this refusal as api_token_acl_not_allowed, whose
+	// message points at ACL rules that cannot lift it.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "auth_interactive_channel_requires_presence"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "a token cannot open an interactive session—sign in with 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device)", err.Error())
+	assert.NotContains(t, err.Error(), "alpacon token acl")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "auth_interactive_channel_requires_presence", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface
