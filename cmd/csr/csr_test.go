@@ -105,7 +105,7 @@ func TestListSubcommandFlags(t *testing.T) {
 	require.NoError(t, err)
 
 	statusFlag := cmd.Flags().Lookup("status")
-	assert.NotNil(t, statusFlag, "--status flag should exist")
+	assert.NotNil(t, statusFlag)
 	assert.Equal(t, "s", statusFlag.Shorthand, "short flag should be -s")
 }
 
@@ -114,7 +114,7 @@ func TestDownloadSubcommandFlags(t *testing.T) {
 	require.NoError(t, err)
 
 	outFlag := cmd.Flags().Lookup("out")
-	assert.NotNil(t, outFlag, "--out flag should exist")
+	assert.NotNil(t, outFlag)
 	assert.Equal(t, "o", outFlag.Shorthand, "short flag should be -o")
 	assert.Empty(t, outFlag.DefValue)
 }
@@ -136,15 +136,15 @@ func TestCreateSubcommandFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("flag --"+tt.flagName, func(t *testing.T) {
 			f := cmd.Flags().Lookup(tt.flagName)
-			assert.NotNil(t, f, "--%s flag should exist", tt.flagName)
+			assert.NotNil(t, f)
 			assert.Equal(t, tt.shorthand, f.Shorthand)
 			assert.Equal(t, tt.defValue, f.DefValue)
 		})
 	}
 
 	validDays := cmd.Flags().Lookup("valid-days")
-	assert.NotNil(t, validDays, "--valid-days flag should exist")
-	assert.Equal(t, "365", validDays.DefValue)
+	require.NotNil(t, validDays)
+	assert.Equal(t, "0", validDays.DefValue, "a nonzero default would be sent and override the CA's default validity")
 }
 
 func TestSplitAndTrim(t *testing.T) {
