@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"net/url"
@@ -290,8 +291,8 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 	}
 
 	err = config.SaveRefreshedAuth0Token(refreshToken, tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil && !errors.Is(err, config.ErrLoginChanged) {
-		return nil, err
+	if err != nil && !errors.Is(err, config.ErrLoginChanged) && !errors.Is(err, fs.ErrNotExist) {
+		utils.CliWarning("Could not save the refreshed access token, so the next command will refresh it again: %s", err)
 	}
 
 	return tokenRes, nil

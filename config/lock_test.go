@@ -93,16 +93,23 @@ func TestConcurrentProcessesKeepEachOthersConfigChanges(t *testing.T) {
 	assert.Equal(t, "token-"+strconv.Itoa(configWriterRounds-1), cfg.AccessToken)
 }
 
-func heldConfigLock(t *testing.T) {
+func configLockPath(t *testing.T) string {
 	t.Helper()
-	held, err := filelock.Acquire(filepath.Join(os.Getenv("HOME"), ConfigFileDir, lockFileName), 0644)
+	dir, err := configDir()
+	require.NoError(t, err)
+	return filepath.Join(dir, lockFileName)
+}
+
+func holdConfigLock(t *testing.T) {
+	t.Helper()
+	held, err := filelock.Acquire(configLockPath(t), 0644)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = held.Release() })
 }
 
 func TestWithConfigLockGivesUpAfterTheTimeoutWithoutRunning(t *testing.T) {
 	setupTestConfig(t)
-	heldConfigLock(t)
+	holdConfigLock(t)
 
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
@@ -146,7 +153,7 @@ func TestWithConfigLockHoldsTheLockWhileFnRunsAndReleasesItAfter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			setupTestConfig(t)
-			lockPath := filepath.Join(os.Getenv("HOME"), ConfigFileDir, lockFileName)
+			lockPath := configLockPath(t)
 			var heldDuringFn error
 
 			err := withConfigLock(func() error {
@@ -196,7 +203,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 			configFile := filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName)
 			before, err := os.ReadFile(configFile)
 			require.NoError(t, err)
-			heldConfigLock(t)
+			holdConfigLock(t)
 
 			synctest.Test(t, func(t *testing.T) {
 				err := tt.write(started)

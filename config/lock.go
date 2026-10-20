@@ -40,7 +40,7 @@ func acquireConfigLock() (*filelock.Lock, error) {
 		case err == nil:
 			return lock, nil
 		case !errors.Is(err, filelock.ErrLocked):
-			return nil, fmt.Errorf("failed to lock %s: %v", lockPath, err)
+			return nil, fmt.Errorf("failed to lock %s: %w", lockPath, err)
 		case !time.Now().Before(deadline):
 			return nil, fmt.Errorf("timed out after %s waiting for another alpacon process to release %s", lockTimeout, lockPath)
 		}

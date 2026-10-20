@@ -120,8 +120,9 @@ func TestCommitSwitch_FailedConnectionLeavesALoginMadeMeanwhile(t *testing.T) {
 			verify := func() error {
 				// Another shell logs in while this one checks the connection.
 				require.NoError(t, config.CreateConfig(tt.anotherLogin, "other", "", "", "other-access", "other-refresh", "alpacon.io", 3600, false))
-				want, err = config.LoadConfig()
-				require.NoError(t, err)
+				cfg, loadErr := config.LoadConfig()
+				require.NoError(t, loadErr)
+				want = cfg
 				return errors.New("connection refused")
 			}
 

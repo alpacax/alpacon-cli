@@ -83,16 +83,16 @@ func (c Config) sameLogin(other Config) bool {
 // saveConfig renames a sibling temp file over the config, so LoadConfig, which takes no lock, never reads half
 // a file. Atomic, not durable: nothing flushes before the rename, so a power loss can empty or revert it.
 func saveConfig(config *Config) error {
-	configDir, err := configDir()
+	dir, err := configDir()
 	if err != nil {
 		return err
 	}
 
-	if err = os.MkdirAll(configDir, 0700); err != nil {
+	if err = os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(dir))
 
 	// The rename below replaces whatever the last path component names, so a
 	// config.json kept as a link into a dotfiles tree would be swapped for a
@@ -100,7 +100,7 @@ func saveConfig(config *Config) error {
 	// Resolving first is what makes that setup survive a write, and the temp
 	// file is created beside the target so the rename stays inside one
 	// filesystem even when the tree is on another mount.
-	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
 	if err != nil {
 		return err
 	}
@@ -182,7 +182,7 @@ func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) er
 // DeleteConfig removes the config while it still holds login's credentials; a login another shell made since
 // stays and DeleteConfig returns ErrLoginChanged. A config that is already gone is no error.
 func DeleteConfig(login Config) error {
-	configDir, err := configDir()
+	dir, err := configDir()
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func DeleteConfig(login Config) error {
 
 		// Remove what the link names, or the refresh token stays in the dotfiles tree;
 		// the link itself stays, so the next login writes through it.
-		configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+		configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
 		if err != nil {
 			return err
 		}
@@ -215,20 +215,20 @@ func DeleteConfig(login Config) error {
 func configDir() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %v", err)
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
 	return filepath.Join(homeDir, ConfigFileDir), nil
 }
 
 func LoadConfig() (Config, error) {
-	configDir, err := configDir()
+	dir, err := configDir()
 	if err != nil {
 		return Config{}, err
 	}
 
-	configFile := filepath.Join(configDir, ConfigFileName)
+	configFile := filepath.Join(dir, ConfigFileName)
 
-	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(dir))
 
 	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
@@ -412,9 +412,12 @@ func GetActiveWorkSession() (string, error) {
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
 // so ending one session never drops another the user has since switched to. Reports whether it cleared.
 func ClearActiveWorkSessionFor(workspaceName, uuid string) (bool, error) {
+	if uuid == "" {
+		return false, nil
+	}
 	cleared := false
 	err := updateConfig(func(cfg *Config) (bool, error) {
-		if uuid == "" || !strings.EqualFold(activeWorkSessionOn(*cfg, workspaceName), uuid) {
+		if !strings.EqualFold(activeWorkSessionOn(*cfg, workspaceName), uuid) {
 			return false, nil
 		}
 		var err error

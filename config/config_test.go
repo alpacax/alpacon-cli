@@ -830,6 +830,16 @@ func TestClearActiveWorkSessionFor_NoConfigIsNotAnError(t *testing.T) {
 	assert.False(t, cleared)
 }
 
+func TestClearActiveWorkSessionFor_NoIDTouchesNothing(t *testing.T) {
+	setupTestConfig(t)
+
+	cleared, err := ClearActiveWorkSessionFor("ws-a", "")
+
+	require.NoError(t, err)
+	assert.False(t, cleared)
+	assert.NoDirExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir))
+}
+
 func TestClearActiveWorkSessionFor_MatchesAnIDThatDiffersOnlyInCase(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
