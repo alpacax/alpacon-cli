@@ -77,8 +77,7 @@ func TestCommitSwitch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			require.NoError(t, config.CreateConfig("https://prev-slug.us1.alpacon.io", "prev-slug", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
-			require.NoError(t, config.SetSchemaName("prev"))
-			require.NoError(t, config.SetKubernetesSurface("https://prev-slug.us1.alpacon.io", true))
+			require.NoError(t, config.SetWorkspaceEnv("https://prev-slug.us1.alpacon.io", "prev", true))
 			orig, err := config.LoadConfig()
 			require.NoError(t, err)
 
@@ -96,6 +95,43 @@ func TestCommitSwitch(t *testing.T) {
 			assert.Equal(t, tt.expectSchemaName, cfg.WorkspaceIdentity())
 			assert.Equal(t, tt.expectSurface, cfg.KubernetesSurface)
 			assert.Equal(t, "access-token", cfg.AccessToken)
+		})
+	}
+}
+
+// Serial: each case sets HOME.
+func TestCommitSwitch_FailedConnectionLeavesALoginMadeMeanwhile(t *testing.T) {
+	tests := []struct {
+		name         string
+		anotherLogin string
+		wantErr      error
+	}{
+		{name: "login elsewhere", anotherLogin: "https://other.zz9.alpacon.io", wantErr: config.ErrWorkspaceChanged},
+		{name: "another account on the workspace switched to", anotherLogin: "https://next.us1.alpacon.io", wantErr: config.ErrLoginChanged},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			require.NoError(t, config.CreateConfig("https://prev.us1.alpacon.io", "prev", "", "", "access-token", "refresh-token", "alpacon.io", 3600, false))
+			orig, err := config.LoadConfig()
+			require.NoError(t, err)
+			var want config.Config
+			verify := func() error {
+				// Another shell logs in while this one checks the connection.
+				require.NoError(t, config.CreateConfig(tt.anotherLogin, "other", "", "", "other-access", "other-refresh", "alpacon.io", 3600, false))
+				want, err = config.LoadConfig()
+				require.NoError(t, err)
+				return errors.New("connection refused")
+			}
+
+			err = commitSwitch(orig, "https://next.us1.alpacon.io", "next", false, verify)
+
+			require.ErrorIs(t, err, tt.wantErr)
+			require.ErrorContains(t, err, `failed to connect to "next": connection refused; left the config as another login or switch set it since`)
+			cfg, err := config.LoadConfig()
+			require.NoError(t, err)
+			assert.Equal(t, want, cfg)
 		})
 	}
 }

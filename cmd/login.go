@@ -163,12 +163,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 
 		}
 
-		// CreateConfig above stored only the host label; the schema name is what
-		// stays fixed when the workspace's URL slug is renamed.
-		if err := config.SetSchemaName(envInfo.Auth0.SchemaName); err != nil {
-			utils.CliWarning("Could not save the workspace identity: %s. Run 'alpacon login' again if workspace commands fail.", err)
-		}
-		persistKubernetesSurface(workspaceURL, envInfo)
+		persistWorkspaceEnv(workspaceURL, envInfo)
 
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -203,15 +198,15 @@ func init() {
 	loginCmd.Flags().StringVar(&regionFlag, "region", "", "Region for Alpacon Cloud login (e.g., us1, ap1)")
 }
 
-// persistKubernetesSurface records surfaces.kubernetes after every branch's CreateConfig reset it.
-// A failed write only keeps 'alpacon kube' hidden, so it warns rather than failing the login.
-func persistKubernetesSurface(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
-	err := config.SetKubernetesSurface(workspaceURL, envInfo.Surfaces.Kubernetes)
+// persistWorkspaceEnv records the schema name, which stays fixed when the URL slug is renamed, and
+// surfaces.kubernetes after every branch's CreateConfig reset both; a failed write warns, not fails.
+func persistWorkspaceEnv(workspaceURL string, envInfo *auth0.AuthEnvResponse) {
+	err := config.SetWorkspaceEnv(workspaceURL, envInfo.Auth0.SchemaName, envInfo.Surfaces.Kubernetes)
 	switch {
 	case errors.Is(err, config.ErrWorkspaceChanged):
-		utils.CliWarning("Did not save Kubernetes support for %s: %s since this login started.", workspaceURL, err)
+		utils.CliWarning("Did not save the workspace identity and Kubernetes support for %s: %s since this login started.", workspaceURL, err)
 	case err != nil:
-		utils.CliWarning("Could not save whether this workspace supports Kubernetes: %s. 'alpacon kube' stays hidden until the next login.", err)
+		utils.CliWarning("Could not save the workspace identity and Kubernetes support: %s. Run 'alpacon login' again if workspace or kube commands fail.", err)
 	}
 }
 

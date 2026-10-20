@@ -402,7 +402,7 @@ func TestDeleteConfigRemovesWhatASymlinkedConfigFileNames(t *testing.T) {
 	setupTestConfig(t)
 	stored, configFile := symlinkedConfigFile(t, &Config{Token: "first"})
 
-	require.NoError(t, DeleteConfig())
+	require.NoError(t, DeleteConfig(Config{Token: "first"}))
 
 	// Removing the link alone would leave the refresh token in the dotfiles tree
 	// after a logout that reported success.

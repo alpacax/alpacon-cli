@@ -573,6 +573,24 @@ func TestRefreshAccessToken_KeepsTheDeviceScopeWhenAccepted(t *testing.T) {
 	assert.Contains(t, exchanges[0].Scope, "device:")
 }
 
+func TestRefreshAccessToken_DoesNotFileTheTokenUnderAnotherLogin(t *testing.T) {
+	server := newRefreshServer(t, func(tokenRequest) (int, string) {
+		return http.StatusOK, refreshSuccessBody
+	})
+	setupRefreshConfig(t, server)
+	// Another shell logged in to a self-hosted workspace while the grant ran.
+	require.NoError(t, config.CreateConfig("https://alpacon.example.com", "self-hosted", "api-key", "", "", "", "", 0, false))
+
+	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", tokenRes.AccessToken)
+	storedConfig, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, storedConfig.AccessToken)
+	assert.Equal(t, "api-key", storedConfig.Token)
+}
+
 // TestRefreshAccessToken_ReportsTheFallbackFailure covers a scope refusal that
 // turns out to be sitting on top of a second, unrelated problem—an expired or
 // revoked token. The retry is entitled to run, since the first refusal really

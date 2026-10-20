@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/auth0"
@@ -60,15 +61,19 @@ func verifyConnection() error {
 	return err
 }
 
-// commitSwitch saves the new workspace with its Kubernetes surface answer, then runs verify;
-// on failure it restores orig in one save, so no save pairs a workspace with another's answer.
+// commitSwitch saves the new workspace with its Kubernetes surface answer, then runs verify; on failure
+// it restores orig in one save unless another login or switch has replaced the new workspace since.
 func commitSwitch(orig config.Config, newURL, newName string, kubernetesSurface bool, verify func() error) error {
-	if err := config.SwitchWorkspace(newURL, newName, kubernetesSurface); err != nil {
+	if err := config.SwitchWorkspace(orig, newURL, newName, kubernetesSurface); err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 
 	if err := verify(); err != nil {
-		if revertErr := config.RestoreWorkspace(orig.WorkspaceURL, orig.WorkspaceName, orig.SchemaName, orig.KubernetesSurface); revertErr != nil {
+		revertErr := config.RestoreWorkspace(newURL, orig)
+		if errors.Is(revertErr, config.ErrWorkspaceChanged) || errors.Is(revertErr, config.ErrLoginChanged) {
+			return fmt.Errorf("failed to connect to %q: %w; left the config as another login or switch set it since: %w", newName, err, revertErr)
+		}
+		if revertErr != nil {
 			return fmt.Errorf("failed to connect to %q and could not revert config: %w (original error: %s)", newName, revertErr, err)
 		}
 		return fmt.Errorf("failed to connect to workspace %q: %w; reverted to %q", newName, err, orig.WorkspaceIdentity())

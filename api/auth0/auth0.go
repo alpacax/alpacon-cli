@@ -289,8 +289,8 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 		return nil, err
 	}
 
-	err = config.SaveRefreshedAuth0Token(tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil {
+	err = config.SaveRefreshedAuth0Token(refreshToken, tokenRes.AccessToken, tokenRes.ExpiresIn)
+	if err != nil && !errors.Is(err, config.ErrLoginChanged) {
 		return nil, err
 	}
 
@@ -553,7 +553,7 @@ func Logout(httpClient *http.Client, validConfig config.Config) error {
 			return fmt.Errorf("failed to revoke token: %v", err)
 		}
 	}
-	err := config.DeleteConfig()
+	err := config.DeleteConfig(validConfig)
 	if err != nil {
 		return err
 	}
