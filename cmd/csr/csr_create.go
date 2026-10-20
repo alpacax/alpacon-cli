@@ -187,9 +187,8 @@ func parseValidDaysInput(input string) (int, error) {
 	return validDays, nil
 }
 
-// createSignRequestErrorText words a failed sign request. validDays is what
-// the request carried, zero meaning the CA's default. The advice names no flag:
-// the interactive prompt reaches the same refusals.
+// createSignRequestErrorText words a failed sign request; validDays is what the
+// request carried, zero meaning the CA's default.
 func createSignRequestErrorText(err error, validDays int) string {
 	if code, _ := utils.ParseErrorResponse(err); code == certApi.CodeInvalidPeriod {
 		if validDays == 0 {
