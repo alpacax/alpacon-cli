@@ -364,7 +364,7 @@ func TestFileExecRefusal(t *testing.T) {
 		{
 			name:         "unsupported agent names the server and the version",
 			err:          coded("file_exec_unsupported_agent"),
-			wantMessage:  "the agent on 'prod-web' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
+			wantMessage:  "the agent on 'prod-web' does not offer the verified file lane; it needs Alpamon 2.8.3 or newer on a platform that supports the lane",
 			wantHintPart: "alpacon exec prod-web -- /bin/bash",
 			wantOK:       true,
 		},
@@ -441,7 +441,7 @@ func TestFileExecRefusal(t *testing.T) {
 		{
 			name:         "wrapped error still answers",
 			err:          fmt.Errorf("failed to execute command on 'prod-web' server: %w", coded("file_exec_unsupported_agent")),
-			wantMessage:  "the agent on 'prod-web' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
+			wantMessage:  "the agent on 'prod-web' does not offer the verified file lane; it needs Alpamon 2.8.3 or newer on a platform that supports the lane",
 			wantHintPart: "Alpamon",
 			wantOK:       true,
 		},
@@ -477,8 +477,23 @@ func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
 	message, hint, ok := fileExecRefusal(err, "prod\n\x1b[2Kforged")
 
 	require.True(t, ok)
-	assert.Equal(t, "the agent on 'prodforged' cannot verify a file digest; Alpamon 2.6.0 or newer is required", message)
+	assert.Equal(t, "the agent on 'prodforged' does not offer the verified file lane; it needs Alpamon 2.8.3 or newer on a platform that supports the lane", message)
 	assert.Contains(t, hint, "  alpacon exec prodforged -- /bin/bash /path/to/script.sh\n")
+}
+
+// TestFileExecRefusalUnsupportedAgentNamesBothCases pins the two agents the
+// code covers: one too old to report capabilities, which an update fixes, and
+// one whose platform has no file lane, which an update does not.
+func TestFileExecRefusalUnsupportedAgentNamesBothCases(t *testing.T) {
+	t.Parallel()
+	err := errors.New("code: file_exec_unsupported_agent; source: command")
+
+	_, hint, ok := fileExecRefusal(err, "prod-web")
+
+	require.True(t, ok)
+	assert.Contains(t, hint, "an Alpamon older than 2.8.3 reports no capabilities, and updating it to 2.8.3 or newer fixes this")
+	assert.Contains(t, hint, "an empty capability list, such as a Windows build, has no file lane on that platform, and updating does not help: on that server, run the script as an ordinary command")
+	assert.Contains(t, hint, "  alpacon exec prod-web -- /bin/bash /path/to/script.sh\n")
 }
 
 // TestReRunHint_File pins the re-run a pending approval prints on the file
@@ -623,7 +638,7 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 			"--file", "/opt/deploy.sh", "--file-from", script, "prod")
 		assert.Equal(t, 1, exitCode)
 		assert.Empty(t, stdout)
-		assert.Contains(t, stderr, "the agent on 'prod' cannot verify a file digest; Alpamon 2.6.0 or newer is required")
+		assert.Contains(t, stderr, "the agent on 'prod' does not offer the verified file lane; it needs Alpamon 2.8.3 or newer on a platform that supports the lane")
 		assert.Contains(t, stderr, "Hint:")
 		assert.NotContains(t, stderr, "file_exec_unsupported_agent", "the code is rendered as guidance, not echoed")
 	})
