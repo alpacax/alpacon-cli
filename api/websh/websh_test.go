@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -1037,6 +1038,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 
 	var upgrades atomic.Int32
 	dialHeaders := make(chan http.Header, receivedBufferSize)
+	dialQueries := make(chan url.Values, receivedBufferSize)
 	channels := make(chan ConnectRequest, receivedBufferSize)
 	resizes := make(chan SessionSizeRequest, receivedBufferSize)
 
@@ -1045,6 +1047,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", func(w http.ResponseWriter, r *http.Request) {
+		dialQueries <- r.URL.Query()
 		select {
 		case dialHeaders <- r.Header.Clone():
 		default:
@@ -1086,7 +1089,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(SessionResponse{
 			ID:           "channel-2",
-			WebsocketURL: "ws://" + r.Host + "/ws/",
+			WebsocketURL: "ws://" + r.Host + "/ws/?client=terminal&replay=0",
 		})
 	})
 	mux.HandleFunc(sessionsBaseURL+"sess-1/", func(w http.ResponseWriter, r *http.Request) {
@@ -1111,7 +1114,7 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	wsClient.reconnect.baseDelay = time.Millisecond
 	wsClient.reconnect.notice = io.Discard
 
-	require.NoError(t, wsClient.dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/"))
+	require.NoError(t, wsClient.dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws/?client=terminal"))
 
 	served := make(chan struct{})
 	go func() {
@@ -1142,6 +1145,8 @@ func TestServeConnections_ReconnectsAfterAServiceRestart(t *testing.T) {
 	}
 
 	assert.Equal(t, int32(2), upgrades.Load(), "the client must dial again rather than reuse the closed connection")
+	assert.Equal(t, url.Values{"client": {"terminal"}}, <-dialQueries)
+	assert.Equal(t, url.Values{"client": {"terminal"}, "replay": {"1"}}, <-dialQueries)
 	for dial := 1; dial <= 2; dial++ {
 		select {
 		case header := <-dialHeaders:

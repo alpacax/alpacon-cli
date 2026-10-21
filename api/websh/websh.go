@@ -637,7 +637,14 @@ func (wsClient *WebsocketClient) redial() bool {
 			}
 			continue
 		}
-		if err := wsClient.dial(websocketURL); err != nil {
+		replayURL, err := url.Parse(websocketURL)
+		if err != nil {
+			continue
+		}
+		query := replayURL.Query()
+		query.Set("replay", "1")
+		replayURL.RawQuery = query.Encode()
+		if err := wsClient.dial(replayURL.String()); err != nil {
 			continue
 		}
 		// Before the pumps, so the redraw the resize provokes lands on a socket
