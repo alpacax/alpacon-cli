@@ -81,6 +81,16 @@ func TestParseRemoteExecArgs_FileUploadErrors(t *testing.T) {
 			args:        []string{"--file", "/opt/deploy.sh", "--upload", "--overwrite=yes", "prod-web"},
 			expectedErr: "--overwrite does not accept a value; use --overwrite alone",
 		},
+		{
+			name:        "upload to a path with dot-dot",
+			args:        []string{"--file", "/opt/link/../deploy.sh", "--upload", "prod-web"},
+			expectedErr: "--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: /opt/link/../deploy.sh",
+		},
+		{
+			name:        "upload to a path with a repeated slash",
+			args:        []string{"--file", "/opt//deploy.sh", "--upload", "prod-web"},
+			expectedErr: "--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: /opt//deploy.sh",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

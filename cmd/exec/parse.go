@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
@@ -293,6 +294,13 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if len(env) > 0 {
 			return RemoteExecArgs{
 				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
+			}
+		}
+		// The upload writes to the cleaned path while the agent opens the path as
+		// given, and a symlink before ".." makes those two different files.
+		if upload && pathpkg.Clean(filePath) != filePath {
+			return RemoteExecArgs{
+				Err: fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath),
 			}
 		}
 		if len(commandParts) > 0 && !separated {

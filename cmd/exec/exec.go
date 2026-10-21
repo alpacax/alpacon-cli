@@ -91,7 +91,8 @@ Flags:
                                 missing directories are created, and the
                                 interpreter reads the file, so no execute bit is
                                 needed. An existing file is refused unless
-                                --overwrite is given.
+                                --overwrite is given. PATH must be clean: no
+                                '.' or '..' and no repeated or trailing slash.
   --overwrite                   With --upload, replace a file already at PATH. The
                                 file keeps its owner and mode.
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
@@ -188,7 +189,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web
 
   # Write a local script to the server and run it as a verified file, in one step.
-  # Add --overwrite to replace a file already at that path.
   alpacon exec --upload --file /opt/deploy.sh --file-from ./deploy.sh root@prod-web -- --fast
 
   # Propose that the approval stay reusable for 30 days; the approver decides

@@ -180,7 +180,7 @@ func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file even
 	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
 		hint = denialHintLine("pass --overwrite to replace the file on the server, or drop --upload to run the file already there.\n")
 	}
-	// reportCodedRefusal adds the closing period the agent's message may carry.
+	// reportCodedRefusal appends its own period; drop the one the agent's message ends with.
 	msg := strings.TrimSuffix(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err), ".")
 	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
 }
