@@ -342,8 +342,8 @@ func TestCancelWorkSession(t *testing.T) {
 // so the handler can pin the whole path instead of its tail.
 const timelineSessionID = "ses-abc"
 
-// newTimelineContractServer serves the two shapes GetWorkSessionTimeline
-// documents, switching on whether `cursor` is named.
+// newTimelineContractServer serves the timeline route's two shapes, paged and
+// whole, switching on whether `cursor` is named.
 func newTimelineContractServer(t *testing.T, items []TimelineItem, pageSize int) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -395,36 +395,16 @@ func timelineFixture() []TimelineItem {
 		{Type: "command", Timestamp: ts, Line: "ls -la"},
 		{Type: "websh_session", Timestamp: ts, ID: "wsh-1"},
 		{Type: "command", Timestamp: ts, Line: "systemctl status nginx"},
-		{Type: "websh_record", Timestamp: ts, SessionID: "wsh-1", MaskedRecord: "ls -la\n"},
+		{Type: "websh_record", Timestamp: ts},
 	}
 }
 
-func TestGetWorkSessionTimeline_WithRecordsKeepsTheRecordings(t *testing.T) {
-	t.Parallel()
-	srv := newTimelineContractServer(t, timelineFixture(), 2)
-	defer srv.Close()
-
-	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
-	require.NoError(t, err)
-	require.Len(t, result, 4)
-
-	var records []TimelineItem
-	for _, item := range result {
-		if item.Type == "websh_record" {
-			records = append(records, item)
-		}
-	}
-	require.Len(t, records, 1)
-	assert.Equal(t, "wsh-1", records[0].SessionID)
-	assert.Equal(t, "ls -la\n", records[0].MaskedRecord)
-}
-
-func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
+func TestGetWorkSessionTimeline_FollowsTheCursor(t *testing.T) {
 	t.Parallel()
 	srv := newTimelineContractServer(t, timelineFixture(), 1)
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID)
 	require.NoError(t, err)
 	require.Len(t, result, 3)
 	assert.Equal(t, "ls -la", result[0].Line)
@@ -435,10 +415,11 @@ func TestGetWorkSessionTimeline_ExcludeRecordsFollowsTheCursor(t *testing.T) {
 	}
 }
 
-// Without the opt-in, the one-response answer holds the same items as the
-// walk, so only the wire can tell them apart; `Has` because `Get` reads an
-// absent key and an empty value alike.
-func TestGetWorkSessionTimeline_ExcludeRecordsNamesAnEmptyCursorThenTheMintedOne(t *testing.T) {
+// The one-response answer would hold the same items as the walk, so only the
+// wire can tell them apart; `Has` because `Get` reads an absent key and an empty
+// value alike. include_records=true would ask an unpaginated server for the
+// recordings, which the timeline never reads.
+func TestGetWorkSessionTimeline_NamesAnEmptyCursorThenTheMintedOne(t *testing.T) {
 	t.Parallel()
 	var sent []url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -455,7 +436,7 @@ func TestGetWorkSessionTimeline_ExcludeRecordsNamesAnEmptyCursorThenTheMintedOne
 	}))
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID)
 	require.NoError(t, err)
 	require.Len(t, result, 2)
 
@@ -465,9 +446,59 @@ func TestGetWorkSessionTimeline_ExcludeRecordsNamesAnEmptyCursorThenTheMintedOne
 	assert.NotEmpty(t, sent[0].Get("page_size"))
 	assert.Equal(t, "page-2", sent[1].Get("cursor"))
 	assert.NotEmpty(t, sent[1].Get("page_size"))
+	for _, q := range sent {
+		assert.Equal(t, "false", q.Get("include_records"))
+	}
 }
 
-func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T) {
+// A null count and a missing one (a server that predates it) both decode to nil,
+// apart from 0, which says there is no recording.
+func TestGetWorkSessionTimeline_DecodesTheRecordChunkCount(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"next":null,"results":[
+			{"type":"websh_session","id":"a","record_chunks_total":3,"max_cols":120,"max_rows":40},
+			{"type":"websh_session","id":"b","record_chunks_total":0},
+			{"type":"websh_session","id":"c","record_chunks_total":null},
+			{"type":"websh_session","id":"d"}]}`))
+	}))
+	defer srv.Close()
+
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID)
+	require.NoError(t, err)
+	require.Len(t, result, 4)
+	require.NotNil(t, result[0].RecordChunksTotal)
+	assert.Equal(t, 3, *result[0].RecordChunksTotal)
+	assert.Equal(t, 120, result[0].MaxCols)
+	assert.Equal(t, 40, result[0].MaxRows)
+	require.NotNil(t, result[1].RecordChunksTotal)
+	assert.Equal(t, 0, *result[1].RecordChunksTotal)
+	assert.Nil(t, result[2].RecordChunksTotal)
+	assert.Nil(t, result[3].RecordChunksTotal)
+}
+
+func TestIsTerminal(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		item TimelineItem
+		want bool
+	}{
+		{"websh session", TimelineItem{Type: "websh_session"}, true},
+		{"websh session flagged as tunnel", TimelineItem{Type: "websh_session", IsTunnel: true}, false},
+		{"tunnel session", TimelineItem{Type: "tunnel_session", IsTunnel: true}, false},
+		{"command", TimelineItem{Type: "command"}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, IsTerminal(&tc.item))
+		})
+	}
+}
+
+func TestGetWorkSessionTimeline_LeavesRecordingsOutOnAnUnpaginatedServer(t *testing.T) {
 	t.Parallel()
 	items := timelineFixture()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -478,58 +509,12 @@ func TestGetWorkSessionTimeline_ExcludeRecordsOnAnUnpaginatedServer(t *testing.T
 	}))
 	defer srv.Close()
 
-	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, false)
+	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID)
 	require.NoError(t, err)
 	require.Len(t, result, 3)
 	for _, item := range result {
 		assert.NotEqual(t, "websh_record", item.Type)
 	}
-}
-
-func TestGetWorkSessionTimeline_RefusesAPageWhenItAskedForTheWholeTimeline(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		body string
-	}{
-		{
-			name: "more pages to come",
-			body: `{"next":"TOKEN2","results":[{"type":"command","line":"ls -la"}]}`,
-		},
-		{
-			name: "null next on a single page",
-			body: `{"next":null,"results":[{"type":"command","line":"ls -la"}]}`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(tt.body))
-			}))
-			defer srv.Close()
-
-			result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
-			require.ErrorIs(t, err, ErrTimelinePaginated)
-			assert.Empty(t, result)
-			assert.Contains(t, err.Error(), "alpacon update")
-		})
-	}
-}
-
-func TestGetWorkSessionTimeline_AcceptsAnAnswerWithNoNextKey(t *testing.T) {
-	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"results":[{"type":"command","line":"ls -la"},{"type":"websh_record","masked_record":"ls -la\n"}]}`))
-	}))
-	defer srv.Close()
-
-	result, err := GetWorkSessionTimeline(newTestClient(srv), timelineSessionID, true)
-	require.NoError(t, err)
-	require.Len(t, result, 2)
-	assert.Equal(t, "websh_record", result[1].Type)
 }
 
 func TestUpdateWorkSession(t *testing.T) {
@@ -627,7 +612,7 @@ func TestWorkSessionCallsRefuseAPathTraversingIDBeforeAnyRequest(t *testing.T) {
 			return err
 		}},
 		{"GetWorkSessionTimeline", func(ac *client.AlpaconClient) error {
-			_, err := GetWorkSessionTimeline(ac, badID, false)
+			_, err := GetWorkSessionTimeline(ac, badID)
 			return err
 		}},
 		{"GetTerminalRecording", func(ac *client.AlpaconClient) error {

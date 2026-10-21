@@ -1,7 +1,6 @@
 package worksession
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -15,23 +14,32 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noRecords bool
-
+// recordingJSON is one Websh terminal of the timeline, numbered as
+// `recording --index` counts them. RecordChunksTotal is null when the server
+// could not count the chunks.
 type recordingJSON struct {
-	Index   int    `json:"index"`
-	Time    string `json:"time"`
-	Server  string `json:"server"`
-	Preview string `json:"preview"`
+	Index             int    `json:"index"`
+	SessionID         string `json:"session_id"`
+	Time              string `json:"time"`
+	Server            string `json:"server"`
+	RecordChunksTotal *int   `json:"record_chunks_total"`
+	Status            string `json:"status"`
 }
 
 var workSessionTimelineCmd = &cobra.Command{
 	Use:     "timeline SESSION_ID",
 	Aliases: []string{"tl"},
 	Short:   "Show the activity timeline for a work session",
-	Args:    cobra.ExactArgs(1),
+	Long: `Show the activity timeline for a work session.
+
+Recordings are not embedded in the timeline. The recordings section lists each
+Websh terminal with the number of recording chunks it has ("unknown" when the
+server cannot count them) and the command that shows one:
+alpacon work-session recording SESSION_ID --index N.`,
+	Args: cobra.ExactArgs(1),
 	Example: `  alpacon work-session timeline ses-abc123
-  alpacon work-session timeline ses-abc123 --no-records
-  alpacon work-session tl ses-abc123 --output json`,
+  alpacon work-session tl ses-abc123 --output json
+  alpacon work-session recording ses-abc123 --index 2`,
 	Run: func(cmd *cobra.Command, args []string) {
 		ac, err := client.NewAlpaconAPIClient()
 		if err != nil {
@@ -47,7 +55,7 @@ var workSessionTimelineCmd = &cobra.Command{
 			wg          sync.WaitGroup
 		)
 		wg.Go(func() {
-			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id, !noRecords)
+			items, timelineErr = wsapi.GetWorkSessionTimeline(ac, id)
 		})
 		wg.Go(func() {
 			session, _ = wsapi.GetWorkSession(ac, id) // best-effort: server names degrade to IDs on failure
@@ -65,90 +73,59 @@ var workSessionTimelineCmd = &cobra.Command{
 			}
 		}
 
-		// A server too old to know include_records sends the records anyway.
-		var (
-			recordingsBySession map[string][]wsapi.TimelineItem
-			recordings          []wsapi.TimelineItem
-		)
-		if !noRecords {
-			recordingsBySession, recordings = buildRecordingIndex(items)
-		}
-
-		rows := make([]wsapi.TimelineAttributes, 0)
+		rows := make([]wsapi.TimelineAttributes, 0, len(items))
+		var terminals []wsapi.TimelineItem
 		for i := range items {
+			// A server too old to know include_records sends the recordings
+			// anyway; they are not timeline rows.
 			if items[i].Type == "websh_record" {
 				continue
 			}
-			row := projectTimelineAttributes(&items[i], serverMap)
-			if items[i].Type == "websh_session" {
-				if recs := recordingsBySession[items[i].ID]; len(recs) > 0 {
-					badge := recordingBadge(len(recs))
-					if row.Details != "" {
-						row.Details += " " + badge
-					} else {
-						row.Details = badge
-					}
-				}
+			if wsapi.IsTerminal(&items[i]) {
+				terminals = append(terminals, items[i])
 			}
-			rows = append(rows, row)
+			rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
 		}
 
 		if utils.OutputFormat == utils.OutputFormatJSON {
-			outputTimelineJSON(rows, recordings, serverMap)
+			outputTimelineJSON(rows, terminals, id, serverMap)
 			return
 		}
 
 		writer, cleanup := utils.WriteToPager()
 		defer cleanup()
 		printTimelineTableTo(writer, rows)
-		if len(recordings) > 0 {
-			printRecordingsSectionTo(writer, recordings, serverMap)
+		if len(terminals) > 0 {
+			printRecordingsSectionTo(writer, terminals, id, serverMap)
 		}
 	},
 }
 
 func init() {
-	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
-		"Skip recordings: hide the recordings section and the recording count on Websh rows")
+	// Kept so existing scripts keep working: the timeline no longer carries
+	// recordings, so there is nothing left for it to skip.
+	workSessionTimelineCmd.Flags().Bool("no-records", false, "No effect; recordings are no longer embedded in the timeline")
+	_ = workSessionTimelineCmd.Flags().MarkDeprecated("no-records",
+		"recordings are no longer embedded in the timeline, so it has no effect")
 }
 
-func buildRecordingIndex(items []wsapi.TimelineItem) (bySession map[string][]wsapi.TimelineItem, flat []wsapi.TimelineItem) {
-	bySession = map[string][]wsapi.TimelineItem{}
-	for _, item := range items {
-		if item.Type == "websh_record" {
-			bySession[item.SessionID] = append(bySession[item.SessionID], item)
-			flat = append(flat, item)
-		}
+// recordingStatus reads a terminal's record_chunks_total. nil covers both a
+// server that could not count (null) and one that predates the count (no key).
+func recordingStatus(total *int) string {
+	switch {
+	case total == nil || *total < 0:
+		return "unknown"
+	case *total == 0:
+		return "no recording"
+	case *total == 1:
+		return "1 chunk"
+	default:
+		return fmt.Sprintf("%d chunks", *total)
 	}
-	return
 }
 
-func recordingBadge(n int) string {
-	if n == 1 {
-		return "• 1 recording"
-	}
-	return fmt.Sprintf("• %d recordings", n)
-}
-
-func recordingPreview(raw string) string {
-	scanner := bufio.NewScanner(strings.NewReader(raw))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for i := 0; i < 50 && scanner.Scan(); i++ {
-		// Not SanitizeTerminalText: its control pass would take \r before the
-		// overwrite handling below gets to use it.
-		line := utils.StripFormatAndANSI(scanner.Text())
-		// Strip trailing CR from CRLF line endings before overwrite handling.
-		line = strings.TrimRight(line, "\r")
-		// \r moves cursor to line start; take only the last overwritten segment
-		if idx := strings.LastIndex(line, "\r"); idx != -1 {
-			line = line[idx+1:]
-		}
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return utils.TruncateString(utils.StripControlChars(line), 60)
-		}
-	}
-	return ""
+func recordingCommand(sessionID string, index int) string {
+	return fmt.Sprintf("alpacon work-session recording %s --index %d", sessionID, index)
 }
 
 func resolveTimestamp(ts *string) string {
@@ -185,29 +162,38 @@ func printTimelineTableTo(w io.Writer, rows []wsapi.TimelineAttributes) {
 	_ = tw.Flush()
 }
 
-func printRecordingsSectionTo(w io.Writer, recordings []wsapi.TimelineItem, serverMap map[string]string) {
-	_, _ = fmt.Fprintf(w, "\n─── Recordings (%d) %s\n", len(recordings), strings.Repeat("─", 44))
-	for i, rec := range recordings {
-		_, _ = fmt.Fprintf(w, "[%d]  %s  %s\n", i+1,
-			utils.SanitizeTerminalText(resolveTimestamp(rec.Timestamp)),
-			utils.SanitizeTerminalText(resolveServer(rec.ServerID, serverMap)))
-		if preview := recordingPreview(rec.MaskedRecord); preview != "" {
-			_, _ = fmt.Fprintf(w, "     %s\n", preview)
-		}
-		if i < len(recordings)-1 {
-			_, _ = fmt.Fprintln(w)
+// printRecordingsSectionTo lists the terminals in timeline order, so [N] is the
+// --index that reads that terminal's recording. A terminal known to have no
+// recording gets no hint, since the command would only report that.
+func printRecordingsSectionTo(w io.Writer, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) {
+	label := "terminals"
+	if len(terminals) == 1 {
+		label = "terminal"
+	}
+	_, _ = fmt.Fprintf(w, "\n─── Recordings (%d %s) %s\n", len(terminals), label, strings.Repeat("─", 40))
+	for i := range terminals {
+		term := &terminals[i]
+		_, _ = fmt.Fprintf(w, "[%d]  %s  %s  %s\n", i+1,
+			utils.SanitizeTerminalText(resolveTimestamp(term.Timestamp)),
+			utils.SanitizeTerminalText(resolveServer(term.ServerID, serverMap)),
+			recordingStatus(term.RecordChunksTotal))
+		if total := term.RecordChunksTotal; total == nil || *total != 0 {
+			_, _ = fmt.Fprintf(w, "     %s\n", utils.SanitizeTerminalText(recordingCommand(sessionID, i+1)))
 		}
 	}
 }
 
-func outputTimelineJSON(rows []wsapi.TimelineAttributes, recordings []wsapi.TimelineItem, serverMap map[string]string) {
-	recEntries := make([]recordingJSON, len(recordings))
-	for i, rec := range recordings {
+func outputTimelineJSON(rows []wsapi.TimelineAttributes, terminals []wsapi.TimelineItem, sessionID string, serverMap map[string]string) {
+	recEntries := make([]recordingJSON, len(terminals))
+	for i := range terminals {
+		term := &terminals[i]
 		recEntries[i] = recordingJSON{
-			Index:   i + 1,
-			Time:    resolveTimestamp(rec.Timestamp),
-			Server:  resolveServer(rec.ServerID, serverMap),
-			Preview: recordingPreview(rec.MaskedRecord),
+			Index:             i + 1,
+			SessionID:         term.ID,
+			Time:              resolveTimestamp(term.Timestamp),
+			Server:            resolveServer(term.ServerID, serverMap),
+			RecordChunksTotal: term.RecordChunksTotal,
+			Status:            recordingStatus(term.RecordChunksTotal),
 		}
 	}
 	out := map[string]any{
@@ -249,8 +235,6 @@ func formatType(t string) string {
 		return "download"
 	case "sudo_grant":
 		return "sudo grant"
-	case "websh_record":
-		return "recording"
 	default:
 		return t
 	}
@@ -300,12 +284,6 @@ func formatDetails(item *wsapi.TimelineItem) string {
 			detail += fmt.Sprintf(" — %s", utils.TruncateString(utils.SanitizeTerminalText(*item.Command), 40))
 		}
 		return detail
-
-	case "websh_record":
-		// Sanitize before truncating, as every case above does: otherwise the 60-char
-		// budget goes on escape bytes and the cell shows less of the command than the
-		// rows beside it.
-		return utils.TruncateString(utils.SanitizeTerminalText(item.MaskedRecord), 60)
 
 	default:
 		return ""
