@@ -14,3 +14,9 @@ type ServerSummary struct {
 	OS          *string `json:"os"`
 	IsConnected bool    `json:"is_connected"`
 }
+
+// ClusterSummary is the nested cluster object returned in API responses.
+type ClusterSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}

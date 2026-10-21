@@ -9,6 +9,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/client"
 	wscmd "github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
@@ -96,10 +97,6 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			if wsErr != nil {
 				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
 			} else if ws != nil {
-				serverNames := make([]string, len(ws.Servers))
-				for i, srv := range ws.Servers {
-					serverNames[i] = srv.Name
-				}
 				expiresAt := ""
 				if !ws.ExpiresAt.IsZero() {
 					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
@@ -109,7 +106,8 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 					ID:        ws.ID,
 					Status:    ws.Status,
 					Scopes:    ws.Scopes,
-					Servers:   serverNames,
+					Servers:   wsapi.ServerNames(ws),
+					Clusters:  wsapi.ClusterNames(ws),
 					ExpiresAt: expiresAt,
 				}
 			}
@@ -125,6 +123,7 @@ type activeWorkSessionSummary struct {
 	Status    string   `json:"status"`
 	Scopes    []string `json:"scopes"`
 	Servers   []string `json:"servers"`
+	Clusters  []string `json:"clusters,omitempty"`
 	ExpiresAt string   `json:"expires_at,omitempty"`
 }
 
