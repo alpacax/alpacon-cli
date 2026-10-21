@@ -1858,3 +1858,70 @@ func TestCompleteDownload_RefusesAServerIDThatIsNotOneSegment(t *testing.T) {
 		})
 	}
 }
+
+// TestUploadContentAsSendsTheGivenBytesToTheExactPath pins what the one-step
+// --file upload relies on: the bytes PUT are the bytes passed in, the remote
+// path splits into basename and directory, and allow_overwrite follows the
+// caller rather than defaulting to true as edit's upload does.
+func TestUploadContentAsSendsTheGivenBytesToTheExactPath(t *testing.T) {
+	t.Parallel()
+	for name, overwrite := range map[string]bool{"keep_existing": false, "overwrite": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var (
+				mu        sync.Mutex
+				uploadReq UploadRequest
+				putBody   []byte
+			)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.Contains(r.URL.Path, "/api/servers/servers"):
+					_ = json.NewEncoder(w).Encode(api.ListResponse[server.ServerDetails]{
+						Count:   1,
+						Results: []server.ServerDetails{{ID: "srv-123", Name: "prod"}},
+					})
+				case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/":
+					mu.Lock()
+					_ = json.NewDecoder(r.Body).Decode(&uploadReq)
+					mu.Unlock()
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(UploadResponse{
+						ID:        "upload-1",
+						UploadURL: "http://" + r.Host + "/s3/deploy.sh",
+					})
+				case r.Method == http.MethodPut && r.URL.Path == "/s3/deploy.sh":
+					body, _ := io.ReadAll(r.Body)
+					mu.Lock()
+					putBody = body
+					mu.Unlock()
+					w.WriteHeader(http.StatusOK)
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/status/"):
+					_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: new(true)})
+				case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/upload"):
+					w.WriteHeader(http.StatusOK)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+
+			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+			content := []byte("#!/bin/bash\necho deploy\n")
+			err := UploadContentAs(ac, "prod", "/opt/app/deploy.sh", content, "root", "ops", "ws-1", overwrite)
+			require.NoError(t, err)
+
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Equal(t, content, putBody)
+			assert.Equal(t, "deploy.sh", uploadReq.Name)
+			assert.Equal(t, "/opt/app/", uploadReq.Path)
+			assert.Equal(t, "srv-123", uploadReq.Server)
+			assert.Equal(t, "root", uploadReq.Username)
+			assert.Equal(t, "ops", uploadReq.Groupname)
+			assert.Equal(t, overwrite, uploadReq.AllowOverwrite)
+			assert.False(t, uploadReq.AllowUnzip)
+			assert.Equal(t, "ws-1", uploadReq.WorkSession)
+		})
+	}
+}

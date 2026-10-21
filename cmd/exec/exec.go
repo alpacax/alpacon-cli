@@ -42,20 +42,23 @@ To send a literal metacharacter, wrap the argument in quotes:
 
 Verified file execution (--file) submits a script as structure instead of a
 command line: the platform hashes the bytes the reviewer sees, and the agent
-proves at execution time that the file it runs on the server is those bytes.
-The file must already exist at that path on the target server; the CLI reads
-the content from the same path locally (or from --file-from) so the reviewer
-and the assessor judge what you are about to run. An approval binds exactly
-those bytes, on that server, as that account, with those arguments—it does not
-mean "the file is safe". Environment, libraries, the interpreter's version and
-anything the script fetches at run time are yours; only the first entrypoint
-is verified. Composition (pipes, redirection, &&) goes inside the script, where
-it is reviewed and hashed with it; a one-off composition around a script stays
-on the ordinary command line. A reviewer can mark an approval standing, and an
-unchanged re-run then stops asking anyone—one changed byte re-queues review.
-The approver decides whether to grant reuse, and a grant always expires: after
-the days --reuse-days proposed, or at the workspace ceiling (1 to 366 days,
-default 90).
+proves at execution time that the file it runs on the server is those bytes. The
+file must already exist at that path on the target server, or --upload writes it
+there first; the CLI reads the content from the same path locally (or from
+--file-from) so the reviewer and the assessor judge what you are about to run.
+With --upload the bytes written are the bytes submitted, and the agent still
+hashes the file at execution and refuses a mismatch. A file --upload wrote stays
+on the server even when the submission is then refused. An approval binds
+exactly those bytes, on that server, as that account, with those arguments—it
+does not mean "the file is safe". Environment, libraries, the interpreter's
+version and anything the script fetches at run time are yours; only the first
+entrypoint is verified. Composition (pipes, redirection, &&) goes inside the
+script, where it is reviewed and hashed with it; a one-off composition around a
+script stays on the ordinary command line. A reviewer can mark an approval
+standing, and an unchanged re-run then stops asking anyone—one changed byte
+re-queues review. The approver decides whether to grant reuse, and a grant
+always expires: after the days --reuse-days proposed, or at the workspace
+ceiling (1 to 366 days, default 90).
 
 Flags:
   -u, --username [USER_NAME]    Specify the username for command execution.
@@ -80,6 +83,17 @@ Flags:
   --file-from LOCAL_PATH        Read the script's content from LOCAL_PATH instead of
                                 PATH. The file on the server must be byte-identical,
                                 or the agent refuses to run it.
+  --upload                      Write the script to PATH on the server first, then
+                                submit it, in one step. The file is written as the
+                                account and group the script runs as (-u or USER@,
+                                -g, or the server's default account when neither
+                                is given): a new file takes that account's umask,
+                                missing directories are created, and the
+                                interpreter reads the file, so no execute bit is
+                                needed. An existing file is refused unless
+                                --overwrite is given.
+  --overwrite                   With --upload, replace a file already at PATH. The
+                                file keeps its owner and mode.
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
@@ -173,6 +187,10 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec --file /opt/deploy.sh root@prod-web -- --fast
   alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web
 
+  # Write a local script to the server and run it as a verified file, in one step.
+  # Add --overwrite to replace a file already at that path.
+  alpacon exec --upload --file /opt/deploy.sh --file-from ./deploy.sh root@prod-web -- --fast
+
   # Propose that the approval stay reusable for 30 days; the approver decides
   alpacon exec --file /opt/deploy.sh --reuse-days 30 root@prod-web -- --fast`,
 	// DisableFlagParsing is required because remote command arguments (e.g., -U, -d)
@@ -238,6 +256,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		return
+	}
+
+	if file != nil && parsed.File.Upload {
+		uploadFileOrExit(alpaconClient, parsed, *file, workSessionID, authMethod)
 	}
 
 	env := parsed.Env
@@ -342,7 +364,9 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // On the file lane it repeats the --file flags as the user gave them, so a
 // defaulted --file-from or --interpreter is not spelled out, and quotes each
 // value with argvQuote: those were argv, never a shell line, so the hint must
-// keep a metacharacter from being interpreted when it is pasted.
+// keep a metacharacter from being interpreted when it is pasted. It drops
+// --upload and --overwrite: the first run already wrote the file, so the re-run
+// verifies it in place instead of failing on it or rewriting it.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {

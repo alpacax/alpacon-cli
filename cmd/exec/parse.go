@@ -106,6 +106,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
+		upload, overwrite                                        bool
 		wait                                                     bool
 		separated                                                bool
 		waitApproval                                             time.Duration
@@ -228,6 +229,14 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if reuseDays, msg = checkReuseDays(raw); msg != "" {
 				return RemoteExecArgs{Err: msg}
 			}
+		case arg == "--upload":
+			upload = true
+		case strings.HasPrefix(arg, "--upload="):
+			return RemoteExecArgs{Err: "--upload does not accept a value; use --upload alone"}
+		case arg == "--overwrite":
+			overwrite = true
+		case strings.HasPrefix(arg, "--overwrite="):
+			return RemoteExecArgs{Err: "--overwrite does not accept a value; use --overwrite alone"}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -264,6 +273,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
 		}
 	}
+	if overwrite && !upload {
+		return RemoteExecArgs{Err: "--overwrite requires --upload; it only applies to the file --upload writes"}
+	}
 	if filePath == "" {
 		if fileFrom != "" {
 			return RemoteExecArgs{Err: "--file-from requires --file"}
@@ -273,6 +285,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		}
 		if reuseDays > 0 {
 			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+		}
+		if upload {
+			return RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"}
 		}
 	} else {
 		if len(env) > 0 {
@@ -315,6 +330,8 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Interpreter: interpreter,
 			Args:        commandParts,
 			ReuseDays:   reuseDays,
+			Upload:      upload,
+			Overwrite:   overwrite,
 		}
 		return parsed
 	}

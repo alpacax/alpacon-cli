@@ -1,6 +1,7 @@
 package ftp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -480,15 +481,9 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 // It preserves the remote basename instead of deriving the destination name
 // from the local temp file name.
 func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePath, username, groupname, workSessionID string) error {
-	remoteName, err := utils.RemoteFileName(remotePath)
+	remoteName, remoteDir, err := splitRemoteFilePath(remotePath)
 	if err != nil {
 		return err
-	}
-	remoteDir := pathpkg.Dir(remotePath)
-	if remoteDir == "." {
-		remoteDir = ""
-	} else if !strings.HasSuffix(remoteDir, "/") {
-		remoteDir += "/"
 	}
 
 	serverID, err := server.GetServerIDByName(ac, serverName)
@@ -517,6 +512,50 @@ func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePa
 		WorkSession:    workSessionID,
 	}
 	return executeSingleUpload(ac, request, readOnly{f}, stat.Size())
+}
+
+// UploadContentAs writes content to the exact remote file path as username and
+// groupname. It sends the bytes it is given rather than reopening a local file,
+// so a caller that hashes or submits the same bytes knows they are what landed
+// on the server. Without allowOverwrite the agent refuses an existing file.
+func UploadContentAs(ac *client.AlpaconClient, serverName, remotePath string, content []byte, username, groupname, workSessionID string, allowOverwrite bool) error {
+	remoteName, remoteDir, err := splitRemoteFilePath(remotePath)
+	if err != nil {
+		return err
+	}
+
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return utils.MarkSubmission(err)
+	}
+
+	request := &UploadRequest{
+		Name:           remoteName,
+		Path:           remoteDir,
+		Server:         serverID,
+		Username:       username,
+		Groupname:      groupname,
+		AllowOverwrite: allowOverwrite,
+		WorkSession:    workSessionID,
+	}
+	// A bytes.Reader lets net/http replay the body on a redirect.
+	return executeSingleUpload(ac, request, bytes.NewReader(content), int64(len(content)))
+}
+
+// splitRemoteFilePath splits an exact remote file path into the name and the
+// directory an upload request carries, the directory ending in a slash.
+func splitRemoteFilePath(remotePath string) (name, dir string, err error) {
+	name, err = utils.RemoteFileName(remotePath)
+	if err != nil {
+		return "", "", err
+	}
+	dir = pathpkg.Dir(remotePath)
+	if dir == "." {
+		dir = ""
+	} else if !strings.HasSuffix(dir, "/") {
+		dir += "/"
+	}
+	return name, dir, nil
 }
 
 func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {

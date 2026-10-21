@@ -9,6 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -96,7 +99,8 @@ var fileExecRefusals = []struct {
 }
 
 // FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
+// --file, --file-from, --interpreter, --reuse-days, --upload, --overwrite and
+// the arguments after --.
 // From and Interpreter are as typed, empty when the flag was not given;
 // loadFileExecution fills the defaults, so a re-run hint can repeat only what
 // the user said.
@@ -112,6 +116,12 @@ type FileExecArgs struct {
 	Args []string
 	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
 	ReuseDays int
+	// Upload writes the content to Path on the server before the submission,
+	// so the file need not be there already.
+	Upload bool
+	// Overwrite lets Upload replace a file already at Path; without it the
+	// agent refuses an existing file.
+	Overwrite bool
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -144,6 +154,35 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		Content:     content,
 		ReuseDays:   spec.ReuseDays,
 	}, ""
+}
+
+// uploadFileOrExit writes the script to its --file path on the server before
+// the submission, as the account and group the script will run as. It sends
+// file.Content, the bytes the submission carries, so what lands on the server is
+// what the reviewer sees; the agent still hashes the file at execution and
+// refuses it if a byte changed in between. It exits on failure, since a script
+// that was not written must not be submitted.
+func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) {
+	upload := func() error {
+		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
+			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
+	}
+	err := upload()
+	if err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, upload))
+	}
+	if err == nil {
+		return
+	}
+	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+	var hint string
+	// The agent answers "PATH already exists." for an existing file.
+	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
+		hint = denialHintLine("pass --overwrite to replace the file on the server, or drop --upload to run the file already there.\n")
+	}
+	// reportCodedRefusal adds the closing period the agent's message may carry.
+	msg := strings.TrimSuffix(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err), ".")
+	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
 }
 
 // readFileContent reads at most FileContentMaxBytes+1 bytes of the file at
