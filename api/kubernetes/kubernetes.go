@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
@@ -16,6 +17,16 @@ const (
 	// UUID→name projection without pulling in the full iam.GroupResponse type.
 	iamGroupURL = "/api/iam/groups/"
 )
+
+// SurfaceNotEnabledMessage is what the CLI prints when the workspace does
+// not expose the Kubernetes surface.
+const SurfaceNotEnabledMessage = "Kubernetes support is not enabled on this workspace. If it was enabled recently, run 'alpacon login' again to refresh."
+
+// IsSurfaceOff reports whether err carries a 404, which the server answers for
+// every path under /api/kubernetes/ when the Kubernetes surface is off.
+func IsSurfaceOff(err error) bool {
+	return utils.HTTPStatusCode(err) == http.StatusNotFound
+}
 
 // GetClusterList returns every cluster the caller can see, projected for 'kube ls'.
 // A service token sees none: the server answers it with an empty list.
