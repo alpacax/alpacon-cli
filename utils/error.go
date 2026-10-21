@@ -117,6 +117,11 @@ const (
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
+	// CommandACLMoved rides a 405 on a command-ACL write: command pre-approvals
+	// moved to a ledger this CLI cannot write yet, so the change has to be made
+	// from the web console.
+	CommandACLMoved = "command_acl_moved"
+
 	// AuthInteractiveChannelRequiresPresence rides a 403: a token gets no interactive channel
 	// whatever its scopes and ACL rules say; only 'alpacon login' without -t lifts it.
 	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
