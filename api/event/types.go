@@ -40,7 +40,7 @@ const (
 // phaseHints gives the next step for a file lane phase. Other phases have no
 // hint.
 var phaseHints = map[string]string{
-	"file_hash_mismatch":    "The file changed after it was verified. Run `alpacon exec --file` again so it is verified again; a standing approval only covers the unchanged file.",
+	"file_hash_mismatch":    "The file changed after it was verified. Run `alpacon exec --file` again so it is verified again, adding `--from-server` to submit the copy now on the server; a standing approval only covers the unchanged file.",
 	"file_payload_invalid":  "Run `alpacon exec --file` again. If it keeps failing, update the CLI and the agent on the server.",
 	"file_open_failed":      "Check that the file exists on the server, is a regular file, and is readable by the agent, then run `alpacon exec --file` again. To write it from a local copy in the same run, use `alpacon exec --upload --file PATH --file-from LOCAL_PATH SERVER`, adding `--overwrite` to replace what is at PATH.",
 	"file_exec_unsupported": "File execution is not available on this server's platform. Run the command with `alpacon exec` instead.",
@@ -72,6 +72,18 @@ type ClientTimeoutError struct{}
 // create a duplicate command (and a duplicate approval request).
 type PendingApprovalError struct {
 	CommandID string
+	// FileSuggestion is the server's proposal to run the held command as a
+	// verified file instead; nil when the server made none.
+	FileSuggestion *FileExecutionSuggestion
+}
+
+// FileExecutionSuggestion is a held command line the server recognized as a
+// script on the target, restated as a verified file: the script's path, its
+// interpreter and its arguments.
+type FileExecutionSuggestion struct {
+	Path        string   `json:"path"`
+	Interpreter string   `json:"interpreter"`
+	Args        []string `json:"args"`
 }
 
 // CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
@@ -145,6 +157,9 @@ type EventDetails struct {
 	// distinguishable from a status the server deliberately left empty.
 	SudoApprovalRequestID *string `json:"sudo_approval_request_id"`
 	SudoGrantStatus       *string `json:"sudo_grant_status"`
+	// FileExecutionSuggestion is set on a held command line the server reads as
+	// a script on the target; absent otherwise and on older servers.
+	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
 }
 
 type CommandRequest struct {

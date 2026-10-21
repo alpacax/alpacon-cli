@@ -803,7 +803,7 @@ func errorFromDetails(d EventDetails) error {
 		return &AwaitingPurposeError{CommandID: d.ID, ExpiresAt: d.PurposeExpiresAt}
 	}
 	if IsAwaitingApprovalStatus(d.Status) {
-		return &PendingApprovalError{CommandID: d.ID}
+		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion}
 	}
 	if IsRejectedStatus(d.Status) {
 		return &CommandRejectedError{CommandID: d.ID}

@@ -107,7 +107,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
-		upload, overwrite                                        bool
+		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
 		waitApproval                                             time.Duration
@@ -238,6 +238,10 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			overwrite = true
 		case strings.HasPrefix(arg, "--overwrite="):
 			return RemoteExecArgs{Err: "--overwrite does not accept a value; use --overwrite alone"}
+		case arg == "--from-server":
+			fromServer = true
+		case strings.HasPrefix(arg, "--from-server="):
+			return RemoteExecArgs{Err: "--from-server does not accept a value; use --from-server alone"}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -290,10 +294,23 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if upload {
 			return RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"}
 		}
+		if fromServer {
+			return RemoteExecArgs{Err: "--from-server requires --file; it reads the script from the --file path on the server"}
+		}
 	} else {
 		if len(env) > 0 {
 			return RemoteExecArgs{
 				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
+			}
+		}
+		if fromServer && upload {
+			return RemoteExecArgs{
+				Err: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
+			}
+		}
+		if fromServer && fileFrom != "" {
+			return RemoteExecArgs{
+				Err: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
 			}
 		}
 		// The upload writes to the cleaned path while the agent opens the path as
@@ -340,6 +357,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			ReuseDays:   reuseDays,
 			Upload:      upload,
 			Overwrite:   overwrite,
+			FromServer:  fromServer,
 		}
 		return parsed
 	}

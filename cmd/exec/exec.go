@@ -46,7 +46,9 @@ proves at execution time that the file it runs on the server is those bytes. The
 file must already exist at that path on the target server, or --upload writes it
 there first; the CLI reads the content from the same path locally (or from
 --file-from) so the reviewer and the assessor judge what you are about to run.
-With --upload the bytes written are the bytes submitted, and the agent still
+A script that exists only on the server takes --from-server: the CLI reads the
+file from the server as the account the script runs as, and submits those
+bytes, so no local copy is needed. With --upload the bytes written are the bytes submitted, and the agent still
 hashes the file at execution and refuses a mismatch. A file --upload wrote stays
 on the server even when the submission is then refused. An approval binds
 exactly those bytes, on that server, as that account, with those arguments—it
@@ -95,6 +97,12 @@ Flags:
                                 '.' or '..' and no repeated or trailing slash.
   --overwrite                   With --upload, replace a file already at PATH. The
                                 file keeps its owner and mode.
+  --from-server                 Read the script's content from PATH on the server
+                                instead of a local file, as the account and group
+                                the script runs as, and submit those bytes. Use it
+                                for a script that already exists only on the
+                                server. Cannot be combined with --upload or
+                                --file-from.
   --interpreter PATH            Interpreter for --file (default /bin/bash). Must be
                                 an absolute path; a bare name would let the server's
                                 PATH decide what runs.
@@ -188,6 +196,9 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
   alpacon exec --file /opt/deploy.sh root@prod-web -- --fast
   alpacon exec --file /opt/deploy.sh --file-from ./deploy.sh --interpreter /bin/sh prod-web
 
+  # Run a script that exists only on the server; its content is read from there.
+  alpacon exec --file /opt/deploy.sh --from-server root@prod-web -- --fast
+
   # Write a local script to the server and run it as a verified file, in one step.
   alpacon exec --upload --file /opt/deploy.sh --file-from ./deploy.sh root@prod-web -- --fast
 
@@ -237,9 +248,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 
 	// The script is read before anything reaches the network: a missing or
 	// oversized local file is answered here, not by a 400 after the session and
-	// the client were resolved.
+	// the client were resolved. A --from-server script is read once the client
+	// exists.
 	var file *event.FileExecution
-	if parsed.File != nil {
+	if parsed.File != nil && !parsed.File.FromServer {
 		loaded, msg := loadFileExecution(*parsed.File)
 		if msg != "" {
 			utils.CliErrorWithExit("%s", msg)
@@ -260,6 +272,10 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 
 	if file != nil && parsed.File.Upload {
 		uploadFileOrExit(alpaconClient, parsed, *file, workSessionID, authMethod)
+	}
+	if parsed.File != nil && parsed.File.FromServer {
+		loaded := downloadFileOrExit(alpaconClient, parsed, workSessionID, authMethod)
+		file = &loaded
 	}
 
 	env := parsed.Env
@@ -331,7 +347,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// A sudo command left pending human approval, not waited on, emits a
 	// machine-readable pending signal and exits before the normal result
 	// handling treats the denial as a plain failure.
-	if HandlePendingApproval(err, reRunHint(parsed)) {
+	if HandlePendingApproval(err, parsed) {
 		return
 	}
 	if buf != nil {
@@ -366,7 +382,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // value with argvQuote: those were argv, never a shell line, so the hint must
 // keep a metacharacter from being interpreted when it is pasted. It drops
 // --upload and --overwrite: the first run already wrote the file, so the re-run
-// verifies it in place instead of failing on it or rewriting it.
+// verifies it in place instead of failing on it or rewriting it. It keeps
+// --from-server, since there may be no local copy to read.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 	parts := []string{string(ExecInvocation)}
 	if parsed.Username != "" {
@@ -393,6 +410,9 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		if parsed.File.From != "" {
 			parts = append(parts, "--file-from "+argvQuote(parsed.File.From))
 		}
+		if parsed.File.FromServer {
+			parts = append(parts, "--from-server")
+		}
 		if parsed.File.Interpreter != "" {
 			parts = append(parts, "--interpreter "+argvQuote(parsed.File.Interpreter))
 		}
@@ -415,4 +435,39 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		action.Description = "--env values are re-read from your shell; export them before re-running"
 	}
 	return action
+}
+
+// fileSuggestionAction renders the server's file_execution_suggestion for a
+// held command line as the --file --from-server command that submits the same
+// script on the verified file lane, keeping the account, group and work
+// session of the original. It answers false when there is no suggestion, when
+// the command was already on the file lane, or when the suggestion names a
+// path or interpreter --file would refuse.
+func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestion) (utils.NextAction, bool) {
+	if s == nil || parsed.File != nil || !strings.HasPrefix(s.Path, "/") {
+		return utils.NextAction{}, false
+	}
+	interpreter := s.Interpreter
+	if interpreter == DefaultInterpreter {
+		interpreter = ""
+	}
+	if interpreter != "" && !strings.HasPrefix(interpreter, "/") {
+		return utils.NextAction{}, false
+	}
+	suggested := RemoteExecArgs{
+		Username:      parsed.Username,
+		Groupname:     parsed.Groupname,
+		WorkSessionID: parsed.WorkSessionID,
+		Server:        parsed.Server,
+		File: &FileExecArgs{
+			Path:        s.Path,
+			Interpreter: interpreter,
+			Args:        s.Args,
+			FromServer:  true,
+		},
+	}
+	return utils.NextAction{
+		Command:     reRunHint(suggested).Command,
+		Description: "or submit the script on the server as a verified file: the reviewer reads its content, and an unchanged re-run can reuse an approval",
+	}, true
 }
