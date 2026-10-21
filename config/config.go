@@ -16,6 +16,9 @@ import (
 const (
 	ConfigFileName = "config.json"
 	ConfigFileDir  = ".alpacon"
+	// KubeSessionDir, under ConfigFileDir, holds the kube sessions
+	// 'alpacon kube login' opened; logout removes it with the config.
+	KubeSessionDir = "kube"
 
 	// ServiceTokenPrefix is the default service-token key prefix, hard-coded here.
 	// It matches the server's default SERVICE_TOKEN_PREFIX; if a self-hosted server
@@ -216,6 +219,11 @@ func DeleteConfig() error {
 		return fmt.Errorf("failed to delete config file: %v", err)
 	}
 
+	// The kube session records hold bearer tokens that outlive this login.
+	if err := os.RemoveAll(filepath.Join(configDir, KubeSessionDir)); err != nil {
+		return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
+	}
+
 	return nil
 }
 
@@ -411,6 +419,21 @@ func GetActiveWorkSession() (string, error) {
 		return "", err
 	}
 	return activeWorkSessionOn(cfg, cfg.WorkspaceIdentity()), nil
+}
+
+// GetActiveWorkSessionFor returns workspaceName's active work-session UUID,
+// for a caller holding a client: it reads the slot of the workspace the
+// client was built for, not whichever one the file names by now. Returns ""
+// (no error) when none is set or no config file exists.
+func GetActiveWorkSessionFor(workspaceName string) (string, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return activeWorkSessionOn(cfg, workspaceName), nil
 }
 
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
