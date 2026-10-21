@@ -1,18 +1,15 @@
 package kube
 
 import (
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
 
-// NotEnabledMessage is what every 'alpacon kube' path prints when the
-// workspace does not expose the Kubernetes surface.
-const NotEnabledMessage = "Kubernetes support is not enabled on this workspace. If it was enabled recently, run 'alpacon login' again to refresh."
-
 // exitNotEnabled ends the command with exit 1. The refusal is expected, not a
 // CLI fault, so it leaves out the "report an issue" footer CliErrorWithExit adds.
 func exitNotEnabled() {
-	utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, NotEnabledMessage)
+	utils.CliErrorWithExitCode(utils.ExitCodeGeneralError, kubernetes.SurfaceNotEnabledMessage)
 }
 
 // ApplySurfaceGate replaces KubeCmd under root with a hidden stand-in when the
@@ -36,8 +33,9 @@ func applySurfaceGate(root, real *cobra.Command, enabled bool) {
 	root.AddCommand(newDisabledKubeCmd(real))
 }
 
-// newDisabledKubeCmd answers every path under real's name and aliases with NotEnabledMessage:
-// no children, no flag parsing and arbitrary args, so nothing Cobra checks first can fail.
+// newDisabledKubeCmd answers every path under real's name and aliases with the
+// not-enabled message: no children, no flag parsing and arbitrary args, so
+// nothing Cobra checks first can fail.
 func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 	disabled := &cobra.Command{
 		Use:                real.Use,

@@ -36,9 +36,13 @@ var kubeConfigFlags kubeConfigFlagValues
 var kubeConfigCmd = &cobra.Command{
 	Use:   "config CLUSTER",
 	Short: "Write a kubeconfig context for a cluster",
-	Long: `Open a kube session on a cluster under the active WorkSession and write a
-context named alpacon-CLUSTER into your kubeconfig, then make it the current
-context so kubectl, k9s, and other clients use it right away.
+	Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
+into your kubeconfig, then make it the current context so kubectl, k9s, and
+other clients use it right away. The session runs under --work-session, or the
+active WorkSession, which must target the cluster with the kube scope; create
+one with 'alpacon work-session create --cluster CLUSTER --scope kube'.
+'alpacon kube login' finds or creates that session itself and keeps the token
+out of the kubeconfig.
 
 The kubeconfig file is the one 'kubectl config' itself writes: --kubeconfig,
 else the first existing file in KUBECONFIG (the last one listed when none
@@ -60,7 +64,7 @@ port instead of connecting to the cluster's proxy host directly.`,
 }
 
 func init() {
-	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under (default: the active one)")
+	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: the active one)")
 	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
 	kubeConfigCmd.Flags().IntVar(&kubeConfigFlags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
 }
@@ -187,22 +191,31 @@ func exitKubeConfigError(err error, clusterName, workSessionID string) {
 	var lookupErr *clusterLookupError
 	if errors.As(err, &lookupErr) {
 		// The cluster list answers 404 only when the surface is off.
-		if isSurfaceOff(lookupErr.err) {
+		if kubernetes.IsSurfaceOff(lookupErr.err) {
 			exitNotEnabled()
 		}
 		utils.CliErrorWithExit("Failed to find the cluster: %s.", lookupErr.err)
 	}
 
+	exitKubeSessionError(err, clusterName, workSessionID, func(_ error, format string, args ...any) {
+		utils.CliErrorWithExit(format, args...)
+	})
+}
+
+// exitKubeSessionError reports a failure of openKubeSession through fail,
+// which ends the command: a WorkSession gate refusal exits 3 on its own, a
+// refusal the server names gets its hint, and anything else says the
+// kubeconfig was not written.
+func exitKubeSessionError(err error, clusterName, workSessionID string, fail func(err error, format string, args ...any)) {
 	var createErr *sessionCreateError
 	if errors.As(err, &createErr) {
-		utils.HandleWorkSessionError(createErr.err, utils.OperationKube, "", config.ResolveAuthMethod(), workSessionID)
+		utils.HandleWorkSessionError(createErr.err, utils.OperationKube, clusterName, config.ResolveAuthMethod(), workSessionID)
 		if hint := kubeSessionErrorHint(createErr.err, clusterName); hint != "" {
-			utils.CliErrorWithExit("Failed to open a kube session: %s.", hint)
+			fail(createErr.err, "Failed to open a kube session: %s.", hint)
 		}
-		utils.CliErrorWithExit("Failed to open a kube session: %s.", utils.InteractiveOnly(createErr.err, "open a kube session"))
+		fail(createErr.err, "Failed to open a kube session: %s.", utils.InteractiveOnly(createErr.err, "open a kube session"))
 	}
-
-	utils.CliErrorWithExit("The kubeconfig was not written: %s.", err)
+	fail(err, "The kubeconfig was not written: %s.", err)
 }
 
 // kubeSessionErrorHint says what to do about a refusal the server names with
@@ -210,8 +223,6 @@ func exitKubeConfigError(err error, clusterName, workSessionID string) {
 func kubeSessionErrorHint(err error, clusterName string) string {
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
-	case utils.KubeSessionAgentModeNotSupported:
-		return "a WorkSession requested by an AI agent cannot open a kube session; use one you created yourself"
 	case utils.ClusterNotConnected:
 		return fmt.Sprintf("the agent in cluster %s is not connected; check 'alpacon kube describe %s' and try again", clusterName, clusterName)
 	case utils.KubeSessionChannelOpenFailed:
@@ -247,7 +258,25 @@ func openKubeConfig(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts ku
 	if opts.isInterrupted() {
 		return nil, errInterrupted
 	}
+	return openKubeSession(ac, editor, opts, clusterID, kubeSessionWriter{})
+}
 
+// kubeSessionWriter is what differs between the commands that write a kube
+// session into a kubeconfig: how kubectl gets its token, and what else is
+// kept of the session.
+type kubeSessionWriter struct {
+	// exec, when set, has kubectl run a credential plugin for the token
+	// instead of reading the session's token from the kubeconfig.
+	exec *kubeconfig.ExecUser
+	// persist keeps the opened session before the kubeconfig is written; an
+	// error closes the session. The undo it returns reverses it when the
+	// kubeconfig write then fails.
+	persist func(session *kubernetes.KubeSessionResponse) (undo func() error, err error)
+}
+
+// openKubeSession opens a kube session under the work session and writes its
+// context. Any failure after the session exists closes it again.
+func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts kubeConfigOptions, clusterID string, w kubeSessionWriter) (*kubeConfigResult, error) {
 	session, err := kubernetes.CreateSession(ac, kubernetes.KubeSessionCreateRequest{
 		Cluster:     clusterID,
 		WorkSession: opts.workSessionID,
@@ -276,18 +305,32 @@ func openKubeConfig(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts ku
 		return nil, discard(errors.New("the server returned no token for the kube session"))
 	}
 
+	undo := func() error { return nil }
+	if w.persist != nil {
+		if undo, err = w.persist(session); err != nil {
+			return nil, discard(err)
+		}
+	}
+
 	entry := kubeconfig.Entry{
 		Name:                  contextPrefix + opts.clusterName,
 		Server:                session.ProxyURL,
-		Token:                 session.ChannelToken,
+		Exec:                  w.exec,
 		InsecureSkipTLSVerify: ac.Insecure,
+	}
+	if w.exec == nil {
+		entry.Token = session.ChannelToken
 	}
 	if opts.proxyPort != 0 {
 		entry.ProxyURL = localProxyURL(opts.proxyPort)
 	}
 	previous, replaced := editor.Apply(entry)
 	if err := editor.Save(); err != nil {
-		return nil, discard(fmt.Errorf("failed to write %s: %w", opts.kubeconfig, err))
+		err = fmt.Errorf("failed to write %s: %w", opts.kubeconfig, err)
+		if undoErr := undo(); undoErr != nil {
+			err = fmt.Errorf("%w; restoring the saved kube session also failed: %w", err, undoErr)
+		}
+		return nil, discard(err)
 	}
 
 	return &kubeConfigResult{
@@ -330,6 +373,22 @@ func validatePort(port int) error {
 }
 
 func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
+	printKubeConfigWarnings(result, insecure)
+
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		if err := utils.PrintJSONValue(os.Stdout, result); err != nil {
+			utils.CliErrorWithExit("Failed to print the result: %s.", err)
+		}
+		return
+	}
+
+	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt))
+	printKubeConfigNext(result)
+}
+
+// printKubeConfigWarnings says what about the written context the user may
+// not expect, in either output format.
+func printKubeConfigWarnings(result *kubeConfigResult, insecure bool) {
 	if result.plaintext {
 		utils.CliWarning("The proxy URL %s is plain http, so kubectl will send the session token unencrypted.", result.ProxyURL)
 	}
@@ -342,15 +401,9 @@ func printKubeConfigResult(result *kubeConfigResult, insecure bool) {
 	if kubeconfig.Shadowed(result.Kubeconfig) {
 		utils.CliWarning("KUBECONFIG lists files before %s; kubectl takes current-context and %s from the first file that sets them.", result.Kubeconfig, result.Context)
 	}
+}
 
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		if err := utils.PrintJSONValue(os.Stdout, result); err != nil {
-			utils.CliErrorWithExit("Failed to print the result: %s.", err)
-		}
-		return
-	}
-
-	utils.CliInfo("Context %q written to %s (token expires %s).", result.Context, result.Kubeconfig, formatTime(&result.TokenExpiresAt))
+func printKubeConfigNext(result *kubeConfigResult) {
 	if result.PreviousContext != "" && result.PreviousContext != result.Context {
 		utils.CliInfo("Switched current-context from %q.", result.PreviousContext)
 	}
