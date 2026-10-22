@@ -45,11 +45,11 @@ func CreateSignRequest(ac *client.AlpaconClient, signRequest SignRequest) (SignR
 	return response, nil
 }
 
-func SubmitCSR(ac *client.AlpaconClient, csr []byte, submitURL string) error {
+func SubmitCSR(ac *client.AlpaconClient, csr []byte, signRequest SignRequestResponse) error {
 	var request CSRSubmit
 	request.CsrText = string(csr)
 
-	_, err := ac.SendPatchRequest(submitURL, request)
+	_, err := ac.SendPatchRequest(signRequest.SubmitURL, request)
 	if err != nil {
 		return err
 	}
