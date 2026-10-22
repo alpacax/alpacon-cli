@@ -458,9 +458,9 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 		return utils.NextAction{}, false
 	}
 	// The held command stays queued and runs if approved, and the CLI cannot
-	// cancel it, so submitting this as well without rejecting it first would
+	// cancel it, so submitting this as well without canceling it first would
 	// file a second approval request for the same script.
-	const heldNote = "; the held command stays queued and runs if approved, so reject it in the Alpacon console before submitting this"
+	const heldNote = "; the held command stays queued and runs if approved, so cancel it in the Alpacon console (Commands) before submitting this"
 	description := "to run the script as a verified file instead, whose content the reviewer reads and whose approval an unchanged re-run can reuse" + heldNote
 	interpreter := s.Interpreter
 	switch {
