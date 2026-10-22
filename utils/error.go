@@ -121,6 +121,12 @@ const (
 	// whatever its scopes and ACL rules say; only 'alpacon login' without -t lifts it.
 	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
 
+	// AuthMFARequiresHumanPrincipal rides a 403: the action requires a person's MFA,
+	// which a token (API or service) cannot complete, so completing MFA under the
+	// token cannot lift it. Signing in with 'alpacon login' without -t can, and so
+	// can the workspace removing the action from its MFA required actions.
+	AuthMFARequiresHumanPrincipal = "auth_mfa_requires_human_principal"
+
 	// The token-scope gate's refusals: the token's scopes do not cover this call, or
 	// the server could not resolve the call's action to a scope at all.
 	APITokenScopeMissing          = "api_token_scope_missing"
@@ -474,7 +480,7 @@ const LoginWithoutTokenHint = "'alpacon login' without -t (on a machine without 
 // take; a scope refusal counts, since granting the scope only reaches the next refusal.
 func InteractiveOnly(err error, action string) error {
 	switch code, _ := ParseErrorResponse(err); code {
-	case AuthInteractiveChannelRequiresPresence, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
+	case AuthInteractiveChannelRequiresPresence, AuthMFARequiresHumanPrincipal, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
 		return fmt.Errorf("a token cannot %s; run %s and try again", action, LoginWithoutTokenHint)
 	}
 	return err

@@ -339,6 +339,8 @@ func TestInteractiveOnly_RewritesTokenRefusal(t *testing.T) {
 		{"token scope refusal", &codedStub{code: APITokenScopeMissing}},
 		{"wrapped token refusal", fmt.Errorf("failed to create tunnel session: %w", &codedStub{code: APITokenACLNotAllowed})},
 		{"wrapped interactive channel refusal", fmt.Errorf("failed to create tunnel session: %w", &codedStub{code: AuthInteractiveChannelRequiresPresence})},
+		{"MFA presence refusal", &codedStub{code: AuthMFARequiresHumanPrincipal}},
+		{"wrapped MFA presence refusal", fmt.Errorf("failed to create tunnel session: %w", &codedStub{code: AuthMFARequiresHumanPrincipal})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

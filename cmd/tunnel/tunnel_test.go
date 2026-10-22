@@ -135,6 +135,7 @@ func TestHandleTunnelStartError_TokenRefusalAsksForInteractiveLogin(t *testing.T
 		code string
 	}{
 		{"interactive channel refusal", utils.AuthInteractiveChannelRequiresPresence},
+		{"MFA presence refusal", utils.AuthMFARequiresHumanPrincipal},
 		{"token access control refusal from an older server", utils.APITokenACLNotAllowed},
 		{"token scope refusal", utils.APITokenScopeMissing},
 	}
