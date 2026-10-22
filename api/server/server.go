@@ -134,6 +134,23 @@ func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, err
 	return ids, nil
 }
 
+// GetServerNames maps every server's id to its name.
+func GetServerNames(ac *client.AlpaconClient) (map[string]string, error) {
+	type serverSummary struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	servers, err := api.FetchAllPages[serverSummary](ac, serverURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(servers))
+	for _, server := range servers {
+		names[server.ID] = server.Name
+	}
+	return names, nil
+}
+
 func UpdateServer(ac *client.AlpaconClient, serverName string) ([]byte, error) {
 	pathID, err := serverPathIDByName(ac, serverName)
 	if err != nil {

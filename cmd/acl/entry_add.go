@@ -1,0 +1,192 @@
+package acl
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/alpacax/alpacon-cli/api/acl"
+	"github.com/alpacax/alpacon-cli/utils"
+	"github.com/spf13/cobra"
+)
+
+var entryAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Pre-approve a command for a service token",
+	Long: `Pre-approve a command pattern for a service token.
+
+Use * as a wildcard for arguments; a pattern without one pre-approves that exact
+command line. --username is the account the command runs as, or "*" for any
+account. Without --server the entry covers every server in the workspace, and
+the command signer warns about it.
+
+--file issues several entries at once from a JSON array whose items carry the
+ledger's own fields (principal_id, command_pattern, username, and optionally
+groupname, server_ids, expires_at, enabled). The batch is all or nothing: one
+refused entry refuses the whole file.`,
+	Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
+    --username root --server web-01
+
+  alpacon acl entry add --token deploy-bot --command "docker compose *" \
+    --username deploy --server web-01,web-02 --expires-at 2027-01-15T10:00:00Z
+
+  alpacon acl entry add --file entries.json`,
+	Args: cobra.NoArgs,
+	Run:  runEntryAdd,
+}
+
+func init() {
+	entryAddCmd.Flags().String("token", "", "Service token the entry pre-approves the command for (name or ID)")
+	entryAddCmd.Flags().StringP("command", "c", "", "Command pattern to pre-approve (supports * wildcard)")
+	entryAddCmd.Flags().String("username", "", `Account the command runs as ("*" for any account)`)
+	entryAddCmd.Flags().String("groupname", "", "Group the command runs as (default: no restriction)")
+	entryAddCmd.Flags().StringSlice("server", nil, "Servers the entry covers, by name or ID (repeatable or comma-separated; default: every server)")
+	entryAddCmd.Flags().String("expires-at", "", "Expiry time in RFC 3339 (default: no expiry)")
+	entryAddCmd.Flags().Bool("disabled", false, "Issue the entry disabled")
+	entryAddCmd.Flags().String("file", "", "Issue every entry in this JSON file")
+}
+
+func runEntryAdd(cmd *cobra.Command, args []string) {
+	file, _ := cmd.Flags().GetString("file")
+
+	var entries []acl.EntryRequest
+	if file != "" {
+		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
+			utils.CliErrorWithExit("--file cannot be combined with --%s.", flagged[0])
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+		}
+		if entries, err = parseEntryFile(data); err != nil {
+			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
+		}
+	} else {
+		entries = []acl.EntryRequest{entryFromFlags(cmd)}
+	}
+
+	session := openLedger()
+	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
+	if err != nil {
+		session.fail("pre-approve the command", err)
+	}
+
+	printWarnings(issued)
+	for _, entry := range issued {
+		utils.CliSuccess("Pre-approved %q (%s)", entry.CommandPattern, entry.ID)
+	}
+}
+
+// entryFlagsSet lists the single-entry flags that were given.
+func entryFlagsSet(cmd *cobra.Command) []string {
+	var set []string
+	for _, name := range []string{"token", "command", "username", "groupname", "server", "expires-at", "disabled"} {
+		if cmd.Flags().Changed(name) {
+			set = append(set, name)
+		}
+	}
+	return set
+}
+
+// entryFromFlags builds the one entry the flags describe, exiting on a missing
+// or malformed value before anything reaches the signer.
+func entryFromFlags(cmd *cobra.Command) acl.EntryRequest {
+	tokenRef, _ := cmd.Flags().GetString("token")
+	command, _ := cmd.Flags().GetString("command")
+	username, _ := cmd.Flags().GetString("username")
+	groupname, _ := cmd.Flags().GetString("groupname")
+	serverRefs, _ := cmd.Flags().GetStringSlice("server")
+	expiresAt, _ := cmd.Flags().GetString("expires-at")
+	disabled, _ := cmd.Flags().GetBool("disabled")
+
+	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}, {"username", username}} {
+		if required.value == "" {
+			utils.CliErrorWithExit("--%s is required (or pass --file).", required.flag)
+		}
+	}
+	if err := validateExpiry(expiresAt); err != nil {
+		utils.CliErrorWithExit("%s", err)
+	}
+
+	principalID, err := resolveServiceToken(tokenRef)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
+	}
+	serverIDs, err := resolveServerScope(serverRefs)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to resolve the entry's servers: %s.", err)
+	}
+
+	return acl.EntryRequest{
+		PrincipalType:  acl.PrincipalTypeServiceToken,
+		PrincipalID:    principalID,
+		CommandPattern: command,
+		Username:       username,
+		Groupname:      groupname,
+		ServerIDs:      serverIDs,
+		ExpiresAt:      expiresAt,
+		Enabled:        !disabled,
+	}
+}
+
+func validateExpiry(expiresAt string) error {
+	if expiresAt == "" {
+		return nil
+	}
+	if _, err := time.Parse(time.RFC3339, expiresAt); err != nil {
+		return fmt.Errorf("--expires-at must be an RFC 3339 time such as 2027-01-15T10:00:00Z, not %q", expiresAt)
+	}
+	return nil
+}
+
+// fileEntry is one item of an --file batch. enabled is a pointer so an item
+// that leaves it out is issued enabled, as the console issues one.
+type fileEntry struct {
+	PrincipalType  string   `json:"principal_type"`
+	PrincipalID    string   `json:"principal_id"`
+	CommandPattern string   `json:"command_pattern"`
+	Username       string   `json:"username"`
+	Groupname      string   `json:"groupname"`
+	ServerIDs      []string `json:"server_ids"`
+	ExpiresAt      string   `json:"expires_at"`
+	Enabled        *bool    `json:"enabled"`
+}
+
+// parseEntryFile reads an --file batch. Unknown fields are refused, so a
+// misspelled one is not silently dropped and the entry issued wider than meant.
+func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+
+	var items []fileEntry
+	if err := decoder.Decode(&items); err != nil {
+		return nil, fmt.Errorf("expected a JSON array of entries: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("the file holds no entries")
+	}
+
+	entries := make([]acl.EntryRequest, 0, len(items))
+	for i, item := range items {
+		if item.PrincipalType == "" {
+			item.PrincipalType = acl.PrincipalTypeServiceToken
+		}
+		if err := validateExpiry(item.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+		entries = append(entries, acl.EntryRequest{
+			PrincipalType:  item.PrincipalType,
+			PrincipalID:    item.PrincipalID,
+			CommandPattern: item.CommandPattern,
+			Username:       item.Username,
+			Groupname:      item.Groupname,
+			ServerIDs:      item.ServerIDs,
+			ExpiresAt:      item.ExpiresAt,
+			Enabled:        item.Enabled == nil || *item.Enabled,
+		})
+	}
+	return entries, nil
+}
