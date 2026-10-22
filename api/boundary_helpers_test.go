@@ -9,8 +9,9 @@ import (
 	"strings"
 )
 
-func nonTestGoFiles() (map[string][]string, error) {
-	out, err := exec.Command("go", "list", "-f", "{{.Dir}}{{range .GoFiles}}\t{{.}}{{end}}", "./...").Output()
+func nonTestGoFiles(patterns ...string) (map[string][]string, error) {
+	args := append([]string{"list", "-f", "{{.ImportPath}}\t{{.Dir}}{{range .GoFiles}}\t{{.}}{{end}}"}, patterns...)
+	out, err := exec.Command("go", args...).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -18,18 +19,18 @@ func nonTestGoFiles() (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	dirs := map[string][]string{}
+	pkgs := map[string][]string{}
 	for line := range strings.Lines(string(out)) {
 		fields := strings.Split(strings.TrimSpace(line), "\t")
-		dir, err := filepath.Rel(wd, fields[0])
+		dir, err := filepath.Rel(wd, fields[1])
 		if err != nil {
 			return nil, err
 		}
-		for _, name := range fields[1:] {
-			dirs[dir] = append(dirs[dir], filepath.Join(dir, name))
+		for _, name := range fields[2:] {
+			pkgs[fields[0]] = append(pkgs[fields[0]], filepath.Join(dir, name))
 		}
 	}
-	return dirs, nil
+	return pkgs, nil
 }
 
 func importName(file *ast.File, pkgPath string) string {
