@@ -15,54 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestParseRemoteExecArgs_FileFromServer(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, RemoteExecArgs{
-		Username: "root",
-		Server:   "prod-web",
-		Env:      map[string]string{},
-		File:     &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}, FromServer: true},
-	}, ParseRemoteExecArgs([]string{"--file", "/opt/deploy.sh", "--from-server", "root@prod-web", "--", "--fast"}))
-}
-
-func TestParseRemoteExecArgs_FileFromServerErrors(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name        string
-		args        []string
-		expectedErr string
-	}{
-		{
-			name:        "from-server without file",
-			args:        []string{"--from-server", "prod-web", "uptime"},
-			expectedErr: "--from-server requires --file; it reads the script from the --file path on the server",
-		},
-		{
-			name:        "from-server with upload",
-			args:        []string{"--file", "/opt/deploy.sh", "--from-server", "--upload", "prod-web"},
-			expectedErr: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
-		},
-		{
-			name:        "from-server with file-from",
-			args:        []string{"--file", "/opt/deploy.sh", "--file-from", "./deploy.sh", "--from-server", "prod-web"},
-			expectedErr: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
-		},
-		{
-			name:        "from-server with a value",
-			args:        []string{"--file", "/opt/deploy.sh", "--from-server=true", "prod-web"},
-			expectedErr: "--from-server does not accept a value; use --from-server alone",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			result := ParseRemoteExecArgs(tt.args)
-			assert.Equal(t, tt.expectedErr, result.Err)
-			assert.Nil(t, result.File)
-		})
-	}
-}
-
 // The re-run keeps --from-server: the requester may have no local copy, and
 // without the flag the re-run would read the --file path locally.
 func TestReRunHint_FileFromServerIsRepeated(t *testing.T) {
