@@ -154,6 +154,24 @@ func CreateSession(ac *client.AlpaconClient, req KubeSessionCreateRequest) (*Kub
 	return &session, nil
 }
 
+// GetSession reads a proxy session back, to learn whether it is still open
+// and when its token expires now.
+func GetSession(ac *client.AlpaconClient, sessionID string) (*KubeSessionDetail, error) {
+	pathID, err := api.RequireID(sessionID, "kube session")
+	if err != nil {
+		return nil, err
+	}
+	body, err := ac.SendGetRequest(api.IDURL(sessionURL, pathID, "", nil))
+	if err != nil {
+		return nil, err
+	}
+	var session KubeSessionDetail
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
 // CloseSession ends a proxy session.
 func CloseSession(ac *client.AlpaconClient, sessionID string) error {
 	pathID, err := api.RequireID(sessionID, "kube session")

@@ -73,6 +73,7 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 		{"kube", "config", "--help"},
 		{"kube", "login", "prod"},
 		{"kube", "login", "--help"},
+		{"kube", "credentials", "--cluster", "prod"},
 		{"kube", "proxy", "prod"},
 		{"kube", "proxy", "prod", "--port", "18444"},
 	}

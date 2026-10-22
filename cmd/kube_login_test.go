@@ -37,6 +37,7 @@ type kubeLoginServer struct {
 	wsList         string // JSON array of the caller's sessions for the cluster
 	kubeCreateCode string // code refusing the kube session, if any
 	pendingReads   int    // reads of the session that answer pending before wsPollStatus
+	kubeClosed     bool   // a read of the kube session answers it closed
 
 	mu       sync.Mutex
 	requests []string
@@ -112,6 +113,15 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusCreated)
 			_, _ = fmt.Fprintf(w, `{"id":"7c1e0000-0000-4000-8000-000000000003","cluster":%q,"channel_token":%q,
 				"token_expired_at":"2099-01-01T00:00:00Z","proxy_url":"https://ws.example.com/kube/%s"}`, loginClusterID, loginToken, loginClusterID)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/kubernetes/sessions/"):
+			closedAt := "null"
+			s.mu.Lock()
+			closed := s.kubeClosed
+			s.mu.Unlock()
+			if closed {
+				closedAt = `"2026-10-22T09:00:00Z"`
+			}
+			_, _ = fmt.Fprintf(w, `{"id":"7c1e0000-0000-4000-8000-000000000003","token_expired_at":"2099-01-02T00:00:00Z","closed_at":%s}`, closedAt)
 		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/kubernetes/sessions/") && strings.HasSuffix(r.URL.Path, "/close/"):
 			s.mu.Lock()
 			s.closed = append(s.closed, r.URL.Path)
@@ -601,4 +611,69 @@ func TestKubeLoginResumeCommandKeepsItsFlags(t *testing.T) {
 	assert.Contains(t, stderr, "--work-session "+loginWSID+" --kubeconfig ")
 	assert.Contains(t, stderr, path)
 	assert.Contains(t, stderr, " --proxy-port 18443")
+}
+
+// runKubeCredentials runs the plugin the way kubectl does, with the cluster
+// it is about to call in KUBERNETES_EXEC_INFO.
+func runKubeCredentials(t *testing.T, home string) (stdout, stderr string, exitCode int) {
+	t.Helper()
+	info := fmt.Sprintf(`{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","spec":{"cluster":{"server":"https://ws.example.com/kube/%s"},"interactive":false}}`, loginClusterID)
+	return runHelperProcess(t, "TestKubeGateHelperProcess", "kube-gate-helper",
+		[]string{"kube", "credentials", "--cluster", "prod-east"},
+		"GO_WANT_KUBE_GATE_HELPER=1", homeEnvVar()+"="+home, "KUBERNETES_EXEC_INFO="+info)
+}
+
+// The context kube login writes runs kube credentials, which hands kubectl
+// the saved token with the expiry the server reports now.
+func TestKubeCredentialsServesTheLoginToken(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
+		"--intent", "x", "--scope", "kube", "--duration", "1h")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+
+	stdout, stderr, exitCode := runKubeCredentials(t, home)
+
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.JSONEq(t, `{
+		"apiVersion": "client.authentication.k8s.io/v1",
+		"kind": "ExecCredential",
+		"status": {"token": "`+loginToken+`", "expirationTimestamp": "2099-01-02T00:00:00Z"}
+	}`, stdout)
+	assert.Contains(t, srv.seen(), "GET /api/kubernetes/sessions/7c1e0000-0000-4000-8000-000000000003/")
+}
+
+func TestKubeCredentialsEndsWithTheGateCodeForAClosedSession(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
+		"--intent", "x", "--scope", "kube", "--duration", "1h")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	srv.mu.Lock()
+	srv.kubeClosed = true
+	srv.mu.Unlock()
+
+	stdout, stderr, exitCode := runKubeCredentials(t, home)
+
+	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "run 'alpacon kube login prod-east'")
+	assert.NotContains(t, stderr, loginToken)
+}
+
+func TestKubeCredentialsWithoutALoginEndsWithTheGateCode(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+
+	stdout, stderr, exitCode := runKubeCredentials(t, home)
+
+	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "No kube session is saved for prod-east")
 }

@@ -111,6 +111,31 @@ func (s kubeSessionStore) read(k recordKey) (*kubeSessionRecord, error) {
 	return &record, nil
 }
 
+// records returns every saved record for clusterName, across workspaces. A
+// file that cannot be read or parsed is skipped: it is no one's credential.
+func (s kubeSessionStore) records(clusterName string) ([]kubeSessionRecord, error) {
+	paths, err := filepath.Glob(filepath.Join(s.dir, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	var found []kubeSessionRecord
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var record kubeSessionRecord
+		if json.Unmarshal(data, &record) != nil || record.Cluster != clusterName {
+			continue
+		}
+		if filepath.Base(path) != recordBase(record.key())+".json" {
+			continue
+		}
+		found = append(found, record)
+	}
+	return found, nil
+}
+
 // write replaces the cluster's record through a temp file renamed into place,
 // so a reader never sees half a record. The rename replaces a symbolic link
 // at the path rather than writing through it, and the file is owner-only

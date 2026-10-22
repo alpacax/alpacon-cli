@@ -86,3 +86,12 @@ type KubeSessionResponse struct {
 	TokenExpiredAt time.Time `json:"token_expired_at"`
 	ProxyURL       string    `json:"proxy_url"`
 }
+
+// KubeSessionDetail is a kube session as it is read back. It never carries
+// the channel token. TokenExpiredAt follows an extended work session, and
+// ClosedAt is set once the session has ended for any reason.
+type KubeSessionDetail struct {
+	ID             string     `json:"id"`
+	TokenExpiredAt *time.Time `json:"token_expired_at"`
+	ClosedAt       *time.Time `json:"closed_at"`
+}
