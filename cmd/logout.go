@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
 	"github.com/alpacax/alpacon-cli/client"
@@ -49,15 +51,20 @@ var logoutCmd = &cobra.Command{
 				}
 			}
 			err = auth0.Logout(httpClient, validConfig)
-			if err != nil {
-				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
-			}
 		} else {
-			err := auth.Logout(ac)
-			if err != nil {
-				utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
-			}
+			err = auth.Logout(ac, validConfig)
 		}
-		utils.CliSuccess("Logout succeeded!")
+		reportLogout(err)
 	},
+}
+
+func reportLogout(err error) {
+	switch {
+	case errors.Is(err, config.ErrLoginChanged):
+		utils.CliWarning("Logged out, but kept the config: another shell logged in since this command started.")
+	case err != nil:
+		utils.CliErrorWithExit("Log out from Alpacon failed: %s.", err)
+	default:
+		utils.CliSuccess("Logout succeeded!")
+	}
 }
