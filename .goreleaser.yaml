@@ -91,7 +91,7 @@ nfpms:
         dst: /usr/share/fish/vendor_completions.d/alpacon.fish
         file_info:
           mode: 0644
-      # Fedora and RHEL zsh reads site-functions, not vendor-completions.
+      # zsh reads vendor-completions on Debian and site-functions on Fedora and RHEL.
       - src: ./completions/alpacon.zsh
         dst: /usr/share/zsh/vendor-completions/_alpacon
         packager: deb
