@@ -202,6 +202,12 @@ func DeleteConfig(login Config) error {
 			return ErrLoginChanged
 		}
 
+		// The kube session records hold bearer tokens that outlive this login.
+		// They go first: the config is what a retry checks the login against,
+		// so removing it first would let a retry pass over records left behind.
+		if err := os.RemoveAll(filepath.Join(dir, KubeSessionDir)); err != nil {
+			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
+		}
 		// Remove what the link names, or the refresh token stays in the dotfiles tree;
 		// the link itself stays, so the next login writes through it.
 		configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
@@ -210,10 +216,6 @@ func DeleteConfig(login Config) error {
 		}
 		if err = os.Remove(configFile); err != nil {
 			return fmt.Errorf("failed to delete config file: %v", err)
-		}
-		// The kube session records hold bearer tokens that outlive this login.
-		if err := os.RemoveAll(filepath.Join(dir, KubeSessionDir)); err != nil {
-			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
 		}
 		return nil
 	})
