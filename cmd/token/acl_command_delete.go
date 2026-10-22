@@ -11,6 +11,11 @@ var aclCommandDeleteCmd = &cobra.Command{
 	Use:     "delete ACL_ID",
 	Aliases: []string{"rm"},
 	Short:   "Delete a command ACL rule by ID",
+	Long: `Delete a command ACL rule by ID.
+
+On servers that manage command ACLs on the command pre-approval ledger, this
+write is refused with command_acl_moved; add, change or remove command ACLs from
+the web console there.`,
 	Example: `  alpacon token acl command delete 550e8400-e29b-41d4-a716-446655440000
   alpacon token acl command rm 550e8400-e29b-41d4-a716-446655440000`,
 	Args: cobra.ExactArgs(1),

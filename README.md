@@ -423,6 +423,8 @@ $ alpacon token acl <type> ls     my-token
 $ alpacon token acl <type> delete <acl-id>
 ```
 
+On servers that manage command ACLs on the command pre-approval ledger, `alpacon token acl command add` and `delete` are refused with `command_acl_moved`; add, change or remove command ACLs from the web console there (the token's ACL page or the workspace Command ACL settings). `alpacon token acl command ls` works as before, and servers without the ledger still accept these writes.
+
 ### Agent (Alpamon) management
 ```bash
 $ alpacon agent restart <server>

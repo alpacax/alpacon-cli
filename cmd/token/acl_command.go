@@ -9,7 +9,11 @@ var aclCommandCmd = &cobra.Command{
 	Use:   "command",
 	Short: "Manage command ACL rules for a token",
 	Long: `Configure which server-side shell commands an API token is allowed to execute
-via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").`,
+via websh or exec (e.g., "whoami", "systemctl status *", "docker compose *").
+
+On servers that manage command ACLs on the command pre-approval ledger, 'add' and
+'delete' are refused with command_acl_moved; add, change or remove command ACLs
+from the web console there. 'ls' works as before.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return utils.RequireSubcommand(cmd)
 	},
