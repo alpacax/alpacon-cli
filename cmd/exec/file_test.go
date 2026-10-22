@@ -116,6 +116,34 @@ func TestParseRemoteExecArgs_File(t *testing.T) {
 				File:          &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}},
 			},
 		},
+		{
+			name: "upload from another local path",
+			args: []string{"--upload", "--file", "/opt/deploy.sh", "--file-from", "./deploy.sh", "prod-web"},
+			expected: RemoteExecArgs{
+				Server: "prod-web",
+				File:   &FileExecArgs{Path: "/opt/deploy.sh", From: "./deploy.sh", Upload: true},
+			},
+		},
+		{
+			name: "upload with overwrite and script arguments",
+			args: []string{"--file", "/opt/deploy.sh", "--upload", "--overwrite", "root@prod-web", "--", "--fast"},
+			expected: RemoteExecArgs{
+				Username: "root",
+				Server:   "prod-web",
+				File: &FileExecArgs{
+					Path: "/opt/deploy.sh", Args: []string{"--fast"}, Upload: true, Overwrite: true,
+				},
+			},
+		},
+		{
+			name: "from-server with script arguments",
+			args: []string{"--file", "/opt/deploy.sh", "--from-server", "root@prod-web", "--", "--fast"},
+			expected: RemoteExecArgs{
+				Username: "root",
+				Server:   "prod-web",
+				File:     &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}, FromServer: true},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,8 +154,9 @@ func TestParseRemoteExecArgs_File(t *testing.T) {
 }
 
 // TestParseRemoteExecArgs_FileErrors pins the local refusals: a relative path or
-// interpreter, a command line mixed with --file, --env on the file lane, and the
-// two companion flags given without --file.
+// interpreter, a command line mixed with --file, --env on the file lane, the
+// two companion flags given without --file, and misuse of --upload, --overwrite
+// and --from-server.
 func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -214,6 +243,56 @@ func TestParseRemoteExecArgs_FileErrors(t *testing.T) {
 			name:        "reuse days flag with no value",
 			args:        []string{"--file", "/opt/deploy.sh", "--reuse-days"},
 			expectedErr: "flag needs an argument: --reuse-days",
+		},
+		{
+			name:        "upload without file",
+			args:        []string{"--upload", "prod-web", "uptime"},
+			expectedErr: "--upload requires --file; it writes the script to the --file path on the server",
+		},
+		{
+			name:        "overwrite without upload",
+			args:        []string{"--file", "/opt/deploy.sh", "--overwrite", "prod-web"},
+			expectedErr: "--overwrite requires --upload; it only applies to the file --upload writes",
+		},
+		{
+			name:        "upload with a value",
+			args:        []string{"--file", "/opt/deploy.sh", "--upload=true", "prod-web"},
+			expectedErr: "--upload does not accept a value; use --upload alone",
+		},
+		{
+			name:        "overwrite with a value",
+			args:        []string{"--file", "/opt/deploy.sh", "--upload", "--overwrite=yes", "prod-web"},
+			expectedErr: "--overwrite does not accept a value; use --overwrite alone",
+		},
+		{
+			name:        "upload to a path with dot-dot",
+			args:        []string{"--file", "/opt/link/../deploy.sh", "--upload", "prod-web"},
+			expectedErr: "--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: /opt/link/../deploy.sh",
+		},
+		{
+			name:        "upload to a path with a repeated slash",
+			args:        []string{"--file", "/opt//deploy.sh", "--upload", "prod-web"},
+			expectedErr: "--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: /opt//deploy.sh",
+		},
+		{
+			name:        "from-server without file",
+			args:        []string{"--from-server", "prod-web", "uptime"},
+			expectedErr: "--from-server requires --file; it reads the script from the --file path on the server",
+		},
+		{
+			name:        "from-server with upload",
+			args:        []string{"--file", "/opt/deploy.sh", "--from-server", "--upload", "prod-web"},
+			expectedErr: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
+		},
+		{
+			name:        "from-server with file-from",
+			args:        []string{"--file", "/opt/deploy.sh", "--file-from", "./deploy.sh", "--from-server", "prod-web"},
+			expectedErr: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
+		},
+		{
+			name:        "from-server with a value",
+			args:        []string{"--file", "/opt/deploy.sh", "--from-server=true", "prod-web"},
+			expectedErr: "--from-server does not accept a value; use --from-server alone",
 		},
 	}
 	for _, tt := range tests {

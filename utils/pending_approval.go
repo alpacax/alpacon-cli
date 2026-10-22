@@ -28,14 +28,15 @@ type pendingApprovalJSON struct {
 
 // pendingApprovalNextActions lists the actionable follow-ups for a consumer
 // reading the message. retry is the surface-specific way to retry (re-run the
-// command, or attach the session); it leads, then the generic console pointer.
-// A zero-value retry is skipped.
-func pendingApprovalNextActions(retry NextAction) []NextAction {
-	actions := make([]NextAction, 0, 2)
+// command, or attach the session); it leads, then the generic console pointer,
+// then any extra actions the surface has. A zero-value retry is skipped.
+func pendingApprovalNextActions(retry NextAction, extra ...NextAction) []NextAction {
+	actions := make([]NextAction, 0, 2+len(extra))
 	if retry != (NextAction{}) {
 		actions = append(actions, retry)
 	}
-	return append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."})
+	actions = append(actions, NextAction{Description: "Approve it out of band in the Alpacon console (web/Slack). Where supported, pass --wait (or --wait-approval DURATION for a longer timeout) on the original command to block until approval."})
+	return append(actions, extra...)
 }
 
 // PrintPendingApproval emits the structured "pending approval" feedback for an
@@ -45,10 +46,10 @@ func pendingApprovalNextActions(retry NextAction) []NextAction {
 // empty when the surface cannot supply one. retry is a surface-specific retry
 // action (e.g. the exact command to re-run); its Command stays a pure,
 // executable string so a machine consumer can run it directly, with any hint in
-// Description.
+// Description. extra follows the generic console pointer.
 // It never exits — the caller owns process exit so the exit-code contract stays
 // in one place.
-func PrintPendingApproval(message, requestID string, retry NextAction) {
+func PrintPendingApproval(message, requestID string, retry NextAction, extra ...NextAction) {
 	if OutputFormat == OutputFormatJSON {
 		envelope := pendingApprovalJSON{
 			OK:          false,
@@ -57,7 +58,7 @@ func PrintPendingApproval(message, requestID string, retry NextAction) {
 			Message:     message,
 			RequestID:   requestID,
 			Context:     pendingApprovalCtx{RequestID: requestID},
-			NextActions: pendingApprovalNextActions(retry),
+			NextActions: pendingApprovalNextActions(retry, extra...),
 		}
 		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
 			// Fall back to a minimal, still-parseable object so a machine consumer
@@ -68,7 +69,7 @@ func PrintPendingApproval(message, requestID string, retry NextAction) {
 	}
 
 	CliWarning("%s", message)
-	for _, action := range pendingApprovalNextActions(retry) {
+	for _, action := range pendingApprovalNextActions(retry, extra...) {
 		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
 	}
 }

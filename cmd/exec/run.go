@@ -768,18 +768,24 @@ func HandlePurposeDemand(err error) bool {
 // true. The status-hold path carries no approval request id; the sudo-denial
 // path carries one only when a --wait poll picked one up along the way
 // (pendingWithRequestID), so the machine signal reports an id when it has one
-// and omits it otherwise. reRunHint is the exact command the caller invoked
-// (with any --env caveat in its Description), so a human can copy-paste it once
-// the request is approved.
-func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
+// and omits it otherwise. The sudo-denial path repeats the exact command the
+// caller invoked (reRunHint of parsed), so a human can copy-paste it once the
+// request is approved. A held command line the server reads as a script on the
+// target also gets the --file --from-server form of it (fileSuggestionAction).
+func HandlePendingApproval(err error, parsed RemoteExecArgs) bool {
 	// Status-hold: held job runs automatically once approved, so point at exec logs.
 	var pendingErr *event.PendingApprovalError
 	if errors.As(err, &pendingErr) {
+		var extra []utils.NextAction
+		if action, ok := fileSuggestionAction(parsed, pendingErr.FileSuggestion); ok {
+			extra = append(extra, action)
+		}
 		utils.PrintPendingApproval(
 			"Approval required—this command is held for human approval in the Alpacon console (web). "+
 				"It runs automatically once approved; pass --wait (or --wait-approval DURATION for a longer wait) to block until then.",
 			"", // the command detail carries no approval request id
 			utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", pendingErr.CommandID)},
+			extra...,
 		)
 		os.Exit(utils.ExitCodePendingApproval)
 		return true
@@ -804,7 +810,7 @@ func HandlePendingApproval(err error, reRunHint utils.NextAction) bool {
 		"Approval required—a human must approve this sudo command in the Alpacon console (web). "+
 			"Re-run after approval, or use --wait (or --wait-approval DURATION for a longer wait) to block until it is approved.",
 		requestID,
-		reRunHint,
+		reRunHint(parsed),
 	)
 	os.Exit(utils.ExitCodePendingApproval)
 	return true
