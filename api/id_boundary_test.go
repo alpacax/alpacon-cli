@@ -96,6 +96,59 @@ func TestAPILayerSendsRequestsOnlyToCheckedURLs(t *testing.T) {
 	assert.Subset(t, slices.Collect(maps.Keys(sinks)), []string{"SendGetRequest", "SendPatchRequest", "FetchAllPages", "NewRequest", "Get", "Dial", resolveName + "." + resolveSinkField})
 }
 
+func TestSinkURLParam_FindsTheURLOfEveryRequestSink(t *testing.T) {
+	t.Parallel()
+	imports, err := exportDataImporter()
+	require.NoError(t, err)
+	p, err := checkPackage("example.com/empty", nil, imports)
+	require.NoError(t, err)
+	clientSinks := map[string]int{
+		"SendRawRequest": 1, "SendGetRequest": 0, "SendGetRequestToURL": 0, "SendGetRequestForDownload": 0,
+		"SendPostRequest": 0, "SendPostRequestWithStatus": 0, "SendPatchRequest": 0, "SendMultipartStreamRequest": 0,
+		"SendDeleteRequest": 0, "SendDeleteRequestWithContext": 1, "SendDeleteRequestWithBody": 0,
+	}
+	var sends []string
+	for m := range types.NewMethodSet(types.NewPointer(p.client)).Methods() {
+		if strings.HasPrefix(m.Obj().Name(), "Send") {
+			sends = append(sends, m.Obj().Name())
+		}
+	}
+	require.ElementsMatch(t, slices.Collect(maps.Keys(clientSinks)), sends)
+
+	type sink struct {
+		pkgPath, recv, name string
+		want                int
+	}
+	sinks := []sink{
+		{apiPkgPath, "", "FetchAllPages", 1}, {apiPkgPath, "", "FetchPagesUpTo", 1},
+		{apiPkgPath, "", "FetchAllCursorPages", 1}, {apiPkgPath, "", "FetchCursorPages", 1},
+		{"net/http", "", "NewRequest", 1}, {"net/http", "", "NewRequestWithContext", 2},
+		{"net/http", "Client", "Get", 0}, {"net/http", "Client", "Head", 0}, {"net/http", "Client", "Post", 0}, {"net/http", "Client", "PostForm", 0},
+		{websocketPkgPath, "Dialer", "Dial", 0}, {websocketPkgPath, "Dialer", "DialContext", 1},
+	}
+	for name, want := range clientSinks {
+		sinks = append(sinks, sink{clientPkgPath, clientName, name, want})
+	}
+	for _, tc := range sinks {
+		pkg, err := imports.Import(tc.pkgPath) // the importer is not safe for concurrent use
+		require.NoError(t, err)
+		obj := pkg.Scope().Lookup(tc.name)
+		if tc.recv != "" {
+			obj, _, _ = types.LookupFieldOrMethod(types.NewPointer(pkg.Scope().Lookup(tc.recv).Type()), false, pkg, tc.name)
+		}
+		fn, ok := obj.(*types.Func)
+		require.True(t, ok, "%s.%s%s is not a function", tc.pkgPath, tc.recv, tc.name)
+		t.Run(tc.recv+tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			i, isSink := p.sinkURLParam(fn)
+
+			assert.True(t, isSink, "%s is not treated as a request sink", tc.name)
+			assert.Equal(t, tc.want, i)
+		})
+	}
+}
+
 func TestURLOffenders_RefusesADotImportedBuilderPackage(t *testing.T) {
 	t.Parallel()
 	src := fmt.Sprintf("package fixture\n\nimport . %q\n\nvar _ = BuildURL\n", utilsPkgPath)
@@ -223,6 +276,7 @@ func TestURLOffenders_FlagsASinkSentAnUncheckedURL(t *testing.T) {
 		{name: "build_url_with_a_non_constant_path", body: `_ = utils.BuildURL(noteURL, id, nil)`, want: "passes BuildURL a non-constant path"},
 		{name: "path_id_concatenated", body: `_ = noteURL + pathID.String()`, want: "concatenates a PathID into a string"},
 		{name: "path_id_appended", body: "s := noteURL\ns += pathID.String()\n_ = s", want: "concatenates a PathID into a string"},
+		{name: "fields_aliased_to_each_other", body: "var x, y session\nx.Note = y.Note\ny.Note = x.Note\n_, _ = ac.SendGetRequest(x.Note)", want: "hands SendGetRequest a URL"},
 		{name: "constant", body: `_, _ = ac.SendGetRequest(noteURL)`},
 		{name: "resolve_by_name_constant_endpoint", body: `_, _ = api.ResolveByName[session](ac, api.ResolveByNameOptions{Endpoint: noteURL, Name: id})`},
 		{name: "build_url_with_a_constant_path", body: `_, _ = ac.SendGetRequest(utils.BuildURL(noteURL, "search", map[string]string{"q": id}))`},
@@ -863,7 +917,7 @@ func (f *urlFlowIndex) varAllowed(obj types.Object, mode urlMode, trusted bool) 
 	}
 	key := visit{v, mode, -1}
 	if f.visiting[key] {
-		return true
+		return false
 	}
 	f.visiting[key] = true
 	defer delete(f.visiting, key)
