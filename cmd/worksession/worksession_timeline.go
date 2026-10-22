@@ -26,6 +26,8 @@ type recordingJSON struct {
 	Status            string `json:"status"`
 }
 
+var noRecords bool
+
 var workSessionTimelineCmd = &cobra.Command{
 	Use:     "timeline SESSION_ID",
 	Aliases: []string{"tl"},
@@ -35,9 +37,11 @@ var workSessionTimelineCmd = &cobra.Command{
 Recordings are not embedded in the timeline. The recordings section lists each
 Websh terminal with the number of recording chunks it has ("unknown" when the
 server cannot count them) and the command that shows one:
-alpacon work-session recording SESSION_ID --index N.`,
+alpacon work-session recording SESSION_ID --index N. --no-records leaves the
+section out.`,
 	Args: cobra.ExactArgs(1),
 	Example: `  alpacon work-session timeline ses-abc123
+  alpacon work-session timeline ses-abc123 --no-records
   alpacon work-session tl ses-abc123 --output json
   alpacon work-session recording ses-abc123 --index 2`,
 	Run: func(cmd *cobra.Command, args []string) {
@@ -81,7 +85,7 @@ alpacon work-session recording SESSION_ID --index N.`,
 			if items[i].Type == "websh_record" {
 				continue
 			}
-			if wsapi.IsTerminal(&items[i]) {
+			if !noRecords && wsapi.IsTerminal(&items[i]) {
 				terminals = append(terminals, items[i])
 			}
 			rows = append(rows, projectTimelineAttributes(&items[i], serverMap))
@@ -102,11 +106,8 @@ alpacon work-session recording SESSION_ID --index N.`,
 }
 
 func init() {
-	// Kept so existing scripts keep working: the timeline no longer carries
-	// recordings, so there is nothing left for it to skip.
-	workSessionTimelineCmd.Flags().Bool("no-records", false, "No effect; recordings are no longer embedded in the timeline")
-	_ = workSessionTimelineCmd.Flags().MarkDeprecated("no-records",
-		"recordings are no longer embedded in the timeline, so it has no effect")
+	workSessionTimelineCmd.Flags().BoolVar(&noRecords, "no-records", false,
+		"Hide the recordings section (an empty recordings list in JSON)")
 }
 
 // recordingStatus reads a terminal's record_chunks_total. nil covers both a

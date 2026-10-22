@@ -467,17 +467,26 @@ func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
 	}
 }
 
-// --no-records is kept for scripts that pass it, and changes nothing.
-func TestTimelineNoRecordsIsANoOp(t *testing.T) {
+// --no-records keeps the contract scripts rely on: the section is left out of
+// the table, and JSON carries an empty recordings list.
+func TestTimelineNoRecordsHidesTheSection(t *testing.T) {
 	t.Parallel()
 	ts, _ := timelinePagingServer(t)
 
-	plain, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1", "--no-records")
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
-	flagged, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1", "--no-records")
-	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "TIME")
+	assert.NotContains(t, stdout, "Recordings (")
+	assert.NotContains(t, stdout, "work-session recording")
+	assert.Empty(t, stderr)
 
-	assert.Equal(t, plain, flagged)
-	assert.Contains(t, flagged, "Recordings (5 terminals)")
-	assert.Contains(t, stderr, "recordings are no longer embedded in the timeline")
+	stdout, stderr, exitCode = runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	var out struct {
+		Timeline   []json.RawMessage `json:"timeline"`
+		Recordings json.RawMessage   `json:"recordings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	assert.NotEmpty(t, out.Timeline)
+	assert.JSONEq(t, `[]`, string(out.Recordings))
 }
