@@ -117,9 +117,8 @@ const (
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
-	// CommandACLMoved rides a 405 on a command-ACL write: command pre-approvals
-	// moved to a ledger this CLI cannot write yet, so a ledger admin makes the
-	// change on the service token's command ACL card in the web console.
+	// CommandACLMoved rides a 405 on a command-ACL write once command ACLs live on
+	// the command pre-approval ledger; codeOnlyMessage in client/client.go renders it.
 	CommandACLMoved = "command_acl_moved"
 
 	// AuthInteractiveChannelRequiresPresence rides a 403: a token gets no interactive channel
