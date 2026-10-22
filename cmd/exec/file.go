@@ -40,8 +40,8 @@ var fileExecRefusals = []struct {
 }{
 	{
 		code:        "file_exec_unsupported_agent",
-		message:     "the agent on '%s' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-		hint:        "update Alpamon on the server, or run the script as an ordinary command until then:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		message:     "the agent on '%s' does not offer the file lane; it needs Alpamon 2.8.3 or newer on a platform that has the file lane",
+		hint:        "if the server runs Alpamon older than 2.8.3, update it to 2.8.3 or newer.\nOn a platform without the file lane, such as Windows, updating does not help.\nEither way, run the script as an ordinary command with an interpreter the server has, for example:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
 		needsServer: true,
 	},
 	{

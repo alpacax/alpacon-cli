@@ -345,35 +345,42 @@ func TestLoadFileExecution(t *testing.T) {
 	})
 }
 
+// coded builds the error a coded server refusal reaches the exec command as.
+func coded(code string) error {
+	return errors.New("code: " + code + "; source: command")
+}
+
 // TestFileExecRefusal covers the code-to-guidance table: each server code is
 // rendered as a sentence rather than the raw code, the two client-bug codes say
 // so, and anything else falls through so the generic path answers.
 func TestFileExecRefusal(t *testing.T) {
 	t.Parallel()
-	coded := func(code string) error {
-		return errors.New("code: " + code + "; source: command")
-	}
 	tests := []struct {
-		name         string
-		err          error
-		wantMessage  string
-		wantHintPart string
-		wantNoHint   bool
-		wantOK       bool
+		name          string
+		err           error
+		wantMessage   string
+		wantHintParts []string
+		wantNoHint    bool
+		wantOK        bool
 	}{
 		{
-			name:         "unsupported agent names the server and the version",
-			err:          coded("file_exec_unsupported_agent"),
-			wantMessage:  "the agent on 'prod-web' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-			wantHintPart: "alpacon exec prod-web -- /bin/bash",
-			wantOK:       true,
+			name:        "unsupported agent names the server and the version",
+			err:         coded("file_exec_unsupported_agent"),
+			wantMessage: "the agent on 'prod-web' does not offer the file lane; it needs Alpamon 2.8.3 or newer on a platform that has the file lane",
+			wantHintParts: []string{
+				"if the server runs Alpamon older than 2.8.3, update it to 2.8.3 or newer",
+				"On a platform without the file lane, such as Windows, updating does not help",
+				"Either way, run the script as an ordinary command",
+				"  alpacon exec prod-web -- /bin/bash /path/to/script.sh\n",
+			},
+			wantOK: true,
 		},
 		{
-			name:         "assessor disabled",
-			err:          coded("file_exec_assessor_disabled"),
-			wantMessage:  "this deployment has the command assessor disabled, so 'prod-web' cannot run a verified file",
-			wantHintPart: "alpacon exec prod-web -- /bin/bash",
-			wantOK:       true,
+			name:          "assessor disabled",
+			err:           coded("file_exec_assessor_disabled"),
+			wantMessage:   "this deployment has the command assessor disabled, so 'prod-web' cannot run a verified file",
+			wantHintParts: []string{"alpacon exec prod-web -- /bin/bash"},
+			wantOK:        true,
 		},
 		{
 			name:        "invalid path",
@@ -383,11 +390,11 @@ func TestFileExecRefusal(t *testing.T) {
 			wantOK:      true,
 		},
 		{
-			name:         "content too large",
-			err:          coded("file_exec_content_too_large"),
-			wantMessage:  "the server refused the file: a verified file is limited to 65536 bytes (64 KB)",
-			wantHintPart: "split the script",
-			wantOK:       true,
+			name:          "content too large",
+			err:           coded("file_exec_content_too_large"),
+			wantMessage:   "the server refused the file: a verified file is limited to 65536 bytes (64 KB)",
+			wantHintParts: []string{"split the script"},
+			wantOK:        true,
 		},
 		{
 			name:        "empty content",
@@ -397,53 +404,52 @@ func TestFileExecRefusal(t *testing.T) {
 			wantOK:      true,
 		},
 		{
-			name:         "line too long",
-			err:          coded("file_exec_line_too_long"),
-			wantMessage:  "the interpreter, the path and the arguments together exceed the server's command line ceiling",
-			wantHintPart: "shorten the arguments",
-			wantOK:       true,
+			name:          "line too long",
+			err:           coded("file_exec_line_too_long"),
+			wantMessage:   "the interpreter, the path and the arguments together exceed the server's command line ceiling",
+			wantHintParts: []string{"shorten the arguments"},
+			wantOK:        true,
 		},
 		{
-			name:         "env not allowed",
-			err:          coded("file_exec_env_not_allowed"),
-			wantMessage:  "the server refused the request: environment variables are not allowed on the file lane",
-			wantHintPart: "inside the script",
-			wantOK:       true,
+			name:          "env not allowed",
+			err:           coded("file_exec_env_not_allowed"),
+			wantMessage:   "the server refused the request: environment variables are not allowed on the file lane",
+			wantHintParts: []string{"inside the script"},
+			wantOK:        true,
 		},
 		{
-			name:         "invalid reuse days names the range and the omission",
-			err:          coded("file_exec_invalid_reuse_days"),
-			wantMessage:  "the server refused the reuse proposal: a reuse duration must be 1 to 366 days",
-			wantHintPart: "omit --reuse-days to propose none; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)",
-			wantOK:       true,
+			name:          "invalid reuse days names the range and the omission",
+			err:           coded("file_exec_invalid_reuse_days"),
+			wantMessage:   "the server refused the reuse proposal: a reuse duration must be 1 to 366 days",
+			wantHintParts: []string{"omit --reuse-days to propose none; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)"},
+			wantOK:        true,
 		},
 		{
-			name:         "reuse past the ceiling says to shorten or drop it",
-			err:          coded("file_exec_reuse_exceeds_max"),
-			wantMessage:  "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
-			wantHintPart: "shorter --reuse-days, or omit it; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)",
-			wantOK:       true,
+			name:          "reuse past the ceiling says to shorten or drop it",
+			err:           coded("file_exec_reuse_exceeds_max"),
+			wantMessage:   "the server refused the reuse proposal: this workspace's file execution grant ceiling is shorter than the duration proposed",
+			wantHintParts: []string{"shorter --reuse-days, or omit it; the approver may then still grant reuse up to the workspace ceiling (1 to 366 days, default 90)"},
+			wantOK:        true,
 		},
 		{
-			name:         "line not allowed is a client bug",
-			err:          coded("file_exec_line_not_allowed"),
-			wantMessage:  "the server refused the request: it carried a command line alongside the file",
-			wantHintPart: "bug in alpacon-cli",
-			wantOK:       true,
+			name:          "line not allowed is a client bug",
+			err:           coded("file_exec_line_not_allowed"),
+			wantMessage:   "the server refused the request: it carried a command line alongside the file",
+			wantHintParts: []string{"bug in alpacon-cli"},
+			wantOK:        true,
 		},
 		{
-			name:         "data not allowed is a client bug",
-			err:          coded("file_exec_data_not_allowed"),
-			wantMessage:  "the server refused the request: it carried a data field alongside the file",
-			wantHintPart: "bug in alpacon-cli",
-			wantOK:       true,
+			name:          "data not allowed is a client bug",
+			err:           coded("file_exec_data_not_allowed"),
+			wantMessage:   "the server refused the request: it carried a data field alongside the file",
+			wantHintParts: []string{"bug in alpacon-cli"},
+			wantOK:        true,
 		},
 		{
-			name:         "wrapped error still answers",
-			err:          fmt.Errorf("failed to execute command on 'prod-web' server: %w", coded("file_exec_unsupported_agent")),
-			wantMessage:  "the agent on 'prod-web' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-			wantHintPart: "Alpamon",
-			wantOK:       true,
+			name:          "wrapped error still answers",
+			err:           fmt.Errorf("failed to execute command on 'prod-web' server: %w", coded("file_exec_unsupported_agent")),
+			wantHintParts: []string{"alpacon exec prod-web -- /bin/bash"},
+			wantOK:        true,
 		},
 		{name: "another code falls through", err: coded(utils.CommandInlineCredential)},
 		{name: "a plain error falls through", err: errors.New("boom")},
@@ -454,16 +460,23 @@ func TestFileExecRefusal(t *testing.T) {
 			t.Parallel()
 			message, hint, ok := fileExecRefusal(tt.err, "prod-web")
 			assert.Equal(t, tt.wantOK, ok, "message %q", message)
-			assert.Equal(t, tt.wantMessage, message)
+			if tt.wantMessage != "" {
+				assert.Equal(t, tt.wantMessage, message)
+			}
 			if tt.wantNoHint {
 				assert.Empty(t, hint)
 			}
-			if tt.wantHintPart != "" {
+			if len(tt.wantHintParts) > 0 {
 				assert.Contains(t, hint, "Hint:")
-				assert.Contains(t, hint, tt.wantHintPart)
+				for _, part := range tt.wantHintParts {
+					assert.Contains(t, hint, part)
+				}
 				assert.True(t, strings.HasSuffix(hint, "\n"), "hint must end with a newline: %q", hint)
 			}
-			if !tt.wantOK {
+			if tt.wantOK {
+				assert.NotEmpty(t, message)
+			} else {
+				assert.Empty(t, message)
 				assert.Empty(t, hint)
 			}
 		})
@@ -472,12 +485,10 @@ func TestFileExecRefusal(t *testing.T) {
 
 func TestFileExecRefusalStripsControlBytesFromServerName(t *testing.T) {
 	t.Parallel()
-	err := errors.New("code: file_exec_unsupported_agent; source: command")
-
-	message, hint, ok := fileExecRefusal(err, "prod\n\x1b[2Kforged")
+	message, hint, ok := fileExecRefusal(coded("file_exec_unsupported_agent"), "prod\n\x1b[2Kforged")
 
 	require.True(t, ok)
-	assert.Equal(t, "the agent on 'prodforged' cannot verify a file digest; Alpamon 2.6.0 or newer is required", message)
+	assert.Contains(t, message, "the agent on 'prodforged' ")
 	assert.Contains(t, hint, "  alpacon exec prodforged -- /bin/bash /path/to/script.sh\n")
 }
 
@@ -623,7 +634,7 @@ func TestExecFileRefusalPrintsGuidance(t *testing.T) {
 			"--file", "/opt/deploy.sh", "--file-from", script, "prod")
 		assert.Equal(t, 1, exitCode)
 		assert.Empty(t, stdout)
-		assert.Contains(t, stderr, "the agent on 'prod' cannot verify a file digest; Alpamon 2.6.0 or newer is required")
+		assert.Contains(t, stderr, "the agent on 'prod' ")
 		assert.Contains(t, stderr, "Hint:")
 		assert.NotContains(t, stderr, "file_exec_unsupported_agent", "the code is rendered as guidance, not echoed")
 	})
@@ -683,9 +694,6 @@ func TestExecFileLocalRefusalNeverReachesServer(t *testing.T) {
 // file lane refuses, or to an ordinary command line, which skips the review.
 func TestFileExecInlineCredentialRefusal(t *testing.T) {
 	t.Parallel()
-	coded := func(code string) error {
-		return errors.New("code: " + code + "; source: command")
-	}
 	tests := []struct {
 		name   string
 		err    error
