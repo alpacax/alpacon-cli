@@ -202,6 +202,8 @@ For Auth0 and MFA authentication the CLI opens the auth URL in your default brow
 
 ## Shell completion
 
+The Homebrew formula and the deb and rpm packages install completion for bash, zsh, and fish, so those installs need no per-command setup. Bash completion still needs the bash-completion package, zsh needs `compinit` in your `~/.zshrc`, and a Homebrew install needs your shell to read Homebrew's completions, as [Homebrew's shell completion guide](https://docs.brew.sh/Shell-Completion) describes. For a binary downloaded directly, or for PowerShell, load the script yourself:
+
 ```bash
 source <(alpacon completion bash)                                  # bash (needs the bash-completion package; add to ~/.bashrc)
 source <(alpacon completion zsh)                                   # zsh (add to ~/.zshrc after compinit)
