@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	ftpapi "github.com/alpacax/alpacon-cli/api/ftp"
+	"github.com/alpacax/alpacon-cli/api/mfa"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
@@ -40,8 +44,8 @@ var fileExecRefusals = []struct {
 }{
 	{
 		code:        "file_exec_unsupported_agent",
-		message:     "the agent on '%s' cannot verify a file digest; Alpamon 2.6.0 or newer is required",
-		hint:        "update Alpamon on the server, or run the script as an ordinary command until then:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
+		message:     "the agent on '%s' does not offer the file lane; it needs Alpamon 2.8.3 or newer on a platform that has the file lane",
+		hint:        "if the server runs Alpamon older than 2.8.3, update it to 2.8.3 or newer.\nOn a platform without the file lane, such as Windows, updating does not help.\nEither way, run the script as an ordinary command with an interpreter the server has, for example:\n  alpacon exec %s -- /bin/bash /path/to/script.sh\n",
 		needsServer: true,
 	},
 	{
@@ -96,7 +100,8 @@ var fileExecRefusals = []struct {
 }
 
 // FileExecArgs is the file lane as the user asked for it on the command line:
-// --file, --file-from, --interpreter, --reuse-days and the arguments after --.
+// --file, --file-from, --interpreter, --reuse-days, --upload, --overwrite,
+// --from-server and the arguments after --.
 // From and Interpreter are as typed, empty when the flag was not given;
 // loadFileExecution fills the defaults, so a re-run hint can repeat only what
 // the user said.
@@ -112,6 +117,15 @@ type FileExecArgs struct {
 	Args []string
 	// ReuseDays is the proposed reuse duration in days; 0 means none was given.
 	ReuseDays int
+	// Upload writes the content to Path on the server before the submission,
+	// so the file need not be there already.
+	Upload bool
+	// Overwrite lets Upload replace a file already at Path; without it the
+	// agent refuses an existing file.
+	Overwrite bool
+	// FromServer reads the content from Path on the server instead of a local
+	// file, for a script that exists only there.
+	FromServer bool
 }
 
 // loadFileExecution reads the script's bytes and builds the submission, or
@@ -125,16 +139,20 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 	if from == "" {
 		from = spec.Path
 	}
-	interpreter := spec.Interpreter
-	if interpreter == "" {
-		interpreter = DefaultInterpreter
-	}
-
 	content, msg := readFileContent(from, spec.From == "")
 	if msg != "" {
 		return event.FileExecution{}, msg
 	}
+	return newFileExecution(spec, content), ""
+}
 
+// newFileExecution builds the submission around content, filling the default
+// interpreter.
+func newFileExecution(spec FileExecArgs, content string) event.FileExecution {
+	interpreter := spec.Interpreter
+	if interpreter == "" {
+		interpreter = DefaultInterpreter
+	}
 	// Args may be nil here; SubmitFileCommand sends it as the empty list the
 	// server defaults to.
 	return event.FileExecution{
@@ -143,7 +161,82 @@ func loadFileExecution(spec FileExecArgs) (event.FileExecution, string) {
 		Args:        spec.Args,
 		Content:     content,
 		ReuseDays:   spec.ReuseDays,
-	}, ""
+	}
+}
+
+// uploadFileOrExit writes the script to its --file path on the server before
+// the submission, as the account and group the script will run as. It sends
+// file.Content, the bytes the submission carries, so what lands on the server is
+// what the reviewer sees; the agent still hashes the file at execution and
+// refuses it if a byte changed in between. It exits on failure, since a script
+// that was not written must not be submitted.
+func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file event.FileExecution, workSessionID, authMethod string) {
+	upload := func() error {
+		return ftpapi.UploadContentAs(ac, parsed.Server, file.Path, []byte(file.Content),
+			parsed.Username, parsed.Groupname, workSessionID, parsed.File.Overwrite)
+	}
+	err := upload()
+	if err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, upload))
+	}
+	if err == nil {
+		return
+	}
+	utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+	var hint string
+	// The agent answers "PATH already exists." for an existing file.
+	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
+		hint = denialHintLine("pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
+	}
+	// reportCodedRefusal writes raw and appends its own period; drop the one the
+	// agent's message ends with.
+	msg := strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err)), ".")
+	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
+}
+
+// downloadFileOrExit reads the script from its --file path on the server, as
+// the account and group it will run as, and builds the submission from those
+// bytes. The requester still submits the content the reviewer judges, and the
+// agent still hashes the file at execution and refuses it if a byte changed in
+// between. It exits on failure, since a script that could not be read must not
+// be submitted.
+func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSessionID, authMethod string) event.FileExecution {
+	label := parsed.Server + ":" + parsed.File.Path
+	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
+	if err != nil {
+		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
+		// reportCodedRefusal writes raw and appends its own period; drop one the
+		// agent's message ends with.
+		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
+		reportCodedRefusal(utils.OperationWebFTP, err, msg, "")
+		return event.FileExecution{}
+	}
+	if msg != "" {
+		utils.CliErrorWithExit("%s", msg)
+		return event.FileExecution{}
+	}
+	return newFileExecution(*parsed.File, content)
+}
+
+// fetchServerScript reads the --file path from the server into memory, at
+// most FileContentMaxBytes+1 bytes of it, and checks it as readFileContent
+// checks a local script. err is a failed download; msg is a copy the file lane
+// cannot take.
+func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label, workSessionID string) (content, msg string, err error) {
+	var data []byte
+	download := func() (err error) {
+		data, err = ftpapi.DownloadFileContent(ac, parsed.Server, parsed.File.Path,
+			parsed.Username, parsed.Groupname, workSessionID, FileContentMaxBytes+1)
+		return err
+	}
+	if err = download(); err != nil {
+		err = utils.HandleCommonErrors(err, parsed.Server, mfa.ErrorCallbacks(ac, download))
+	}
+	if err != nil {
+		return "", "", err
+	}
+	content, msg = readScriptContent(bytes.NewReader(data), label)
+	return content, msg, nil
 }
 
 // readFileContent reads at most FileContentMaxBytes+1 bytes of the file at
@@ -160,18 +253,24 @@ func readFileContent(path string, defaultedPath bool) (string, string) {
 		return "", msg
 	}
 	defer func() { _ = f.Close() }()
+	return readScriptContent(f, path)
+}
 
-	data, err := io.ReadAll(io.LimitReader(f, FileContentMaxBytes+1))
+// readScriptContent reads at most FileContentMaxBytes+1 bytes from r and checks
+// them against what the file lane accepts. label names the script in the
+// message.
+func readScriptContent(r io.Reader, label string) (string, string) {
+	data, err := io.ReadAll(io.LimitReader(r, FileContentMaxBytes+1))
 	if err != nil {
-		return "", fmt.Sprintf("cannot read the script from '%s': %s", path, describeOpenError(err))
+		return "", fmt.Sprintf("cannot read the script from '%s': %s", label, describeOpenError(err))
 	}
 	switch {
 	case len(data) == 0:
-		return "", fmt.Sprintf("'%s' is empty; a verified file needs content to hash", path)
+		return "", fmt.Sprintf("'%s' is empty; a verified file needs content to hash", label)
 	case len(data) > FileContentMaxBytes:
-		return "", fmt.Sprintf("'%s' exceeds %d bytes (64 KB), the ceiling for a verified file", path, FileContentMaxBytes)
+		return "", fmt.Sprintf("'%s' exceeds %d bytes (64 KB), the ceiling for a verified file", label, FileContentMaxBytes)
 	case !utf8.Valid(data):
-		return "", fmt.Sprintf("'%s' is not valid UTF-8; the content travels as JSON text, which would alter the bytes the agent hashes", path)
+		return "", fmt.Sprintf("'%s' is not valid UTF-8; the content travels as JSON text, which would alter the bytes the agent hashes", label)
 	}
 	return string(data), ""
 }

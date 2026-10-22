@@ -573,6 +573,63 @@ func TestRefreshAccessToken_KeepsTheDeviceScopeWhenAccepted(t *testing.T) {
 	assert.Contains(t, exchanges[0].Scope, "device:")
 }
 
+func TestRefreshAccessToken_DoesNotFileTheTokenUnderAnotherLogin(t *testing.T) {
+	server := newRefreshServer(t, func(tokenRequest) (int, string) {
+		return http.StatusOK, refreshSuccessBody
+	})
+	setupRefreshConfig(t, server)
+	// Another shell logged in to a self-hosted workspace while the grant ran.
+	require.NoError(t, config.CreateConfig("https://alpacon.example.com", "self-hosted", "api-key", "", "", "", "", 0, false))
+
+	tokenRes, err := RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+
+	require.NoError(t, err)
+	assert.Equal(t, "new-access-token", tokenRes.AccessToken)
+	storedConfig, err := config.LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, storedConfig.AccessToken)
+	assert.Equal(t, "api-key", storedConfig.Token)
+}
+
+// Serial: each case sets HOME and swaps os.Stderr.
+func TestRefreshAccessToken_ReturnsTheTokenWhenItCannotBeSaved(t *testing.T) {
+	tests := []struct {
+		name        string
+		dirInPlace  bool
+		wantWarning string
+	}{
+		{name: "a logout removed the config"},
+		{name: "the config cannot be read", dirInPlace: true, wantWarning: "Could not save the refreshed access token"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newRefreshServer(t, func(tokenRequest) (int, string) {
+				return http.StatusOK, refreshSuccessBody
+			})
+			setupRefreshConfig(t, server)
+			configFile := filepath.Join(os.Getenv("HOME"), config.ConfigFileDir, config.ConfigFileName)
+			require.NoError(t, os.Remove(configFile))
+			if tt.dirInPlace {
+				require.NoError(t, os.Mkdir(configFile, 0700))
+			}
+
+			var tokenRes *TokenResponse
+			var err error
+			stderr := captureStderr(t, func() {
+				tokenRes, err = RefreshAccessToken(server.URL, server.Client(), "refresh-token")
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, "new-access-token", tokenRes.AccessToken)
+			if tt.wantWarning == "" {
+				assert.Empty(t, stderr)
+			} else {
+				assert.Contains(t, stderr, tt.wantWarning)
+			}
+		})
+	}
+}
+
 // TestRefreshAccessToken_ReportsTheFallbackFailure covers a scope refusal that
 // turns out to be sitting on top of a second, unrelated problem—an expired or
 // revoked token. The retry is entitled to run, since the first refusal really

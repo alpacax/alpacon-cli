@@ -18,7 +18,12 @@ Use * as a wildcard to match any arguments. Without a wildcard, only the exact
 command string is matched.
 
 Username semantics: "" = token owner only, "*" = any user, exact name = match only.
-Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.`,
+Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.
+
+On servers that manage command ACLs on the command pre-approval ledger, this
+write is refused with command_acl_moved; a Command ACL admin issues the entry
+under Pre-approved commands on the service token's page in the web console, and a
+personal API token has no command list on the ledger.`,
 	Example: `  alpacon token acl command add my-api-token --command="whoami"
   alpacon token acl command add my-api-token --command="docker *" --username=root
   alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,

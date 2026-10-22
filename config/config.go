@@ -43,78 +43,59 @@ func CreateConfig(workspaceURL, workspaceName, token, expiresAt, accessToken, re
 		config.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
 	}
 
-	return saveConfig(&config)
+	return withConfigLock(func() error {
+		return saveConfig(&config)
+	})
 }
 
-// SwitchWorkspace updates the workspace URL, name, identity and Kubernetes surface
-// answer in one save, so the config never pairs a workspace with another's answer.
-func SwitchWorkspace(newURL, newName string, kubernetesSurface bool) error {
+// SwitchWorkspace moves from's login to newURL, saving the name, identity and Kubernetes surface
+// answer in one write; once another login or switch has replaced from, it writes nothing.
+func SwitchWorkspace(from Config, newURL, newName string, kubernetesSurface bool) error {
 	// The new URL is built from the schema name, so it is also the identity;
 	// keeping the old workspace's value would name the wrong one.
-	return RestoreWorkspace(newURL, newName, newName, kubernetesSurface)
+	return moveWorkspace(from.WorkspaceURL, from, Config{WorkspaceURL: newURL, WorkspaceName: newName, SchemaName: newName, KubernetesSurface: kubernetesSurface})
 }
 
-// RestoreWorkspace writes the URL, host label, schema name and Kubernetes surface
-// answer back in one save, which is how a failed switch returns to the workspace
-// it left. The schema name may be empty, as it is in a config that predates the field.
-func RestoreWorkspace(url, hostLabel, schemaName string, kubernetesSurface bool) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %v", err)
-	}
-
-	cfg.WorkspaceURL = url
-	cfg.WorkspaceName = hostLabel
-	cfg.SchemaName = schemaName
-	cfg.KubernetesSurface = kubernetesSurface
-
-	return saveConfig(&cfg)
+// RestoreWorkspace puts orig's workspace back in one save while the config still holds orig's login on
+// switchedURL, the workspace a failed switch saved; otherwise it writes nothing.
+func RestoreWorkspace(switchedURL string, orig Config) error {
+	return moveWorkspace(switchedURL, orig, orig)
 }
 
-// SetSchemaName records the current workspace's frozen identity, leaving every
-// other field as it is. An empty value (a server that does not report one) keeps
-// what is stored, so the host label keeps serving as the identity.
-func SetSchemaName(schemaName string) error {
-	if schemaName == "" {
-		return nil
-	}
-
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load existing config: %w", err)
-	}
-	if cfg.SchemaName == schemaName {
-		return nil
-	}
-
-	cfg.SchemaName = schemaName
-
-	return saveConfig(&cfg)
+func moveWorkspace(fromURL string, login, to Config) error {
+	return updateConfig(func(cfg *Config) (bool, error) {
+		if cfg.WorkspaceURL != fromURL {
+			return false, ErrWorkspaceChanged
+		}
+		if !cfg.sameLogin(login) {
+			return false, ErrLoginChanged
+		}
+		cfg.WorkspaceURL = to.WorkspaceURL
+		cfg.WorkspaceName = to.WorkspaceName
+		cfg.SchemaName = to.SchemaName
+		cfg.KubernetesSurface = to.KubernetesSurface
+		return true, nil
+	})
 }
 
-// saveConfig replaces the config file in one step. Another alpacon process can
-// be saving a renewed access token at the same moment—every command that meets
-// an expired token writes this file—and two writers truncating the same path
-// leave a config that no longer parses, which the next command reports as a
-// broken file and answers with "run alpacon login". Encoding into a sibling
-// temp file and renaming it over the target means a concurrent reader sees one
-// whole config or the other, never a half of each. That is atomicity against
-// another process and not durability against a crash: nothing flushes the temp
-// file before the rename, so a power loss can still bring the config back empty
-// or reverted. Two writers can still lose each other's token, which costs one
-// refresh and nothing else.
+// sameLogin reports whether c holds other's credentials, which a login replaces and a switch or refresh keeps.
+func (c Config) sameLogin(other Config) bool {
+	return c.Token == other.Token && c.RefreshToken == other.RefreshToken
+}
+
+// saveConfig renames a sibling temp file over the config, so LoadConfig, which takes no lock, never reads half
+// a file. Atomic, not durable: nothing flushes before the rename, so a power loss can empty or revert it.
 func saveConfig(config *Config) error {
-	homeDir, err := os.UserHomeDir()
+	dir, err := configDir()
 	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %v", err)
+		return err
 	}
 
-	configDir := filepath.Join(homeDir, ConfigFileDir)
-	if err = os.MkdirAll(configDir, 0700); err != nil {
+	if err = os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %v", err)
 	}
 
-	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(dir))
 
 	// The rename below replaces whatever the last path component names, so a
 	// config.json kept as a link into a dotfiles tree would be swapped for a
@@ -122,7 +103,7 @@ func saveConfig(config *Config) error {
 	// Resolving first is what makes that setup survive a write, and the temp
 	// file is created beside the target so the rename stays inside one
 	// filesystem even when the tree is on another mount.
-	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+	configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
 	if err != nil {
 		return err
 	}
@@ -164,79 +145,97 @@ func saveConfig(config *Config) error {
 // the one a value was fetched for, so the value was not written.
 var ErrWorkspaceChanged = errors.New("the config now names another workspace")
 
-// SetKubernetesSurface records whether the workspace at workspaceURL exposes the
-// Kubernetes surface, leaving every other field as it is. The URL is a parameter,
-// not a fresh read: the answer comes from a network call, and another shell's
-// login or switch during it would otherwise file one workspace's answer under
-// another. When the config no longer names workspaceURL it returns
-// ErrWorkspaceChanged and writes nothing.
-func SetKubernetesSurface(workspaceURL string, enabled bool) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load existing config: %w", err)
-	}
-	if cfg.WorkspaceURL != workspaceURL {
-		return ErrWorkspaceChanged
-	}
-	if cfg.KubernetesSurface == enabled {
-		return nil
-	}
+// ErrLoginChanged reports that the config holds another login than the one a
+// change was decided for, so nothing was written or removed.
+var ErrLoginChanged = errors.New("the config now holds another login")
 
-	cfg.KubernetesSurface = enabled
-
-	return saveConfig(&cfg)
+// SetWorkspaceEnv records the schema name (empty keeps the stored one) and Kubernetes surface the workspace
+// at workspaceURL reported, and writes nothing once another login or switch has moved the config elsewhere.
+func SetWorkspaceEnv(workspaceURL, schemaName string, kubernetesSurface bool) error {
+	return updateConfig(func(cfg *Config) (bool, error) {
+		if cfg.WorkspaceURL != workspaceURL {
+			return false, ErrWorkspaceChanged
+		}
+		changed := false
+		if schemaName != "" && cfg.SchemaName != schemaName {
+			cfg.SchemaName = schemaName
+			changed = true
+		}
+		if cfg.KubernetesSurface != kubernetesSurface {
+			cfg.KubernetesSurface = kubernetesSurface
+			changed = true
+		}
+		return changed, nil
+	})
 }
 
-func SaveRefreshedAuth0Token(accessToken string, expiresIn int) error {
-	currentConfig, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load existing config: %v", err)
-	}
-
-	currentConfig.AccessToken = accessToken
-	currentConfig.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
-
-	return saveConfig(&currentConfig)
+// SaveRefreshedAuth0Token stores accessToken while the config still holds refreshToken; once a login made
+// during the grant has replaced it, it returns ErrLoginChanged and writes nothing.
+func SaveRefreshedAuth0Token(refreshToken, accessToken string, expiresIn int) error {
+	return updateConfig(func(cfg *Config) (bool, error) {
+		if cfg.RefreshToken != refreshToken {
+			return false, ErrLoginChanged
+		}
+		cfg.AccessToken = accessToken
+		cfg.AccessTokenExpiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second).Format(time.RFC3339)
+		return true, nil
+	})
 }
 
-func DeleteConfig() error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %v", err)
-	}
-
-	configDir := filepath.Join(homeDir, ConfigFileDir)
-	// Removing the link alone would leave the refresh token sitting in the
-	// dotfiles tree it names. The link stays: the next login writes through it
-	// and the setup survives a logout.
-	configFile, err := resolveConfigWritePath(filepath.Join(configDir, ConfigFileName))
+// DeleteConfig removes the config while it still holds login's credentials; a login another shell made since
+// stays and DeleteConfig returns ErrLoginChanged. A config that is already gone is no error.
+func DeleteConfig(login Config) error {
+	dir, err := configDir()
 	if err != nil {
 		return err
 	}
 
-	err = os.Remove(configFile)
+	return withConfigLock(func() error {
+		cfg, err := LoadConfig()
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if !cfg.sameLogin(login) {
+			return ErrLoginChanged
+		}
+
+		// Remove what the link names, or the refresh token stays in the dotfiles tree;
+		// the link itself stays, so the next login writes through it.
+		configFile, err := resolveConfigWritePath(filepath.Join(dir, ConfigFileName))
+		if err != nil {
+			return err
+		}
+		if err = os.Remove(configFile); err != nil {
+			return fmt.Errorf("failed to delete config file: %v", err)
+		}
+		// The kube session records hold bearer tokens that outlive this login.
+		if err := os.RemoveAll(filepath.Join(dir, KubeSessionDir)); err != nil {
+			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
+		}
+		return nil
+	})
+}
+
+func configDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return fmt.Errorf("failed to delete config file: %v", err)
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
-
-	// The kube session records hold bearer tokens that outlive this login.
-	if err := os.RemoveAll(filepath.Join(configDir, KubeSessionDir)); err != nil {
-		return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
-	}
-
-	return nil
+	return filepath.Join(homeDir, ConfigFileDir), nil
 }
 
 func LoadConfig() (Config, error) {
-	homeDir, err := os.UserHomeDir()
+	dir, err := configDir()
 	if err != nil {
-		return Config{}, fmt.Errorf("failed to get user home directory: %v", err)
+		return Config{}, err
 	}
 
-	configDir := filepath.Join(homeDir, ConfigFileDir)
-	configFile := filepath.Join(configDir, ConfigFileName)
+	configFile := filepath.Join(dir, ConfigFileName)
 
-	warnUnrestricted("config directory", restrictConfigDirectoryMode(configDir))
+	warnUnrestricted("config directory", restrictConfigDirectoryMode(dir))
 
 	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
@@ -387,22 +386,18 @@ func (c Config) IsSaaS() bool {
 // SetActiveWorkSession persists the work-session UUID for the config's current workspace ("" clears it);
 // a caller holding a client must use SetActiveWorkSessionFor with the client's pinned workspace instead.
 func SetActiveWorkSession(uuid string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	return setActiveWorkSessionOn(&cfg, cfg.WorkspaceIdentity(), uuid)
+	return updateConfig(func(cfg *Config) (bool, error) {
+		return setActiveWorkSessionOn(cfg, cfg.WorkspaceIdentity(), uuid)
+	})
 }
 
 // SetActiveWorkSessionFor persists the work-session UUID under workspaceName ("" clears it); workspaceName
 // is a parameter, not a fresh read, because create --wait --use can block on approval long
 // enough for another shell's 'alpacon ws use' to file it under a workspace it was never created in.
 func SetActiveWorkSessionFor(workspaceName, uuid string) error {
-	cfg, err := LoadConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	return setActiveWorkSessionOn(&cfg, workspaceName, uuid)
+	return updateConfig(func(cfg *Config) (bool, error) {
+		return setActiveWorkSessionOn(cfg, workspaceName, uuid)
+	})
 }
 
 // GetActiveWorkSession returns the active work-session UUID for the current workspace.
@@ -439,20 +434,25 @@ func GetActiveWorkSessionFor(workspaceName string) (string, error) {
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
 // so ending one session never drops another the user has since switched to. Reports whether it cleared.
 func ClearActiveWorkSessionFor(workspaceName, uuid string) (bool, error) {
-	cfg, err := LoadConfig()
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to load config: %w", err)
-	}
-	if uuid == "" || !strings.EqualFold(activeWorkSessionOn(cfg, workspaceName), uuid) {
+	if uuid == "" {
 		return false, nil
 	}
-	if err := setActiveWorkSessionOn(&cfg, workspaceName, ""); err != nil {
+	cleared := false
+	err := updateConfig(func(cfg *Config) (bool, error) {
+		if !strings.EqualFold(activeWorkSessionOn(*cfg, workspaceName), uuid) {
+			return false, nil
+		}
+		var err error
+		cleared, err = setActiveWorkSessionOn(cfg, workspaceName, "")
+		return cleared, err
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return cleared, nil
 }
 
 func activeWorkSessionOn(cfg Config, workspaceName string) string {
@@ -506,11 +506,10 @@ func GetSmuxConfig() *smux.Config {
 	return config
 }
 
-// setActiveWorkSessionOn shares one LoadConfig across both setters—two reads would reopen
-// the closed race: workspaceName from the first read applied to a map from a second, mid-switch.
-func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) error {
+// setActiveWorkSessionOn files uuid under workspaceName in cfg ("" clears it) and reports whether cfg changed.
+func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) (bool, error) {
 	if workspaceName == "" {
-		return errors.New("no active workspace; run 'alpacon login' first")
+		return false, errors.New("no active workspace; run 'alpacon login' first")
 	}
 	// A session saved before schema_name was recorded sits under the host label,
 	// where GetActiveWorkSession still falls back to it. Every write for the
@@ -527,7 +526,7 @@ func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) error {
 		hasLegacy = hasLegacy && legacyKey != ""
 	}
 	if current == uuid && !hasLegacy {
-		return nil
+		return false, nil
 	}
 	if cfg.ActiveWorkSessions == nil {
 		cfg.ActiveWorkSessions = map[string]string{}
@@ -540,5 +539,5 @@ func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) error {
 	} else {
 		cfg.ActiveWorkSessions[workspaceName] = uuid
 	}
-	return saveConfig(cfg)
+	return true, nil
 }

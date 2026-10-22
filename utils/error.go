@@ -117,9 +117,21 @@ const (
 	// human detail, so authStatusCodeMessage in client/client.go renders the message.
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
+	// CommandACLMoved rides a 405 on a command-ACL write once command ACLs live on
+	// the command pre-approval ledger; codeOnlyMessage in client/client.go renders it.
+	CommandACLMoved = "command_acl_moved"
+
 	// AuthInteractiveChannelRequiresPresence rides a 403: a token gets no interactive channel
 	// whatever its scopes and ACL rules say; only 'alpacon login' without -t lifts it.
 	AuthInteractiveChannelRequiresPresence = "auth_interactive_channel_requires_presence"
+
+	// AuthMFARequiresHumanPrincipal rides a 403: the action requires a person's MFA,
+	// which a token (API or service) cannot complete, so completing MFA under the
+	// token cannot lift it. Signing in with 'alpacon login' without -t can. Removing
+	// the action from the workspace's MFA required actions also can, but only for an
+	// action the workspace armed: the server holds some actions (security settings,
+	// sudo and approval policy writes, RBAC roles) to this no matter what.
+	AuthMFARequiresHumanPrincipal = "auth_mfa_requires_human_principal"
 
 	// The token-scope gate's refusals: the token's scopes do not cover this call, or
 	// the server could not resolve the call's action to a scope at all.
@@ -488,7 +500,7 @@ const LoginWithoutTokenHint = "'alpacon login' without -t (on a machine without 
 // take; a scope refusal counts, since granting the scope only reaches the next refusal.
 func InteractiveOnly(err error, action string) error {
 	switch code, _ := ParseErrorResponse(err); code {
-	case AuthInteractiveChannelRequiresPresence, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
+	case AuthInteractiveChannelRequiresPresence, AuthMFARequiresHumanPrincipal, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
 		return fmt.Errorf("a token cannot %s; run %s and try again", action, LoginWithoutTokenHint)
 	}
 	return err

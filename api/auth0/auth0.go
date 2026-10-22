@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"net/http"
 	"net/url"
@@ -289,9 +290,9 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 		return nil, err
 	}
 
-	err = config.SaveRefreshedAuth0Token(tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil {
-		return nil, err
+	err = config.SaveRefreshedAuth0Token(refreshToken, tokenRes.AccessToken, tokenRes.ExpiresIn)
+	if err != nil && !errors.Is(err, config.ErrLoginChanged) && !errors.Is(err, fs.ErrNotExist) {
+		utils.CliWarning("Could not save the refreshed access token, so the next command will refresh it again: %s", err)
 	}
 
 	return tokenRes, nil
@@ -553,7 +554,7 @@ func Logout(httpClient *http.Client, validConfig config.Config) error {
 			return fmt.Errorf("failed to revoke token: %v", err)
 		}
 	}
-	err := config.DeleteConfig()
+	err := config.DeleteConfig(validConfig)
 	if err != nil {
 		return err
 	}

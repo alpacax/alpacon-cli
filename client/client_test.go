@@ -408,6 +408,26 @@ func TestSendRequest_403InteractiveChannelRefusalPointsToLogin(t *testing.T) {
 	assert.Equal(t, "auth_interactive_channel_requires_presence", code)
 }
 
+func TestSendRequest_403MFAPresenceRefusalPointsToLogin(t *testing.T) {
+	t.Parallel()
+	// Completing MFA under the token cannot lift this refusal, so the message must
+	// not read as the auth_mfa_required step-up prompt.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code": "auth_mfa_requires_human_principal"}`))
+	}))
+	defer ts.Close()
+
+	ac := newTestClient(ts.URL)
+	_, err := ac.SendGetRequest("/api/test/")
+	require.Error(t, err)
+	assert.Equal(t, "this action requires a person to complete MFA, which a token cannot do—sign in with 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and run it as yourself; if your workspace added it to its MFA required actions, an admin can remove it there instead", err.Error())
+	assert.NotContains(t, err.Error(), "complete MFA to continue")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "auth_mfa_requires_human_principal", code)
+}
+
 func TestSendRequest_403FieldErrorsRenderMessage(t *testing.T) {
 	t.Parallel()
 	// A code-only envelope with field_errors and no "detail" must still surface
@@ -2954,6 +2974,26 @@ func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
 			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
 		})
 	}
+}
+
+// A command-ACL write answered 405 command_acl_moved names where the change is
+// made now, and the raw code stays readable for callers.
+func TestSendRequest_405CommandACLMovedNamesTheConsole(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(`{"code":"command_acl_moved"}`))
+	}))
+	defer ts.Close()
+
+	_, err := newTestClient(ts.URL).SendPostRequest("/api/security/command-acl/", map[string]string{"command": "ls"})
+
+	require.Error(t, err)
+	assert.Equal(t, "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger", err.Error())
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "command_acl_moved", code)
+	assert.Equal(t, http.StatusMethodNotAllowed, utils.HTTPStatusCode(err))
 }
 
 // The cursor-paginator codes reach a user only after api.FetchCursorPages has spent

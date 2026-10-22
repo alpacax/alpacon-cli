@@ -3,6 +3,7 @@ package exec
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
@@ -106,6 +107,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		reuseDays                                                int
 		commandParts                                             []string
 		detach                                                   bool
+		upload, overwrite, fromServer                            bool
 		wait                                                     bool
 		separated                                                bool
 		waitApproval                                             time.Duration
@@ -228,6 +230,18 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			if reuseDays, msg = checkReuseDays(raw); msg != "" {
 				return RemoteExecArgs{Err: msg}
 			}
+		case arg == "--upload":
+			upload = true
+		case strings.HasPrefix(arg, "--upload="):
+			return RemoteExecArgs{Err: "--upload does not accept a value; use --upload alone"}
+		case arg == "--overwrite":
+			overwrite = true
+		case strings.HasPrefix(arg, "--overwrite="):
+			return RemoteExecArgs{Err: "--overwrite does not accept a value; use --overwrite alone"}
+		case arg == "--from-server":
+			fromServer = true
+		case strings.HasPrefix(arg, "--from-server="):
+			return RemoteExecArgs{Err: "--from-server does not accept a value; use --from-server alone"}
 		case arg == "--detach":
 			detach = true
 		case strings.HasPrefix(arg, "--detach="):
@@ -264,6 +278,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
 		}
 	}
+	if overwrite && !upload {
+		return RemoteExecArgs{Err: "--overwrite requires --upload; it only applies to the file --upload writes"}
+	}
 	if filePath == "" {
 		if fileFrom != "" {
 			return RemoteExecArgs{Err: "--file-from requires --file"}
@@ -274,10 +291,33 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		if reuseDays > 0 {
 			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
 		}
+		if upload {
+			return RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"}
+		}
+		if fromServer {
+			return RemoteExecArgs{Err: "--from-server requires --file; it reads the script from the --file path on the server"}
+		}
 	} else {
 		if len(env) > 0 {
 			return RemoteExecArgs{
 				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
+			}
+		}
+		if fromServer && upload {
+			return RemoteExecArgs{
+				Err: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
+			}
+		}
+		if fromServer && fileFrom != "" {
+			return RemoteExecArgs{
+				Err: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
+			}
+		}
+		// The upload writes to the cleaned path while the agent opens the path as
+		// given, and a symlink before ".." makes those two different files.
+		if upload && pathpkg.Clean(filePath) != filePath {
+			return RemoteExecArgs{
+				Err: fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath),
 			}
 		}
 		if len(commandParts) > 0 && !separated {
@@ -315,6 +355,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			Interpreter: interpreter,
 			Args:        commandParts,
 			ReuseDays:   reuseDays,
+			Upload:      upload,
+			Overwrite:   overwrite,
+			FromServer:  fromServer,
 		}
 		return parsed
 	}

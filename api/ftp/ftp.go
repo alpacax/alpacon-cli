@@ -1,6 +1,7 @@
 package ftp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -480,22 +481,10 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 // It preserves the remote basename instead of deriving the destination name
 // from the local temp file name.
 func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePath, username, groupname, workSessionID string) error {
-	remoteName, err := utils.RemoteFileName(remotePath)
-	if err != nil {
+	// A bad remote path is the caller's to fix whatever the local file holds.
+	if _, _, err := splitRemoteFilePath(remotePath); err != nil {
 		return err
 	}
-	remoteDir := pathpkg.Dir(remotePath)
-	if remoteDir == "." {
-		remoteDir = ""
-	} else if !strings.HasSuffix(remoteDir, "/") {
-		remoteDir += "/"
-	}
-
-	serverID, err := server.GetServerIDByName(ac, serverName)
-	if err != nil {
-		return utils.MarkSubmission(err)
-	}
-
 	f, err := os.Open(localPath)
 	if err != nil {
 		return err
@@ -506,6 +495,31 @@ func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePa
 	if err != nil {
 		return err
 	}
+	return uploadToExactPath(ac, serverName, remotePath, readOnly{f}, stat.Size(), username, groupname, workSessionID, true)
+}
+
+// UploadContentAs writes content to the exact remote file path as username and
+// groupname. It sends the bytes it is given rather than reopening a local file,
+// so a caller that hashes or submits the same bytes knows they are what landed
+// on the server. Without allowOverwrite the agent refuses an existing file.
+func UploadContentAs(ac *client.AlpaconClient, serverName, remotePath string, content []byte, username, groupname, workSessionID string, allowOverwrite bool) error {
+	// A bytes.Reader lets net/http replay the body on a redirect.
+	return uploadToExactPath(ac, serverName, remotePath, bytes.NewReader(content), int64(len(content)), username, groupname, workSessionID, allowOverwrite)
+}
+
+// uploadToExactPath uploads body to the exact remote file path. The server
+// lookup and the upload create are tagged as the submission, so an MFA retry
+// resends them and nothing after the create.
+func uploadToExactPath(ac *client.AlpaconClient, serverName, remotePath string, body io.Reader, size int64, username, groupname, workSessionID string, allowOverwrite bool) error {
+	remoteName, remoteDir, err := splitRemoteFilePath(remotePath)
+	if err != nil {
+		return err
+	}
+
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return utils.MarkSubmission(err)
+	}
 
 	request := &UploadRequest{
 		Name:           remoteName,
@@ -513,10 +527,26 @@ func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePa
 		Server:         serverID,
 		Username:       username,
 		Groupname:      groupname,
-		AllowOverwrite: true,
+		AllowOverwrite: allowOverwrite,
 		WorkSession:    workSessionID,
 	}
-	return executeSingleUpload(ac, request, readOnly{f}, stat.Size())
+	return executeSingleUpload(ac, request, body, size)
+}
+
+// splitRemoteFilePath splits an exact remote file path into the name and the
+// directory an upload request carries, the directory ending in a slash.
+func splitRemoteFilePath(remotePath string) (name, dir string, err error) {
+	name, err = utils.RemoteFileName(remotePath)
+	if err != nil {
+		return "", "", err
+	}
+	dir = pathpkg.Dir(remotePath)
+	if dir == "." {
+		dir = ""
+	} else if !strings.HasSuffix(dir, "/") {
+		dir += "/"
+	}
+	return name, dir, nil
 }
 
 func createFolderZipTempFile(folderPath string) (*os.File, int64, error) {
@@ -638,13 +668,42 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 }
 
 func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttempts int) (int64, error) {
+	resp, err := fetchFromURL(httpClient, url, maxAttempts)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Remote files routinely carry secrets, so a new download lands owner-only.
+	return utils.SaveStreamAtomic(filePath, resp.Body, 0600)
+}
+
+// fetchFromURLLimited reads at most limit bytes of the file at url into
+// memory, so a file far larger than the caller accepts is never read whole.
+func fetchFromURLLimited(httpClient *http.Client, url string, limit int64, maxAttempts int) ([]byte, error) {
+	resp, err := fetchFromURL(httpClient, url, maxAttempts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	if err != nil {
+		return nil, fmt.Errorf("network error while downloading: %w", utils.RedactURLError(err))
+	}
+	return data, nil
+}
+
+// fetchFromURL GETs url, retrying a retryable status up to maxAttempts times,
+// and returns the 200 response; the caller closes its body.
+func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 
 	for count := range maxAttempts {
 		resp, err = httpClient.Get(url)
 		if err != nil {
-			return 0, fmt.Errorf("network error while downloading: %w", utils.RedactURLError(err))
+			return nil, fmt.Errorf("network error while downloading: %w", utils.RedactURLError(err))
 		}
 
 		if resp.StatusCode == http.StatusOK {
@@ -661,7 +720,7 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 		}
 
 		if utils.IsFatalClientError(resp.StatusCode) {
-			return 0, fetchStatusError{status: resp.StatusCode, code: refusalCode, source: refusalSource}
+			return nil, fetchStatusError{status: resp.StatusCode, code: refusalCode, source: refusalSource}
 		}
 
 		budget := maxAttempts
@@ -669,15 +728,11 @@ func fetchFromURLToFile(httpClient *http.Client, url, filePath string, maxAttemp
 			budget = min(budget, throttledMaxAttempts)
 		}
 		if count >= budget-1 {
-			return 0, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
+			return nil, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
 		}
 		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
 	}
-
-	defer func() { _ = resp.Body.Close() }()
-
-	// Remote files routinely carry secrets, so a new download lands owner-only.
-	return utils.SaveStreamAtomic(filePath, resp.Body, 0600)
+	return resp, nil
 }
 
 func downloadedFilePath(dest, remotePath string) (string, error) {
@@ -745,6 +800,22 @@ func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, re
 }
 
 func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, serverID, username, groupname, resourceType, workSessionID string, recursive bool) (DownloadedFile, error) {
+	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %s...", filepath.Base(remotePath)))
+	spinner.Start()
+	defer spinner.Stop()
+
+	postBody, err := createSingleDownload(ac, remotePath, serverID, username, groupname, resourceType, workSessionID)
+	if err != nil {
+		return DownloadedFile{}, err
+	}
+	// The server accepted the download and runs it; what fails after it is
+	// returned untagged, so it never starts another.
+	return completeSingleDownload(ac, serverID, postBody, remotePath, dest, recursive)
+}
+
+// createSingleDownload asks the server to start downloading one remote path.
+// Its refusal is tagged as the submission, the one request a retry may resend.
+func createSingleDownload(ac *client.AlpaconClient, remotePath, serverID, username, groupname, resourceType, workSessionID string) ([]byte, error) {
 	downloadRequest := &DownloadRequest{
 		Path:         remotePath,
 		Name:         filepath.Base(remotePath),
@@ -754,18 +825,11 @@ func downloadSingleFileWithResult(ac *client.AlpaconClient, remotePath, dest, se
 		ResourceType: resourceType,
 		WorkSession:  workSessionID,
 	}
-
-	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %s...", filepath.Base(remotePath)))
-	spinner.Start()
-	defer spinner.Stop()
-
 	postBody, err := ac.SendPostRequest(downloadAPIURL, downloadRequest)
 	if err != nil {
-		return DownloadedFile{}, utils.MarkSubmission(err)
+		return nil, utils.MarkSubmission(err)
 	}
-	// The server accepted the download and runs it; what fails after it is
-	// returned untagged, so it never starts another.
-	return completeSingleDownload(ac, serverID, postBody, remotePath, dest, recursive)
+	return postBody, nil
 }
 
 // downloadIDs checks the transfer and command IDs a download create returned,
@@ -783,16 +847,32 @@ func downloadIDs(transferID, commandID string) (api.PathID, api.PathID, error) {
 }
 
 // completeSingleDownload waits for the download the server started, fetches
-// the file and confirms the transfer. Each request after the create is its own
-// retry unit (transferStep).
+// the file to dest and confirms the transfer.
 func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody []byte, remotePath, dest string, recursive bool) (DownloadedFile, error) {
+	var localPath string
+	written, err := completeSingleDownloadWith(ac, serverID, postBody, func(url string) (written int64, err error) {
+		localPath, written, err = saveDownloadedURL(ac.HTTPClient, url, dest, remotePath, recursive, downloadMaxAttempts)
+		return written, err
+	})
+	if err != nil {
+		return DownloadedFile{}, err
+	}
+	// Report the bytes actually written to disk; the edit size guard must reflect
+	// the local file, not a possibly stale or incorrect server-reported size.
+	return DownloadedFile{Path: localPath, Size: written}, nil
+}
+
+// completeSingleDownloadWith waits for the download the server started, hands
+// its URL to fetch and confirms the transfer, returning the bytes fetch read.
+// Each request after the create is its own retry unit (transferStep).
+func completeSingleDownloadWith(ac *client.AlpaconClient, serverID string, postBody []byte, fetch func(url string) (int64, error)) (int64, error) {
 	var downloadResponse DownloadResponse
 	if err := json.Unmarshal(postBody, &downloadResponse); err != nil {
-		return DownloadedFile{}, err
+		return 0, err
 	}
 	transferID, commandID, err := downloadIDs(downloadResponse.ID, downloadResponse.Command)
 	if err != nil {
-		return DownloadedFile{}, err
+		return 0, err
 	}
 
 	var status event.EventDetails
@@ -800,39 +880,33 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 		status, err = event.PollCommandExecution(ac, commandID)
 		return err
 	}); err != nil {
-		return DownloadedFile{}, err
+		return 0, err
 	}
 
 	if status.Status == "stuck" || status.Status == "error" {
-		return DownloadedFile{}, fmt.Errorf("command failed with status: %s", status.Status)
+		return 0, fmt.Errorf("command failed with status: %s", status.Status)
 	}
 	if status.Status == "failed" {
-		return DownloadedFile{}, fmt.Errorf("%s", status.Result)
+		return 0, fmt.Errorf("%s", status.Result)
 	}
 
-	var (
-		localPath string
-		written   int64
-	)
+	var written int64
 	if err := transferStep(ac, serverID, func() (err error) {
-		localPath, written, err = saveDownloadedURL(ac.HTTPClient, downloadResponse.DownloadURL, dest, remotePath, recursive, downloadMaxAttempts)
+		written, err = fetch(downloadResponse.DownloadURL)
 		return err
 	}); err != nil {
-		return DownloadedFile{}, err
+		return 0, err
 	}
 
 	timeout := calcPollTimeout(1, written)
 	success, message, err := pollTransfer(ac, serverID, downloadTransfer, transferID, timeout, time.Time{})
 	if err != nil {
-		return DownloadedFile{}, fmt.Errorf("download transfer status check failed: %w", err)
+		return 0, fmt.Errorf("download transfer status check failed: %w", err)
 	}
 	if !success {
-		return DownloadedFile{}, fmt.Errorf("%s", message)
+		return 0, fmt.Errorf("%s", message)
 	}
-
-	// Report the bytes actually written to disk; the edit size guard must reflect
-	// the local file, not a possibly stale or incorrect server-reported size.
-	return DownloadedFile{Path: localPath, Size: written}, nil
+	return written, nil
 }
 
 // downloadBulk downloads multiple remote files as a single zip archive using the bulk API.
@@ -967,6 +1041,37 @@ func DownloadFileToPath(ac *client.AlpaconClient, serverName, remotePath, localP
 		return DownloadedFile{}, utils.MarkSubmission(err)
 	}
 	return downloadSingleFileWithResult(ac, remotePath, localPath, serverID, username, groupname, "file", workSessionID, false)
+}
+
+// DownloadFileContent reads one remote file into memory, at most limit bytes of
+// it: a caller that refuses anything larger learns so from limit+1 without the
+// whole file crossing the network or touching the disk.
+func DownloadFileContent(ac *client.AlpaconClient, serverName, remotePath, username, groupname, workSessionID string, limit int64) ([]byte, error) {
+	serverID, err := server.GetServerIDByName(ac, serverName)
+	if err != nil {
+		return nil, utils.MarkSubmission(err)
+	}
+
+	spinner := utils.NewSpinner(fmt.Sprintf("Downloading %s...", filepath.Base(remotePath)))
+	spinner.Start()
+	defer spinner.Stop()
+
+	postBody, err := createSingleDownload(ac, remotePath, serverID, username, groupname, "file", workSessionID)
+	if err != nil {
+		return nil, err
+	}
+	// The server accepted the download and runs it; what fails after it is
+	// returned untagged, so it never starts another.
+	var content []byte
+	_, err = completeSingleDownloadWith(ac, serverID, postBody, func(url string) (int64, error) {
+		data, err := fetchFromURLLimited(ac.HTTPClient, url, limit, downloadMaxAttempts)
+		content = data
+		return int64(len(data)), err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
 }
 
 // calcPollTimeout returns a dynamic poll timeout based on file count and total size.
