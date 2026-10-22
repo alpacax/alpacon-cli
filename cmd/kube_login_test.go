@@ -596,5 +596,9 @@ func TestKubeLoginResumeCommandKeepsItsFlags(t *testing.T) {
 		"--intent", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
 
 	assert.Equal(t, utils.ExitCodePendingApproval, exitCode, "stderr: %s", stderr)
-	assert.Contains(t, stderr, "--work-session "+loginWSID+" --kubeconfig "+path+" --proxy-port 18443")
+	// How the path is quoted follows the platform's shell; a Windows temp path
+	// carries a ~ and gets double quotes.
+	assert.Contains(t, stderr, "--work-session "+loginWSID+" --kubeconfig ")
+	assert.Contains(t, stderr, path)
+	assert.Contains(t, stderr, " --proxy-port 18443")
 }
