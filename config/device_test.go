@@ -137,7 +137,7 @@ func TestGetOrCreateDeviceID_SurvivesLogout(t *testing.T) {
 	deviceID, err := GetOrCreateDeviceID()
 	require.NoError(t, err)
 
-	require.NoError(t, DeleteConfig())
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
 
 	_, err = LoadConfig()
 	require.Error(t, err, "logout must have removed the config file")
@@ -174,11 +174,11 @@ func TestGetOrCreateDeviceID_SurvivesConfigWrites(t *testing.T) {
 	}{
 		{"workspace switch", func(t *testing.T) {
 			t.Helper()
-			require.NoError(t, SwitchWorkspace("https://ws2.us1.alpacon.io", "ws2", false))
+			require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false))
 		}},
 		{"access token refresh", func(t *testing.T) {
 			t.Helper()
-			require.NoError(t, SaveRefreshedAuth0Token("refreshed-access-token", 3600))
+			require.NoError(t, SaveRefreshedAuth0Token("refresh-token", "refreshed-access-token", 3600))
 		}},
 		{"active work session", func(t *testing.T) {
 			t.Helper()

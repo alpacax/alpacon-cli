@@ -155,9 +155,11 @@ func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, WorkspaceName: "ws-a"}
 
-	require.NoError(t, config.SwitchWorkspace("https://ws-b.example.com", "ws-b", false))
+	before, err := config.LoadConfig()
+	require.NoError(t, err)
+	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false))
 
-	_, err := worksession.RunUse(ac, "ses-a")
+	_, err = worksession.RunUse(ac, "ses-a")
 	require.NoError(t, err)
 
 	cfg, err := config.LoadConfig()
