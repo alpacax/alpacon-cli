@@ -49,9 +49,9 @@ jobs:
         if: runner.os == 'Linux'
         run: bash -n sample_test_cli.sh
 
-      - name: Lint the sample CLI script with shellcheck
+      - name: Lint the shell scripts with shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck sample_test_cli.sh
+        run: shellcheck sample_test_cli.sh scripts/completions.sh
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -73,11 +73,51 @@ jobs:
       - name: Run Tests
         run: go test -race -v -shuffle=on -count=1 ${{ matrix.packages }}
 
+  # The before hook and nfpm contents otherwise first run when a tag is pushed.
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Allow Go toolchain auto-download
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: Build a snapshot release
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --snapshot --clean --skip=docker
+
+      - name: Check completion files in the packages
+        run: |
+          command -v rpm >/dev/null || sudo apt-get install -y rpm
+          deb=$(ls dist/*_linux_amd64.deb)
+          rpm=$(ls dist/*_linux_amd64.rpm)
+          for f in /usr/share/bash-completion/completions/alpacon \
+                   /usr/share/fish/vendor_completions.d/alpacon.fish \
+                   /usr/share/zsh/vendor-completions/_alpacon; do
+            dpkg-deb -c "$deb" | grep -E "^-rw-r--r-- .*\.$f\$"
+          done
+          for f in /usr/share/bash-completion/completions/alpacon \
+                   /usr/share/fish/vendor_completions.d/alpacon.fish \
+                   /usr/share/zsh/site-functions/_alpacon; do
+            rpm -qlpv "$rpm" | grep -E "^-rw-r--r-- .* $f\$"
+          done
+          grep -F 'generate_completions_from_executable(bin/"alpacon", "completion")' dist/homebrew/Formula/alpacon-cli.rb
+
   build-and-test:
-    needs: [test]
+    needs: [test, package]
     if: always()
     runs-on: ubuntu-latest
 
     steps:
-      - name: Fail unless every matrix leg passed
-        run: '[ "${{ needs.test.result }}" = "success" ]'
+      - name: Fail unless every matrix leg and the package check passed
+        run: '[ "${{ needs.test.result }}" = "success" ] && [ "${{ needs.package.result }}" = "success" ]'
