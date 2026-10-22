@@ -118,8 +118,8 @@ const (
 	APITokenACLNotAllowed = "api_token_acl_not_allowed"
 
 	// CommandACLMoved rides a 405 on a command-ACL write: command pre-approvals
-	// moved to a ledger this CLI cannot write yet, so the change has to be made
-	// from the web console.
+	// moved to a ledger this CLI cannot write yet, so a ledger admin makes the
+	// change on the service token's command ACL card in the web console.
 	CommandACLMoved = "command_acl_moved"
 
 	// AuthInteractiveChannelRequiresPresence rides a 403: a token gets no interactive channel

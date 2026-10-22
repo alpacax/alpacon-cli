@@ -2970,7 +2970,7 @@ func TestSendRequest_405CommandACLMovedNamesTheConsole(t *testing.T) {
 	_, err := newTestClient(ts.URL).SendPostRequest("/api/security/command-acl/", map[string]string{"command": "ls"})
 
 	require.Error(t, err)
-	assert.Equal(t, "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—add, change or remove them from the web console, on the token's ACL page or in the workspace Command ACL settings", err.Error())
+	assert.Equal(t, "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a ledger admin issues or revokes the entry on the service token's command ACL card in the web console; a personal API token has no command list on this path", err.Error())
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, utils.CommandACLMoved, code)
 	assert.Equal(t, "command_acl_moved", code)

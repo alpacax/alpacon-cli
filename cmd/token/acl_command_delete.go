@@ -14,8 +14,9 @@ var aclCommandDeleteCmd = &cobra.Command{
 	Long: `Delete a command ACL rule by ID.
 
 On servers that manage command ACLs on the command pre-approval ledger, this
-write is refused with command_acl_moved; add, change or remove command ACLs from
-the web console there.`,
+write is refused with command_acl_moved; a ledger admin revokes the entry on the
+service token's command ACL card in the web console, and a personal API token has
+no command list on this path.`,
 	Example: `  alpacon token acl command delete 550e8400-e29b-41d4-a716-446655440000
   alpacon token acl command rm 550e8400-e29b-41d4-a716-446655440000`,
 	Args: cobra.ExactArgs(1),

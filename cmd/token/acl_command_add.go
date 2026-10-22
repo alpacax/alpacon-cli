@@ -21,8 +21,9 @@ Username semantics: "" = token owner only, "*" = any user, exact name = match on
 Groupname semantics: "" = no group restriction, "*" = any group, exact name = match only.
 
 On servers that manage command ACLs on the command pre-approval ledger, this
-write is refused with command_acl_moved; add, change or remove command ACLs from
-the web console there.`,
+write is refused with command_acl_moved; a ledger admin issues the entry on the
+service token's command ACL card in the web console, and a personal API token has
+no command list on this path.`,
 	Example: `  alpacon token acl command add my-api-token --command="whoami"
   alpacon token acl command add my-api-token --command="docker *" --username=root
   alpacon token acl command add my-api-token --command="systemctl status *" --username="*" --groupname="*"`,
