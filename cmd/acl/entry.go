@@ -42,21 +42,21 @@ with --token. Revoked entries are not listed.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		tokenRef, _ := cmd.Flags().GetString("token")
 
+		session := openLedger()
 		principalID := ""
 		if tokenRef != "" {
 			var err error
-			if principalID, err = resolveServiceToken(tokenRef); err != nil {
+			if principalID, err = session.resolveServiceToken(tokenRef); err != nil {
 				utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
 			}
 		}
 
-		session := openLedger()
 		entries, err := acl.ListEntries(session.signer, session.workspaceID, principalID)
 		if err != nil {
 			session.fail("list pre-approved commands", err)
 		}
 
-		tokenNames, serverNames := workspaceNames()
+		tokenNames, serverNames := session.workspaceNames()
 		utils.PrintTable(acl.ToEntryAttributes(entries, tokenNames, serverNames))
 	},
 }

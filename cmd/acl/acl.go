@@ -3,12 +3,11 @@
 package acl
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/server"
-	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -43,23 +42,13 @@ func init() {
 	AclCmd.AddCommand(adminCmd)
 }
 
-// workspaceClient connects to the workspace API, which resolves the names the
-// ledger stores as ids.
-func workspaceClient() (*client.AlpaconClient, error) {
-	ac, err := client.NewAlpaconAPIClient()
-	if err != nil {
-		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
-	}
-	return ac, nil
-}
-
 // resolveServiceToken turns a service token name into the id the ledger
-// stores; an id passes through without a lookup.
-func resolveServiceToken(ref string) (string, error) {
+// stores, in the session's workspace; an id passes through without a lookup.
+func (s *ledgerSession) resolveServiceToken(ref string) (string, error) {
 	if utils.IsUUID(strings.TrimSpace(ref)) {
 		return strings.TrimSpace(ref), nil
 	}
-	ac, err := workspaceClient()
+	ac, err := s.workspaceAPI()
 	if err != nil {
 		return "", err
 	}
@@ -68,14 +57,15 @@ func resolveServiceToken(ref string) (string, error) {
 
 // resolveServerScope turns --server values into the ids the ledger stores. An
 // id passes through, because a listed entry prints ids where a server has been
-// deleted; anything else is a server name resolved through the workspace API.
-func resolveServerScope(refs []string) ([]string, error) {
-	ids, names := partitionServerRefs(refs)
-	if len(names) == 0 {
-		return ids, nil
+// deleted; anything else is a server name resolved through the session's
+// workspace API.
+func (s *ledgerSession) resolveServerScope(refs []string) ([]string, error) {
+	ids, names, err := partitionServerRefs(refs)
+	if err != nil || len(names) == 0 {
+		return ids, err
 	}
 
-	ac, err := workspaceClient()
+	ac, err := s.workspaceAPI()
 	if err != nil {
 		return nil, err
 	}
@@ -86,28 +76,30 @@ func resolveServerScope(refs []string) ([]string, error) {
 	return append(ids, resolved...), nil
 }
 
-// partitionServerRefs splits --server values into ids and names, dropping the
-// empty strings a trailing comma leaves behind.
-func partitionServerRefs(refs []string) (ids []string, names []string) {
+// partitionServerRefs splits --server values into ids and names. An empty
+// value is refused rather than dropped: an empty scope means every server in
+// the workspace, so dropping a stray empty value could leave a scope that
+// covers far more than the caller wrote.
+func partitionServerRefs(refs []string) (ids []string, names []string, err error) {
 	for _, ref := range refs {
 		ref = strings.TrimSpace(ref)
 		switch {
 		case ref == "":
-			continue
+			return nil, nil, errors.New("--server has an empty value; name each server, or leave --server out to cover every server")
 		case utils.IsUUID(ref):
 			ids = append(ids, ref)
 		default:
 			names = append(names, ref)
 		}
 	}
-	return ids, names
+	return ids, names, nil
 }
 
 // workspaceNames maps service token and server ids to names for a listing. It
 // is best effort: a listing is still correct with ids, so a failure here only
 // costs readability and is reported under ALPACON_DEBUG.
-func workspaceNames() (tokenNames, serverNames map[string]string) {
-	ac, err := workspaceClient()
+func (s *ledgerSession) workspaceNames() (tokenNames, serverNames map[string]string) {
+	ac, err := s.workspaceAPI()
 	if err != nil {
 		utils.CliDebug("showing ids instead of names: %v", err)
 		return nil, nil

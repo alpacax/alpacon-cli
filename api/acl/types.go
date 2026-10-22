@@ -17,8 +17,10 @@ type Capability struct {
 }
 
 // Administers reports whether the caller is a Command ACL admin of workspaceID.
+// Both halves of the answer have to agree: a workspace listed beside a false
+// flag is not taken as a grant.
 func (c Capability) Administers(workspaceID string) bool {
-	return slices.ContainsFunc(c.WorkspaceIDs, func(id string) bool { return strings.EqualFold(id, workspaceID) })
+	return c.IsLedgerAdmin && slices.ContainsFunc(c.WorkspaceIDs, func(id string) bool { return strings.EqualFold(id, workspaceID) })
 }
 
 type EntryResponse struct {

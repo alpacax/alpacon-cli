@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -58,6 +59,7 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	file, _ := cmd.Flags().GetString("file")
 
 	var entries []acl.EntryRequest
+	var flagged *flagEntry
 	if file != "" {
 		if flagged := entryFlagsSet(cmd); len(flagged) > 0 {
 			utils.CliErrorWithExit("--file cannot be combined with --%s.", flagged[0])
@@ -70,10 +72,13 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 			utils.CliErrorWithExit("Failed to read %s: %s.", file, err)
 		}
 	} else {
-		entries = []acl.EntryRequest{entryFromFlags(cmd)}
+		flagged = entryFromFlags(cmd)
 	}
 
 	session := openLedger()
+	if flagged != nil {
+		entries = []acl.EntryRequest{flagged.resolve(session)}
+	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
 		session.fail("pre-approve the command", err)
@@ -96,9 +101,17 @@ func entryFlagsSet(cmd *cobra.Command) []string {
 	return set
 }
 
-// entryFromFlags builds the one entry the flags describe, exiting on a missing
+// flagEntry is the one entry the flags describe, before its service token and
+// server names are resolved in the session's workspace.
+type flagEntry struct {
+	tokenRef   string
+	serverRefs []string
+	request    acl.EntryRequest
+}
+
+// entryFromFlags reads the one entry the flags describe, exiting on a missing
 // or malformed value before anything reaches the signer.
-func entryFromFlags(cmd *cobra.Command) acl.EntryRequest {
+func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	tokenRef, _ := cmd.Flags().GetString("token")
 	command, _ := cmd.Flags().GetString("command")
 	username, _ := cmd.Flags().GetString("username")
@@ -115,26 +128,51 @@ func entryFromFlags(cmd *cobra.Command) acl.EntryRequest {
 	if err := validateExpiry(expiresAt); err != nil {
 		utils.CliErrorWithExit("%s", err)
 	}
-
-	principalID, err := resolveServiceToken(tokenRef)
-	if err != nil {
-		utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
+	if err := validateServerRefs(cmd.Flags().Changed("server"), serverRefs); err != nil {
+		utils.CliErrorWithExit("%s", err)
 	}
-	serverIDs, err := resolveServerScope(serverRefs)
+
+	return &flagEntry{
+		tokenRef:   tokenRef,
+		serverRefs: serverRefs,
+		request: acl.EntryRequest{
+			PrincipalType:  acl.PrincipalTypeServiceToken,
+			CommandPattern: command,
+			Username:       username,
+			Groupname:      groupname,
+			ExpiresAt:      expiresAt,
+			Enabled:        !disabled,
+		},
+	}
+}
+
+// validateServerRefs refuses a --server that was given but names nothing, such
+// as --server "" or a stray comma. Read as omitted, it would issue the entry
+// for every server in the workspace.
+func validateServerRefs(given bool, refs []string) error {
+	if given && len(refs) == 0 {
+		return errors.New("--server has an empty value; name each server, or leave --server out to cover every server")
+	}
+	_, _, err := partitionServerRefs(refs)
+	return err
+}
+
+// resolve names the service token and servers by the ids the ledger stores,
+// looked up in the workspace the session was opened for.
+func (f *flagEntry) resolve(session *ledgerSession) acl.EntryRequest {
+	principalID, err := session.resolveServiceToken(f.tokenRef)
+	if err != nil {
+		utils.CliErrorWithExit("Failed to find service token %q: %s.", f.tokenRef, err)
+	}
+	serverIDs, err := session.resolveServerScope(f.serverRefs)
 	if err != nil {
 		utils.CliErrorWithExit("Failed to resolve the entry's servers: %s.", err)
 	}
 
-	return acl.EntryRequest{
-		PrincipalType:  acl.PrincipalTypeServiceToken,
-		PrincipalID:    principalID,
-		CommandPattern: command,
-		Username:       username,
-		Groupname:      groupname,
-		ServerIDs:      serverIDs,
-		ExpiresAt:      expiresAt,
-		Enabled:        !disabled,
-	}
+	request := f.request
+	request.PrincipalID = principalID
+	request.ServerIDs = serverIDs
+	return request
 }
 
 func validateExpiry(expiresAt string) error {
@@ -169,6 +207,11 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 	var items []fileEntry
 	if err := decoder.Decode(&items); err != nil {
 		return nil, fmt.Errorf("expected a JSON array of entries: %w", err)
+	}
+	// One array and nothing after it: the batch is all or nothing, so a second
+	// value concatenated onto the file must not be ignored.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("expected a single JSON array of entries, but the file continues after it")
 	}
 	if len(items) == 0 {
 		return nil, errors.New("the file holds no entries")

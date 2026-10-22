@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -43,8 +44,10 @@ type sessionSeams struct {
 func installSeams(t *testing.T, s *sessionSeams) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	origLoad, origFetch, origAuthorize, origNow := loadConfig, fetchAuthEnv, authorizeSigner, now
-	t.Cleanup(func() { loadConfig, fetchAuthEnv, authorizeSigner, now = origLoad, origFetch, origAuthorize, origNow })
+	origLoad, origFetch, origAuthorize, origNow, origWorkspace := loadConfig, fetchAuthEnv, authorizeSigner, now, newWorkspaceClient
+	t.Cleanup(func() {
+		loadConfig, fetchAuthEnv, authorizeSigner, now, newWorkspaceClient = origLoad, origFetch, origAuthorize, origNow, origWorkspace
+	})
 
 	loadConfig = func() (config.Config, error) { return s.cfg, s.cfgErr }
 	fetchAuthEnv = func(string, *http.Client) (*auth0.AuthEnvResponse, error) { return s.env, nil }
@@ -154,6 +157,7 @@ func TestNewLedgerSession_NotACommandACLAdminHere(t *testing.T) {
 		body string
 	}{
 		{name: "admin of nothing", body: `{"is_ledger_admin": false, "workspace_ids": []}`},
+		{name: "workspace listed beside a false flag", body: `{"is_ledger_admin": false, "workspace_ids": ["` + testWorkspaceID + `"]}`},
 		{name: "admin of another workspace", body: `{"is_ledger_admin": true, "workspace_ids": ["00000000-0000-0000-0000-000000000000"]}`},
 	}
 	for _, tt := range tests {
@@ -256,4 +260,96 @@ func TestAuthorizationFailureMessage(t *testing.T) {
 			assert.NotContains(t, message, "alpacon login", "the remedy is running the acl command again")
 		})
 	}
+}
+
+// Name lookups go to the workspace the session was opened for. Once another
+// shell has switched workspaces, resolving there would file a name from one
+// workspace under the other's ledger.
+func TestWorkspaceAPI_RefusesAWorkspaceTheSessionWasNotOpenedFor(t *testing.T) {
+	installSeams(t, &sessionSeams{})
+	newWorkspaceClient = func() (*client.AlpaconClient, error) {
+		return &client.AlpaconClient{BaseURL: "https://ws2.us1.alpacon.io"}, nil
+	}
+	session := &ledgerSession{workspaceURL: testWorkspaceURL}
+
+	_, err := session.workspaceAPI()
+	require.ErrorContains(t, err, "workspace changed")
+
+	_, err = session.resolveServiceToken("deploy-bot")
+	require.ErrorContains(t, err, "workspace changed")
+	_, err = session.resolveServerScope([]string{"web-01"})
+	require.ErrorContains(t, err, "workspace changed")
+}
+
+func TestWorkspaceAPI_BuildsOneClientForTheSessionsWorkspace(t *testing.T) {
+	installSeams(t, &sessionSeams{})
+	builds := 0
+	newWorkspaceClient = func() (*client.AlpaconClient, error) {
+		builds++
+		return &client.AlpaconClient{BaseURL: testWorkspaceURL}, nil
+	}
+	session := &ledgerSession{workspaceURL: testWorkspaceURL}
+
+	first, err := session.workspaceAPI()
+	require.NoError(t, err)
+	second, err := session.workspaceAPI()
+	require.NoError(t, err)
+	assert.Same(t, first, second)
+	assert.Equal(t, 1, builds)
+}
+
+// A token authorized for one login and workspace is not used once another
+// shell has replaced either while the browser step ran.
+func TestCacheSignerToken_FailsOnceTheConfigMoved(t *testing.T) {
+	tests := []struct {
+		name string
+		move func(started config.Config) error
+	}{
+		{name: "another login", move: func(config.Config) error {
+			return config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access-2", "refresh-2", "alpacon.io", 3600, false)
+		}},
+		{name: "a workspace switch", move: func(started config.Config) error {
+			return config.SwitchWorkspace(started, "https://ws2.us1.alpacon.io", "ws2", false)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
+			started, err := config.LoadConfig()
+			require.NoError(t, err)
+			require.NoError(t, tt.move(started))
+
+			token, err := cacheSignerToken(started, "signer", 86400)
+
+			require.ErrorContains(t, err, "Run the command again")
+			assert.Empty(t, token)
+		})
+	}
+}
+
+func TestCacheSignerToken_ReturnsTheSavedToken(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
+	started, err := config.LoadConfig()
+	require.NoError(t, err)
+
+	token, err := cacheSignerToken(started, "signer", 86400)
+
+	require.NoError(t, err)
+	assert.Equal(t, "signer", token)
+}
+
+// The override may carry credentials in its userinfo or query; neither the
+// message nor the transport error it quotes may print them.
+func TestErrorMessage_RedactsTheSignerURL(t *testing.T) {
+	override := "https://user:secret@signer.example.com/base?token=abc"
+	t.Setenv(client.SignerURLEnvVar, override)
+	transportErr := &url.Error{Op: "Get", URL: override + "/api/acl/me/", Err: errors.New("connection refused")}
+
+	message := (&ledgerSession{}).errorMessage("list pre-approved commands", transportErr)
+
+	assert.NotContains(t, message, "secret")
+	assert.NotContains(t, message, "token=abc")
+	assert.Contains(t, message, "https://signer.example.com/base")
 }

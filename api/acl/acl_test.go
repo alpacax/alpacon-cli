@@ -373,3 +373,11 @@ func TestListAndRevoke_KeepAPITokenEntries(t *testing.T) {
 	assert.Equal(t, "api_token", entries[0].PrincipalType)
 	require.NoError(t, RevokeEntry(ac, testEntryID))
 }
+
+// A workspace listed beside a false flag is not a grant: both halves of the
+// answer have to agree.
+func TestCapability_AdministersNeedsTheFlag(t *testing.T) {
+	t.Parallel()
+	capability := Capability{IsLedgerAdmin: false, WorkspaceIDs: []string{testWorkspaceID}}
+	assert.False(t, capability.Administers(testWorkspaceID))
+}

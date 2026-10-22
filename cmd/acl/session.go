@@ -19,17 +19,20 @@ import (
 // ledgerSession is what every acl subcommand works through: a client for the
 // signer holding the signer token, and the workspace the ledger is asked about.
 type ledgerSession struct {
-	signer      *client.AlpaconClient
-	token       string
-	workspaceID string
+	signer       *client.AlpaconClient
+	token        string
+	workspaceID  string
+	workspaceURL string
+	workspace    *client.AlpaconClient
 }
 
 // Seams for the parts of opening a session that reach outside this process.
 var (
-	loadConfig      = config.LoadConfig
-	fetchAuthEnv    = auth0.FetchAuthEnv
-	authorizeSigner = runSignerDeviceCode
-	now             = time.Now
+	loadConfig         = config.LoadConfig
+	fetchAuthEnv       = auth0.FetchAuthEnv
+	newWorkspaceClient = client.NewAlpaconAPIClient
+	authorizeSigner    = runSignerDeviceCode
+	now                = time.Now
 )
 
 // openLedger opens a ledger session or exits with the reason it cannot.
@@ -72,9 +75,10 @@ func newLedgerSession() (*ledgerSession, error) {
 	}
 
 	session := &ledgerSession{
-		signer:      client.NewSignerClient(token, cfg.Insecure),
-		token:       token,
-		workspaceID: workspaceID,
+		signer:       client.NewSignerClient(token, cfg.Insecure),
+		token:        token,
+		workspaceID:  workspaceID,
+		workspaceURL: cfg.WorkspaceURL,
 	}
 
 	capability, err := acl.GetCapability(session.signer)
@@ -120,11 +124,23 @@ func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse) (str
 		return "", errors.New(authorizationFailureMessage(err))
 	}
 
-	err = config.SaveSignerToken(cfg, tokenRes.AccessToken, tokenRes.ExpiresIn)
-	if err != nil && !errors.Is(err, config.ErrLoginChanged) && !errors.Is(err, config.ErrWorkspaceChanged) {
+	return cacheSignerToken(cfg, tokenRes.AccessToken, tokenRes.ExpiresIn)
+}
+
+// cacheSignerToken stores a freshly authorized signer token and hands it back,
+// unless the config no longer holds the login and workspace cfg named.
+func cacheSignerToken(cfg config.Config, token string, expiresIn int) (string, error) {
+	err := config.SaveSignerToken(cfg, token, expiresIn)
+	switch {
+	case errors.Is(err, config.ErrLoginChanged), errors.Is(err, config.ErrWorkspaceChanged):
+		// The token was authorized for the login and workspace this command
+		// started with. Another shell has replaced them, so acting on it now
+		// would manage a workspace the config no longer names.
+		return "", errors.New("another login or workspace switch changed the configuration while you were authorizing. Run the command again")
+	case err != nil:
 		utils.CliWarning("Could not save the authorization, so the next acl command will ask for it again: %s", err)
 	}
-	return tokenRes.AccessToken, nil
+	return token, nil
 }
 
 // authorizationFailureMessage words a device-code failure for the ledger,
@@ -140,6 +156,26 @@ func authorizationFailureMessage(err error) string {
 	}
 }
 
+// workspaceAPI returns a client for the workspace this session was opened for,
+// which resolves the names the ledger stores as ids. It is built once and
+// refused when the config has moved to another workspace since the session
+// opened, so a name is never resolved in one workspace for a ledger call
+// filed under another.
+func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
+	if s.workspace != nil {
+		return s.workspace, nil
+	}
+	ac, err := newWorkspaceClient()
+	if err != nil {
+		return nil, fmt.Errorf("connection to Alpacon API failed: %w", err)
+	}
+	if ac.BaseURL != s.workspaceURL {
+		return nil, errors.New("the current workspace changed while this command ran. Run the command again")
+	}
+	s.workspace = ac
+	return ac, nil
+}
+
 // fail reports a failed ledger call and exits.
 func (s *ledgerSession) fail(action string, err error) {
 	utils.CliErrorWithExit("%s", s.errorMessage(action, err))
@@ -153,7 +189,10 @@ func (s *ledgerSession) errorMessage(action string, err error) string {
 	status := utils.HTTPStatusCode(err)
 	switch status {
 	case 0:
-		return fmt.Sprintf("Failed to %s: could not reach the command signer at %s: %s. Set %s if this workspace uses another signer.", action, client.SignerURL(), err, client.SignerURLEnvVar)
+		// The URL may come from an override carrying credentials, so both it
+		// and the transport error that quotes it are redacted.
+		return fmt.Sprintf("Failed to %s: could not reach the command signer at %s: %s. Set %s if this workspace uses another signer.",
+			action, utils.RedactURL(client.SignerURL()), utils.RedactURLError(err), client.SignerURLEnvVar)
 	case http.StatusUnauthorized:
 		if clearErr := config.ClearSignerToken(s.token); clearErr != nil {
 			utils.CliDebug("could not drop the refused signer token: %v", clearErr)
