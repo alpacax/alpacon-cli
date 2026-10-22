@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/api/mfa"
@@ -444,13 +446,22 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 // (interpreter null, interpreter_name set) gets an --interpreter placeholder
 // instead, since --file takes only an absolute interpreter and only the target
 // knows where that name resolves. It answers false when there is no
-// suggestion, when the command was already on the file lane, or when the
-// suggestion names a path or interpreter --file would refuse.
+// suggestion, when the command was already on the file lane, when it carried
+// --env (the file lane cannot, so the script would run without them), or when
+// the suggestion names a path or interpreter --file would refuse or holds a
+// control character argvQuote would print as is.
 func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestion) (utils.NextAction, bool) {
-	if s == nil || parsed.File != nil || !strings.HasPrefix(s.Path, "/") {
+	if s == nil || parsed.File != nil || len(parsed.Env) > 0 || !strings.HasPrefix(s.Path, "/") {
 		return utils.NextAction{}, false
 	}
-	description := "or submit the script on the server as a verified file: the reviewer reads its content, and an unchanged re-run can reuse an approval"
+	if slices.ContainsFunc(append([]string{s.Path, s.Interpreter}, s.Args...), hasControlChar) {
+		return utils.NextAction{}, false
+	}
+	// The held command stays queued and runs if approved, and the CLI cannot
+	// cancel it, so submitting this as well without rejecting it first would
+	// file a second approval request for the same script.
+	const heldNote = "; the held command stays queued and runs if approved, so reject it in the Alpacon console before submitting this"
+	description := "to run the script as a verified file instead, whose content the reviewer reads and whose approval an unchanged re-run can reuse" + heldNote
 	interpreter := s.Interpreter
 	switch {
 	case interpreter == DefaultInterpreter:
@@ -461,7 +472,7 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 		}
 	case isInterpreterName(s.InterpreterName):
 		interpreter = "<absolute-path-of-" + s.InterpreterName + ">"
-		description = fmt.Sprintf("or submit the script on the server as a verified file, replacing %s with the absolute path of %s on the server, which 'command -v %s' prints there: the reviewer reads its content, and an unchanged re-run can reuse an approval",
+		description = fmt.Sprintf("to run the script as a verified file instead, replace %s with the absolute path of %s on the server, which 'command -v %s' prints there"+heldNote,
 			interpreter, s.InterpreterName, s.InterpreterName)
 	default:
 		return utils.NextAction{}, false
@@ -482,6 +493,11 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 		Command:     reRunHint(suggested).Command,
 		Description: description,
 	}, true
+}
+
+// hasControlChar reports whether s holds a C0 or C1 control character.
+func hasControlChar(s string) bool {
+	return strings.ContainsFunc(s, unicode.IsControl)
 }
 
 // isInterpreterName reports whether name is a bare command name safe to print

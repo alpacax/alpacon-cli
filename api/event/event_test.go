@@ -1141,6 +1141,35 @@ func TestStreamSubscribed_FinOnApprovalHoldWaitsForPoll(t *testing.T) {
 	}
 }
 
+// A --wait-approval that runs out while the command is still held reports it
+// pending, and carries the file suggestion the held command detail names so the
+// timed-out wait prints what a run without --wait does.
+func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
+	t.Parallel()
+	ac := newStreamingServers(t, streamingServerConfig{
+		cmdID:      "cmd-uuid",
+		serverID:   "srv-uuid",
+		heldPolls:  1 << 20,
+		heldFields: `,"file_execution_suggestion":{"path":"/opt/deploy.sh","interpreter":"/bin/bash","args":["--fast"]}`,
+	})
+	listener := NewCommandOutputListener(ac)
+	listener.Start()
+	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
+
+	delays := defaultStreamDelays
+	delays.pollTick = 10 * time.Millisecond
+	pathID := testPathID(t, "cmd-uuid")
+	done := make(chan error, 1)
+	go func() {
+		done <- streamSubscribed(ac, listener, pathID, "srv-uuid", &bytes.Buffer{}, 200*time.Millisecond, delays, true)
+	}()
+
+	var pending *PendingApprovalError
+	require.ErrorAs(t, awaitStream(t, done), &pending)
+	assert.Equal(t, "cmd-uuid", pending.CommandID)
+	assert.Equal(t, &FileExecutionSuggestion{Path: "/opt/deploy.sh", Interpreter: "/bin/bash", Args: []string{"--fast"}}, pending.FileSuggestion)
+}
+
 func TestRunCommandStreaming_GapFilledByREST(t *testing.T) {
 	t.Parallel()
 	stdoutBuf := &bytes.Buffer{}
@@ -1521,6 +1550,7 @@ type streamingServerConfig struct {
 	// first one on its server-id lookup, so its poll loop sees one held fewer.
 	heldPolls    int
 	heldStatus   string // status the held responses carry; "awaiting_approval" when empty
+	heldFields   string // extra JSON members, each led by a comma, the held responses carry
 	runningPolls int
 	terminal     EventDetails // returned by the detail poll once held+running elapse
 	// submitRefusals is how many leading command submissions are refused with
@@ -1668,7 +1698,7 @@ func newStreamingServers(t *testing.T, cfg streamingServerConfig) *client.Alpaco
 				if held == "" {
 					held = "awaiting_approval"
 				}
-				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"` + held + `","server":{"id":"` + cfg.serverID + `"}}`))
+				_, _ = w.Write([]byte(`{"id":"` + cfg.cmdID + `","status":"` + held + `","server":{"id":"` + cfg.serverID + `"}` + cfg.heldFields + `}`))
 				return
 			}
 			if n <= cfg.heldPolls+cfg.runningPolls {

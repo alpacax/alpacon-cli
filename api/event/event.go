@@ -676,7 +676,13 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 			// instead of surfacing a generic client timeout.
 			var timeout *ClientTimeoutError
 			if waitApproval && errors.As(err, &timeout) {
-				return &PendingApprovalError{CommandID: commandID}
+				pending := &PendingApprovalError{CommandID: commandID}
+				// One more read, best effort, so the timed-out wait carries the
+				// same file suggestion a run without --wait prints.
+				if details, err := getCommandByPathID(ac, cmdID); err == nil {
+					pending.FileSuggestion = details.FileExecutionSuggestion
+				}
+				return pending
 			}
 			return err
 		}

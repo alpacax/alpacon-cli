@@ -1,11 +1,11 @@
 package exec
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -186,10 +186,11 @@ func uploadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, file even
 	var hint string
 	// The agent answers "PATH already exists." for an existing file.
 	if !parsed.File.Overwrite && strings.Contains(err.Error(), "already exists") {
-		hint = denialHintLine("pass --overwrite to replace the file on the server, or drop --upload to run the file already there.\n")
+		hint = denialHintLine("pass --overwrite to replace the file on the server, or use --from-server instead of --upload (and drop --file-from) to submit the copy already there.\n")
 	}
-	// reportCodedRefusal appends its own period; drop the one the agent's message ends with.
-	msg := strings.TrimSuffix(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err), ".")
+	// reportCodedRefusal writes raw and appends its own period; drop the one the
+	// agent's message ends with.
+	msg := strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("failed to upload the script to '%s:%s': %s", parsed.Server, file.Path, err)), ".")
 	reportCodedRefusal(utils.OperationWebFTP, err, msg, hint)
 }
 
@@ -204,8 +205,9 @@ func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSes
 	content, msg, err := fetchServerScript(ac, parsed, label, workSessionID)
 	if err != nil {
 		utils.HandleWorkSessionError(err, utils.OperationWebFTP, parsed.Server, authMethod, workSessionID)
-		// reportCodedRefusal appends its own period; drop one the agent's message ends with.
-		msg = strings.TrimSuffix(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err), ".")
+		// reportCodedRefusal writes raw and appends its own period; drop one the
+		// agent's message ends with.
+		msg = strings.TrimSuffix(utils.SanitizeTerminalText(fmt.Sprintf("cannot read the script from '%s' on the server: %s", label, err)), ".")
 		reportCodedRefusal(utils.OperationWebFTP, err, msg, "")
 		return event.FileExecution{}
 	}
@@ -216,20 +218,15 @@ func downloadFileOrExit(ac *client.AlpaconClient, parsed RemoteExecArgs, workSes
 	return newFileExecution(*parsed.File, content)
 }
 
-// fetchServerScript downloads the --file path into a private temporary
-// directory, removed on return, and reads it as readFileContent reads a local
-// script. err is a failed download; msg is a copy the file lane cannot take.
+// fetchServerScript reads the --file path from the server into memory, at
+// most FileContentMaxBytes+1 bytes of it, and checks it as readFileContent
+// checks a local script. err is a failed download; msg is a copy the file lane
+// cannot take.
 func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label, workSessionID string) (content, msg string, err error) {
-	dir, err := os.MkdirTemp("", "alpacon-exec-")
-	if err != nil {
-		return "", fmt.Sprintf("cannot create a temporary directory for the script: %s", err), nil
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	localPath := filepath.Join(dir, "script")
-
-	download := func() error {
-		_, err := ftpapi.DownloadFileToPath(ac, parsed.Server, parsed.File.Path, localPath,
-			parsed.Username, parsed.Groupname, workSessionID)
+	var data []byte
+	download := func() (err error) {
+		data, err = ftpapi.DownloadFileContent(ac, parsed.Server, parsed.File.Path,
+			parsed.Username, parsed.Groupname, workSessionID, FileContentMaxBytes+1)
 		return err
 	}
 	if err = download(); err != nil {
@@ -238,13 +235,7 @@ func fetchServerScript(ac *client.AlpaconClient, parsed RemoteExecArgs, label, w
 	if err != nil {
 		return "", "", err
 	}
-
-	f, err := os.Open(localPath)
-	if err != nil {
-		return "", fmt.Sprintf("cannot read the downloaded copy of '%s': %s", label, describeOpenError(err)), nil
-	}
-	defer func() { _ = f.Close() }()
-	content, msg = readScriptContent(f, label)
+	content, msg = readScriptContent(bytes.NewReader(data), label)
 	return content, msg, nil
 }
 

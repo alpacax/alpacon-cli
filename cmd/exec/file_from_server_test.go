@@ -17,11 +17,12 @@ import (
 
 func TestParseRemoteExecArgs_FileFromServer(t *testing.T) {
 	t.Parallel()
-	result := ParseRemoteExecArgs([]string{"--file", "/opt/deploy.sh", "--from-server", "root@prod-web", "--", "--fast"})
-	require.Empty(t, result.Err)
-	assert.Equal(t, "root", result.Username)
-	assert.Equal(t, "prod-web", result.Server)
-	assert.Equal(t, &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}, FromServer: true}, result.File)
+	assert.Equal(t, RemoteExecArgs{
+		Username: "root",
+		Server:   "prod-web",
+		Env:      map[string]string{},
+		File:     &FileExecArgs{Path: "/opt/deploy.sh", Args: []string{"--fast"}, FromServer: true},
+	}, ParseRemoteExecArgs([]string{"--file", "/opt/deploy.sh", "--from-server", "root@prod-web", "--", "--fast"}))
 }
 
 func TestParseRemoteExecArgs_FileFromServerErrors(t *testing.T) {
@@ -140,6 +141,21 @@ func TestFileSuggestionAction(t *testing.T) {
 			name:       "relative interpreter",
 			parsed:     generic,
 			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", Interpreter: "bash"},
+		},
+		{
+			name:       "env keys the file lane cannot carry",
+			parsed:     RemoteExecArgs{Server: "prod-web", Env: map[string]string{"PGPASSWORD": ""}, Command: "bash /opt/backup.sh"},
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/backup.sh", Interpreter: "/bin/bash"},
+		},
+		{
+			name:       "control character in the path",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh\x1b[2J", Interpreter: "/bin/bash"},
+		},
+		{
+			name:       "newline in an argument",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", Interpreter: "/bin/bash", Args: []string{"a\nb"}},
 		},
 		{
 			name:       "already on the file lane",
