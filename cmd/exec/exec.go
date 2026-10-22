@@ -440,18 +440,30 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 // fileSuggestionAction renders the server's file_execution_suggestion for a
 // held command line as the --file --from-server command that submits the same
 // script on the verified file lane, keeping the account, group and work
-// session of the original. It answers false when there is no suggestion, when
-// the command was already on the file lane, or when the suggestion names a
-// path or interpreter --file would refuse.
+// session of the original. A suggestion whose interpreter was a bare name
+// (interpreter null, interpreter_name set) gets an --interpreter placeholder
+// instead, since --file takes only an absolute interpreter and only the target
+// knows where that name resolves. It answers false when there is no
+// suggestion, when the command was already on the file lane, or when the
+// suggestion names a path or interpreter --file would refuse.
 func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestion) (utils.NextAction, bool) {
 	if s == nil || parsed.File != nil || !strings.HasPrefix(s.Path, "/") {
 		return utils.NextAction{}, false
 	}
+	description := "or submit the script on the server as a verified file: the reviewer reads its content, and an unchanged re-run can reuse an approval"
 	interpreter := s.Interpreter
-	if interpreter == DefaultInterpreter {
+	switch {
+	case interpreter == DefaultInterpreter:
 		interpreter = ""
-	}
-	if interpreter != "" && !strings.HasPrefix(interpreter, "/") {
+	case interpreter != "":
+		if !strings.HasPrefix(interpreter, "/") {
+			return utils.NextAction{}, false
+		}
+	case isInterpreterName(s.InterpreterName):
+		interpreter = "<absolute-path-of-" + s.InterpreterName + ">"
+		description = fmt.Sprintf("or submit the script on the server as a verified file, replacing %s with the absolute path of %s on the server, which 'command -v %s' prints there: the reviewer reads its content, and an unchanged re-run can reuse an approval",
+			interpreter, s.InterpreterName, s.InterpreterName)
+	default:
 		return utils.NextAction{}, false
 	}
 	suggested := RemoteExecArgs{
@@ -468,6 +480,20 @@ func fileSuggestionAction(parsed RemoteExecArgs, s *event.FileExecutionSuggestio
 	}
 	return utils.NextAction{
 		Command:     reRunHint(suggested).Command,
-		Description: "or submit the script on the server as a verified file: the reviewer reads its content, and an unchanged re-run can reuse an approval",
+		Description: description,
 	}, true
+}
+
+// isInterpreterName reports whether name is a bare command name safe to print
+// in a placeholder and a 'command -v' hint: no path separator, no quoting.
+func isInterpreterName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		if r == '/' || !isArgvSafe(r) {
+			return false
+		}
+	}
+	return true
 }

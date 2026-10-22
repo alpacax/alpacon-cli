@@ -82,6 +82,7 @@ func TestFileSuggestionAction(t *testing.T) {
 		parsed     RemoteExecArgs
 		suggestion *event.FileExecutionSuggestion
 		want       string
+		wantDesc   string
 	}{
 		{
 			name:       "no suggestion",
@@ -105,8 +106,30 @@ func TestFileSuggestionAction(t *testing.T) {
 		{
 			name:       "arguments are quoted for the local shell",
 			parsed:     generic,
-			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", Args: []string{"a;b", "$(id)"}},
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", Interpreter: "/bin/bash", Args: []string{"a;b", "$(id)"}},
 			want:       "alpacon exec -u root --file /opt/deploy.sh --from-server prod-web -- 'a;b' '$(id)'",
+		},
+		{
+			name:       "bare interpreter name gets a placeholder",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", InterpreterName: "bash", Args: []string{"--fast"}},
+			want:       "alpacon exec -u root --file /opt/deploy.sh --from-server --interpreter '<absolute-path-of-bash>' prod-web -- --fast",
+			wantDesc:   "command -v bash",
+		},
+		{
+			name:       "neither interpreter nor name",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh"},
+		},
+		{
+			name:       "interpreter name with a path separator",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", InterpreterName: "bin/bash"},
+		},
+		{
+			name:       "interpreter name that needs quoting",
+			parsed:     generic,
+			suggestion: &event.FileExecutionSuggestion{Path: "/opt/deploy.sh", InterpreterName: "bash;id"},
 		},
 		{
 			name:       "relative path",
@@ -135,6 +158,9 @@ func TestFileSuggestionAction(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, tt.want, action.Command)
 			assert.NotEmpty(t, action.Description)
+			if tt.wantDesc != "" {
+				assert.Contains(t, action.Description, tt.wantDesc)
+			}
 		})
 	}
 }
@@ -327,6 +353,20 @@ func TestExecHeldScriptPrintsTheFromServerSuggestion(t *testing.T) {
 		assert.Equal(t, "alpacon exec logs cmd-1", got.NextActions[0].Command)
 		assert.Equal(t, heldScriptSuggestionLine, got.NextActions[len(got.NextActions)-1].Command)
 	})
+}
+
+// TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder pins that a held
+// command line whose interpreter was a bare name gets the --from-server line
+// with an --interpreter placeholder and the 'command -v' hint to fill it.
+func TestExecHeldScriptWithBareInterpreterPrintsAPlaceholder(t *testing.T) {
+	t.Parallel()
+	ts := newHeldScriptServer(`{"path":"/opt/deploy.sh","interpreter":null,"interpreter_name":"bash","args":["--fast"]}`)
+	defer ts.Close()
+
+	_, stderr, exitCode := runExecHelper(t, ts.URL, "root@prod", "--", "bash", "/opt/deploy.sh", "--fast")
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode)
+	assert.Contains(t, stderr, "  alpacon exec -u root --file /opt/deploy.sh --from-server --interpreter '<absolute-path-of-bash>' prod -- --fast  # ")
+	assert.Contains(t, stderr, "'command -v bash'")
 }
 
 // TestExecHeldCommandWithoutSuggestionKeepsTodaysHint pins that a held command

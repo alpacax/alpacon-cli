@@ -79,11 +79,14 @@ type PendingApprovalError struct {
 
 // FileExecutionSuggestion is a held command line the server recognized as a
 // script on the target, restated as a verified file: the script's path, its
-// interpreter and its arguments.
+// interpreter and its arguments. Interpreter is set only when the command line
+// named it by absolute path; a bare name such as bash leaves it null and
+// arrives in InterpreterName, since only the target knows where it resolves.
 type FileExecutionSuggestion struct {
-	Path        string   `json:"path"`
-	Interpreter string   `json:"interpreter"`
-	Args        []string `json:"args"`
+	Path            string   `json:"path"`
+	Interpreter     string   `json:"interpreter"`
+	InterpreterName string   `json:"interpreter_name"`
+	Args            []string `json:"args"`
 }
 
 // CommandRejectedError is a type so the CLI can exit ExitCodeNotApproved: an
