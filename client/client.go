@@ -315,7 +315,7 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 	case utils.AuthInteractiveChannelRequiresPresence:
 		return "a token cannot open an interactive session—sign in with " + utils.LoginWithoutTokenHint, true
 	case utils.AuthMFARequiresHumanPrincipal:
-		return "this action requires a person to complete MFA, which a token cannot do—sign in with " + utils.LoginWithoutTokenHint + " and run it as yourself, or ask a workspace admin to remove it from the MFA required actions", true
+		return "this action requires a person to complete MFA, which a token cannot do—sign in with " + utils.LoginWithoutTokenHint + " and run it as yourself; if your workspace added it to its MFA required actions, an admin can remove it there instead", true
 	case utils.WorkspaceSudoWithMFAStepUpUnavailable:
 		return "this setting cannot be changed on this server because MFA sign-in is not available; a server administrator has to change it", true
 	case utils.WorkspaceExecutionControlConsoleOnly:

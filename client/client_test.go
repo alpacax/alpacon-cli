@@ -422,7 +422,7 @@ func TestSendRequest_403MFAPresenceRefusalPointsToLogin(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	require.Error(t, err)
-	assert.Equal(t, "this action requires a person to complete MFA, which a token cannot do—sign in with 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and run it as yourself, or ask a workspace admin to remove it from the MFA required actions", err.Error())
+	assert.Equal(t, "this action requires a person to complete MFA, which a token cannot do—sign in with 'alpacon login' without -t (on a machine without a browser, open the printed URL on another device) and run it as yourself; if your workspace added it to its MFA required actions, an admin can remove it there instead", err.Error())
 	assert.NotContains(t, err.Error(), "complete MFA to continue")
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, "auth_mfa_requires_human_principal", code)
