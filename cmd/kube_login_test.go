@@ -152,14 +152,18 @@ func kubeLoginHome(t *testing.T, workspaceURL string, extra ...map[string]any) s
 	return writeKubeGateConfig(t, cfg)
 }
 
-func writeKubeRecord(t *testing.T, home string, record map[string]any) {
+// writeKubeRecord leaves a saved kube session for prod-east of the workspace
+// at workspaceURL under home, and returns its path.
+func writeKubeRecord(t *testing.T, home, workspaceURL string, record map[string]any) string {
 	t.Helper()
 	dir := filepath.Join(home, ".alpacon", "kube")
 	require.NoError(t, os.MkdirAll(dir, 0700))
-	sum := sha256.Sum256([]byte("prod-east"))
+	sum := sha256.Sum256([]byte(workspaceURL + "\n" + "prod-east"))
 	data, err := json.Marshal(record)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, hex.EncodeToString(sum[:])[:16]+".json"), data, 0600))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:])[:16]+".json")
+	require.NoError(t, os.WriteFile(path, data, 0600))
+	return path
 }
 
 func (s *kubeLoginServer) count(request string) int {
@@ -510,10 +514,13 @@ func TestKubeLoginLeavesAnotherWorkspacesRecordAlone(t *testing.T) {
 	srv := &kubeLoginServer{wsCreateStatus: "active"}
 	ts := srv.start(t)
 	home := kubeLoginHome(t, ts.URL)
-	writeKubeRecord(t, home, map[string]any{
+	other := writeKubeRecord(t, home, "https://other.example.com", map[string]any{
 		"cluster": "prod-east", "workspace_name": "other", "workspace_url": "https://other.example.com",
 		"kube_session_id": "7c1e0000-0000-4000-8000-0000000000bb", "work_session_id": "0b5d7e9a-0000-4000-8000-0000000000bb",
+		"channel_token": "other-token",
 	})
+	before, err := os.ReadFile(other)
+	require.NoError(t, err)
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
 		"--intent", "x", "--scope", "kube", "--duration", "1h")
@@ -522,7 +529,12 @@ func TestKubeLoginLeavesAnotherWorkspacesRecordAlone(t *testing.T) {
 	assert.Zero(t, srv.count("GET /api/work-sessions/sessions/0b5d7e9a-0000-4000-8000-0000000000bb/"))
 	_, _, closed := srv.bodies()
 	assert.Empty(t, closed)
-	assert.Contains(t, stderr, "belongs to workspace other")
+	after, err := os.ReadFile(other)
+	require.NoError(t, err)
+	assert.Equal(t, string(before), string(after), "the other workspace keeps its token")
+	records, err := filepath.Glob(filepath.Join(home, ".alpacon", "kube", "*.json"))
+	require.NoError(t, err)
+	assert.Len(t, records, 2)
 }
 
 func TestKubeLoginJSONResult(t *testing.T) {
@@ -548,4 +560,41 @@ func TestKubeLoginJSONResult(t *testing.T) {
 		"work_session_created": true,
 		"scopes": ["kube"]
 	}`, path, loginClusterID, loginWSID, loginClusterID), stdout)
+}
+
+func TestKubeLoginArgumentCountIsAUsageError(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{}, {"prod-east", "prod-west"}} {
+		t.Run(fmt.Sprintf("%d_arguments", len(args)), func(t *testing.T) {
+			t.Parallel()
+			srv := &kubeLoginServer{}
+			ts := srv.start(t)
+			home := kubeLoginHome(t, ts.URL)
+
+			stdout, stderr, exitCode := runKubeLogin(t, home, append(args, "--output", "json")...)
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			var envelope map[string]any
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
+			assert.Equal(t, "usage_error", envelope["error_code"])
+			assert.Empty(t, srv.seen())
+		})
+	}
+}
+
+// The command printed to come back to a pending session writes the same file
+// through the same local proxy.
+func TestKubeLoginResumeCommandKeepsItsFlags(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "pending", wsPollStatus: "pending"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+	path := filepath.Join(t.TempDir(), "config")
+
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", path, "--proxy-port", "18443",
+		"--intent", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
+
+	assert.Equal(t, utils.ExitCodePendingApproval, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "--work-session "+loginWSID+" --kubeconfig "+path+" --proxy-port 18443")
 }

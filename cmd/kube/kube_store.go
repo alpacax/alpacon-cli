@@ -33,15 +33,20 @@ type kubeSessionRecord struct {
 	SavedAt        time.Time `json:"saved_at"`
 }
 
-// sameWorkspace reports whether the record was written for the workspace a
-// client was built for, the only one whose credentials can act on it.
-func (r *kubeSessionRecord) sameWorkspace(workspaceName, workspaceURL string) bool {
-	return r.WorkspaceName == workspaceName && r.WorkspaceURL == workspaceURL
+// recordKey names one record: a cluster name is unique only within its
+// workspace, so a login to a same-named cluster of another workspace keeps
+// its own token rather than replacing this one's.
+type recordKey struct {
+	workspaceURL string
+	cluster      string
 }
 
-// kubeSessionStore keeps one record per cluster name, the same key the
-// kubeconfig context alpacon-CLUSTER uses, under a directory only the owner
-// can enter.
+func (r *kubeSessionRecord) key() recordKey {
+	return recordKey{workspaceURL: r.WorkspaceURL, cluster: r.Cluster}
+}
+
+// kubeSessionStore keeps one record per workspace and cluster under a
+// directory only the owner can enter.
 type kubeSessionStore struct {
 	dir string
 }
@@ -59,35 +64,35 @@ func defaultKubeSessionStore() (kubeSessionStore, error) {
 	return kubeSessionStore{dir: filepath.Join(home, config.ConfigFileDir, config.KubeSessionDir)}, nil
 }
 
-// recordBase names a cluster's files. The name is hashed so any cluster name
-// makes a safe file name.
-func recordBase(clusterName string) string {
-	sum := sha256.Sum256([]byte(clusterName))
+// recordBase names a record's files. The key is hashed so any workspace URL
+// and cluster name make a safe file name.
+func recordBase(k recordKey) string {
+	sum := sha256.Sum256([]byte(k.workspaceURL + "\n" + k.cluster))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-func (s kubeSessionStore) recordPath(clusterName string) string {
-	return filepath.Join(s.dir, recordBase(clusterName)+".json")
+func (s kubeSessionStore) recordPath(k recordKey) string {
+	return filepath.Join(s.dir, recordBase(k)+".json")
 }
 
 var errStoreLocked = errors.New("another 'alpacon kube login' for this cluster is running")
 
 // lock serializes the logins of one cluster, whichever kubeconfig each one
 // writes: each reads the record, replaces it and closes the session it named.
-func (s kubeSessionStore) lock(clusterName string) (*filelock.Lock, error) {
+func (s kubeSessionStore) lock(k recordKey) (*filelock.Lock, error) {
 	if err := s.ensureDir(); err != nil {
 		return nil, err
 	}
-	lock, err := filelock.Acquire(filepath.Join(s.dir, recordBase(clusterName)+".lock"), storeFilePerm)
+	lock, err := filelock.Acquire(filepath.Join(s.dir, recordBase(k)+".lock"), storeFilePerm)
 	if errors.Is(err, filelock.ErrLocked) {
 		return nil, errStoreLocked
 	}
 	return lock, err
 }
 
-// read returns the cluster's record, or nil when there is none.
-func (s kubeSessionStore) read(clusterName string) (*kubeSessionRecord, error) {
-	data, err := os.ReadFile(s.recordPath(clusterName))
+// read returns the record under k, or nil when there is none.
+func (s kubeSessionStore) read(k recordKey) (*kubeSessionRecord, error) {
+	data, err := os.ReadFile(s.recordPath(k))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -96,11 +101,11 @@ func (s kubeSessionStore) read(clusterName string) (*kubeSessionRecord, error) {
 	}
 	var record kubeSessionRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("cannot read %s: %w", s.recordPath(clusterName), err)
+		return nil, fmt.Errorf("cannot read %s: %w", s.recordPath(k), err)
 	}
-	// Two names sharing a hash prefix would share a file; neither may take the
+	// Two keys sharing a hash prefix would share a file; neither may take the
 	// other's record for its own.
-	if record.Cluster != clusterName {
+	if record.key() != k {
 		return nil, nil
 	}
 	return &record, nil
@@ -118,8 +123,8 @@ func (s kubeSessionStore) write(record kubeSessionRecord) error {
 	if err != nil {
 		return err
 	}
-	path := s.recordPath(record.Cluster)
-	tmp, err := os.CreateTemp(s.dir, recordBase(record.Cluster)+".*.tmp")
+	path := s.recordPath(record.key())
+	tmp, err := os.CreateTemp(s.dir, recordBase(record.key())+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -141,11 +146,11 @@ func (s kubeSessionStore) write(record kubeSessionRecord) error {
 
 // restore puts back the record a failed login replaced, or removes the new
 // one when there was none before.
-func (s kubeSessionStore) restore(clusterName string, previous *kubeSessionRecord) error {
+func (s kubeSessionStore) restore(k recordKey, previous *kubeSessionRecord) error {
 	if previous != nil {
 		return s.write(*previous)
 	}
-	err := os.Remove(s.recordPath(clusterName))
+	err := os.Remove(s.recordPath(k))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}

@@ -106,10 +106,13 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 		proxyPort = kubeConfigFlags.proxyPort
 	}
 
-	workSessionID := worksession.ResolveOrExit(kubeConfigFlags.workSession)
 	ac, err := client.NewAlpaconAPIClient()
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
+	}
+	workSessionID, err := worksession.ResolveFor(kubeConfigFlags.workSession, ac.WorkspaceName)
+	if err != nil {
+		utils.CliErrorWithExit("%s", err)
 	}
 
 	path, err := kubeconfig.ResolvePath(kubeConfigFlags.kubeconfig)

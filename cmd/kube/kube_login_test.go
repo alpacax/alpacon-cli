@@ -13,7 +13,6 @@ import (
 	"github.com/alpacax/alpacon-cli/api/types"
 	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
-	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -248,6 +247,10 @@ func TestCredentialPluginNamesTheCluster(t *testing.T) {
 	assert.Equal(t, []string{"kube", "credentials", "--cluster", "prod-east"}, exec.Args)
 }
 
+func testKey(cluster string) recordKey {
+	return recordKey{workspaceURL: "https://ws.example.com", cluster: cluster}
+}
+
 func testRecord(cluster string) kubeSessionRecord {
 	return kubeSessionRecord{
 		Cluster:        cluster,
@@ -267,19 +270,17 @@ func TestKubeSessionStoreRoundTrip(t *testing.T) {
 	t.Parallel()
 	store := kubeSessionStore{dir: filepath.Join(t.TempDir(), ".alpacon", "kube")}
 
-	got, err := store.read("prod-east")
+	got, err := store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	assert.Nil(t, got, "no record yet")
 
 	require.NoError(t, store.write(testRecord("prod-east")))
-	got, err = store.read("prod-east")
+	got, err = store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, testRecord("prod-east"), *got)
-	assert.True(t, got.sameWorkspace("ws", "https://ws.example.com"), "record workspace %q at %q", got.WorkspaceName, got.WorkspaceURL)
-	assert.False(t, got.sameWorkspace("ws", "https://other.example.com"), "record workspace %q at %q", got.WorkspaceName, got.WorkspaceURL)
 
-	other, err := store.read("prod-west")
+	other, err := store.read(testKey("prod-west"))
 	require.NoError(t, err)
 	assert.Nil(t, other, "each cluster has its own record")
 }
@@ -293,17 +294,17 @@ func TestKubeSessionStoreRestore(t *testing.T) {
 	replaced.KubeSessionID = "k-2"
 	require.NoError(t, store.write(replaced))
 
-	require.NoError(t, store.restore("prod-east", &previous))
-	got, err := store.read("prod-east")
+	require.NoError(t, store.restore(testKey("prod-east"), &previous))
+	got, err := store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, "k-1", got.KubeSessionID)
 
-	require.NoError(t, store.restore("prod-east", nil))
-	got, err = store.read("prod-east")
+	require.NoError(t, store.restore(testKey("prod-east"), nil))
+	got, err = store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	assert.Nil(t, got, "with no previous record the new one is removed")
-	require.NoError(t, store.restore("prod-east", nil), "removing a missing record is not an error")
+	require.NoError(t, store.restore(testKey("prod-east"), nil), "removing a missing record is not an error")
 }
 
 // A record stored under the file another name hashes to is not taken for
@@ -312,9 +313,9 @@ func TestKubeSessionStoreIgnoresARecordForAnotherName(t *testing.T) {
 	t.Parallel()
 	store := kubeSessionStore{dir: t.TempDir()}
 	require.NoError(t, store.write(testRecord("prod-east")))
-	require.NoError(t, os.Rename(store.recordPath("prod-east"), store.recordPath("prod-west")))
+	require.NoError(t, os.Rename(store.recordPath(testKey("prod-east")), store.recordPath(testKey("prod-west"))))
 
-	got, err := store.read("prod-west")
+	got, err := store.read(testKey("prod-west"))
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
@@ -322,15 +323,15 @@ func TestKubeSessionStoreIgnoresARecordForAnotherName(t *testing.T) {
 func TestKubeSessionStoreLockIsExclusive(t *testing.T) {
 	t.Parallel()
 	store := kubeSessionStore{dir: t.TempDir()}
-	lock, err := store.lock("prod-east")
+	lock, err := store.lock(testKey("prod-east"))
 	require.NoError(t, err)
-	_, err = store.lock("prod-east")
+	_, err = store.lock(testKey("prod-east"))
 	require.ErrorIs(t, err, errStoreLocked)
-	other, err := store.lock("prod-west")
+	other, err := store.lock(testKey("prod-west"))
 	require.NoError(t, err, "another cluster has its own lock")
 	require.NoError(t, other.Release())
 	require.NoError(t, lock.Release())
-	again, err := store.lock("prod-east")
+	again, err := store.lock(testKey("prod-east"))
 	require.NoError(t, err)
 	require.NoError(t, again.Release())
 }
@@ -343,7 +344,7 @@ func TestKubeSessionStoreIsOwnerOnly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "kube")
 	require.NoError(t, os.MkdirAll(dir, 0755))
 	store := kubeSessionStore{dir: dir}
-	path := store.recordPath("prod-east")
+	path := store.recordPath(testKey("prod-east"))
 	require.NoError(t, os.WriteFile(path, []byte("{}"), 0644))
 
 	require.NoError(t, store.write(testRecord("prod-east")))
@@ -364,14 +365,14 @@ func TestKubeSessionStoreReplacesASymlinkRatherThanWritingThroughIt(t *testing.T
 	store := kubeSessionStore{dir: t.TempDir()}
 	target := filepath.Join(t.TempDir(), "elsewhere")
 	require.NoError(t, os.WriteFile(target, []byte("keep"), 0644))
-	require.NoError(t, os.Symlink(target, store.recordPath("prod-east")))
+	require.NoError(t, os.Symlink(target, store.recordPath(testKey("prod-east"))))
 
 	require.NoError(t, store.write(testRecord("prod-east")))
 
 	data, err := os.ReadFile(target)
 	require.NoError(t, err)
 	assert.Equal(t, "keep", string(data))
-	info, err := os.Lstat(store.recordPath("prod-east"))
+	info, err := os.Lstat(store.recordPath(testKey("prod-east")))
 	require.NoError(t, err)
 	assert.True(t, info.Mode().IsRegular(), "the record is a plain file now: %v", info.Mode())
 }
@@ -405,7 +406,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 			if err := store.write(record); err != nil {
 				return nil, err
 			}
-			return func() error { return store.restore("prod-east", &previous) }, nil
+			return func() error { return store.restore(testKey("prod-east"), &previous) }, nil
 		},
 	}
 
@@ -414,7 +415,7 @@ func TestOpenKubeSessionRestoresTheRecordWhenTheWriteFails(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to write "+path)
 	assert.Equal(t, 1, srv.closes())
-	got, err := store.read("prod-east")
+	got, err := store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, previous, *got)
@@ -442,23 +443,49 @@ func TestOpenKubeSessionClosesTheSessionWhenItCannotBeKept(t *testing.T) {
 	assert.NoFileExists(t, path)
 }
 
-// Another workspace's session cannot be closed with this login's credentials,
-// so it is left to end with its work session.
-func TestClosePreviousSessionSkipsAnotherWorkspace(t *testing.T) {
-	srv := newSessionServer()
-	ac := srv.start(t)
-	ac.WorkspaceName = "ws"
-	record := testRecord("prod-east")
-	record.WorkspaceName = "other"
+// A cluster of the same name in another workspace keeps its own record, so a
+// login to one never hands its token to a context of the other.
+func TestKubeSessionStoreKeepsWorkspacesApart(t *testing.T) {
+	t.Parallel()
+	store := kubeSessionStore{dir: t.TempDir()}
+	here := testRecord("prod-east")
+	there := testRecord("prod-east")
+	there.WorkspaceURL = "https://other.example.com"
+	there.ChannelToken = "other-token"
+	require.NoError(t, store.write(here))
+	require.NoError(t, store.write(there))
 
-	_, stderr := testutil.CaptureOutput(t, func() {
-		closePreviousSession(ac, &record, "k-new")
-	})
+	got, err := store.read(testKey("prod-east"))
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "tok", got.ChannelToken)
+	got, err = store.read(there.key())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "other-token", got.ChannelToken)
+}
 
-	assert.Zero(t, srv.closes())
-	assert.Contains(t, stderr, "belongs to workspace other")
-
-	record.WorkspaceName, record.WorkspaceURL = "ws", ac.BaseURL
-	closePreviousSession(ac, &record, record.KubeSessionID)
-	assert.Zero(t, srv.closes(), "the session this login opened is not the previous one")
+func TestResumeActionKeepsTheKubeconfigAndProxy(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   kubeLoginInput
+		want string
+	}{
+		{name: "defaults", in: kubeLoginInput{cluster: "prod-east"}, want: "alpacon kube login prod-east --work-session ws-1"},
+		{
+			name: "file and proxy",
+			in:   kubeLoginInput{cluster: "prod-east", kubeconfig: "/home/alice/kube configs/alpacon", proxyPort: 18443},
+			want: "alpacon kube login prod-east --work-session ws-1 --kubeconfig '/home/alice/kube configs/alpacon' --proxy-port 18443",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if runtime.GOOS == "windows" {
+				t.Skip("quoting follows the platform's shell")
+			}
+			assert.Equal(t, tt.want, resumeAction(tt.in, "ws-1").Command)
+		})
+	}
 }

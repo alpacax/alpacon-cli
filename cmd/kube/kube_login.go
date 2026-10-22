@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,7 +75,9 @@ exists), else ~/.kube/config. Use --proxy-port to send kubectl through
   alpacon kube login prod-east --intent "debug crashlooping api pods" --scope kube,kube_exec --duration 2h
   alpacon kube login prod-east --work-session 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47
   alpacon kube login prod-east --kubeconfig ~/.kube/alpacon --proxy-port 18443`,
-	Args: cobra.ExactArgs(1),
+	// Counted in runKubeLogin, so a wrong count is a usage error (exit 2)
+	// like the flags, not Cobra's own exit 1.
+	Args: cobra.ArbitraryArgs,
 	Run:  runKubeLogin,
 }
 
@@ -97,6 +100,7 @@ type kubeLoginInput struct {
 	duration      time.Duration
 	waitTimeout   time.Duration
 	proxyPort     int
+	kubeconfig    string // the --kubeconfig file as an absolute path, when given
 	requesterType string
 }
 
@@ -164,6 +168,9 @@ func readKubeLoginInput(cluster string, flags kubeLoginFlagValues, changed func(
 }
 
 func runKubeLogin(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "kube login takes one CLUSTER argument, not %d; see 'alpacon kube login --help'.", len(args))
+	}
 	in, err := readKubeLoginInput(args[0], kubeLoginFlags, cmd.Flags().Changed, os.Getenv(worksession.WorkSessionEnvVar), aiagent.FromEnvironment())
 	if err != nil {
 		utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "%s.", err)
@@ -183,6 +190,11 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 	path, err := kubeconfig.ResolvePath(kubeLoginFlags.kubeconfig)
 	if err != nil {
 		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
+	}
+	if kubeLoginFlags.kubeconfig != "" {
+		if in.kubeconfig, err = filepath.Abs(path); err != nil {
+			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to find the kubeconfig: %s.", err)
+		}
 	}
 	// Probed before any WorkSession exists, so a locked, malformed or
 	// unwritable file is found out while nothing has been asked of an
@@ -209,12 +221,13 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 	// Held until the process ends, approval wait included, so a second login
 	// to the cluster cannot create a second WorkSession beside this one. The
 	// kernel drops it however the process exits.
-	storeLock, err := store.lock(in.cluster)
+	key := recordKey{workspaceURL: ac.BaseURL, cluster: in.cluster}
+	storeLock, err := store.lock(key)
 	if err != nil {
 		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Cannot log in to %s: %s.", in.cluster, err)
 	}
 	defer func() { _ = storeLock.Release() }()
-	previous, err := store.read(in.cluster)
+	previous, err := store.read(key)
 	if err != nil {
 		utils.CliWarning("Ignoring the saved kube session for %s: %s", in.cluster, err)
 		previous = nil
@@ -261,7 +274,7 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 			if err := store.write(record); err != nil {
 				return nil, fmt.Errorf("failed to save the kube session: %w", err)
 			}
-			return func() error { return store.restore(in.cluster, previous) }, nil
+			return func() error { return store.restore(key, previous) }, nil
 		},
 	}
 	result, err := openKubeSession(ac, editor, opts, clusterID, writer)
@@ -298,14 +311,9 @@ func credentialPlugin(cluster string) *kubeconfig.ExecUser {
 }
 
 // closePreviousSession closes the kube session an earlier login to the
-// cluster opened, now that the context no longer reaches it. A session of
-// another workspace cannot be closed with this login's credentials.
+// cluster in this workspace opened, now that the context no longer reaches it.
 func closePreviousSession(ac *client.AlpaconClient, previous *kubeSessionRecord, current string) {
 	if previous == nil || previous.KubeSessionID == "" || strings.EqualFold(previous.KubeSessionID, current) {
-		return
-	}
-	if !previous.sameWorkspace(ac.WorkspaceName, ac.BaseURL) {
-		utils.CliInfo("The kube session the previous login opened belongs to workspace %s and stays open until its WorkSession ends.", previous.WorkspaceName)
 		return
 	}
 	// The context already works, so a server that stops answering must not
@@ -428,8 +436,7 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 	if err == nil && active != "" {
 		candidates = append(candidates, active)
 	}
-	if previous != nil && previous.sameWorkspace(ac.WorkspaceName, ac.BaseURL) &&
-		previous.WorkSessionID != "" && !strings.EqualFold(previous.WorkSessionID, active) {
+	if previous != nil && previous.WorkSessionID != "" && !strings.EqualFold(previous.WorkSessionID, active) {
 		candidates = append(candidates, previous.WorkSessionID)
 	}
 	for _, id := range candidates {
@@ -536,7 +543,7 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 // waitForWorkSession waits for ws to activate, saying first how to come back
 // to it, since Ctrl+C or the timeout leaves it waiting on approval.
 func waitForWorkSession(ac *client.AlpaconClient, in kubeLoginInput, ws *wsapi.WorkSession) *wsapi.WorkSession {
-	resume := worksession.KubeLoginAction(in.cluster, ws.ID)
+	resume := resumeAction(in, ws.ID)
 	utils.CliInfo("WorkSession %s is %s; waiting up to %s for it to become active. To stop and come back later, press Ctrl+C and run '%s'.",
 		utils.SanitizeTerminalText(ws.ID), utils.SanitizeTerminalText(ws.Status), in.waitTimeout, utils.SanitizeTerminalText(resume.Command))
 	final, err := worksession.WaitForApproval(ac, ws.ID, true, worksession.ApprovalPollInterval, in.waitTimeout)
@@ -547,6 +554,19 @@ func waitForWorkSession(ac *client.AlpaconClient, in kubeLoginInput, ws *wsapi.W
 		worksession.PrintSessionAdvisories(final)
 	}
 	return final
+}
+
+// resumeAction is the command that comes back to the WorkSession id, writing
+// the same kubeconfig file through the same local proxy as this run.
+func resumeAction(in kubeLoginInput, id string) utils.NextAction {
+	action := worksession.KubeLoginAction(shellQuote(in.cluster), id)
+	if in.kubeconfig != "" {
+		action.Command += " --kubeconfig " + shellQuote(in.kubeconfig)
+	}
+	if in.proxyPort != 0 {
+		action.Command += fmt.Sprintf(" --proxy-port %d", in.proxyPort)
+	}
+	return action
 }
 
 var kubeScopeChoices = []struct {
