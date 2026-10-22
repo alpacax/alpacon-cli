@@ -26,7 +26,12 @@ the command signer warns about it.
 --file issues several entries at once from a JSON array whose items carry the
 ledger's own fields (principal_id, command_pattern, username, and optionally
 groupname, server_ids, expires_at, enabled). The batch is all or nothing: one
-refused entry refuses the whole file.`,
+refused entry refuses the whole file. principal_type may be left out; it can
+only be service_token.
+
+Only a service token can be pre-approved commands: a personal API token has no
+command list on the ledger. Existing entries for personal API tokens are still
+listed and can be revoked.`,
 	Example: `  alpacon acl entry add --token deploy-bot --command "systemctl restart nginx" \
     --username root --server web-01
 
@@ -173,6 +178,9 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 	for i, item := range items {
 		if item.PrincipalType == "" {
 			item.PrincipalType = acl.PrincipalTypeServiceToken
+		}
+		if item.PrincipalType != acl.PrincipalTypeServiceToken {
+			return nil, fmt.Errorf("entry %d: principal_type must be %q; a personal API token has no command list on the ledger", i, acl.PrincipalTypeServiceToken)
 		}
 		if err := validateExpiry(item.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)

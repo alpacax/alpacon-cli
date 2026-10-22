@@ -19,7 +19,8 @@ var AclCmd = &cobra.Command{
 	Long: `Manage the command pre-approval ledger: the pre-approved commands a service
 token may run without each run being judged again, and the Command ACL admins
 who may change them. The web console shows the same entries under
-Pre-approved commands on a service token's page.
+Pre-approved commands on a service token's page. A personal API token has no
+command list on the ledger.
 
 The ledger is kept by the command signer rather than the workspace, so the
 first acl command asks you to authorize it in the browser, the same way

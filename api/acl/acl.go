@@ -50,7 +50,17 @@ func ListEntries(ac *client.AlpaconClient, workspaceID, principalID string) ([]E
 // IssueEntries issues every entry or none: the bulk route refuses the whole
 // batch on one bad row, and it is used for a single entry too so both meet the
 // same duplicate refusal.
+//
+// Only service tokens are issued entries. The ledger keeps api_token entries
+// for tokens that held them before, but the web console neither issues nor
+// shows them on a personal API token's page, so one issued here could not be
+// seen or revoked there. The refusal happens before any request is sent.
 func IssueEntries(ac *client.AlpaconClient, workspaceID string, entries []EntryRequest) ([]EntryResponse, error) {
+	for i, entry := range entries {
+		if entry.PrincipalType != PrincipalTypeServiceToken {
+			return nil, fmt.Errorf("entry %d names principal type %q: only service tokens can be issued pre-approved commands, and a personal API token has no command list on the ledger", i, entry.PrincipalType)
+		}
+	}
 	for i := range entries {
 		// The ledger reads an empty scope as every server in the workspace; a
 		// nil slice would marshal as null, which is not a list at all.

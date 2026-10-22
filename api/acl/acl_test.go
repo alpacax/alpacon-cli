@@ -170,7 +170,7 @@ func TestIssueEntries_RelaysTheSignersRefusal(t *testing.T) {
 		return http.StatusBadRequest, `{"entries": ["Row 0 is a grant the ledger already holds: 'uptime' as '*'. Revoke it first to reissue."], "code": "duplicate_entry"}`
 	})
 
-	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{{PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"}})
+	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{{PrincipalType: PrincipalTypeServiceToken, PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"}})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already holds")
@@ -340,4 +340,36 @@ func TestEntryAttributes_JSONFieldNames(t *testing.T) {
 	body, err := json.Marshal(EntryAttributes{ID: "e1", Principal: "deploy-bot", Command: "uptime"})
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"id": "e1", "principal": "deploy-bot", "command_pattern": "uptime", "username": "", "groupname": "", "servers": "", "enabled": false, "expires_at": "", "created_by": ""}`, string(body))
+}
+
+// The console never issues an api_token entry nor shows one on a personal API
+// token's page, so one issued here could not be seen or revoked there.
+func TestIssueEntries_RefusesAPersonalAPITokenBeforeSending(t *testing.T) {
+	t.Parallel()
+	ac, stub := newStubSigner(t, func(*http.Request) (int, string) { return http.StatusCreated, `[]` })
+
+	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{
+		{PrincipalType: PrincipalTypeServiceToken, PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"},
+		{PrincipalType: "api_token", PrincipalID: testTokenID, CommandPattern: "df -h", Username: "*"},
+	})
+
+	require.ErrorContains(t, err, "a personal API token has no command list on the ledger")
+	assert.Empty(t, stub.recorded(), "no request may reach the signer")
+}
+
+// Listing and revoking keep working for api_token entries already held.
+func TestListAndRevoke_KeepAPITokenEntries(t *testing.T) {
+	t.Parallel()
+	ac, _ := newStubSigner(t, func(r *http.Request) (int, string) {
+		if r.Method == http.MethodDelete {
+			return http.StatusNoContent, ""
+		}
+		return http.StatusOK, `{"count": 1, "next": null, "results": [{"id": "` + testEntryID + `", "principal_type": "api_token"}]}`
+	})
+
+	entries, err := ListEntries(ac, testWorkspaceID, "")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "api_token", entries[0].PrincipalType)
+	require.NoError(t, RevokeEntry(ac, testEntryID))
 }

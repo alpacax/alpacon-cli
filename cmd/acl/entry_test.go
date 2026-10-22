@@ -36,6 +36,7 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 		{name: "not an array", data: `{"command_pattern": "uptime"}`, wantErr: "JSON array"},
 		{name: "empty array", data: `[]`, wantErr: "no entries"},
 		{name: "misspelled field", data: `[{"command_pattern": "uptime", "username": "*", "server_id": ["x"]}]`, wantErr: "server_id"},
+		{name: "personal API token", data: `[{"principal_type": "api_token", "command_pattern": "uptime", "username": "*"}]`, wantErr: "no command list on the ledger"},
 		{name: "unreadable expiry", data: `[{"command_pattern": "uptime", "username": "*", "expires_at": "tomorrow"}]`, wantErr: "entry 0"},
 	}
 	for _, tt := range tests {

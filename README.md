@@ -432,7 +432,7 @@ $ alpacon token acl <type> delete <acl-id>
 On servers that manage command ACLs on the command pre-approval ledger, `alpacon token acl command add` and `delete` are refused with `command_acl_moved`; a Command ACL admin issues or revokes the entry with `alpacon acl entry` (below) or under Pre-approved commands on the service token's page in the web console, and a personal API token has no command list on the ledger. `alpacon token acl command ls` is unaffected, and servers without the ledger still accept these writes.
 
 ### Pre-approved commands
-On workspaces that keep command ACLs on the command pre-approval ledger, `alpacon acl` manages the same entries the web console shows under Pre-approved commands: each one pre-approves a command pattern for a service token, run as one account, on chosen servers or on every server in the workspace.
+On workspaces that keep command ACLs on the command pre-approval ledger, `alpacon acl` manages the same entries the web console shows under Pre-approved commands: each one pre-approves a command pattern for a service token, run as one account, on chosen servers or on every server in the workspace. A personal API token has no command list on the ledger: `alpacon acl entry add` refuses one before sending anything, while entries an API token already holds can still be listed and revoked.
 
 ```bash
 $ alpacon acl entry ls [--token deploy-bot]
