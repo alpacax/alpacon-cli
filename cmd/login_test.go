@@ -964,44 +964,47 @@ func TestPrintDeviceCodePrompt(t *testing.T) {
 	}
 }
 
-func TestPersistKubernetesSurface(t *testing.T) {
+func TestPersistWorkspaceEnv(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "token", "", "", "", "", 0, false))
 
-	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
 	assert.True(t, cfg.KubernetesSurface)
 	assert.Equal(t, "token", cfg.Token)
 
-	// A server that stops reporting the surface turns it back off.
-	persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{})
+	// A server that stops reporting either keeps the schema name and turns the surface back off.
+	persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{})
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
+	assert.Equal(t, "frozen", cfg.SchemaName)
 	assert.False(t, cfg.KubernetesSurface)
 }
 
-func TestPersistKubernetesSurface_WarnsWithoutConfig(t *testing.T) {
+func TestPersistWorkspaceEnv_WarnsWithoutConfig(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
 	})
 
-	assert.Contains(t, stderr, "Could not save whether this workspace supports Kubernetes")
+	assert.Contains(t, stderr, "Could not save the workspace identity and Kubernetes support")
 }
 
-func TestPersistKubernetesSurface_SkipsAnotherWorkspace(t *testing.T) {
+func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	setTestHome(t, t.TempDir())
 	// Another shell's login replaced the config while this login was in flight.
 	require.NoError(t, config.CreateConfig("https://other.example.com", "other", "token", "", "", "", "", 0, false))
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		persistKubernetesSurface("https://ws.example.com", &auth0.AuthEnvResponse{Surfaces: auth0.Surfaces{Kubernetes: true}})
+		persistWorkspaceEnv("https://ws.example.com", &auth0.AuthEnvResponse{Auth0: auth0.Auth0Config{SchemaName: "frozen"}, Surfaces: auth0.Surfaces{Kubernetes: true}})
 	})
 
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
+	assert.Empty(t, cfg.SchemaName)
 	assert.False(t, cfg.KubernetesSurface)
-	assert.Contains(t, stderr, "Did not save Kubernetes support for https://ws.example.com")
+	assert.Contains(t, stderr, "Did not save the workspace identity and Kubernetes support for https://ws.example.com")
 }

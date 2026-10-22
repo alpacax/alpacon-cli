@@ -341,11 +341,11 @@ func narrowToPublishedFileMode(file *os.File, path string) error {
 
 // deviceIDPath returns the absolute path of the device identifier file.
 func deviceIDPath() (string, error) {
-	homeDir, err := os.UserHomeDir()
+	dir, err := configDir()
 	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %v", err)
+		return "", err
 	}
-	return filepath.Join(homeDir, ConfigFileDir, DeviceIDFileName), nil
+	return filepath.Join(dir, DeviceIDFileName), nil
 }
 
 // newDeviceID returns a random RFC 4122 version 4 UUID. The canonical
