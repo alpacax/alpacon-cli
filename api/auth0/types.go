@@ -32,12 +32,38 @@ type Auth0Config struct {
 	// the org scope—the URL label can change while this never does. Empty on
 	// older servers that do not return the field.
 	SchemaName string `json:"schema_name,omitempty"`
+	// WorkspaceID is the workspace's UUID, which the signer's ledger names a
+	// workspace by. Empty on older servers that do not return the field.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 type AuthEnvResponse struct {
 	Auth0    Auth0Config `json:"auth0"`
 	Language string      `json:"language"`
 	Surfaces Surfaces    `json:"surfaces"`
+	// CommandACLSurface names the service that holds this workspace's command
+	// ACLs: CommandACLSurfaceAI when they live on the command pre-approval
+	// ledger, anything else when the workspace keeps them itself.
+	CommandACLSurface CommandACLSurface `json:"command_acl_surface"`
+}
+
+// CommandACLSurfaceAI is the command_acl_surface value that sends command ACL
+// management to the command pre-approval ledger.
+const CommandACLSurfaceAI = "ai"
+
+// CommandACLSurface is the server's command_acl_surface answer, or "" when the
+// server predates the key.
+type CommandACLSurface string
+
+// UnmarshalJSON never fails, for the reason Surfaces gives: anything that is
+// not a JSON string reads as "".
+func (s *CommandACLSurface) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		value = ""
+	}
+	*s = CommandACLSurface(value)
+	return nil
 }
 
 // Surfaces lists the optional product surfaces the server says this workspace
