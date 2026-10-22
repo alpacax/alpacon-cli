@@ -429,6 +429,8 @@ $ alpacon token acl <type> ls     my-token
 $ alpacon token acl <type> delete <acl-id>
 ```
 
+On servers that manage command ACLs on the command pre-approval ledger, `alpacon token acl command add` and `delete` are refused with `command_acl_moved`; a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console, and a personal API token has no command list on the ledger. `alpacon token acl command ls` is unaffected, and servers without the ledger still accept these writes.
+
 ### Agent (Alpamon) management
 ```bash
 $ alpacon agent restart <server>
@@ -521,7 +523,7 @@ Separately from the work session gate, `exec` (and `websh` when running a comman
 
 Exit code is `1`, and under `--output json` the refusal is an error envelope on stderr with `error_code` `command_inline_credential`. That envelope currently carries no `next_actions`—rewrite the command with `--env="KEY"` as described above (`exec` takes the remote command after `--`, `websh` takes it as one quoted argument), or, for a `--file` run, rewrite the script to read the secret on the host.
 
-Also separate from the work session gate: when you authenticate with an API token or a service token, the server checks the request against that token's ACL rules before anything runs. A request outside those rules is refused with exit code `1` and a message naming token access control. This is a permanent refusal, not a transient one: a retry submits the same request. List the rules with `alpacon token acl command ls TOKEN`, `alpacon token acl server ls TOKEN`, or `alpacon token acl file ls TOKEN`, and widen them with the matching `add` subcommand. Deny-by-default applies per ACL type—a token with no rule of a given type has no access of that kind at all.
+Also separate from the work session gate: when you authenticate with an API token or a service token, the server checks the request against that token's ACL rules before anything runs. A request outside those rules is refused with exit code `1` and a message naming token access control. This is a permanent refusal, not a transient one: a retry submits the same request. List the rules with `alpacon token acl command ls TOKEN`, `alpacon token acl server ls TOKEN`, or `alpacon token acl file ls TOKEN`, and widen them with the matching `add` subcommand (see Token ACLs for servers with the command pre-approval ledger). Deny-by-default applies per ACL type—a token with no rule of a given type has no access of that kind at all.
 
 ## Exit codes
 

@@ -2956,6 +2956,26 @@ func TestSendRequest_PAMInstallCodesExplainTheRemedy(t *testing.T) {
 	}
 }
 
+// A command-ACL write answered 405 command_acl_moved names where the change is
+// made now, and the raw code stays readable for callers.
+func TestSendRequest_405CommandACLMovedNamesTheConsole(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(`{"code":"command_acl_moved"}`))
+	}))
+	defer ts.Close()
+
+	_, err := newTestClient(ts.URL).SendPostRequest("/api/security/command-acl/", map[string]string{"command": "ls"})
+
+	require.Error(t, err)
+	assert.Equal(t, "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger", err.Error())
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "command_acl_moved", code)
+	assert.Equal(t, http.StatusMethodNotAllowed, utils.HTTPStatusCode(err))
+}
+
 // The cursor-paginator codes reach a user only after api.FetchCursorPages has spent
 // its restarts, so the message has to name the remedy rather than echo the code.
 func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {

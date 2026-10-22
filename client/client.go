@@ -1377,6 +1377,8 @@ func codeOnlyMessage(code string) string {
 		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account"
 	case utils.WorkSessionAgentSessionRequired:
 		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
+	case utils.CommandACLMoved:
+		return "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger"
 	default:
 		return fmt.Sprintf("request failed (code: %s)", code)
 	}
