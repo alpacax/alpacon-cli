@@ -70,6 +70,17 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 	CliErrorWithExitCode(code, format, args...)
 }
 
+// CliErrorEnvelopeWithNextActions prints the --output json error envelope with
+// a caller-chosen exit code and the follow-ups that replace the refused request,
+// then exits with that code.
+func CliErrorEnvelopeWithNextActions(code int, operation string, err error, message string, actions []NextAction) {
+	envelope := buildCliErrorEnvelopeFromErr(operation, err, message)
+	envelope.ExitCode = code
+	envelope.NextActions = actions
+	PrintJSONError(os.Stderr, envelope)
+	os.Exit(code)
+}
+
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits(2); error_code is fixed to UsageErrorCode.
 func CliUsageErrorEnvelopeWithExit(operation string, format string, args ...any) {
 	if OutputFormat == OutputFormatJSON {

@@ -71,8 +71,15 @@ Run the command again later to check for completion.`,
 		// this refusal the way exec and work-session create do: retrying only
 		// files another approval request.
 		if event.IsRejectedStatus(details.Status) {
-			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command",
-				&event.CommandRejectedError{CommandID: details.ID},
+			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
+			// The gate refused a script body on the command line: the reviewer
+			// sentence below would send the user to the wrong place. The detail
+			// carries no execution account, so the commands repeat none.
+			if rejected.Cause == event.RejectionCauseUseFileExecution {
+				reportUseFileExecution(rejected, details.Server.Name, nil)
+				return
+			}
+			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
 				"command was rejected by a reviewer (status: %s)", details.Status)
 			return
 		}
