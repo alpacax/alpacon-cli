@@ -13,11 +13,12 @@ var tokenCreateCmd = &cobra.Command{
 	Long: `
 	Generates a new API token for accessing the server.
 	This command allows you to create a token by specifying options such as token name, expiration, and scopes.
+	Personal API tokens cannot run commands or transfer files. Use service tokens for automation that runs commands or transfers files.
 	`,
 	Example: `
 	alpacon token create
-	alpacon token create --name ci-token --scopes "server:read,command:create"
-	alpacon token create --name deploy-token --scopes "*"
+	alpacon token create --name ci-token --scopes "server:read"
+	alpacon token create --name audit-token --scopes "server:read,role_audit_log:read"
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		name, _ := cmd.Flags().GetString("name")
@@ -66,7 +67,7 @@ func init() {
 	tokenCreateCmd.Flags().StringVarP(&name, "name", "n", "", "A name to remember the token easily.")
 	tokenCreateCmd.Flags().BoolVarP(&limit, "limit", "l", true, "Set to true to apply usage limits.")
 	tokenCreateCmd.Flags().IntVar(&expiresAt, "expiration-in-days", 0, "Days until the token expires (0 = the workspace's maximum token lifetime).")
-	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,command:create"). Omit to get every scope you can grant: "*" for a superuser, your roles' scopes otherwise.`)
+	tokenCreateCmd.Flags().String("scopes", "", `Comma-separated list of scopes (e.g. "server:read,role_audit_log:read"). Omit to get the scopes your roles allow.`)
 }
 
 func promptForToken() (auth.APITokenRequest, error) {

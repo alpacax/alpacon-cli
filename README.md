@@ -412,11 +412,13 @@ On Alpacon Cloud workspaces an API token is refused on the `alpacon user role` c
 
 ### API tokens
 ```bash
-$ alpacon token create -n <name> --expiration-in-days=7
+$ alpacon token create -n <name> --scopes "server:read" --expiration-in-days=7
 $ alpacon token ls
 $ alpacon token rm <token-id-or-name>
 $ alpacon login <URL> -t <TOKEN_KEY>
 ```
+
+Personal API tokens cannot run commands or transfer files. Use service tokens for automation that runs commands or transfers files.
 
 ### Token ACLs
 Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).
