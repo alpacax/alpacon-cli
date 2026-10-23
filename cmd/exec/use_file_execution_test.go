@@ -19,6 +19,7 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 		name         string
 		server       string
 		accountFlags []string
+		withEnv      bool
 		wantMessage  string
 		wantCommands []string
 	}{
@@ -39,6 +40,16 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 			wantCommands: []string{
 				"alpacon exec -u root -g wheel --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
 				"alpacon exec -u root -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
+			},
+		},
+		{
+			name:        "env values are warned about",
+			server:      "prod",
+			withEnv:     true,
+			wantMessage: wantMessage + ". --env values cannot ride the file lane, so the script must read them on the host",
+			wantCommands: []string{
+				"alpacon exec --upload --file /path/to/script.sh --file-from ./script.sh prod",
+				"alpacon exec --file /path/to/script.sh --from-server prod",
 			},
 		},
 		{
@@ -72,7 +83,7 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			message, actions := useFileExecutionRefusal("cmd-1", tc.server, tc.accountFlags)
+			message, actions := useFileExecutionRefusal("cmd-1", tc.server, tc.accountFlags, tc.withEnv)
 			assert.Equal(t, tc.wantMessage, message)
 			commands := make([]string, 0, len(actions))
 			for _, a := range actions {
@@ -117,6 +128,9 @@ func newRejectedCommandServer(cause string) *httptest.Server {
 				"verification_status": "rejected",
 				"result":              "Save the script to a file and run it as a verified file.",
 				"server":              map[string]any{"id": "srv-1", "name": "prod"},
+				"username":            "root",
+				"groupname":           "wheel",
+				"work_session":        map[string]any{"id": "ses-1"},
 			}
 			if cause != "" {
 				detail["rejection_cause"] = cause
@@ -184,7 +198,7 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 		assert.Equal(t, []utils.NextAction{
 			{
 				Command:     "alpacon exec -u root --upload --file /path/to/script.sh --file-from ./script.sh prod",
-				Description: "save the script to a local file, then write it to the server and run it in one step",
+				Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path",
 			},
 			{
 				Command:     "alpacon exec -u root --file /path/to/script.sh --from-server prod",
@@ -220,7 +234,8 @@ func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
 		assert.Contains(t, stderr, "(use_file_execution)")
-		assert.Contains(t, stderr, "  alpacon exec --file /path/to/script.sh --from-server prod\n")
+		assert.Contains(t, stderr, "  alpacon exec -u root -g wheel --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod\n")
+		assert.Contains(t, stderr, "  alpacon exec -u root -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod\n")
 		assert.NotContains(t, stderr, "rejected by a reviewer")
 	})
 
@@ -235,6 +250,13 @@ func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
 		assert.Equal(t, "use_file_execution", envelope.ErrorCode)
 		assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
-		assert.Len(t, envelope.NextActions, 2)
+		commands := make([]string, 0, len(envelope.NextActions))
+		for _, a := range envelope.NextActions {
+			commands = append(commands, a.Command)
+		}
+		assert.Equal(t, []string{
+			"alpacon exec -u root -g wheel --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
+			"alpacon exec -u root -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
+		}, commands)
 	})
 }

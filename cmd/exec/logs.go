@@ -73,10 +73,13 @@ Run the command again later to check for completion.`,
 		if event.IsRejectedStatus(details.Status) {
 			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
 			// The gate refused a script body on the command line: the reviewer
-			// sentence below would send the user to the wrong place. The detail
-			// carries no execution account, so the commands repeat none.
+			// sentence below would send the user to the wrong place.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
-				reportUseFileExecution(rejected, details.Server.Name, nil)
+				original := RemoteExecArgs{Username: details.Username, Groupname: details.Groupname}
+				if details.WorkSession != nil {
+					original.WorkSessionID = details.WorkSession.ID
+				}
+				reportUseFileExecution(rejected, details.Server.Name, useFileExecutionAccountFlags(original), false)
 				return
 			}
 			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,

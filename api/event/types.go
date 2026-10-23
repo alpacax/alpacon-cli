@@ -176,6 +176,17 @@ type EventDetails struct {
 	// RejectionCause says why a rejected command was refused when the gate,
 	// not a reviewer, decided it; empty otherwise and on older servers.
 	RejectionCause string `json:"rejection_cause"`
+	// The account the command ran as and the work session it ran under, so a
+	// re-run printed from the detail repeats them. WorkSession is null when the
+	// command ran under none.
+	Username    string              `json:"username"`
+	Groupname   string              `json:"groupname"`
+	WorkSession *CommandWorkSession `json:"work_session"`
+}
+
+// CommandWorkSession is the work session a command detail names.
+type CommandWorkSession struct {
+	ID string `json:"id"`
 }
 
 type CommandRequest struct {

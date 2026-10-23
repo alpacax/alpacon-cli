@@ -397,20 +397,25 @@ func HandleFileExecInlineCredential(err error) bool {
 // a copy already on the server. Both repeat the account flags of the refused
 // run, since the file lane has to run on the same server as the same account.
 // The server token is quoted with argvQuote so the commands stay one argument
-// per value when pasted into a shell.
-func useFileExecutionRefusal(commandID, server string, accountFlags []string) (message string, actions []utils.NextAction) {
+// per value when pasted into a shell. withEnv says the refused run carried
+// --env, which the file lane cannot pass, so the message warns that the script
+// has to read those values on the host.
+func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool) (message string, actions []utils.NextAction) {
 	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
 	if server == "" {
 		server = "SERVER"
 	}
 	message = fmt.Sprintf("the server refused command %s on '%s': its command line carries a script body, which runs only as a verified file (%s)",
 		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
+	if withEnv {
+		message += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
 	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
 	serverArg := argvQuote(server)
 	actions = []utils.NextAction{
 		{
 			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
-			Description: "save the script to a local file, then write it to the server and run it in one step",
+			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path",
 		},
 		{
 			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
@@ -447,7 +452,7 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
 		return false
 	}
-	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed))
+	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed), len(parsed.Env) > 0)
 	return true
 }
 
@@ -455,8 +460,8 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 // code every settled-without-a-grant command exits with: running the same line
 // again is refused the same way. Under --output json the envelope carries the
 // code as error_code and the replacement commands as next_actions.
-func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string) {
-	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags)
+func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool) {
+	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv)
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		utils.CliErrorEnvelopeWithNextActions(utils.ExitCodeNotApproved, "command", rejected, message+".", actions)
 		return
