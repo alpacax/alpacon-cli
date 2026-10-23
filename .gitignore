@@ -8,7 +8,7 @@ alpacon
 .idea
 
 dist/
-completions/
+/completions/
 
 vendor/
 
