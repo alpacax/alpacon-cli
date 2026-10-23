@@ -396,6 +396,8 @@ func HandleFileExecInlineCredential(err error) bool {
 // command writes a local copy to the server in the same run and the second runs
 // a copy already on the server. Both repeat the account flags of the refused
 // run, since the file lane has to run on the same server as the same account.
+// The server token is quoted with argvQuote so the commands stay one argument
+// per value when pasted into a shell.
 func useFileExecutionRefusal(commandID, server string, accountFlags []string) (message string, actions []utils.NextAction) {
 	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
 	if server == "" {
@@ -404,13 +406,14 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string) (m
 	message = fmt.Sprintf("the server refused command %s on '%s': its command line carries a script body, which runs only as a verified file (%s)",
 		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
 	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
+	serverArg := argvQuote(server)
 	actions = []utils.NextAction{
 		{
-			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + server,
+			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
 			Description: "save the script to a local file, then write it to the server and run it in one step",
 		},
 		{
-			Command:     prefix + " --file /path/to/script.sh --from-server " + server,
+			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
 			Description: "or, when a copy is already saved at that path on the server, run it there",
 		},
 	}
@@ -418,17 +421,19 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string) (m
 }
 
 // useFileExecutionAccountFlags returns the -u, -g and --work-session flags of
-// the refused run, sanitized for a raw write, in the order reRunHint uses.
+// the refused run, sanitized for a raw write and quoted with argvQuote so a
+// pasted command keeps each value one argument, in the order reRunHint uses.
 func useFileExecutionAccountFlags(parsed RemoteExecArgs) []string {
+	quote := func(s string) string { return argvQuote(utils.SanitizeTerminalText(s)) }
 	var flags []string
 	if parsed.Username != "" {
-		flags = append(flags, "-u "+utils.SanitizeTerminalText(parsed.Username))
+		flags = append(flags, "-u "+quote(parsed.Username))
 	}
 	if parsed.Groupname != "" {
-		flags = append(flags, "-g "+utils.SanitizeTerminalText(parsed.Groupname))
+		flags = append(flags, "-g "+quote(parsed.Groupname))
 	}
 	if parsed.WorkSessionID != "" {
-		flags = append(flags, "--work-session "+utils.SanitizeTerminalText(parsed.WorkSessionID))
+		flags = append(flags, "--work-session "+quote(parsed.WorkSessionID))
 	}
 	return flags
 }

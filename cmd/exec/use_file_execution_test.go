@@ -51,6 +51,15 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 			},
 		},
 		{
+			name:        "server name with shell syntax is quoted",
+			server:      "prod;id",
+			wantMessage: "the server refused command cmd-1 on 'prod;id': its command line carries a script body, which runs only as a verified file (use_file_execution)",
+			wantCommands: []string{
+				"alpacon exec --upload --file /path/to/script.sh --file-from ./script.sh 'prod;id'",
+				"alpacon exec --file /path/to/script.sh --from-server 'prod;id'",
+			},
+		},
+		{
 			name:        "missing server gets a placeholder",
 			server:      "",
 			wantMessage: "the server refused command cmd-1 on 'SERVER': its command line carries a script body, which runs only as a verified file (use_file_execution)",
@@ -81,6 +90,9 @@ func TestUseFileExecutionAccountFlags(t *testing.T) {
 	assert.Equal(t,
 		[]string{"-u root", "-g wheel", "--work-session ses-1"},
 		useFileExecutionAccountFlags(RemoteExecArgs{Server: "prod", Username: "root", Groupname: "wheel", WorkSessionID: "ses-1"}))
+	assert.Equal(t,
+		[]string{"-u 'a b'", "-g '$(id)'", "--work-session 'ses;1'"},
+		useFileExecutionAccountFlags(RemoteExecArgs{Server: "prod", Username: "a b", Groupname: "$(id)", WorkSessionID: "ses;1"}))
 }
 
 // rejectedCommandID is a UUID because exec logs refuses any other job id.
