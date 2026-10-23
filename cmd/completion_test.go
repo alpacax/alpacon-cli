@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The packages install stdout as the completion file, so anything else there
-// breaks it. Serial: generating the expected script reads RootCmd.
+// Packages install stdout as the completion file, and Homebrew runs it with no
+// Alpacon config. Serial: the expected script comes from RootCmd.
 func TestCompletionWritesOnlyTheScriptToStdout(t *testing.T) {
 	tests := []struct {
 		shell string
@@ -26,12 +26,17 @@ func TestCompletionWritesOnlyTheScriptToStdout(t *testing.T) {
 			var want bytes.Buffer
 			require.NoError(t, tc.gen(&want))
 
+			home := t.TempDir()
+
 			stdout, stderr, exitCode := runHelperProcess(t, "TestCompletionHelperProcess", "completion-helper",
-				[]string{"completion", tc.shell}, "GO_WANT_COMPLETION_HELPER=1", homeEnvVar()+"="+t.TempDir())
+				[]string{"completion", tc.shell}, "GO_WANT_COMPLETION_HELPER=1", homeEnvVar()+"="+home)
 
 			assert.Equal(t, 0, exitCode)
 			assert.Empty(t, stderr)
 			assert.Equal(t, want.String(), stdout)
+			entries, err := os.ReadDir(home)
+			require.NoError(t, err)
+			assert.Empty(t, entries)
 		})
 	}
 }
