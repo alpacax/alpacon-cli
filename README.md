@@ -523,7 +523,7 @@ Separately from the work session gate, `exec` (and `websh` when running a comman
 
 Exit code is `1`, and under `--output json` the refusal is an error envelope on stderr with `error_code` `command_inline_credential`. That envelope currently carries no `next_actions`—rewrite the command with `--env="KEY"` as described above (`exec` takes the remote command after `--`, `websh` takes it as one quoted argument), or, for a `--file` run, rewrite the script to read the secret on the host.
 
-A command whose line carries a script body—a heredoc, a multi-line `bash -c` or `perl -e` body, or a decoded payload piped into a shell or interpreter—is refused once the server has verified it, because nothing can verify a script in that shape. Save the script to a file and run it on the verified file lane, on the same server and as the same account (`-u`/`-g`):
+A command whose line carries a script body—a heredoc, a multi-line `bash -c` or `perl -e` body, or a decoded payload piped into a shell or interpreter—can be refused once the server has verified it, when the workspace approval policy blocks script bodies: nothing can verify a script in that shape. When it is refused, save the script to a file and run it on the verified file lane, on the same server and as the same account (`-u`/`-g`):
 
 ```bash
 # write a local copy to the server and run it in one step

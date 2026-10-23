@@ -104,9 +104,9 @@ type CommandRejectedError struct {
 // RejectionCauseUseFileExecution is the rejection_cause of a command whose line
 // carried a script body: a heredoc, a multi-line -c or -e body, or a decoded
 // payload piped into a shell. Nothing can verify a script in that shape, so the
-// server refuses it after verification and asks for the file lane instead. The
-// refusal is per command, so it covers one server even when the same script
-// went to several.
+// server can refuse it after verification, when the workspace approval policy
+// blocks script bodies, and ask for the file lane instead. The refusal is per
+// command, so it covers one server even when the same script went to several.
 const RejectionCauseUseFileExecution = "use_file_execution"
 
 // AwaitingPurposeError is returned when the server parked a command at the
