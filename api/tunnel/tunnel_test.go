@@ -1,6 +1,7 @@
 package tunnel_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,10 +9,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -110,4 +113,115 @@ func TestCreateTunnelSession_BodyOmitsWorkSession_WhenEmpty(t *testing.T) {
 	hadKey, _, seen := capture.snapshot()
 	require.True(t, seen, "POST must reach the test server")
 	assert.False(t, hadKey, "body must omit work_session field when ID is empty")
+}
+
+func newTunnelDetailClient(t *testing.T, handler http.HandlerFunc) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/websh/tunnels/tun-1/" {
+			http.NotFound(w, r)
+			return
+		}
+		handler(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+}
+
+func answerTunnelDetail(status int, body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}
+}
+
+func TestGetTunnelSessionReadsFailedOpen(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, answerTunnelDetail(http.StatusOK, `{
+		"id": "tun-1",
+		"open_status": "failed",
+		"open_failure": {
+			"command": "4f1c2a8e-0000-4000-8000-000000000001",
+			"status": "error",
+			"error_phase": "connect",
+			"exit_code": 1,
+			"result": "connection refused"
+		}
+	}`))
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "tun-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, &tunnel.TunnelSessionDetail{
+		OpenStatus:  tunnel.OpenStatusFailed,
+		OpenFailure: tunnel.OpenFailure{Result: "connection refused"},
+	}, detail)
+}
+
+func TestGetTunnelSessionFromOlderServerLeavesOpenFieldsEmpty(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, answerTunnelDetail(http.StatusOK, `{"id": "tun-1", "target_port": 5432}`))
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "tun-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, &tunnel.TunnelSessionDetail{}, detail)
+}
+
+func TestGetTunnelSessionReadsNullOpenFieldsAsEmpty(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, answerTunnelDetail(http.StatusOK, `{"id": "tun-1", "open_status": null, "open_failure": null}`))
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "tun-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, &tunnel.TunnelSessionDetail{}, detail)
+}
+
+func TestGetTunnelSessionReturnsErrorOnNon2xx(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, answerTunnelDetail(http.StatusForbidden, `{"code": "permission_denied"}`))
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "tun-1")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
+	assert.Contains(t, err.Error(), "failed to get tunnel session")
+	assert.Nil(t, detail)
+}
+
+func TestGetTunnelSessionReturnsErrorOnMalformedBody(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, answerTunnelDetail(http.StatusOK, `{"open_status":`))
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "tun-1")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse tunnel session detail")
+	assert.Nil(t, detail)
+}
+
+func TestGetTunnelSessionGivesUpWhenTheContextExpires(t *testing.T) {
+	t.Parallel()
+	ac := newTunnelDetailClient(t, func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	detail, err := tunnel.GetTunnelSession(ctx, ac, "tun-1")
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Nil(t, detail)
+}
+
+func TestGetTunnelSessionRefusesUnusableID(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{}
+
+	detail, err := tunnel.GetTunnelSession(context.Background(), ac, "../servers")
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
+	assert.Nil(t, detail)
 }

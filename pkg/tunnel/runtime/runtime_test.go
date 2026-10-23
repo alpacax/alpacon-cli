@@ -7,12 +7,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -470,4 +473,162 @@ func TestTunnelDialerKeepsTheDefaultDialerSettings(t *testing.T) {
 
 	assert.Equal(t, websocket.DefaultDialer.HandshakeTimeout, dialer.HandshakeTimeout)
 	assert.NotNil(t, dialer.Proxy)
+}
+
+func TestExplainDialFailure(t *testing.T) {
+	t.Parallel()
+	failed := func(result string) *tunnelapi.TunnelSessionDetail {
+		return &tunnelapi.TunnelSessionDetail{
+			OpenStatus:  tunnelapi.OpenStatusFailed,
+			OpenFailure: tunnelapi.OpenFailure{Result: result},
+		}
+	}
+	pending := &tunnelapi.TunnelSessionDetail{OpenStatus: tunnelapi.OpenStatusPending}
+	agentGone := &http.Response{StatusCode: http.StatusServiceUnavailable, Status: "503 Service Unavailable"}
+	forbidden := &http.Response{StatusCode: http.StatusForbidden, Status: "403 Forbidden"}
+	fallback := "failed to connect to proxy server: websocket: bad handshake"
+
+	tests := []struct {
+		name   string
+		resp   *http.Response
+		detail *tunnelapi.TunnelSessionDetail
+		want   string
+	}{
+		{
+			name:   "failed with a reason names the reason",
+			resp:   agentGone,
+			detail: failed("opentunnel: CPU usage 100.0% exceeds limit 90%"),
+			want:   "failed to open tunnel on db-1: opentunnel: CPU usage 100.0% exceeds limit 90%",
+		},
+		{
+			name:   "failed reason loses its terminal controls",
+			detail: failed("\x1b[31mrefused\x1b[0m\u009b now"),
+			want:   "failed to open tunnel on db-1: refused now",
+		},
+		{
+			name:   "failed reason over several lines reads as one",
+			detail: failed("refused:\r\n  CPU busy\n"),
+			want:   "failed to open tunnel on db-1: refused: CPU busy",
+		},
+		{
+			name:   "failed without a reason still says the open failed",
+			resp:   forbidden,
+			detail: failed(""),
+			want:   "failed to open tunnel on db-1",
+		},
+		{
+			name:   "failed with a blank reason still says the open failed",
+			detail: failed(" \t\n "),
+			want:   "failed to open tunnel on db-1",
+		},
+		{
+			name:   "failed with only terminal controls still says the open failed",
+			detail: failed("\x1b[0m"),
+			want:   "failed to open tunnel on db-1",
+		},
+		{
+			name:   "pending after the proxy gave up says the agent did not respond",
+			resp:   agentGone,
+			detail: pending,
+			want:   "failed to open tunnel on db-1: the agent did not respond to the tunnel request",
+		},
+		{
+			name:   "pending with another refusal keeps the proxy status",
+			resp:   forbidden,
+			detail: pending,
+			want:   fallback + " (status 403 Forbidden)",
+		},
+		{
+			name:   "pending without a handshake response keeps the dial error",
+			detail: pending,
+			want:   fallback,
+		},
+		{
+			name: "no detail falls back",
+			resp: agentGone,
+			want: fallback + " (status 503 Service Unavailable)",
+		},
+		{
+			name:   "older server without open fields falls back",
+			resp:   agentGone,
+			detail: &tunnelapi.TunnelSessionDetail{},
+			want:   fallback + " (status 503 Service Unavailable)",
+		},
+		{
+			name:   "opened falls back",
+			detail: &tunnelapi.TunnelSessionDetail{OpenStatus: tunnelapi.OpenStatusOpened},
+			want:   fallback,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := explainDialFailure("db-1", websocket.ErrBadHandshake, tt.resp, tt.detail)
+
+			assert.EqualError(t, err, tt.want)
+		})
+	}
+}
+
+func TestExplainDialFailureKeepsChannelTokenOutOfFallback(t *testing.T) {
+	t.Parallel()
+	dialErr := &url.Error{Op: "Get", URL: "wss://proxy.example.com/ws/tunnel/secret-token/", Err: websocket.ErrBadHandshake}
+
+	err := explainDialFailure("db-1", dialErr, nil, nil)
+
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "secret-token")
+	assert.Contains(t, err.Error(), "proxy.example.com")
+	assert.ErrorIs(t, err, websocket.ErrBadHandshake)
+}
+
+func newRefusingTunnelServer(t *testing.T, proxyStatus int, detail http.HandlerFunc) (*client.AlpaconClient, *tunnelapi.TunnelSessionResponse, *atomic.Int32) {
+	t.Helper()
+	var lookups atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/ws/tunnel/channel-token/":
+			w.WriteHeader(proxyStatus)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/websh/tunnels/tun-1/":
+			lookups.Add(1)
+			detail(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	session := &tunnelapi.TunnelSessionResponse{
+		ID:           "tun-1",
+		WebsocketURL: "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/tunnel/channel-token/",
+	}
+	return ac, session, &lookups
+}
+
+func TestDialTunnelExplainsARefusedDialFromTheSessionDetail(t *testing.T) {
+	t.Parallel()
+	ac, session, lookups := newRefusingTunnelServer(t, http.StatusServiceUnavailable, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": "tun-1", "open_status": "failed", "open_failure": {"result": "opentunnel: CPU usage 100.0% exceeds limit 90%"}}`))
+	})
+
+	conn, err := dialTunnel(ac, session, "db-1", config.GetSmuxConfig().MaxFrameSize, time.Second)
+
+	assert.Nil(t, conn)
+	require.EqualError(t, err, "failed to open tunnel on db-1: opentunnel: CPU usage 100.0% exceeds limit 90%")
+	assert.Equal(t, int32(1), lookups.Load())
+}
+
+func TestDialTunnelReportsTheDialErrorWhenTheLookupHangs(t *testing.T) {
+	t.Parallel()
+	ac, session, lookups := newRefusingTunnelServer(t, http.StatusServiceUnavailable, func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+
+	conn, err := dialTunnel(ac, session, "db-1", config.GetSmuxConfig().MaxFrameSize, 50*time.Millisecond)
+
+	assert.Nil(t, conn)
+	require.EqualError(t, err, "failed to connect to proxy server: websocket: bad handshake (status 503 Service Unavailable)")
+	assert.Equal(t, int32(1), lookups.Load())
 }

@@ -863,11 +863,17 @@ func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 
 // Get Request to Alpacon Server
 func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
+	return ac.SendGetRequestWithContext(context.Background(), url)
+}
+
+// SendGetRequestWithContext is SendGetRequest bounded by ctx. A token renewal the
+// request runs is not: it waits out the grant as any other request does.
+func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // POST Request to Alpacon Server

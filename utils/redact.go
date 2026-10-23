@@ -2,6 +2,8 @@ package utils
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -81,6 +83,16 @@ func RedactURLError(err error) error { return redactURLError(err, RedactURL) }
 // as well: it keeps only the scheme and host, so even a malformed URL that a
 // parser quotes whole reveals nothing past the host.
 func RedactURLErrorHostOnly(err error) error { return redactURLError(err, RedactURLHostOnly) }
+
+// WebsocketDialError reports a failed WebSocket dial whose URL path carries a channel token,
+// keeping only its host and adding the handshake status a bad handshake alone never names.
+func WebsocketDialError(prefix string, err error, resp *http.Response) error {
+	err = RedactURLErrorHostOnly(err)
+	if resp == nil {
+		return fmt.Errorf("%s: %w", prefix, err)
+	}
+	return fmt.Errorf("%s: %w (status %s)", prefix, err, SanitizeTerminalText(resp.Status))
+}
 
 func redactURLError(err error, redact func(string) string) error {
 	var urlErr *url.Error
