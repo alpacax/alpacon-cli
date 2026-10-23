@@ -718,3 +718,58 @@ func TestEndedStatuses_CallerCannotChangeTheList(t *testing.T) {
 	assert.False(t, IsEndedStatus("active"), "mutating the returned slice must not reach the shared list")
 	assert.Len(t, EndedStatuses(), 5)
 }
+
+func TestProjectAttributesShowsTheCluster(t *testing.T) {
+	t.Parallel()
+	row := ProjectAttributes(&WorkSession{
+		ID:       "ses-k",
+		Scopes:   []string{"kube", "kube_exec"},
+		Clusters: []types.ClusterSummary{{ID: "c-1", Name: "prod-east"}},
+	})
+	assert.Equal(t, "prod-east", row.Clusters)
+	assert.Empty(t, row.Servers)
+	assert.Equal(t, "kube, kube_exec", row.Scopes)
+}
+
+func TestGetClusterWorkSessions(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/work-sessions/sessions/", r.URL.Path)
+		q := r.URL.Query()
+		assert.Equal(t, "c-1", q.Get("cluster"))
+		assert.Equal(t, "user", q.Get("requester_type"))
+		assert.Equal(t, "u-1", q.Get("assigned_user"))
+		assert.False(t, q.Has("status"), "an empty filter is not sent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"ses-k","status":"pending","clusters":[{"id":"c-1","name":"prod-east"}]}]}`))
+	}))
+	defer ts.Close()
+
+	sessions, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1", RequesterType: "user", AssignedUser: "u-1"})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	assert.True(t, TargetsCluster(&sessions[0], "C-1"), "clusters %v", sessions[0].Clusters)
+	assert.False(t, TargetsCluster(&sessions[0], "c-2"), "clusters %v", sessions[0].Clusters)
+
+	_, err = GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{})
+	require.Error(t, err, "without a cluster the list would be every session")
+}
+
+func TestFormatDuration(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in   time.Duration
+		want string
+	}{
+		{90 * time.Minute, "01:30:00"},
+		{30 * time.Hour, "30:00:00"},
+		{45 * time.Second, "00:00:45"},
+		{1500 * time.Millisecond, "00:00:02"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, FormatDuration(tt.in))
+		})
+	}
+}

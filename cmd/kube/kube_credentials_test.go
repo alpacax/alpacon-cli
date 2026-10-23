@@ -1,0 +1,148 @@
+package kube
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type statusError struct{ code int }
+
+func (e statusError) Error() string       { return "status" }
+func (e statusError) HTTPStatusCode() int { return e.code }
+
+func TestCredentialExpiry(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	saved := now.Add(time.Hour)
+	later := now.Add(3 * time.Hour)
+	past := now.Add(-time.Minute)
+	read := func(s *kubernetes.KubeSessionDetail, err error) func() (*kubernetes.KubeSessionDetail, error) {
+		return func() (*kubernetes.KubeSessionDetail, error) { return s, err }
+	}
+	tests := []struct {
+		name     string
+		saved    time.Time
+		retrieve func() (*kubernetes.KubeSessionDetail, error)
+		want     time.Time
+		gone     bool
+		warn     bool
+	}{
+		{name: "open session", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &saved}, nil), want: saved},
+		{name: "extended session", saved: past, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &later}, nil), want: later},
+		{name: "closed session", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &saved, ClosedAt: &past}, nil), gone: true},
+		{name: "expired on the server", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &past}, nil), gone: true},
+		{name: "no expiry in the answer", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{}, nil), want: saved},
+		{name: "session not found", saved: saved, retrieve: read(nil, statusError{404}), gone: true},
+		{name: "check fails while the token is good", saved: saved, retrieve: read(nil, errors.New("connection refused")), want: saved, warn: true},
+		{name: "check fails after the token expired", saved: past, retrieve: read(nil, errors.New("connection refused")), gone: true},
+		{name: "another workspace, token good", saved: saved, want: saved},
+		{name: "another workspace, token expired", saved: past, gone: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := credentialExpiry(&kubeSessionRecord{TokenExpiredAt: tt.saved}, now, tt.retrieve)
+			if tt.gone {
+				require.ErrorIs(t, err, errSessionGone)
+				return
+			}
+			if tt.warn {
+				require.Error(t, err)
+				require.NotErrorIs(t, err, errSessionGone)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestPickRecord(t *testing.T) {
+	t.Parallel()
+	here := kubeSessionRecord{Cluster: "prod-east", WorkspaceURL: "https://ws.example.com", ProxyURL: "https://ws.example.com/kube/c-1"}
+	there := kubeSessionRecord{Cluster: "prod-east", WorkspaceURL: "https://other.example.com", ProxyURL: "https://other.example.com/kube/c-9"}
+	both := []kubeSessionRecord{here, there}
+	tests := []struct {
+		name      string
+		records   []kubeSessionRecord
+		server    string
+		workspace string
+		want      string
+	}{
+		{name: "the server kubectl calls", records: both, server: there.ProxyURL, workspace: here.WorkspaceURL, want: there.WorkspaceURL},
+		{name: "an unknown server", records: both, server: "https://elsewhere.example.com/kube/c-1"},
+		{name: "the logged-in workspace", records: both, workspace: here.WorkspaceURL, want: here.WorkspaceURL},
+		{name: "a lone record", records: []kubeSessionRecord{there}, workspace: here.WorkspaceURL, want: there.WorkspaceURL},
+		{name: "two records and no way to choose", records: both, workspace: "https://third.example.com"},
+		{name: "none", records: nil, workspace: here.WorkspaceURL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := pickRecord(tt.records, tt.server, tt.workspace)
+			if tt.want == "" {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tt.want, got.WorkspaceURL)
+		})
+	}
+}
+
+func TestClusterServer(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "https://ws.example.com/kube/c-1", clusterServer(`{"apiVersion":"client.authentication.k8s.io/v1","kind":"ExecCredential","spec":{"cluster":{"server":"https://ws.example.com/kube/c-1"},"interactive":false}}`))
+	assert.Empty(t, clusterServer(`{"spec":{"interactive":false}}`))
+	assert.Empty(t, clusterServer(""))
+	assert.Empty(t, clusterServer("not json"))
+}
+
+func TestRetrieveWithinGivesUp(t *testing.T) {
+	t.Parallel()
+	block := make(chan struct{})
+	defer close(block)
+	_, err := retrieveWithin(10*time.Millisecond, func() (*kubernetes.KubeSessionDetail, error) {
+		<-block
+		return nil, nil
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no answer within")
+}
+
+func TestStoreRecordsFindsEveryWorkspace(t *testing.T) {
+	t.Parallel()
+	store := kubeSessionStore{dir: t.TempDir()}
+	here := testRecord("prod-east")
+	there := testRecord("prod-east")
+	there.WorkspaceURL = "https://other.example.com"
+	require.NoError(t, store.write(here))
+	require.NoError(t, store.write(there))
+	require.NoError(t, store.write(testRecord("prod-west")))
+
+	got, err := store.records("prod-east")
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+}
+
+func TestSaveExtendedRecordKeepsANewerLogin(t *testing.T) {
+	t.Parallel()
+	store := kubeSessionStore{dir: t.TempDir()}
+	newer := testRecord("prod-east")
+	newer.KubeSessionID = "k-2"
+	require.NoError(t, store.write(newer))
+
+	stale := testRecord("prod-east")
+	stale.TokenExpiredAt = stale.TokenExpiredAt.Add(time.Hour)
+	saveExtendedRecord(store, stale)
+
+	got, err := store.read(testKey("prod-east"))
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "k-2", got.KubeSessionID, "a record from an older session never replaces a newer login's")
+}

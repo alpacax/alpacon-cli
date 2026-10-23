@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -578,6 +579,33 @@ func TestGetClusterIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, id)
+		})
+	}
+}
+
+type statusErr struct{ code int }
+
+func (e statusErr) Error() string       { return fmt.Sprintf("status %d", e.code) }
+func (e statusErr) HTTPStatusCode() int { return e.code }
+
+func TestIsSurfaceOff(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{name: "not found", err: statusErr{http.StatusNotFound}, expected: true},
+		{name: "wrapped not found", err: fmt.Errorf("fetching page 1: %w", statusErr{http.StatusNotFound}), expected: true},
+		{name: "server error", err: statusErr{http.StatusInternalServerError}},
+		{name: "forbidden", err: statusErr{http.StatusForbidden}},
+		{name: "no status", err: errors.New("connection refused")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.expected, IsSurfaceOff(tt.err))
 		})
 	}
 }

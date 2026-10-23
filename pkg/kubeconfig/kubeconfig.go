@@ -32,7 +32,7 @@ var (
 )
 
 const (
-	newFilePerm = 0600 // the file holds a bearer token
+	newFilePerm = 0600 // the file can hold a bearer token
 	dirPerm     = 0755 // kubectl's mode for a directory it creates
 )
 
@@ -48,14 +48,24 @@ users: []
 `
 
 // Entry is what Apply writes. Name is shared by the cluster, the user and the
-// context, as one session yields exactly one of each.
+// context, as one session yields exactly one of each. The user authenticates
+// with Exec when it is set and with Token otherwise.
 type Entry struct {
 	Name                  string
 	Server                string
 	ProxyURL              string // empty removes a proxy-url left by an earlier write
 	Token                 string
+	Exec                  *ExecUser
 	InsecureSkipTLSVerify bool
 }
+
+// ExecUser is a credential plugin kubectl runs for a token.
+type ExecUser struct {
+	Command string
+	Args    []string
+}
+
+const execAPIVersion = "client.authentication.k8s.io/v1"
 
 // Editor holds a kubeconfig's write lock and its parsed contents between Open
 // and Save, so a file that cannot be edited is found out before anything is
@@ -404,19 +414,42 @@ func serverHost(server string) string {
 	return server
 }
 
-// applyUser replaces the user whole: a stale exec plugin or client
-// certificate left beside the token would take precedence or conflict.
+// applyUser replaces the user whole: a stale exec plugin, token or client
+// certificate left beside the new credential would take precedence or conflict.
 func (ed *Editor) applyUser(e Entry) {
 	key, seq := childSequence(ed.root, "users")
+	user := mapping(scalar(strTag, "token"), scalar(strTag, e.Token))
+	if e.Exec != nil {
+		user = mapping(scalar(strTag, "exec"), execNode(*e.Exec))
+	}
 	fresh := []*yaml.Node{
 		scalar(strTag, "name"), scalar(strTag, e.Name),
-		scalar(strTag, "user"), mapping(scalar(strTag, "token"), scalar(strTag, e.Token)),
+		scalar(strTag, "user"), user,
 	}
 	if item := keepFirstNamed(seq, e.Name); item != nil {
 		item.Content = fresh
 		return
 	}
 	appendBlock(key, seq, mapping(fresh...))
+}
+
+// execNode renders the exec block with its keys in kubectl's order. Every
+// argument is tagged a string, so one that reads as a number or a boolean,
+// such as a cluster named 123, reaches the plugin as written. kubectl refuses
+// a v1 exec block without interactiveMode; the plugin never prompts, so it is
+// Never.
+func execNode(x ExecUser) *yaml.Node {
+	args := &yaml.Node{Kind: yaml.SequenceNode, Tag: seqTag}
+	for _, a := range x.Args {
+		args.Content = append(args.Content, scalar(strTag, a))
+	}
+	return mapping(
+		scalar(strTag, "apiVersion"), scalar(strTag, execAPIVersion),
+		scalar(strTag, "args"), args,
+		scalar(strTag, "command"), scalar(strTag, x.Command),
+		scalar(strTag, "interactiveMode"), scalar(strTag, "Never"),
+		scalar(strTag, "provideClusterInfo"), scalar(boolTag, "true"),
+	)
 }
 
 // applyContext points the context at the cluster and user in place, keeping a
@@ -463,10 +496,30 @@ func (ed *Editor) Save() error {
 	if _, err := utils.SaveStreamAtomic(ed.path, &buf, perm); err != nil {
 		return fmt.Errorf("failed to write %s: %w", ed.path, err)
 	}
-	if existing && readableByOthers(perm) {
+	if existing && readableByOthers(perm) && ed.holdsToken() {
 		utils.CliWarning("%s holds a bearer token and is readable by other accounts; run 'chmod 600 %s'", ed.path, ed.path)
 	}
 	return nil
+}
+
+// holdsToken reports whether any user in the file carries a bearer token,
+// ours or another's, which is what makes a file other accounts can read worth
+// a warning.
+func (ed *Editor) holdsToken() bool {
+	_, users := lookup(ed.root, "users")
+	if users == nil || users.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, item := range users.Content {
+		_, user := lookup(item, "user")
+		if user == nil || user.Kind != yaml.MappingNode {
+			continue
+		}
+		if _, token := lookup(user, "token"); token != nil && !isNull(token) {
+			return true
+		}
+	}
+	return false
 }
 
 // readableByOthers reports a group- or world-readable mode. Windows has no

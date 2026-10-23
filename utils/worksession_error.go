@@ -9,17 +9,19 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/aiagent"
 )
 
-// Operations HandleWorkSessionError reports; each but OperationKube is also the WorkSession scope it requires.
+// Operations HandleWorkSessionError reports; each is also the WorkSession scope it requires.
 const (
 	OperationCommand = "command"
 	OperationWebFTP  = "webftp"
 	OperationWebsh   = "websh"
-	// OperationKube names no scope: any active WorkSession of the caller qualifies.
+	// OperationKube targets a cluster rather than a server: it needs a session
+	// that holds the kube scope and targets that cluster.
 	OperationKube = "kube"
 )
 
-// agentForbiddenScopes are the scopes an agent session cannot hold.
-var agentForbiddenScopes = []string{OperationWebsh}
+// agentForbiddenScopes are the scopes an agent session cannot hold: an
+// interactive terminal, and exec into a pod.
+var agentForbiddenScopes = []string{OperationWebsh, "kube_exec"}
 
 // IsAgentForbiddenScope reports whether an agent session cannot hold scope.
 func IsAgentForbiddenScope(scope string) bool {
@@ -43,6 +45,9 @@ type workSessionErrorCtx struct {
 	RequiredScope      string   `json:"required_scope"`
 	TargetServers      []string `json:"target_servers"`
 	CurrentWorksession *string  `json:"current_worksession"`
+	// TargetClusters is set only for kube, whose target is a cluster; kube
+	// keeps TargetServers an empty array so the field's type stays stable.
+	TargetClusters []string `json:"target_clusters,omitempty"`
 }
 
 var workSessionReasonMap = map[string]string{
@@ -52,6 +57,7 @@ var workSessionReasonMap = map[string]string{
 	WorkSessionExpired:              "selected session has expired",
 	WorkSessionScopeNotAllowed:      "session does not include this scope",
 	WorkSessionServerNotAllowed:     "target server is not in this session",
+	WorkSessionClusterNotAllowed:    "target cluster is not in this session",
 	WorkSessionAssigneeMismatch:     "this session is assigned to another principal",
 	WorkSessionAgentSessionRequired: "this CLI runs under an AI agent, and an AI agent cannot use a user session",
 	WorkSessionAccountNotApproved:   "the command runs as an account the session was not approved for; a session runs only as the account named when it was created",
@@ -63,7 +69,8 @@ func isWorkSessionCode(code string) bool {
 }
 
 // HandleWorkSessionError prints a WorkSession gate diagnostic and exits(3); no-op for other errors.
-func HandleWorkSessionError(err error, operation, serverName, authMethod, activeWS string) {
+// target is what the operation names: a cluster for OperationKube, a server otherwise.
+func HandleWorkSessionError(err error, operation, target, authMethod, activeWS string) {
 	if err == nil {
 		return
 	}
@@ -72,14 +79,14 @@ func HandleWorkSessionError(err error, operation, serverName, authMethod, active
 		return
 	}
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS))
+		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS))
 	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS))
 	}
 	os.Exit(ExitCodeWorkSessionDenied)
 }
 
-func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS string) string {
+func buildWorkSessionDiagnostic(code, operation, target, authMethod, activeWS string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -91,15 +98,19 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	fmt.Fprintln(&sb)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "auth", authDisplay)
 	fmt.Fprintf(&sb, "  %-14s: %s\n", "reason", reason)
-	if scope := workSessionRequiredScope(operation); scope != "" {
-		fmt.Fprintf(&sb, "  %-14s: %s\n", "required scope", scope)
+	if operation != "" {
+		fmt.Fprintf(&sb, "  %-14s: %s\n", "required scope", operation)
 	}
-	if serverName != "" {
-		fmt.Fprintf(&sb, "  %-14s: %s\n", "target server", serverName)
+	if target != "" {
+		label := "target server"
+		if operation == OperationKube {
+			label = "target cluster"
+		}
+		fmt.Fprintf(&sb, "  %-14s: %s\n", label, target)
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
-	for _, action := range workSessionNextActions(code, operation, serverName, activeWS) {
+	for _, action := range workSessionNextActions(code, operation, target, activeWS) {
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
@@ -112,17 +123,9 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 
 func workSessionMessage(operation string) string {
 	if operation == OperationKube {
-		return "opening a kube session requires an active WorkSession on this authentication."
+		return "opening a kube session requires an active WorkSession that targets the cluster with the kube scope."
 	}
 	return fmt.Sprintf("the %s operation requires an active WorkSession on this authentication.", operation)
-}
-
-// workSessionRequiredScope is empty for kube, which any active WorkSession satisfies.
-func workSessionRequiredScope(operation string) string {
-	if operation == OperationKube {
-		return ""
-	}
-	return operation
 }
 
 // agentSessionNote tells a person taken for an agent which variables made the
@@ -144,7 +147,7 @@ func workSessionTokenNote(operation string) string {
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }
 
-func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS string) workSessionErrorJSON {
+func buildWorkSessionErrorEnvelope(code, operation, target, authMethod, activeWS string) workSessionErrorJSON {
 	var ws *string
 	if activeWS != "" {
 		ws = &activeWS
@@ -158,27 +161,35 @@ func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, acti
 		Context: workSessionErrorCtx{
 			AuthMethod: authMethod,
 			// Kept even when empty so the JSON shape stays stable.
-			RequiredScope:      workSessionRequiredScope(operation),
-			TargetServers:      targetServerList(serverName),
+			RequiredScope:      operation,
+			TargetServers:      targetServerList(operation, target),
 			CurrentWorksession: ws,
+			TargetClusters:     targetClusterList(operation, target),
 		},
-		NextActions: workSessionNextActions(code, operation, serverName, activeWS),
+		NextActions: workSessionNextActions(code, operation, target, activeWS),
 	}
 }
 
-func targetServerList(serverName string) []string {
-	if serverName == "" {
+func targetServerList(operation, target string) []string {
+	if target == "" || operation == OperationKube {
 		// Return an empty array (not nil) so the JSON field type stays a stable array.
 		return []string{}
 	}
-	return []string{serverName}
+	return []string{target}
 }
 
-func workSessionNextActions(code, operation, serverName, activeWS string) []NextAction {
-	if operation == OperationKube {
-		return kubeWorkSessionNextActions(code, activeWS)
+func targetClusterList(operation, clusterName string) []string {
+	if operation != OperationKube || clusterName == "" {
+		return nil
 	}
-	serverArg := serverName
+	return []string{clusterName}
+}
+
+func workSessionNextActions(code, operation, target, activeWS string) []NextAction {
+	if operation == OperationKube {
+		return kubeWorkSessionNextActions(code, target, activeWS)
+	}
+	serverArg := target
 	if serverArg == "" {
 		// Some call sites have no target server (e.g. exec logs); keep the suggestion runnable.
 		serverArg = "<SERVER>"
@@ -264,30 +275,45 @@ func workSessionExtendCommand(activeWS string) string {
 	return "alpacon work-session extend <ID>"
 }
 
-// kubeWorkSessionNextActions suggests a session the caller owns, whatever its scope.
-// An AI-agent WorkSession cannot open a kube session, so no agent path is offered.
-func kubeWorkSessionNextActions(code, activeWS string) []NextAction {
-	create := NextAction{
-		Command:     `alpacon work-session create --scope command --server <SERVER> --expires-in 1h --purpose "<intent>" --use`,
-		Description: "none active? create one; any active session you own works for kube",
+// kubeWorkSessionNextActions suggests a session that targets the cluster with
+// the kube scope. 'alpacon kube login' finds or creates one for a person; an
+// agent session cannot be attached, so an agent creates its own and names it
+// with --work-session.
+func kubeWorkSessionNextActions(code, clusterName, activeWS string) []NextAction {
+	cluster := clusterName
+	if cluster == "" {
+		cluster = "<CLUSTER>"
 	}
-	reuseOrCreate := []NextAction{
-		{Command: "alpacon work-session ls --status active", Description: "find an existing active session you own"},
-		{Command: "alpacon work-session use <ID>", Description: "attach it"},
-		create,
+	login := NextAction{
+		Command:     "alpacon kube login " + cluster,
+		Description: "find or create a work session for this cluster",
+	}
+	agentCreate := NextAction{
+		Command:     fmt.Sprintf(`alpacon work-session create --scope kube --cluster %s --expires-in 1h --purpose "<intent>" --requester-type agent`, cluster),
+		Description: fmt.Sprintf("AI agent: create an agent session, then run 'alpacon kube login %s --work-session <ID>'", cluster),
+	}
+	reuse := NextAction{
+		Command:     "alpacon work-session ls --status active",
+		Description: fmt.Sprintf("find an active session for this cluster; pass it with 'alpacon kube login %s --work-session <ID>'", cluster),
 	}
 	switch code {
 	case WorkSessionAgentSessionRequired:
-		// An agent session cannot open a kube session, and a user session is
-		// refused under a detected agent: only a person's own terminal works.
-		return []NextAction{{Description: "kube needs a person's own terminal: unset the AI agent variables or run the command from your own terminal, then attach a session you own"}}
+		// The selected session is a person's; only an agent session serves an agent.
+		return []NextAction{
+			{Command: "alpacon work-session ls --status active --requester-type agent", Description: reuse.Description},
+			agentCreate,
+		}
 	case WorkSessionNotActive:
-		return append([]NextAction{
-			{Command: "alpacon work-session current", Description: "pending/approved: wait until active; completed/revoked/cancelled: create or reuse below"},
-		}, reuseOrCreate...)
+		// A cluster session is never the active one, so 'work-session current'
+		// cannot show it; 'kube login' waits on one still pending approval.
+		wait := NextAction{Command: fmt.Sprintf("alpacon kube login %s --work-session <ID>", cluster), Description: "pending/approved: waits until it is active; completed/revoked/cancelled: create or reuse below"}
+		if activeWS != "" {
+			wait.Command = fmt.Sprintf("alpacon kube login %s --work-session %s", cluster, activeWS)
+		}
+		return []NextAction{wait, reuse, login, agentCreate}
 	case WorkSessionExpired:
-		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, create}
-	default: // required, not_usable, assignee_mismatch, and the scope/server codes kube never names
-		return reuseOrCreate
+		return []NextAction{{Command: workSessionExtendCommand(activeWS)}, login, agentCreate}
+	default: // required, not_usable, assignee_mismatch, and the scope, cluster, server and account codes
+		return []NextAction{reuse, login, agentCreate}
 	}
 }

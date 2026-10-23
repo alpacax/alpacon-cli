@@ -42,3 +42,24 @@ func TestResolve_Priority(t *testing.T) {
 		})
 	}
 }
+
+// ResolveFor reads the active slot of the workspace it is given, so a client
+// built for one workspace never takes another's session.
+func TestResolveFor_ReadsTheNamedWorkspace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(worksession.WorkSessionEnvVar, "")
+	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "", "", "", "", "", 0, false))
+	require.NoError(t, config.SetActiveWorkSession("uuid-ws"))
+
+	got, err := worksession.ResolveFor("", "ws")
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-ws", got)
+
+	got, err = worksession.ResolveFor("", "other")
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	got, err = worksession.ResolveFor("uuid-flag", "other")
+	require.NoError(t, err)
+	assert.Equal(t, "uuid-flag", got)
+}
