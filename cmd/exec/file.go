@@ -399,8 +399,9 @@ func HandleFileExecInlineCredential(err error) bool {
 // The server token is quoted with argvQuote so the commands stay one argument
 // per value when pasted into a shell. withEnv says the refused run carried
 // --env, which the file lane cannot pass, so the message warns that the script
-// has to read those values on the host.
-func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool) (message string, actions []utils.NextAction) {
+// has to read those values on the host. accountNote, when set, follows the
+// message: exec logs uses it to say the account flags are placeholders.
+func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool, accountNote string) (message string, actions []utils.NextAction) {
 	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
 	if server == "" {
 		server = "SERVER"
@@ -409,6 +410,9 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string, wi
 		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
 	if withEnv {
 		message += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
+	if accountNote != "" {
+		message += ". " + accountNote
 	}
 	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
 	serverArg := argvQuote(server)
@@ -452,7 +456,7 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
 		return false
 	}
-	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed), len(parsed.Env) > 0)
+	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed), len(parsed.Env) > 0, "")
 	return true
 }
 
@@ -460,8 +464,8 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 // code every settled-without-a-grant command exits with: running the same line
 // again is refused the same way. Under --output json the envelope carries the
 // code as error_code and the replacement commands as next_actions.
-func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool) {
-	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv)
+func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) {
+	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		utils.CliErrorEnvelopeWithNextActions(utils.ExitCodeNotApproved, "command", rejected, message+".", actions)
 		return

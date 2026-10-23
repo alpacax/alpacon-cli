@@ -83,7 +83,7 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			message, actions := useFileExecutionRefusal("cmd-1", tc.server, tc.accountFlags, tc.withEnv)
+			message, actions := useFileExecutionRefusal("cmd-1", tc.server, tc.accountFlags, tc.withEnv, "")
 			assert.Equal(t, tc.wantMessage, message)
 			commands := make([]string, 0, len(actions))
 			for _, a := range actions {
@@ -113,6 +113,12 @@ const rejectedCommandID = "a1b2c3d4-5678-abcd-ef01-234567890abc"
 // rejectedCommandID, and answers its detail as rejected with cause, the shape
 // the server reports once verification refuses the command.
 func newRejectedCommandServer(cause string) *httptest.Server {
+	return newRejectedCommandServerAs(cause, "root", "wheel")
+}
+
+// newRejectedCommandServerAs is newRejectedCommandServer with the detail's
+// account; an empty username or groupname leaves the field out.
+func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Server {
 	const cmdID = rejectedCommandID
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -128,9 +134,13 @@ func newRejectedCommandServer(cause string) *httptest.Server {
 				"verification_status": "rejected",
 				"result":              "Save the script to a file and run it as a verified file.",
 				"server":              map[string]any{"id": "srv-1", "name": "prod"},
-				"username":            "root",
-				"groupname":           "wheel",
 				"work_session":        map[string]any{"id": "ses-1"},
+			}
+			if username != "" {
+				detail["username"] = username
+			}
+			if groupname != "" {
+				detail["groupname"] = groupname
 			}
 			if cause != "" {
 				detail["rejection_cause"] = cause
@@ -258,5 +268,61 @@ func TestExecLogsUseFileExecutionRefusal(t *testing.T) {
 			"alpacon exec -u root -g wheel --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
 			"alpacon exec -u root -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
 		}, commands)
+	})
+}
+
+// TestExecLogsUseFileExecutionRefusalWithoutAccount pins that a detail naming no
+// account never yields a runnable command: dropping -u would run the pasted
+// line as the server's default account, so both commands carry placeholders
+// and the message says to fill them in.
+func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
+	t.Parallel()
+
+	t.Run("table", func(t *testing.T) {
+		t.Parallel()
+		ts := newRejectedCommandServerAs("use_file_execution", "", "")
+		defer ts.Close()
+
+		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
+		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+		assert.Contains(t, stderr, "replace <account> with that account")
+		assert.Contains(t, stderr, "  alpacon exec -u <account> -g <group> --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod\n")
+		assert.Contains(t, stderr, "  alpacon exec -u <account> -g <group> --work-session ses-1 --file /path/to/script.sh --from-server prod\n")
+	})
+
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		ts := newRejectedCommandServerAs("use_file_execution", "", "")
+		defer ts.Close()
+
+		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, rejectedCommandID)
+		assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+		var envelope cliErrorEnvelope
+		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
+		assert.Contains(t, envelope.Message, "replace <account> with that account")
+		commands := make([]string, 0, len(envelope.NextActions))
+		for _, a := range envelope.NextActions {
+			commands = append(commands, a.Command)
+		}
+		assert.Equal(t, []string{
+			"alpacon exec -u <account> -g <group> --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
+			"alpacon exec -u <account> -g <group> --work-session ses-1 --file /path/to/script.sh --from-server prod",
+		}, commands)
+	})
+
+	t.Run("group named", func(t *testing.T) {
+		t.Parallel()
+		ts := newRejectedCommandServerAs("use_file_execution", "", "wheel")
+		defer ts.Close()
+
+		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatJSON, rejectedCommandID)
+		assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
+		var envelope cliErrorEnvelope
+		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
+		assert.NotContains(t, envelope.Message, "<group>")
+		require.Len(t, envelope.NextActions, 2)
+		assert.Equal(t,
+			"alpacon exec -u <account> -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
+			envelope.NextActions[1].Command)
 	})
 }

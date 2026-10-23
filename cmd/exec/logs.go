@@ -75,11 +75,8 @@ Run the command again later to check for completion.`,
 			// The gate refused a script body on the command line: the reviewer
 			// sentence below would send the user to the wrong place.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
-				original := RemoteExecArgs{Username: details.Username, Groupname: details.Groupname}
-				if details.WorkSession != nil {
-					original.WorkSessionID = details.WorkSession.ID
-				}
-				reportUseFileExecution(rejected, details.Server.Name, useFileExecutionAccountFlags(original), false)
+				accountFlags, accountNote := logsAccountFlags(details)
+				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
 			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
@@ -134,6 +131,31 @@ Run the command again later to check for completion.`,
 
 func init() {
 	ExecCmd.AddCommand(logsCmd)
+}
+
+// logsAccountFlags repeats the refused run's -u, -g and --work-session flags
+// from the command detail. A detail with no username (an older server, or a
+// field the viewer cannot see) gets an -u <account> placeholder and a note to
+// fill it in: a command without -u would run as the server's default account.
+// -g gets a placeholder too unless the detail names the group, since the
+// original may have carried one.
+func logsAccountFlags(details event.EventDetails) (flags []string, note string) {
+	original := RemoteExecArgs{Username: details.Username, Groupname: details.Groupname}
+	if details.WorkSession != nil {
+		original.WorkSessionID = details.WorkSession.ID
+	}
+	flags = useFileExecutionAccountFlags(original)
+	if details.Username != "" {
+		return flags, ""
+	}
+	placeholders := []string{"-u <account>"}
+	note = "the command detail does not name the account the command ran as, so replace <account> with that account"
+	if details.Groupname == "" {
+		placeholders = append(placeholders, "-g <group>")
+		note += " and <group> with its group, or drop -g if it had none"
+	}
+	note += ": without -u the command runs as the server's default account"
+	return append(placeholders, flags...), note
 }
 
 // logsCommandOutcome guarantees a non-empty stderrLine ends with \n. Neither the
