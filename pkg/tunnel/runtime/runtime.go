@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
@@ -379,8 +380,7 @@ func explainDialFailure(serverName string, dialErr error, resp *http.Response, d
 		proxyGaveUpOnAgent := resp != nil && resp.StatusCode == http.StatusServiceUnavailable
 		switch {
 		case detail.OpenStatus == tunnelapi.OpenStatusFailed:
-			clean, _ := utils.SanitizeTerminalBlock(detail.OpenFailure.Result)
-			if reason := strings.Join(strings.Fields(clean), " "); reason != "" {
+			if reason := oneLineReason(detail.OpenFailure.Result); reason != "" {
 				return fmt.Errorf("failed to open tunnel on %s: %s", serverName, reason)
 			}
 			return fmt.Errorf("failed to open tunnel on %s", serverName)
@@ -389,4 +389,16 @@ func explainDialFailure(serverName string, dialErr error, resp *http.Response, d
 		}
 	}
 	return utils.WebsocketDialError("failed to connect to proxy server", dialErr, resp)
+}
+
+// oneLineReason prints agent text on one line. Whitespace becomes a space before the
+// sanitizer runs, which would otherwise drop a tab or line break and join the words around it.
+func oneLineReason(result string) string {
+	spaced := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		return r
+	}, result)
+	return strings.Join(strings.Fields(utils.SanitizeTerminalText(spaced)), " ")
 }

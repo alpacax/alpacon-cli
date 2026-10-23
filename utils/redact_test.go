@@ -97,3 +97,41 @@ func TestRedactURLHostOnly(t *testing.T) {
 	assert.NotContains(t, got.Error(), "PATHTOKEN")
 	assert.Contains(t, got.Error(), "invalid URL escape")
 }
+
+// A URL with no host to keep must still lose its path: the server sending a
+// malformed websocket_url is no reason to print the channel token.
+func TestRedactURLHostOnlyWithoutAParsedHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "opaque URL keeps the scheme", raw: "ws:proxy.example.com/ws/tunnel/PATHTOKEN/", want: "ws:"},
+		{name: "unparsable opaque URL keeps the scheme", raw: "ws:proxy.example.com/ws/tunnel/PATHTOKEN\x7f/", want: "ws:"},
+		{name: "rooted path keeps the scheme", raw: "ws:/ws/tunnel/PATHTOKEN/%zz", want: "ws:"},
+		{name: "scheme-relative URL keeps the authority", raw: "//proxy.example.com/ws/tunnel/PATHTOKEN\x7f/", want: "//proxy.example.com"},
+		{name: "scheme-relative userinfo is dropped", raw: "//user:PATHTOKEN@ho st/x", want: "//ho st"},
+		{name: "empty authority keeps nothing past it", raw: "ws:///PATHTOKEN%zz", want: "ws://"},
+		{name: "no scheme keeps nothing", raw: "proxy.example.com/ws/tunnel/PATHTOKEN/%zz", want: ""},
+		{name: "no scheme with a colon keeps nothing", raw: "1ws:proxy/PATHTOKEN/%zz", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := RedactURLHostOnly(tt.raw)
+
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRedactURLErrorHostOnlyHidesThePathOfAnUnparsableHostlessURL(t *testing.T) {
+	t.Parallel()
+	parseErr := &url.Error{Op: "parse", URL: "ws:proxy.example.com/ws/tunnel/PATHTOKEN\x7f/", Err: errors.New("net/url: invalid control character in URL")}
+
+	got := RedactURLErrorHostOnly(parseErr)
+
+	assert.Equal(t, `parse "ws:": net/url: invalid control character in URL`, got.Error())
+}

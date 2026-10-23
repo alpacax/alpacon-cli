@@ -511,6 +511,11 @@ func TestExplainDialFailure(t *testing.T) {
 			want:   "failed to open tunnel on db-1: refused: CPU busy",
 		},
 		{
+			name:   "failed reason keeps tabs as word breaks",
+			detail: failed("CPU\tbusy\x0bnow"),
+			want:   "failed to open tunnel on db-1: CPU busy now",
+		},
+		{
 			name:   "failed without a reason still says the open failed",
 			resp:   forbidden,
 			detail: failed(""),
