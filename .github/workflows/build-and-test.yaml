@@ -98,18 +98,18 @@ jobs:
 
       - name: Check completion files in the packages
         run: |
-          command -v rpm >/dev/null || sudo apt-get install -y rpm
+          command -v rpm >/dev/null || { sudo apt-get update && sudo apt-get install -y rpm; }
           deb=$(ls dist/*_linux_amd64.deb)
           rpm=$(ls dist/*_linux_amd64.rpm)
           for f in /usr/share/bash-completion/completions/alpacon \
                    /usr/share/fish/vendor_completions.d/alpacon.fish \
                    /usr/share/zsh/vendor-completions/_alpacon; do
-            dpkg-deb -c "$deb" | grep -E "^-rw-r--r-- .*\.$f\$"
+            dpkg-deb -c "$deb" | grep -E "^-rw-r--r-- .*\.${f//./\\.}\$"
           done
           for f in /usr/share/bash-completion/completions/alpacon \
                    /usr/share/fish/vendor_completions.d/alpacon.fish \
                    /usr/share/zsh/site-functions/_alpacon; do
-            rpm -qlpv "$rpm" | grep -E "^-rw-r--r-- .* $f\$"
+            rpm -qlpv "$rpm" | grep -E "^-rw-r--r-- .* ${f//./\\.}\$"
           done
           grep -F 'generate_completions_from_executable(bin/"alpacon", "completion")' dist/homebrew/Formula/alpacon-cli.rb
 
