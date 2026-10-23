@@ -123,6 +123,7 @@ func TestSinkURLParam_FindsTheURLOfEveryRequestSink(t *testing.T) {
 		{apiPkgPath, "", "FetchAllPages", 1}, {apiPkgPath, "", "FetchPagesUpTo", 1},
 		{apiPkgPath, "", "FetchAllCursorPages", 1}, {apiPkgPath, "", "FetchCursorPages", 1},
 		{"net/http", "", "NewRequest", 1}, {"net/http", "", "NewRequestWithContext", 2},
+		{"net/http", "", "Get", 0}, {"net/http", "", "Head", 0}, {"net/http", "", "Post", 0}, {"net/http", "", "PostForm", 0},
 		{"net/http", "Client", "Get", 0}, {"net/http", "Client", "Head", 0}, {"net/http", "Client", "Post", 0}, {"net/http", "Client", "PostForm", 0},
 		{websocketPkgPath, "Dialer", "Dial", 0}, {websocketPkgPath, "Dialer", "DialContext", 1},
 	}
@@ -277,7 +278,11 @@ func TestURLOffenders_FlagsASinkSentAnUncheckedURL(t *testing.T) {
 		{name: "path_id_concatenated", body: `_ = noteURL + pathID.String()`, want: "concatenates a PathID into a string"},
 		{name: "path_id_appended", body: "s := noteURL\ns += pathID.String()\n_ = s", want: "concatenates a PathID into a string"},
 		{name: "fields_aliased_to_each_other", body: "var x, y session\nx.Note = y.Note\ny.Note = x.Note\n_, _ = ac.SendGetRequest(x.Note)", want: "hands SendGetRequest a URL"},
+		{name: "http_get_function", body: `_, _ = http.Get(noteURL + id)`, want: "hands Get a URL"},
+		{name: "request_url_path_taken_by_address", body: "r, _ := http.NewRequest(http.MethodGet, noteURL, nil)\np := &r.URL.Path\n*p = noteURL + id", want: "takes the address of a request's URL"},
+		{name: "request_url_taken_by_address", body: "r, _ := http.NewRequest(http.MethodGet, noteURL, nil)\nchange(&r.URL)", extra: "func change(u **url.URL) {}", want: "takes the address of a request's URL"},
 		{name: "constant", body: `_, _ = ac.SendGetRequest(noteURL)`},
+		{name: "http_get_function_with_a_constant", body: `_, _ = http.Get(noteURL)`},
 		{name: "resolve_by_name_constant_endpoint", body: `_, _ = api.ResolveByName[session](ac, api.ResolveByNameOptions{Endpoint: noteURL, Name: id})`},
 		{name: "build_url_with_a_constant_path", body: `_, _ = ac.SendGetRequest(utils.BuildURL(noteURL, "search", map[string]string{"q": id}))`},
 		{name: "idurl_in_a_variable", body: "u := api.IDURL(noteURL, pathID, \"close\", nil)\n_, _ = ac.SendPostRequest(u, nil)"},
@@ -495,6 +500,10 @@ func (p checkedPackage) urlOffenders(decoded map[string]bool) (offenders []strin
 						report(lhs.Pos(), "changes a request's URL after it was built, so the URL it is sent to goes unchecked")
 					}
 				}
+			case *ast.UnaryExpr:
+				if n.Op == token.AND && p.changesRequestURL(n.X) {
+					report(n.Pos(), "takes the address of a request's URL, so the URL it is sent to goes unchecked")
+				}
 			case *ast.CompositeLit:
 				if name := typeName(p.info.TypeOf(n)); name == "net/http.Request" || name == "net/url.URL" {
 					report(n.Pos(), "builds a %s literal, so the URL it is sent to goes unchecked", name)
@@ -622,7 +631,7 @@ func (p checkedPackage) sinkURLParam(fn *types.Func) (int, bool) {
 			return -1, true
 		}
 		sig = method.Signature()
-	case recv == "net/http.Client" && (name == "Get" || name == "Head" || name == "Post" || name == "PostForm"):
+	case (recv == "net/http.Client" || recv == "" && pkg == "net/http") && (name == "Get" || name == "Head" || name == "Post" || name == "PostForm"):
 	case recv == "" && pkg == apiPkgPath && strings.HasPrefix(name, "Fetch") && strings.Contains(name, "Pages"):
 	case recv == "" && pkg == "net/http" && strings.HasPrefix(name, "NewRequest"):
 	case recv == websocketPkgPath+".Dialer" && strings.HasPrefix(name, "Dial"):
