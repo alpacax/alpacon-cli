@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -58,7 +59,6 @@ func TestFormatType(t *testing.T) {
 		{"file_upload", "upload"},
 		{"file_download", "download"},
 		{"sudo_grant", "sudo grant"},
-		{"websh_record", "recording"},
 		{"unknown_type", "unknown_type"},
 	}
 	for _, tc := range tests {
@@ -235,20 +235,6 @@ func TestFormatDetails_SudoGrant(t *testing.T) {
 	}
 }
 
-func TestFormatDetails_WebshRecord(t *testing.T) {
-	t.Parallel()
-	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "ls -la /home/user"}
-	assert.Equal(t, "ls -la /home/user", formatDetails(&item))
-}
-
-func TestFormatDetails_WebshRecord_SanitizesBeforeTruncating(t *testing.T) {
-	t.Parallel()
-	// The escape has to go before the 60-char cut, or it eats the budget the command
-	// text needs and the cell shows less than the rows beside it.
-	item := wsapi.TimelineItem{Type: "websh_record", MaskedRecord: "\x1b[2K\u202els -la"}
-	assert.Equal(t, "ls -la", formatDetails(&item))
-}
-
 func TestFormatDetails_Unknown(t *testing.T) {
 	t.Parallel()
 	item := wsapi.TimelineItem{Type: "unknown_event"}
@@ -280,10 +266,11 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 	timestamp := "2024-01-15T10:30:00Z"
 	var buf bytes.Buffer
 	printRecordingsSectionTo(&buf, []wsapi.TimelineItem{{
-		Type:      "websh_record",
+		Type:      "websh_session",
+		ID:        "wsh-1",
 		Timestamp: &timestamp,
 		ServerID:  &serverID,
-	}}, map[string]string{serverID: "web-01\x1b[2K\rdb-prod"})
+	}}, "ses-1\x1b[2J", map[string]string{serverID: "web-01\x1b[2K\rdb-prod"})
 
 	got := buf.String()
 	assert.NotContains(t, got, "\x1b")
@@ -296,17 +283,17 @@ func TestPrintRecordingsSectionTo_StripsControlSequences(t *testing.T) {
 func TestOutputTimelineJSON_EscapesFormatChars(t *testing.T) {
 	rows := []wsapi.TimelineAttributes{{Server: "prod\u202edb"}}
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON(rows, nil, nil)
+		outputTimelineJSON(rows, nil, "ses-1", nil)
 	})
 	assert.NotContains(t, out, "\u202e")
 	assert.Contains(t, out, `\u202e`)
 }
 
-// outputTimelineJSON must emit recordings as [] not null when no recordings exist,
-// including when --no-records passes nil for recordings.
+// outputTimelineJSON must emit recordings as [] not null when the session has no
+// terminal.
 func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
+		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
 	var result map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
@@ -316,7 +303,7 @@ func TestOutputTimelineJSON_RecordingsEmptyArrayNotNull(t *testing.T) {
 // Both timeline and recordings keys must always be present in JSON output.
 func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	out := testutil.CaptureStdout(t, func() {
-		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, nil)
+		outputTimelineJSON([]wsapi.TimelineAttributes{}, nil, "ses-1", nil)
 	})
 	var keys map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal([]byte(out), &keys))
@@ -326,66 +313,180 @@ func TestOutputTimelineJSON_BothKeysPresent(t *testing.T) {
 	assert.True(t, hasRecordings, "recordings key must be present in JSON output")
 }
 
-// --no-records must reach the request, so the recording bytes are never downloaded,
-// and must still hold on a server too old to know include_records.
-func TestTimelineNoRecordsIsOnTheWire(t *testing.T) {
+func TestRecordingStatus(t *testing.T) {
 	t.Parallel()
-
 	tests := []struct {
-		name           string
-		args           []string
-		ignoresParam   bool
-		wantParam      string
-		wantRecordings bool
+		name  string
+		total *int
+		want  string
 	}{
-		{"default asks for the records", []string{"timeline", "ses-1"}, false, "true", true},
-		{"no-records does not", []string{"timeline", "ses-1", "--no-records"}, false, "false", false},
-		{"no-records holds on an old server", []string{"timeline", "ses-1", "--no-records"}, true, "false", false},
+		{"several chunks", new(3), "3 chunks"},
+		{"one chunk", new(1), "1 chunk"},
+		{"no recording", new(0), "no recording"},
+		{"count unknown", nil, "unknown"},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var (
-				mu       sync.Mutex
-				gotParam string
-			)
-			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				if r.URL.Path != "/api/work-sessions/sessions/ses-1/timeline/" {
-					_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","servers":[{"id":"srv-1","name":"web-01"}]}`))
-					return
-				}
-				param := r.URL.Query().Get("include_records")
-				mu.Lock()
-				gotParam = param
-				mu.Unlock()
-				// The client sends strconv.FormatBool output, so "false" is the
-				// only falsy spelling that can arrive here.
-				results := `{"type":"websh_session","id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:00Z"}`
-				if param != "false" || tc.ignoresParam {
-					results += `,{"type":"websh_record","session_id":"wss-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:01Z","masked_record":"ls -la"}`
-				}
-				_, _ = w.Write([]byte(`{"count":2,"results":[` + results + `]}`))
-			}))
-			defer ts.Close()
-
-			stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, tc.args...)
-			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
-
-			mu.Lock()
-			defer mu.Unlock()
-			assert.Equal(t, tc.wantParam, gotParam)
-
-			if tc.wantRecordings {
-				assert.Contains(t, stdout, "• 1 recording")
-				assert.Contains(t, stdout, "Recordings (1)")
-			} else {
-				// The badge goes with the bytes: its count rides on the recording
-				// items, so an unrequested recording cannot be counted either.
-				assert.NotContains(t, stdout, "recording")
-				assert.NotContains(t, stdout, "Recordings")
-			}
+			assert.Equal(t, tc.want, recordingStatus(tc.total))
 		})
 	}
+}
+
+// timelinePagingServer answers the paged timeline in two pages and logs every
+// request. Its terminals, in order, count 3 chunks, 0, null, no key at all, and
+// 1; the tunnel rows between them carry a count a terminal filter must not see.
+func timelinePagingServer(t *testing.T) (*httptest.Server, func() []*url.URL) {
+	t.Helper()
+	var (
+		mu  sync.Mutex
+		log []*url.URL
+	)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		log = append(log, r.URL)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/work-sessions/sessions/ses-1/":
+			_, _ = w.Write([]byte(`{"id":"ses-1","status":"active","servers":[{"id":"srv-1","name":"web-01"}]}`))
+		case "/api/work-sessions/sessions/ses-1/timeline/":
+			if r.URL.Query().Get("cursor") == "" {
+				_, _ = w.Write([]byte(`{"next":"p2","results":[
+					{"type":"command","id":"c1","server_id":"srv-1","timestamp":"2024-01-15T10:30:00Z","line":"ls"},
+					{"type":"websh_session","id":"wsh-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:01Z","record_chunks_total":3,"max_cols":120,"max_rows":40},
+					{"type":"websh_session","id":"wsh-2","server_id":"srv-1","timestamp":"2024-01-15T10:30:02Z","record_chunks_total":0}]}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"next":null,"results":[
+				{"type":"tunnel_session","id":"tun-1","server_id":"srv-1","timestamp":"2024-01-15T10:30:03Z","is_tunnel":true,"target_port":5432},
+				{"type":"websh_session","id":"wsh-t","server_id":"srv-1","timestamp":"2024-01-15T10:30:04Z","is_tunnel":true,"record_chunks_total":7},
+				{"type":"websh_session","id":"wsh-3","server_id":"srv-1","timestamp":"2024-01-15T10:30:05Z","record_chunks_total":null},
+				{"type":"websh_session","id":"wsh-4","server_id":"srv-1","timestamp":"2024-01-15T10:30:06Z"},
+				{"type":"websh_session","id":"wsh-5","server_id":"srv-1","timestamp":"2024-01-15T10:30:07Z","record_chunks_total":1}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts, func() []*url.URL {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]*url.URL(nil), log...)
+	}
+}
+
+// The default timeline reads by cursor: it names an empty cursor first, follows
+// `next`, never asks for the recordings, and reads no recording either.
+func TestTimelineDefaultWalksTheCursorAndFetchesNoRecording(t *testing.T) {
+	t.Parallel()
+	ts, requests := timelinePagingServer(t)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "[unknown] ls", "the first page must be rendered")
+	assert.Contains(t, stdout, "port 5432 opened", "the second page must be rendered")
+
+	var timeline []*url.URL
+	for _, u := range requests() {
+		assert.NotContains(t, u.Path, "/records/", "timeline must not read a recording")
+		assert.NotEqual(t, "true", u.Query().Get("include_records"))
+		if strings.HasSuffix(u.Path, "/timeline/") {
+			timeline = append(timeline, u)
+		}
+	}
+	require.Len(t, timeline, 2)
+	assert.True(t, timeline[0].Query().Has("cursor"), "first request must name cursor, sent %q", timeline[0].RawQuery)
+	assert.Empty(t, timeline[0].Query().Get("cursor"))
+	assert.Equal(t, "p2", timeline[1].Query().Get("cursor"))
+}
+
+func TestTimelineRecordingsSectionReadsTheChunkCount(t *testing.T) {
+	t.Parallel()
+	ts, _ := timelinePagingServer(t)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+
+	_, section, found := strings.Cut(stdout, "─── Recordings (5 terminals)")
+	require.True(t, found, "stdout: %s", stdout)
+	lines := strings.Split(strings.TrimSpace(section), "\n")[1:] // drop the rest of the rule
+	hint := func(n int) string { return fmt.Sprintf("     alpacon work-session recording ses-1 --index %d", n) }
+	want := []struct {
+		prefix, status string
+		hint           bool
+	}{
+		{"[1]", "  3 chunks", true},
+		{"[2]", "  no recording", false},
+		{"[3]", "  unknown", true},
+		{"[4]", "  unknown", true},
+		{"[5]", "  1 chunk", true},
+	}
+	i := 0
+	for n, w := range want {
+		require.Less(t, i, len(lines), "section ended before %s:\n%s", w.prefix, section)
+		assert.True(t, strings.HasPrefix(lines[i], w.prefix) && strings.HasSuffix(lines[i], w.status),
+			"line %q: want %s ... %s", lines[i], w.prefix, w.status)
+		assert.Contains(t, lines[i], "web-01")
+		i++
+		if w.hint {
+			require.Less(t, i, len(lines))
+			assert.Equal(t, hint(n+1), lines[i])
+			i++
+		}
+	}
+	assert.Len(t, lines, i, "section has extra lines:\n%s", section)
+	assert.NotContains(t, stdout, "7 chunks", "a tunnel is not a terminal")
+}
+
+func TestTimelineJSONRecordingsReadTheChunkCount(t *testing.T) {
+	t.Parallel()
+	ts, _ := timelinePagingServer(t)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+
+	var out struct {
+		Recordings []map[string]json.RawMessage `json:"recordings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out), "stdout: %s", stdout)
+	want := []struct{ id, total, status string }{
+		{"wsh-1", "3", "3 chunks"},
+		{"wsh-2", "0", "no recording"},
+		{"wsh-3", "null", "unknown"},
+		{"wsh-4", "null", "unknown"},
+		{"wsh-5", "1", "1 chunk"},
+	}
+	require.Len(t, out.Recordings, len(want))
+	for i, w := range want {
+		rec := out.Recordings[i]
+		assert.JSONEq(t, fmt.Sprint(i+1), string(rec["index"]))
+		assert.JSONEq(t, `"`+w.id+`"`, string(rec["session_id"]))
+		assert.JSONEq(t, w.total, string(rec["record_chunks_total"]), "terminal %s", w.id)
+		assert.JSONEq(t, `"`+w.status+`"`, string(rec["status"]))
+	}
+}
+
+// --no-records keeps the contract scripts rely on: the section is left out of
+// the table, and JSON carries an empty recordings list.
+func TestTimelineNoRecordsHidesTheSection(t *testing.T) {
+	t.Parallel()
+	ts, _ := timelinePagingServer(t)
+
+	stdout, stderr, exitCode := runWorkSessionHelper(t, utils.OutputFormatTable, ts.URL, "timeline", "ses-1", "--no-records")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stdout, "TIME")
+	assert.NotContains(t, stdout, "Recordings (")
+	assert.NotContains(t, stdout, "work-session recording")
+	assert.Empty(t, stderr)
+
+	stdout, stderr, exitCode = runWorkSessionHelper(t, utils.OutputFormatJSON, ts.URL, "timeline", "ses-1", "--no-records")
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	var out struct {
+		Timeline   []json.RawMessage `json:"timeline"`
+		Recordings json.RawMessage   `json:"recordings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	assert.NotEmpty(t, out.Timeline)
+	assert.JSONEq(t, `[]`, string(out.Recordings))
 }
