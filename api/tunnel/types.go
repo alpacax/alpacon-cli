@@ -18,3 +18,24 @@ type TunnelSessionResponse struct {
 	Server        types.ServerSummary `json:"server"`
 	TargetPort    int                 `json:"target_port"`
 }
+
+// OpenStatus is the state of a tunnel session's open request,
+// empty from a server that predates it.
+type OpenStatus string
+
+const (
+	OpenStatusPending OpenStatus = "pending"
+	OpenStatusOpened  OpenStatus = "opened"
+	OpenStatusFailed  OpenStatus = "failed"
+)
+
+// TunnelSessionDetail is the part of a tunnel session's detail this CLI reads.
+type TunnelSessionDetail struct {
+	OpenStatus  OpenStatus  `json:"open_status"`
+	OpenFailure OpenFailure `json:"open_failure"`
+}
+
+// OpenFailure is the outcome of the command that failed to open the tunnel.
+type OpenFailure struct {
+	Result string `json:"result"`
+}

@@ -325,14 +325,7 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
 	if err != nil {
-		// The handshake response carries the reason a bad handshake alone never names.
-		// The URL carries a channel token in its path, which a URL error prints
-		// whole, so only the host is kept.
-		err = utils.RedactURLErrorHostOnly(err)
-		if resp == nil {
-			return fmt.Errorf("websocket connection failed: %w", err)
-		}
-		return fmt.Errorf("websocket connection failed: %w (status %s)", err, utils.SanitizeTerminalText(resp.Status))
+		return utils.WebsocketDialError("websocket connection failed", err, resp)
 	}
 	wsClient.conn = newConnection(conn)
 

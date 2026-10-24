@@ -1457,6 +1457,33 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
+// A caller that bounds a request bounds the renewal it triggers too: a refresh
+// grant that outlasts ctx must not hold the request past it.
+func TestSendGetRequestWithContext_StopsWaitingOnARenewalPastTheDeadline(t *testing.T) {
+	finished := make(chan struct{})
+	swapTokenRenewal(t, func(*AlpaconClient) error {
+		time.Sleep(2 * time.Second) // a grant far slower than the caller's deadline
+		close(finished)
+		return nil
+	})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+	ac := newBearerTestClient(ts.URL, "stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ac.SendGetRequestWithContext(ctx, "/api/test/")
+
+	elapsed := time.Since(start)
+	<-finished // the renewal goroutine reads the seam, so it ends before the seam is restored
+
+	assert.Less(t, elapsed, time.Second)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+}
+
 // The server rejects a stale token in its permission layer, before the view
 // runs, so the first attempt changed nothing—but only a replayed body makes the
 // retry the same request.
