@@ -418,7 +418,7 @@ $ alpacon token rm <token-id-or-name>
 $ alpacon login <URL> -t <TOKEN_KEY>
 ```
 
-Personal API tokens cannot run commands or transfer files. Use service tokens for automation that runs commands or transfers files.
+Running commands and transferring files with a personal API token is being retired. Servers that carry this change issue no new personal token with the scopes that run a command or move a file, and refuse `*` and any wildcard that covers them; a token issued before keeps the scopes it holds, and the ACLs below still apply to it. Use service tokens for automation that runs commands or transfers files.
 
 ### Token ACLs
 Each API token gets three independent **deny-by-default** ACL types—`command` (which shell commands the token can run via websh/exec), `server` (which servers it can reach), and `file` (which file paths it can read/write via cp). A bare token can do nothing until at least one ACL of each relevant type is granted; this is how `damage containment` is enforced on the token-auth path (`work session` plays the same role on the interactive-auth path).

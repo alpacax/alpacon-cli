@@ -76,7 +76,7 @@ func promptForToken() (auth.APITokenRequest, error) {
 	if utils.PromptForBool("Set a shorter expiration than the workspace's maximum token lifetime?") {
 		tokenRequest.ExpiresAt = utils.TimeFormat(promptForExpiryDays())
 	}
-	scopes := utils.PromptForListInput("Scopes (comma-separated, default: every scope you can grant): ")
+	scopes := utils.PromptForListInput("Scopes (comma-separated, default: the scopes your roles allow): ")
 	if len(scopes) > 0 {
 		tokenRequest.Scopes = scopes
 	}
