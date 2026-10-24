@@ -162,6 +162,13 @@ secret with --env="KEY" instead. A --file script that carries a credential is
 refused the same way; take the secret out of the script and have the script
 read it on the host at run time. --output json emits an error envelope on
 stderr with error_code command_inline_credential.
+A command whose line carries a script body—a heredoc, a multi-line -c or -e
+body, or a decoded payload piped into a shell—can be refused when the
+workspace approval policy blocks script bodies, with exit code 6 and the code
+use_file_execution. Then save the script to a local file and run it on the
+same server as the same account with --upload --file PATH --file-from
+LOCAL_PATH, which writes it to PATH and runs it in one step, or with --file
+PATH --from-server when the script is already at PATH on the server.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
@@ -350,6 +357,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	// machine-readable pending signal and exits before the normal result
 	// handling treats the denial as a plain failure.
 	if HandlePendingApproval(err, parsed) {
+		return
+	}
+	// The command never ran, so under --output json nothing reaches stdout: the
+	// buffer holds only the server's own wording of the refusal.
+	if HandleUseFileExecutionRefusal(err, parsed) {
 		return
 	}
 	if buf != nil {

@@ -387,3 +387,96 @@ func HandleFileExecInlineCredential(err error) bool {
 	reportCodedRefusal("command", err, message, hint)
 	return true
 }
+
+// useFileExecutionRefusal renders a command the gate refused with
+// rejection_cause use_file_execution as a message and the commands that replace
+// it on the file lane. The script was on the command line, so there is no path
+// to name and the commands carry placeholders. --file reads the local copy at
+// its path unless --file-from or --from-server says otherwise, so the first
+// command writes a local copy to the server in the same run and the second runs
+// a copy already on the server. Both repeat the account flags of the refused
+// run, since the file lane has to run on the same server as the same account.
+// The server token is quoted with argvQuote so the commands stay one argument
+// per value when pasted into a shell. withEnv says the refused run carried
+// --env, which the file lane cannot pass, so the message warns that the script
+// has to read those values on the host. accountNote, when set, follows the
+// message: exec logs uses it to say the account flags are placeholders.
+func useFileExecutionRefusal(commandID, server string, accountFlags []string, withEnv bool, accountNote string) (message string, actions []utils.NextAction) {
+	server = utils.SanitizeTerminalText(server) // reportUseFileExecution writes raw
+	if server == "" {
+		server = "SERVER"
+	}
+	message = fmt.Sprintf("the server refused command %s on '%s': its command line carries a script body, which runs only as a verified file (%s)",
+		utils.SanitizeTerminalText(commandID), server, event.RejectionCauseUseFileExecution)
+	if withEnv {
+		message += ". --env values cannot ride the file lane, so the script must read them on the host"
+	}
+	if accountNote != "" {
+		message += ". " + accountNote
+	}
+	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
+	serverArg := argvQuote(server)
+	actions = []utils.NextAction{
+		{
+			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
+			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path",
+		},
+		{
+			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
+			Description: "or, when a copy is already saved at that path on the server, run it there",
+		},
+	}
+	return message, actions
+}
+
+// useFileExecutionAccountFlags returns the -u, -g and --work-session flags of
+// the refused run, sanitized for a raw write and quoted with argvQuote so a
+// pasted command keeps each value one argument, in the order reRunHint uses.
+func useFileExecutionAccountFlags(parsed RemoteExecArgs) []string {
+	quote := func(s string) string { return argvQuote(utils.SanitizeTerminalText(s)) }
+	var flags []string
+	if parsed.Username != "" {
+		flags = append(flags, "-u "+quote(parsed.Username))
+	}
+	if parsed.Groupname != "" {
+		flags = append(flags, "-g "+quote(parsed.Groupname))
+	}
+	if parsed.WorkSessionID != "" {
+		flags = append(flags, "--work-session "+quote(parsed.WorkSessionID))
+	}
+	return flags
+}
+
+// HandleUseFileExecutionRefusal reports a use_file_execution refusal with the
+// file lane guidance and exits 6, or returns false when err is something else.
+// It runs ahead of HandleCommandResult, which knows neither the server nor the
+// account flags the guidance repeats.
+func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
+	var rejected *event.CommandRejectedError
+	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
+		return false
+	}
+	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed), len(parsed.Env) > 0, "")
+	return true
+}
+
+// reportUseFileExecution prints the use_file_execution refusal and exits 6, the
+// code every settled-without-a-grant command exits with: running the same line
+// again is refused the same way. Under --output json the envelope carries the
+// code as error_code and the replacement commands as next_actions.
+func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) {
+	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		utils.CliErrorEnvelopeWithNextActions(utils.ExitCodeNotApproved, "command", rejected, message+".", actions)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
+	for i, action := range actions {
+		line := action.Description + ":\n  " + action.Command + "\n"
+		if i == 0 {
+			line = denialHintLine(line)
+		}
+		fmt.Fprint(os.Stderr, line)
+	}
+	os.Exit(utils.ExitCodeNotApproved)
+}

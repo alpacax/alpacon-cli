@@ -97,7 +97,17 @@ type FileExecutionSuggestion struct {
 type CommandRejectedError struct {
 	CommandID string
 	Expired   bool
+	// Cause is the server's rejection_cause, empty for a reviewer's refusal.
+	Cause string
 }
+
+// RejectionCauseUseFileExecution is the rejection_cause of a command whose line
+// carried a script body: a heredoc, a multi-line -c or -e body, or a decoded
+// payload piped into a shell. Nothing can verify a script in that shape, so the
+// server can refuse it after verification, when the workspace approval policy
+// blocks script bodies, and ask for the file lane instead. The refusal is per
+// command, so it covers one server even when the same script went to several.
+const RejectionCauseUseFileExecution = "use_file_execution"
 
 // AwaitingPurposeError is returned when the server parked a command at the
 // "awaiting_purpose" status: the verification gate would have queued it for a
@@ -163,6 +173,20 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
+	// RejectionCause says why a rejected command was refused when the gate,
+	// not a reviewer, decided it; empty otherwise and on older servers.
+	RejectionCause string `json:"rejection_cause"`
+	// The account the command ran as and the work session it ran under, so a
+	// re-run printed from the detail repeats them. WorkSession is null when the
+	// command ran under none.
+	Username    string              `json:"username"`
+	Groupname   string              `json:"groupname"`
+	WorkSession *CommandWorkSession `json:"work_session"`
+}
+
+// CommandWorkSession is the work session a command detail names.
+type CommandWorkSession struct {
+	ID string `json:"id"`
 }
 
 type CommandRequest struct {
@@ -290,7 +314,10 @@ func (*AwaitingPurposeError) Error() string {
 
 func (e *CommandRejectedError) Error() string {
 	reason := "was rejected by a reviewer"
-	if e.Expired {
+	switch {
+	case e.Cause == RejectionCauseUseFileExecution:
+		reason = "was refused because its command line carries a script body (" + RejectionCauseUseFileExecution + ")"
+	case e.Expired:
 		reason = "was not approved before the request expired"
 	}
 	if e.CommandID == "" {
@@ -298,6 +325,14 @@ func (e *CommandRejectedError) Error() string {
 	}
 	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
+
+// ErrorCode returns the rejection cause for the --output json envelope; a
+// reviewer's refusal has none and returns "".
+func (e *CommandRejectedError) ErrorCode() string { return e.Cause }
+
+// ErrorSource completes the coded error the envelope reads; a rejection names
+// no source.
+func (*CommandRejectedError) ErrorSource() string { return "" }
 
 // DescribePhase returns the human-readable description for an error_phase,
 // or the raw identifier when the phase is unknown. An unknown file_* phase
