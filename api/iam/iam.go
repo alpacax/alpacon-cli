@@ -474,21 +474,40 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 			return response, nil
 		}
 
-		code, _ := utils.ParseErrorResponse(err)
-		msg, known := UsernameErrorMessage(code)
-		if known {
-			if isRetryableUsernameError(code) {
-				utils.CliWarning("%s", msg)
-				continue
-			}
-			if code == codeUsernameAlreadySet {
-				// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
-				utils.CliInfo("Username is already set; continuing.")
-				return nil, nil
-			}
-			return nil, errors.New(msg)
+		warning, alreadySet, stopErr := usernameFailure(err)
+		switch {
+		case warning != "":
+			utils.CliWarning("%s", warning)
+			continue
+		case alreadySet:
+			// Username was set concurrently (e.g. another session); treat as success so the original command proceeds.
+			utils.CliInfo("Username is already set; continuing.")
+			return nil, nil
+		default:
+			return nil, stopErr
 		}
-		return nil, fmt.Errorf("failed to set username: %w", err)
+	}
+}
+
+// usernameFailure decides what the username prompt does with a failed
+// SetUsername: ask again after a warning, carry on because the username is
+// already set, or stop with an error. A refusal carrying the server's hint
+// stops with that refusal kept in the chain, so the hint prints under it in
+// place of the local message.
+func usernameFailure(err error) (warning string, alreadySet bool, stop error) {
+	code, _ := utils.ParseErrorResponse(err)
+	msg, known := UsernameErrorMessage(code)
+	switch {
+	case !known:
+		return "", false, fmt.Errorf("failed to set username: %w", err)
+	case isRetryableUsernameError(code):
+		return msg, false, nil
+	case code == codeUsernameAlreadySet:
+		return "", true, nil
+	case utils.RefusalHint(err) != "":
+		return "", false, fmt.Errorf("failed to set username: %w", err)
+	default:
+		return "", false, errors.New(msg)
 	}
 }
 

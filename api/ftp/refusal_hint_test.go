@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -54,4 +56,49 @@ func TestDownloadFileToPath_FetchRefusalKeepsTheHint(t *testing.T) {
 	_, err = DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
 	require.Error(t, err)
 	assert.Empty(t, utils.RefusalHint(err))
+}
+
+// A 429 that outlasts the download retries still reaches the caller with its
+// code, status and hint; the retries themselves are unchanged.
+func TestDownloadFileToPath_ExhaustedThrottleKeepsTheHint(t *testing.T) {
+	restore := swapDownloadRetryDelays(time.Millisecond, time.Millisecond)
+	defer restore()
+	const hint = "Too many requests were made in a short time; wait, then retry."
+
+	ac := refusedBlobClient(http.StatusTooManyRequests, `{"code": "api_rate_limited", "gate": "rate", "hint": "`+hint+`"}`)
+	_, err := DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
+	assert.Equal(t, hint, utils.RefusalHint(err))
+	assert.Equal(t, http.StatusTooManyRequests, utils.HTTPStatusCode(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "api_rate_limited", code)
+
+	ac = refusedBlobClient(http.StatusTooManyRequests, `{"code": "api_rate_limited"}`)
+	_, err = DownloadFileToPath(ac, "my-server", "/home/alice/a.txt", filepath.Join(t.TempDir(), "a.txt"), "", "", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "download failed after 10 attempts (last status: 429)")
+	assert.Empty(t, utils.RefusalHint(err))
+}
+
+// A status poll that times out while throttled keeps the last 429, hint
+// included, behind the same timeout message.
+func TestPollTransferStatus_TimeoutWhileThrottledKeepsTheHint(t *testing.T) {
+	const hint = "Too many requests were made in a short time; wait, then retry."
+	ac := &client.AlpaconClient{
+		BaseURL: testutil.StubBaseURL,
+		HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
+			return http.StatusTooManyRequests, `{"code": "api_rate_limited", "gate": "rate", "hint": "` + hint + `"}`
+		}),
+	}
+
+	var err error
+	_, stderr := testutil.CaptureOutput(t, func() {
+		synctest.Test(t, func(t *testing.T) {
+			_, _, err = pollTransferStatus(ac, downloadTransfer, testPathID(t, "t-1"), 2*time.Second, 100*time.Millisecond)
+		})
+	})
+	require.Error(t, err, "stderr: %s", stderr)
+	assert.Equal(t, "transfer status polling timed out after 2s", err.Error())
+	assert.Equal(t, hint, utils.RefusalHint(err))
 }

@@ -92,6 +92,9 @@ func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.Path
 	budget := utils.NewThrottleBudget(timeout)
 	failures := 0
 	throttles := 0
+	// lastThrottle is the 429 the latest poll got, if it got one, so a poll
+	// that times out while throttled still carries the server's hint.
+	var lastThrottle error
 
 	// Checked before every request, since time.Sleep can oversleep the deadline.
 	for time.Now().Before(deadline) {
@@ -99,10 +102,12 @@ func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.Path
 		// false is terminal.
 		respBody, err := ac.SendGetRequest(statusURL)
 		var delay time.Duration
+		lastThrottle = nil
 		switch {
 		case err != nil && !utils.IsTransientRequestError(err):
 			return false, "", fmt.Errorf("failed to check transfer status: %w", err)
 		case err != nil && utils.HTTPStatusCode(err) == http.StatusTooManyRequests:
+			lastThrottle = err
 			delay = utils.NextPollBackoff(tick, throttles, utils.RetryAfter(err))
 			throttles++
 			budget.WarnThrottled(delay)
@@ -133,7 +138,11 @@ func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.Path
 		time.Sleep(delay)
 	}
 
-	return false, "", fmt.Errorf("transfer status polling timed out after %v", timeout)
+	timedOut := fmt.Sprintf("transfer status polling timed out after %v", timeout)
+	if lastThrottle != nil {
+		return false, "", utils.Reword(lastThrottle, timedOut)
+	}
+	return false, "", errors.New(timedOut)
 }
 
 func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size int64) error {
@@ -731,6 +740,15 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 			budget = min(budget, throttledMaxAttempts)
 		}
 		if count >= budget-1 {
+			// A refusal that outlasted the retries, a 429 in practice, keeps its
+			// code and the server's hint, so the error output can print the hint.
+			if utils.IsRefusalStatus(resp.StatusCode) {
+				code, source := parseRefusal(body)
+				return nil, fetchStatusError{
+					status: resp.StatusCode, code: code, source: source,
+					hint: utils.ParseRefusalHint(body, resp.StatusCode), attempts: count + 1,
+				}
+			}
 			return nil, fmt.Errorf("download failed after %d attempts (last status: %d)", count+1, resp.StatusCode)
 		}
 		time.Sleep(backoffDelay(count, initialDownloadRetryDelay, maxDownloadRetryDelay))
@@ -1089,13 +1107,19 @@ func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
 // fetchStatusError is the refusal a download URL answered with. It carries the
 // code the response body named, so an MFA refusal reads as one, and the
 // server's hint, sanitized, which the error output prints under the error.
+// attempts is set when the refusal is the last of a retried status that ran
+// out of attempts.
 type fetchStatusError struct {
 	status       int
 	code, source string
 	hint         string
+	attempts     int
 }
 
 func (e fetchStatusError) Error() string {
+	if e.attempts > 0 {
+		return fmt.Sprintf("download failed after %d attempts (last status: %d)", e.attempts, e.status)
+	}
 	return fmt.Sprintf("download failed with client error: %d", e.status)
 }
 func (e fetchStatusError) HTTPStatusCode() int { return e.status }

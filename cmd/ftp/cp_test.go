@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
@@ -484,14 +485,10 @@ func TestWantsPermissionAdvice(t *testing.T) {
 	}
 }
 
-// A download whose final fetch is refused with the server's hint reaches cp's
-// caller with the hint on the error, so its error line prints the hint; cp's
-// own checklist for a failed download, which exits on the spot, stays out of
-// it.
-func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
-	t.Parallel()
-	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
-	ac := &client.AlpaconClient{
+// refusedDownloadClient serves a download whose final fetch is answered with
+// status and body.
+func refusedDownloadClient(status int, body string) *client.AlpaconClient {
+	return &client.AlpaconClient{
 		BaseURL:       testutil.StubBaseURL,
 		WorkspaceName: "my-workspace",
 		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
@@ -505,16 +502,55 @@ func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
 			case r.URL.Path == "/api/webftp/downloads/t-1/status/":
 				return http.StatusOK, `{"success": true, "message": "done"}`
 			case r.URL.Path == "/blob":
-				return http.StatusForbidden, `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "hint": "` + hint + `"}`
+				return status, body
 			default:
 				return http.StatusOK, `{}`
 			}
 		}),
 	}
+}
 
-	serverName, err := downloadObject(ac, []string{"my-server:/home/alice/a.txt"}, t.TempDir(), "", "", false, "")
-	require.Error(t, err)
-	assert.Equal(t, "my-server", serverName)
-	assert.Contains(t, err.Error(), "download failed")
-	assert.Equal(t, hint, utils.RefusalHint(err))
+// A download whose final fetch is refused with the server's hint reaches cp's
+// caller with the hint on the error, so its error line prints the hint; cp's
+// own checklist for a failed download, which exits on the spot, stays out of
+// it. A 429 that outlasts the retries counts the same.
+func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		hint   string
+	}{
+		{
+			name:   "a file access refusal",
+			status: http.StatusForbidden,
+			body:   `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "hint": "This token's file access rules do not allow this transfer for this path, account and direction."}`,
+			hint:   "This token's file access rules do not allow this transfer for this path, account and direction.",
+		},
+		{
+			name:   "a throttle that outlasts the retries",
+			status: http.StatusTooManyRequests,
+			body:   `{"code": "api_rate_limited", "gate": "rate", "hint": "Too many requests were made in a short time; wait, then retry."}`,
+			hint:   "Too many requests were made in a short time; wait, then retry.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac := refusedDownloadClient(tt.status, tt.body)
+			dest := t.TempDir()
+
+			var serverName string
+			var err error
+			// The fake clock spends the retry backoff at once.
+			synctest.Test(t, func(t *testing.T) {
+				serverName, err = downloadObject(ac, []string{"my-server:/home/alice/a.txt"}, dest, "", "", false, "")
+			})
+			require.Error(t, err)
+			assert.Equal(t, "my-server", serverName)
+			assert.Contains(t, err.Error(), "download failed")
+			assert.Equal(t, tt.hint, utils.RefusalHint(err))
+		})
+	}
 }
