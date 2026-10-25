@@ -192,13 +192,13 @@ func uploadResponseLabel(resp UploadResponse) string {
 	return resp.ID
 }
 
-func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
+func collectConcurrentFailures(count, limit int, fn func(int) error) []error {
 	if count == 0 {
 		return nil
 	}
 	limit = min(max(limit, 1), count)
 
-	failuresByIndex := make([]string, count)
+	failuresByIndex := make([]error, count)
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	for i := range count {
@@ -210,14 +210,31 @@ func collectConcurrentFailures(count, limit int, fn func(int) string) []string {
 	}
 	wg.Wait()
 
-	var failures []string
+	var failures []error
 	for _, failure := range failuresByIndex {
-		if failure != "" {
+		if failure != nil {
 			failures = append(failures, failure)
 		}
 	}
 	return failures
 }
+
+// batchFailure is the error of a batch in which some items failed. Its message
+// lists each failure on a line of its own, and it unwraps to the errors behind
+// them, so a refusal's code and hint still read through it.
+type batchFailure struct {
+	failures []error
+}
+
+func (e *batchFailure) Error() string {
+	lines := make([]string, len(e.failures))
+	for i, failure := range e.failures {
+		lines[i] = failure.Error()
+	}
+	return fmt.Sprintf("upload failed for %d file(s):\n  %s", len(e.failures), strings.Join(lines, "\n  "))
+}
+
+func (e *batchFailure) Unwrap() []error { return e.failures }
 
 func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
 	return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
@@ -337,18 +354,18 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		ids[i] = resp.ID
 	}
 
-	uploadFailures := collectConcurrentFailures(len(responses), bulkUploadConcurrency, func(i int) string {
+	uploadFailures := collectConcurrentFailures(len(responses), bulkUploadConcurrency, func(i int) error {
 		resp := responses[i]
 		if resp.UploadURL == "" {
-			return ""
+			return nil
 		}
 		if err := uploadToS3(ac.HTTPClient, resp.UploadURL, files[i], sizes[i]); err != nil {
-			return fmt.Sprintf("%s: failed to upload to storage: %v", uploadResponseLabel(resp), err)
+			return fmt.Errorf("%s: failed to upload to storage: %w", uploadResponseLabel(resp), err)
 		}
-		return ""
+		return nil
 	})
 	if len(uploadFailures) > 0 {
-		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(uploadFailures), strings.Join(uploadFailures, "\n  "))
+		return &batchFailure{failures: uploadFailures}
 	}
 
 	// Trigger server-side processing
@@ -370,19 +387,19 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 	// One start time for the whole batch: the polls queue behind the concurrency
 	// limit, and all of them belong to this command's MFA wait.
 	batchStart := time.Now()
-	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) string {
+	failures := collectConcurrentFailures(len(responses), bulkPollConcurrency, func(i int) error {
 		resp := responses[i]
 		success, message, err := pollTransfer(ac, serverID, uploadTransfer, pathIDs[i], timeout, batchStart)
 		if err != nil {
-			return fmt.Sprintf("%s: %v", uploadResponseLabel(resp), err)
+			return fmt.Errorf("%s: %w", uploadResponseLabel(resp), err)
 		}
 		if !success {
-			return fmt.Sprintf("%s: %s", uploadResponseLabel(resp), message)
+			return fmt.Errorf("%s: %s", uploadResponseLabel(resp), message)
 		}
-		return ""
+		return nil
 	})
 	if len(failures) > 0 {
-		return fmt.Errorf("upload failed for %d file(s):\n  %s", len(failures), strings.Join(failures, "\n  "))
+		return &batchFailure{failures: failures}
 	}
 
 	return nil

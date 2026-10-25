@@ -160,3 +160,33 @@ func TestReword_KeepsTheRefusalBehindTheMessage(t *testing.T) {
 	assert.Equal(t, "permission_denied", code)
 	assert.ErrorIs(t, reworded, refusal)
 }
+
+// An error that joins several refusals yields each distinct hint once, in
+// order, and RefusalHint reads the first.
+func TestRefusalNextActions_JoinedRefusals(t *testing.T) {
+	t.Parallel()
+	const other = "Too many requests were made in a short time; wait, then retry."
+	joined := errors.Join(
+		fmt.Errorf("a.txt: %w", &hintedError{hint: sampleHint}),
+		errors.New("b.txt: disk full"),
+		fmt.Errorf("c.txt: %w", &hintedError{hint: sampleHint}),
+		fmt.Errorf("d.txt: %w", &hintedError{hint: other}),
+	)
+
+	assert.Equal(t, []NextAction{{Description: sampleHint}, {Description: other}}, RefusalNextActions(joined))
+	assert.Equal(t, sampleHint, RefusalHint(joined))
+}
+
+// A warning that formats a refusal prints its hint under the line, as the
+// error helpers do.
+func TestCliWarning_PrintsTheServerHint(t *testing.T) {
+	pinColor(t, false)
+
+	stderr := captureStderr(t, func() {
+		CliWarning("Could not fetch user info: %s", &hintedError{hint: sampleHint})
+	})
+	assert.Equal(t, "Warning: Could not fetch user info: permission denied\nHint: "+sampleHint+"\n", stderr)
+
+	stderr = captureStderr(t, func() { CliWarning("Could not fetch user info: %s", errors.New("timeout")) })
+	assert.NotContains(t, stderr, "Hint:")
+}

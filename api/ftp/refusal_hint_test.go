@@ -1,8 +1,14 @@
 package ftp
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -101,4 +107,65 @@ func TestPollTransferStatus_TimeoutWhileThrottledKeepsTheHint(t *testing.T) {
 	require.Error(t, err, "stderr: %s", stderr)
 	assert.Equal(t, "transfer status polling timed out after 2s", err.Error())
 	assert.Equal(t, hint, utils.RefusalHint(err))
+}
+
+// bulkStatusRefusalServer runs a bulk upload of two files whose status polls
+// are refused with hintFor's hint for each file's transfer.
+func bulkStatusRefusalServer(t *testing.T, hintFor func(id string) string) *client.AlpaconClient {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == uploadBulkAPIURL:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode([]UploadResponse{
+				{ID: "id-1", Name: "a.txt", UploadURL: "http://" + r.Host + "/s3/a"},
+				{ID: "id-2", Name: "b.txt", UploadURL: "http://" + r.Host + "/s3/b"},
+			})
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == uploadBulkTriggerURL:
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/status/"):
+			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, uploadAPIURL), "/status/")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintf(w, `{"code": "api_token_scope_missing", "gate": "token_scope", "hint": %q}`, hintFor(id))
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "test-token"}
+}
+
+func uploadTwoFiles(t *testing.T, ac *client.AlpaconClient) error {
+	t.Helper()
+	request := &BulkUploadRequest{Names: []string{"a.txt", "b.txt"}, Path: "/home/alice", Server: "srv-id"}
+	files := []io.Reader{bytes.NewReader([]byte("a")), bytes.NewReader([]byte("b"))}
+	return executeBulkUpload(ac, request, files, []int64{1, 1})
+}
+
+// A bulk upload whose status polls are refused keeps every refusal behind the
+// aggregate error: its message is the list it always was, and each distinct
+// hint reads through it once.
+func TestExecuteBulkUpload_StatusRefusalsKeepTheirHints(t *testing.T) {
+	t.Parallel()
+	const hint = "This token does not hold a scope this action needs; use a token that has the scope, then retry."
+
+	t.Run("the same hint on both files", func(t *testing.T) {
+		t.Parallel()
+		err := uploadTwoFiles(t, bulkStatusRefusalServer(t, func(string) string { return hint }))
+		require.Error(t, err)
+		assert.True(t, strings.HasPrefix(err.Error(), "upload failed for 2 file(s):\n  a.txt: failed to check transfer status: "), "err: %q", err.Error())
+		assert.Contains(t, err.Error(), "\n  b.txt: failed to check transfer status: ")
+		assert.Equal(t, hint, utils.RefusalHint(err))
+		assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+		code, _ := utils.ParseErrorResponse(err)
+		assert.Equal(t, utils.APITokenScopeMissing, code)
+	})
+
+	t.Run("a different hint on each file", func(t *testing.T) {
+		t.Parallel()
+		err := uploadTwoFiles(t, bulkStatusRefusalServer(t, func(id string) string { return "Hint for " + id + "." }))
+		require.Error(t, err)
+		assert.Equal(t, []utils.NextAction{{Description: "Hint for id-1."}, {Description: "Hint for id-2."}}, utils.RefusalNextActions(err))
+	})
 }

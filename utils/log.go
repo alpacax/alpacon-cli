@@ -114,8 +114,12 @@ func CliInfo(msg string, args ...any) {
 // warns from inside a download), and the spinner leaves the cursor mid-line.
 // The break and the text go out as one write so a spinner frame cannot wedge
 // itself between them.
+//
+// Like the error helpers, it prints the server's hint under the line for an
+// error argument that carries one (printRefusalNextActions).
 func CliWarning(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
+	printRefusalNextActions(os.Stderr, refusalErrorIn(args))
 }
 
 // spinnerLineBreak returns the newline that moves a message off the line a

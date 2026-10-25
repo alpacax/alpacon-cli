@@ -2,6 +2,7 @@ package ftp
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -466,6 +467,9 @@ func TestWantsPermissionAdvice(t *testing.T) {
 	require.Contains(t, hinted.Error(), "permission denied")
 	assert.False(t, wantsPermissionAdvice(hinted))
 	assert.Equal(t, hint, utils.RefusalHint(hinted))
+	// A bulk upload joins its files' failures; a refusal among them still
+	// reads through.
+	assert.False(t, wantsPermissionAdvice(errors.Join(errors.New("a.txt: disk full"), fmt.Errorf("b.txt: %w", hinted))))
 
 	tests := []struct {
 		name string

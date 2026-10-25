@@ -68,26 +68,43 @@ func ParseRefusalHint(body []byte, statusCode int) string {
 // RefusalHint returns the sanitized hint the first error in err's chain that
 // carries one holds, or "" when none does.
 func RefusalHint(err error) string {
-	for e := range errorChain(err) {
-		if carrier, ok := e.(hintCarrier); ok {
-			if hint := SanitizeServerHint(carrier.ErrorHint()); hint != "" {
-				return hint
-			}
-		}
+	if hints := refusalHints(err); len(hints) > 0 {
+		return hints[0]
 	}
 	return ""
 }
 
-// RefusalNextActions is the server's own guidance for a refused request, as
-// the follow-ups an error output shows under the error line. The hint is
-// printed as sent, never rephrased or matched against a local table, so a new
-// refusal code needs no CLI change to be explained. Nil when err carries none.
-func RefusalNextActions(err error) []NextAction {
-	hint := RefusalHint(err)
-	if hint == "" {
-		return nil
+// refusalHints returns every distinct sanitized hint in err's chain, in chain
+// order. An error that joins several refusals, such as a batch in which more
+// than one item was refused, can carry more than one; the same hint on several
+// of them counts once.
+func refusalHints(err error) []string {
+	var hints []string
+	seen := map[string]bool{}
+	for e := range errorChain(err) {
+		carrier, ok := e.(hintCarrier)
+		if !ok {
+			continue
+		}
+		if hint := SanitizeServerHint(carrier.ErrorHint()); hint != "" && !seen[hint] {
+			seen[hint] = true
+			hints = append(hints, hint)
+		}
 	}
-	return []NextAction{{Description: hint}}
+	return hints
+}
+
+// RefusalNextActions is the server's own guidance for a refused request, as
+// the follow-ups an error output shows under the error line: one per distinct
+// hint. The hint is printed as sent, never rephrased or matched against a
+// local table, so a new refusal code needs no CLI change to be explained. Nil
+// when err carries none.
+func RefusalNextActions(err error) []NextAction {
+	var actions []NextAction
+	for _, hint := range refusalHints(err) {
+		actions = append(actions, NextAction{Description: hint})
+	}
+	return actions
 }
 
 // Reword returns an error that reads as message and keeps err in its chain,

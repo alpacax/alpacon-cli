@@ -181,10 +181,17 @@ func PrintPurposeRefused(commandID string, cause error) {
 			"or this credential may not be the one that submitted the command.",
 		commandID, cause,
 	)
+	// The server's hint, when the refusal carries one, says why in place of the
+	// local guess, and leads the follow-ups.
+	actions := RefusalNextActions(cause)
+	if len(actions) > 0 {
+		message = fmt.Sprintf("failed to state the purpose for %s: %s.", commandID, cause)
+	}
 	next := NextAction{
 		Command:     fmt.Sprintf("alpacon exec logs %s", commandID),
 		Description: "Read the command's state; do not re-submit it, which would create a second command",
 	}
+	actions = append(actions, next)
 
 	if OutputFormat == OutputFormatJSON {
 		envelope := purposeAnswerJSON{
@@ -193,7 +200,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 			ExitCode:    ExitCodeGeneralError,
 			Message:     message,
 			CommandID:   commandID,
-			NextActions: []NextAction{next},
+			NextActions: actions,
 		}
 		if err := PrintJSONValue(os.Stdout, envelope); err != nil {
 			_, _ = fmt.Fprintf(os.Stdout, `{"ok":false,"status":"purpose_refused"}`+"\n")
@@ -202,5 +209,7 @@ func PrintPurposeRefused(commandID string, cause error) {
 	}
 
 	CliWarning("%s", message)
-	fmt.Fprintf(os.Stderr, "  %s\n", next.PlainText())
+	for _, action := range actions {
+		fmt.Fprintf(os.Stderr, "  %s\n", action.PlainText())
+	}
 }
