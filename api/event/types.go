@@ -63,7 +63,14 @@ type RemoteCommandError struct {
 
 // ClientTimeoutError is returned when the CLI gave up polling for the command
 // result before the server reported a terminal status.
-type ClientTimeoutError struct{}
+//
+// cause is the refusal the last poll got when the wait ended on it (a 429 in
+// practice), kept so its hint still prints; nil otherwise.
+type ClientTimeoutError struct {
+	cause error
+}
+
+func (e *ClientTimeoutError) Unwrap() error { return e.cause }
 
 // PendingApprovalError is returned when the server parked a command at the
 // "awaiting_approval" status: the job was accepted but a human must approve it

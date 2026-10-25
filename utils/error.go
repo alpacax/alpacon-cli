@@ -270,14 +270,63 @@ type retryAfterCarrier interface {
 }
 
 // HTTPStatusCode returns the HTTP status carried by err, or 0 if none—lets callers tell 404 from 401.
+// An error that joins several (a BatchError, errors.Join, fmt.Errorf with more
+// than one %w) has the status its children agree on: the one status every
+// child that carries a status has, or 0 when two of them differ.
 func HTTPStatusCode(err error) int {
-	for e := err; e != nil; e = errors.Unwrap(e) {
+	for e := err; e != nil; {
 		if sc, ok := e.(statusCoder); ok {
 			return sc.HTTPStatusCode()
+		}
+		switch wrapped := e.(type) {
+		case interface{ Unwrap() []error }:
+			return agreedStatusCode(wrapped.Unwrap())
+		case interface{ Unwrap() error }:
+			e = wrapped.Unwrap()
+		default:
+			return 0
 		}
 	}
 	return 0
 }
+
+// agreedStatusCode is HTTPStatusCode over joined errors: the status every
+// child that has one agrees on, or 0 when none has one or two differ.
+func agreedStatusCode(errs []error) int {
+	agreed := 0
+	for _, child := range errs {
+		status := HTTPStatusCode(child)
+		if status == 0 {
+			continue
+		}
+		if agreed != 0 && status != agreed {
+			return 0
+		}
+		agreed = status
+	}
+	return agreed
+}
+
+// BatchError joins the failures of independent items, such as the files of a
+// bulk upload. Its message is Header followed by one line per failure. It
+// unwraps to every failure, so each refusal's hint still prints, but no single
+// item's code speaks for the batch: ParseErrorResponse and StructuredErrorCode
+// do not look inside it, so a batch is never classified as one item's refusal
+// (a work-session gate, an MFA step-up) and its per-item results stay in view.
+type BatchError struct {
+	Header   string
+	Failures []error
+}
+
+func (e *BatchError) Error() string {
+	lines := make([]string, len(e.Failures))
+	for i, failure := range e.Failures {
+		lines[i] = failure.Error()
+	}
+	return e.Header + ":\n  " + strings.Join(lines, "\n  ")
+}
+
+func (e *BatchError) Unwrap() []error { return e.Failures }
 
 // RetryAfter returns the delay the server asked for on err, or 0 if it sent none.
 func RetryAfter(err error) time.Duration {
@@ -410,7 +459,7 @@ func ParseErrorResponse(err error) (string, string) {
 		return code, source
 	}
 
-	for e := range errorChain(err) {
+	for e := range codeChain(err) {
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}
@@ -441,7 +490,7 @@ func ParseErrorResponse(err error) (string, string) {
 }
 
 func typedCode(err error, accept func(code, source string) bool) (string, string) {
-	for e := range errorChain(err) {
+	for e := range codeChain(err) {
 		if coded, ok := e.(codedError); ok {
 			code, source := coded.ErrorCode(), coded.ErrorSource()
 			if accept(code, source) {
@@ -452,7 +501,18 @@ func typedCode(err error, accept func(code, source string) bool) (string, string
 	return "", ""
 }
 
+// errorChain walks err and everything it wraps, joined errors included.
 func errorChain(err error) iter.Seq[error] {
+	return walkErrors(err, false)
+}
+
+// codeChain is errorChain without descending into a BatchError: an item's code
+// is not the batch's.
+func codeChain(err error) iter.Seq[error] {
+	return walkErrors(err, true)
+}
+
+func walkErrors(err error, stopAtBatch bool) iter.Seq[error] {
 	return func(yield func(error) bool) {
 		var walk func(error) bool
 		walk = func(current error) bool {
@@ -461,6 +521,9 @@ func errorChain(err error) iter.Seq[error] {
 			}
 			if !yield(current) {
 				return false
+			}
+			if _, isBatch := current.(*BatchError); isBatch && stopAtBatch {
+				return true
 			}
 			switch wrapped := current.(type) {
 			case interface{ Unwrap() []error }:

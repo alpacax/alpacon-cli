@@ -384,6 +384,7 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 	delay := tick
 	failures := 0
 	budget := utils.NewThrottleBudget(timeout)
+	var lastRefusal error
 
 	for {
 		select {
@@ -402,10 +403,14 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			}
 		}
 		if !seams.Now().Before(deadline) {
-			return response, &ClientTimeoutError{}
+			return response, &ClientTimeoutError{cause: lastRefusal}
 		}
 
 		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
+		lastRefusal = nil
+		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+			lastRefusal = err
+		}
 		if err != nil {
 			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {
 				return response, err

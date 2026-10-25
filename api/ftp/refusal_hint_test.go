@@ -158,8 +158,10 @@ func TestExecuteBulkUpload_StatusRefusalsKeepTheirHints(t *testing.T) {
 		assert.Contains(t, err.Error(), "\n  b.txt: failed to check transfer status: ")
 		assert.Equal(t, hint, utils.RefusalHint(err))
 		assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+		// An item's code does not speak for the batch.
 		code, _ := utils.ParseErrorResponse(err)
-		assert.Equal(t, utils.APITokenScopeMissing, code)
+		assert.Empty(t, code)
+		assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err), "both items agree on 403")
 	})
 
 	t.Run("a different hint on each file", func(t *testing.T) {
@@ -168,4 +170,50 @@ func TestExecuteBulkUpload_StatusRefusalsKeepTheirHints(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, []utils.NextAction{{Description: "Hint for id-1."}, {Description: "Hint for id-2."}}, utils.RefusalNextActions(err))
 	})
+}
+
+// A bulk upload in which one file meets a work-session gate is not classified
+// as that gate: the work-session handler leaves it alone, so the per-file
+// list and every distinct hint reach the batch's own error line.
+func TestExecuteBulkUpload_WorkSessionRefusalStaysInTheBatch(t *testing.T) {
+	const gateHint = "This work session does not cover this server; use a session that does."
+	const scopeHint = "This token does not hold a scope this action needs; use a token that has the scope, then retry."
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == uploadBulkAPIURL:
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode([]UploadResponse{
+				{ID: "id-1", Name: "a.txt", UploadURL: "http://" + r.Host + "/s3/a"},
+				{ID: "id-2", Name: "b.txt", UploadURL: "http://" + r.Host + "/s3/b"},
+			})
+		case r.Method == http.MethodPut:
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == uploadBulkTriggerURL:
+			w.WriteHeader(http.StatusCreated)
+		case strings.HasSuffix(r.URL.Path, "/id-1/status/"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintf(w, `{"code": %q, "source": "webftp", "hint": %q}`, utils.WorkSessionServerNotAllowed, gateHint)
+		case strings.HasSuffix(r.URL.Path, "/id-2/status/"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintf(w, `{"code": "api_token_scope_missing", "gate": "token_scope", "hint": %q}`, scopeHint)
+		}
+	}))
+	defer ts.Close()
+
+	err := uploadTwoFiles(t, &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "test-token"})
+	require.Error(t, err)
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Empty(t, code)
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		// Returns: a batch is not a work-session refusal. It would exit 3 otherwise.
+		utils.HandleWorkSessionError(err, utils.OperationWebFTP, "my-server", "API token", "")
+		utils.CliError("Failed to upload to '%s': %s", "my-server:/home/alice", err)
+	})
+	assert.Contains(t, stderr, "upload failed for 2 file(s):\n  a.txt: ")
+	assert.Contains(t, stderr, "\n  b.txt: ")
+	assert.Equal(t, 1, strings.Count(stderr, "Hint: "+gateHint), "stderr: %q", stderr)
+	assert.Equal(t, 1, strings.Count(stderr, "Hint: "+scopeHint), "stderr: %q", stderr)
+	assert.NotContains(t, stderr, "Next:")
 }

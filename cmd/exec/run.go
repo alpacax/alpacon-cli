@@ -671,15 +671,22 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 	throttles := 0
 	lastRequestID := ""
 	budget := utils.NewThrottleBudget(waitTimeout)
+	// lastRefusal is the refusal (a 429 in practice) the latest status read got,
+	// if it got one, so a wait that times out on it still prints its hint.
+	var lastRefusal error
 	for {
 		select {
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			utils.CliWarning("Approval wait timed out after %s; the command is still pending.", waitTimeout)
+			utils.CliWarning("%s", utils.Reword(lastRefusal, fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout)))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
 			outcome, requestID, err := pollApprovalOnce(ac, cmdID)
+			lastRefusal = nil
+			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+				lastRefusal = err
+			}
 			switch {
 			case err != nil && isPollFailure(err):
 				// A 429 says the server is answering, so it is not counted toward
@@ -940,6 +947,8 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		var clientTimeout *event.ClientTimeoutError
 		if errors.As(err, &clientTimeout) {
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
+			// A wait that ended on a refusal (a 429 in practice) keeps its hint.
+			utils.PrintRefusalHints(os.Stderr, clientTimeout)
 			os.Exit(1)
 		}
 		var rejected *event.CommandRejectedError

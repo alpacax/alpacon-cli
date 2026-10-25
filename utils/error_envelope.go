@@ -52,27 +52,43 @@ func CliErrorEnvelopeWithExit(operation string, err error, format string, args .
 		CliUsageErrorEnvelopeWithExit(operation, format, args...)
 		return
 	}
+	guidance := refusalGuidance(err, args)
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...)))
+		envelope := buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...))
+		envelope.NextActions = RefusalNextActions(guidance)
+		PrintJSONError(os.Stderr, envelope)
 		os.Exit(1)
 	}
-	printCliError(err, format, args...)
+	printCliError(guidance, format, args...)
 	reportCLIError()
 	os.Exit(1)
+}
+
+// refusalGuidance is the error whose server hints an envelope helper shows:
+// err, or, when a caller passes nil to keep a code out of the envelope, the
+// refusal among the message's own arguments. The hint is guidance, not the
+// code, so it shows either way.
+func refusalGuidance(err error, args []any) error {
+	if err != nil {
+		return err
+	}
+	return refusalErrorIn(args)
 }
 
 // CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
 // code, for refusals a script branches on (e.g. ExitCodeNotApproved).
 func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
+	guidance := refusalGuidance(err, args)
 	if OutputFormat == OutputFormatJSON {
 		envelope := buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...))
 		// buildCliErrorEnvelope hardcodes 1; leaving it would make the envelope
 		// disagree with the process exit code.
 		envelope.ExitCode = code
+		envelope.NextActions = RefusalNextActions(guidance)
 		PrintJSONError(os.Stderr, envelope)
 		os.Exit(code)
 	}
-	printCliError(err, format, args...)
+	printCliError(guidance, format, args...)
 	os.Exit(code)
 }
 

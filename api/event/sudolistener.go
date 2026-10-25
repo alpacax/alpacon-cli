@@ -234,7 +234,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n%s", err, utils.RawTerminalHintLines(err))
 		return
 	}
 

@@ -219,23 +219,6 @@ func collectConcurrentFailures(count, limit int, fn func(int) error) []error {
 	return failures
 }
 
-// batchFailure is the error of a batch in which some items failed. Its message
-// lists each failure on a line of its own, and it unwraps to the errors behind
-// them, so a refusal's code and hint still read through it.
-type batchFailure struct {
-	failures []error
-}
-
-func (e *batchFailure) Error() string {
-	lines := make([]string, len(e.failures))
-	for i, failure := range e.failures {
-		lines[i] = failure.Error()
-	}
-	return fmt.Sprintf("upload failed for %d file(s):\n  %s", len(e.failures), strings.Join(lines, "\n  "))
-}
-
-func (e *batchFailure) Unwrap() []error { return e.failures }
-
 func executeSingleUpload(ac *client.AlpaconClient, request *UploadRequest, file io.Reader, size int64) error {
 	return executeSingleUploadFrom(ac, request, func() (io.Reader, int64, func(), error) {
 		return file, size, func() {}, nil
@@ -365,7 +348,7 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		return nil
 	})
 	if len(uploadFailures) > 0 {
-		return &batchFailure{failures: uploadFailures}
+		return &utils.BatchError{Header: fmt.Sprintf("upload failed for %d file(s)", len(uploadFailures)), Failures: uploadFailures}
 	}
 
 	// Trigger server-side processing
@@ -399,7 +382,7 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		return nil
 	})
 	if len(failures) > 0 {
-		return &batchFailure{failures: failures}
+		return &utils.BatchError{Header: fmt.Sprintf("upload failed for %d file(s)", len(failures)), Failures: failures}
 	}
 
 	return nil

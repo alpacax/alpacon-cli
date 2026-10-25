@@ -197,13 +197,25 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+	// lastRefusal is the refusal the latest completion check got, if it got one:
+	// a step-up that times out on it keeps it behind the timeout, so its hint
+	// still reaches the output.
+	var lastRefusal error
 	for {
 		select {
 		case <-deadline:
 			spinner.Stop()
-			return fmt.Errorf("MFA step-up timed out after %v", timeout)
+			timedOut := fmt.Sprintf("MFA step-up timed out after %v", timeout)
+			if lastRefusal != nil {
+				return utils.Reword(lastRefusal, timedOut)
+			}
+			return errors.New(timedOut)
 		case <-ticker.C:
 			completed, cerr := CheckMFACompletion(ac)
+			lastRefusal = nil
+			if cerr != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(cerr)) {
+				lastRefusal = cerr
+			}
 			if cerr != nil || !completed {
 				// Non-fatal: the endpoint may lag the browser; keep polling.
 				continue

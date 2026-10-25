@@ -91,3 +91,22 @@ func TestPrintPendingApproval_JSONOutput_OmitsEmptyRetry(t *testing.T) {
 	assert.Empty(t, got.NextActions[0].Command)
 	assert.Contains(t, got.NextActions[0].Description, "Alpacon console")
 }
+
+// The extra follow-ups a caller passes, such as a refusal's hint, ride in the
+// pending envelope's next_actions after the retry.
+func TestPrintPendingApproval_CarriesARefusalHint(t *testing.T) {
+	const hint = "Too many requests were made in a short time; wait, then retry."
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() {
+			PrintPendingApproval("Work session ws-1: timed out. The outcome is still open.", "",
+				NextAction{Command: "alpacon work-session use ws-1"},
+				RefusalNextActions(&hintedError{hint: hint})...)
+		})
+	})
+	var got struct {
+		NextActions []NextAction `json:"next_actions"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.Contains(t, got.NextActions, NextAction{Description: hint})
+}

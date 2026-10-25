@@ -827,3 +827,40 @@ func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 		})
 	}
 }
+
+// A wait that times out on a run of refusals keeps the last one behind the
+// timeout: still pending (exit 4), with the refusal's hint for the output.
+func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "Too many requests were made in a short time; wait, then retry."
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code": "api_rate_limited", "gate": "rate", "hint": "` + hint + `"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+
+	require.Error(t, err)
+	var pending *pendingWaitError
+	require.ErrorAs(t, err, &pending)
+	assert.Contains(t, err.Error(), "timed out waiting for approval")
+	assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+}
+
+// A plain timeout carries no hint.
+func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"pending"}`))
+	}))
+	defer ts.Close()
+
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 30*time.Millisecond)
+	require.Error(t, err)
+	assert.Empty(t, utils.RefusalNextActions(err))
+}

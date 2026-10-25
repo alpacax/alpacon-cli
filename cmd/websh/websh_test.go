@@ -513,3 +513,22 @@ func TestSetupSudoListener_WarningReturnsTheCursor(t *testing.T) {
 			"websh may already hold the terminal in raw mode, where a bare newline leaves the cursor mid-line: %q", line)
 	}
 }
+
+// A refused event session carries the server's hint under the warning, on a
+// line that still returns the cursor in raw mode.
+func TestSetupSudoListener_WarningCarriesTheServerHint(t *testing.T) {
+	const hint = "This credential cannot stand for a person at the keyboard; sign in to the CLI instead."
+	ts := newSudoListenerTestServer(t, http.StatusForbidden, `{"code": "auth_interactive_channel_requires_presence", "hint": "`+hint+`"}`)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_ = setupSudoListener(ac, "my-server", "session-1")
+	})
+
+	assert.Contains(t, stderr, "Sudo MFA listener unavailable")
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, hint+"\r\n")
+	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
+		assert.True(t, strings.HasSuffix(line, "\r"), "line: %q", line)
+	}
+}

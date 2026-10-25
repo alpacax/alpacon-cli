@@ -123,6 +123,24 @@ type rewordedError struct {
 func (e *rewordedError) Error() string { return e.message }
 func (e *rewordedError) Unwrap() error { return e.err }
 
+// PrintRefusalHints writes err's refusal guidance to w, one "Hint:" line per
+// distinct hint, for output written outside the Cli* helpers.
+func PrintRefusalHints(w io.Writer, err error) {
+	printRefusalNextActions(w, err)
+}
+
+// RawTerminalHintLines renders err's refusal guidance for a terminal that may
+// be in raw mode, where a bare newline leaves the cursor where it stood: one
+// "Hint:" line per distinct hint, each ending in \r\n. Empty when err carries
+// none.
+func RawTerminalHintLines(err error) string {
+	var sb strings.Builder
+	for _, action := range RefusalNextActions(err) {
+		fmt.Fprintf(&sb, "%s %s\r\n", Yellow("Hint:"), action.PlainText())
+	}
+	return sb.String()
+}
+
 // refusalErrorIn returns the first argument that is an error carrying refusal
 // guidance, so the Cli* error helpers can print it under the line they render
 // that error into.

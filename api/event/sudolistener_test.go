@@ -642,6 +642,44 @@ func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *tes
 	assert.Zero(t, others.Load(), "no MFA link lookup or poll after the refusal")
 }
 
+// The MFA link is a REST request: its refusal's hint prints under the failure,
+// each line ending in \r\n for a terminal in raw mode.
+func TestSudoListener_HandleSudoMFA_LinkRefusalCarriesTheHint(t *testing.T) {
+	// No t.Parallel: HOME is redirected so the token refresh finds no stored config.
+	t.Setenv("HOME", t.TempDir())
+	const hint = "This action needs a recent MFA check; complete MFA, then retry."
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/sudo/grants/grant-1/verify/"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code": "auth_mfa_required"}`))
+		case r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`))
+		default:
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code": "permission_denied", "hint": "` + hint + `"}`))
+		}
+	}))
+	defer ts.Close()
+
+	sl := NewSudoListener(&client.AlpaconClient{
+		HTTPClient:    ts.Client(),
+		BaseURL:       ts.URL,
+		WorkspaceName: "my-workspace",
+	}, "my-server", "session-1")
+	var event sudoMFAEvent
+	event.Payload.SudoGrantID = "grant-1"
+
+	_, stderr := testutil.CaptureOutput(t, func() { sl.handleSudoMFA(event) })
+
+	assert.Contains(t, stderr, "Failed to get MFA link")
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, hint+"\r\n")
+	assert.NotContains(t, stderr, "Opening browser")
+}
+
 func TestCredentialCannotProveMFAText(t *testing.T) {
 	t.Parallel()
 	const hint = "This credential cannot prove an MFA check; verify the sudo request from a console or CLI sign-in instead."

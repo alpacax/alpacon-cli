@@ -190,3 +190,50 @@ func TestCliWarning_PrintsTheServerHint(t *testing.T) {
 	stderr = captureStderr(t, func() { CliWarning("Could not fetch user info: %s", errors.New("timeout")) })
 	assert.NotContains(t, stderr, "Hint:")
 }
+
+type statusOnly int
+
+func (s statusOnly) Error() string       { return "status" }
+func (s statusOnly) HTTPStatusCode() int { return int(s) }
+
+// Joined errors have the status their children agree on, or none.
+func TestHTTPStatusCode_JoinedErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "children agree", err: &BatchError{Header: "h", Failures: []error{statusOnly(403), fmt.Errorf("b: %w", statusOnly(403))}}, want: 403},
+		{name: "a child without a status does not count", err: errors.Join(statusOnly(429), errors.New("disk full")), want: 429},
+		{name: "children differ", err: &BatchError{Header: "h", Failures: []error{statusOnly(403), statusOnly(429)}}, want: 0},
+		{name: "no child has one", err: errors.Join(errors.New("a"), errors.New("b")), want: 0},
+		{name: "a wrapped batch", err: fmt.Errorf("upload: %w", &BatchError{Header: "h", Failures: []error{statusOnly(402)}}), want: 402},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, HTTPStatusCode(tt.err))
+		})
+	}
+}
+
+// A batch hides its items' codes, while hints still read through it.
+func TestBatchError_HidesItemCodesButNotHints(t *testing.T) {
+	t.Parallel()
+	batch := &BatchError{Header: "upload failed for 1 file(s)", Failures: []error{
+		fmt.Errorf("a.txt: %w", &hintedError{code: AuthMFARequired, hint: sampleHint}),
+	}}
+
+	assert.Equal(t, "upload failed for 1 file(s):\n  a.txt: permission denied", batch.Error())
+	code, _ := ParseErrorResponse(batch)
+	assert.Empty(t, code)
+	assert.Empty(t, StructuredErrorCode(batch))
+	assert.Equal(t, sampleHint, RefusalHint(batch))
+}
+
+func TestRawTerminalHintLines(t *testing.T) {
+	pinColor(t, false)
+	assert.Equal(t, "Hint: "+sampleHint+"\r\n", RawTerminalHintLines(&hintedError{hint: sampleHint}))
+	assert.Empty(t, RawTerminalHintLines(errors.New("boom")))
+}
