@@ -60,6 +60,22 @@ func RefusalNextActions(err error) []NextAction {
 	return []NextAction{{Description: hint}}
 }
 
+// Reword returns an error that reads as message and keeps err in its chain,
+// for a call site that words a failure itself: the Cli* error helpers still
+// find err's server hint and print it under message, and err's code still
+// reads through ParseErrorResponse.
+func Reword(err error, message string) error {
+	return &rewordedError{message: message, err: err}
+}
+
+type rewordedError struct {
+	message string
+	err     error
+}
+
+func (e *rewordedError) Error() string { return e.message }
+func (e *rewordedError) Unwrap() error { return e.err }
+
 // refusalErrorIn returns the first argument that is an error carrying refusal
 // guidance, so the Cli* error helpers can print it under the line they render
 // that error into.

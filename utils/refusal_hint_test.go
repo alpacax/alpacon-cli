@@ -148,3 +148,15 @@ func TestInteractiveOnly_DefersToTheServerHint(t *testing.T) {
 	plain := &hintedError{code: AuthInteractiveChannelRequiresPresence}
 	assert.ErrorContains(t, InteractiveOnly(plain, "open a Websh session"), "a token cannot open a Websh session")
 }
+
+func TestReword_KeepsTheRefusalBehindTheMessage(t *testing.T) {
+	t.Parallel()
+	refusal := &hintedError{code: "permission_denied", hint: sampleHint}
+	reworded := Reword(refusal, "Failed to delete the CA: permission denied.")
+
+	assert.Equal(t, "Failed to delete the CA: permission denied.", reworded.Error())
+	assert.Equal(t, sampleHint, RefusalHint(reworded))
+	code, _ := ParseErrorResponse(reworded)
+	assert.Equal(t, "permission_denied", code)
+	assert.ErrorIs(t, reworded, refusal)
+}

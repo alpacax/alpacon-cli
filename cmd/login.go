@@ -179,7 +179,7 @@ with the saved target as the default. Non-interactive login requires a HOST or
 			// Old server without whoami: fall back to legacy prefix-based verification.
 			verifyLoginLegacy(ac, token)
 		default:
-			utils.CliErrorWithExit("%s", whoamiFailureMessage(whoErr))
+			utils.CliErrorWithExit("%s", utils.Reword(whoErr, whoamiFailureMessage(whoErr)))
 		}
 
 		utils.CliSuccess("Login succeeded!")
@@ -516,12 +516,20 @@ func whoamiFailureMessage(err error) string {
 	if isVerificationUnavailable(err) {
 		return "Login succeeded and your credential is saved, but the server could not verify it right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
 	}
+	// A server hint is the guidance when the refusal carries one, and the error
+	// output prints it under this line.
+	if utils.RefusalHint(err) != "" {
+		return fmt.Sprintf("Login succeeded but failed to verify your credential: %s.", err)
+	}
 	return fmt.Sprintf("Login succeeded but failed to verify your credential: %s. Please try logging in again.", err)
 }
 
 func profileFailureMessage(err error) string {
 	if isVerificationUnavailable(err) {
 		return "Login succeeded and your credential is saved, but the server could not verify your user profile right now. It was not rejected, so try again in a moment with 'alpacon whoami'"
+	}
+	if utils.RefusalHint(err) != "" {
+		return fmt.Sprintf("Login succeeded but failed to verify user profile: %s.", err)
 	}
 	return fmt.Sprintf("Login succeeded but failed to verify user profile: %s. Please try logging in again.", err)
 }
@@ -547,7 +555,7 @@ func verifyLoginLegacy(ac *client.AlpaconClient, token string) {
 	}
 	if err := ac.LoadCurrentUser(); err != nil {
 		if shouldFailOnProfileError(token) {
-			utils.CliErrorWithExit("%s", profileFailureMessage(err))
+			utils.CliErrorWithExit("%s", utils.Reword(err, profileFailureMessage(err)))
 		}
 		utils.CliInfo("Could not preload your user profile; continuing since the credential was verified.")
 	}

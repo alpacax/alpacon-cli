@@ -1008,3 +1008,40 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	assert.False(t, cfg.KubernetesSurface)
 	assert.Contains(t, stderr, "Did not save the workspace identity and Kubernetes support for https://ws.example.com")
 }
+
+// loginRefusal is a coded refusal carrying the server's hint.
+type loginRefusal struct{ code, hint string }
+
+func (e loginRefusal) Error() string       { return "permission denied (HTTP 403, code: " + e.code + ")" }
+func (e loginRefusal) ErrorCode() string   { return e.code }
+func (e loginRefusal) ErrorSource() string { return "" }
+func (e loginRefusal) ErrorHint() string   { return e.hint }
+
+// After a login, a verification refusal carrying the server's hint drops the
+// local "log in again" sentence, and the reworded error the command prints
+// keeps the hint.
+func TestLoginVerificationFailure_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "This account or credential does not have permission for this action."
+	hinted := loginRefusal{code: "permission_denied", hint: hint}
+	plain := loginRefusal{code: "permission_denied"}
+
+	tests := []struct {
+		name    string
+		message func(error) string
+	}{
+		{name: "whoami", message: whoamiFailureMessage},
+		{name: "profile", message: profileFailureMessage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := tt.message(hinted)
+			assert.NotContains(t, got, "logging in again")
+			assert.Contains(t, got, hinted.Error())
+			assert.Equal(t, hint, utils.RefusalHint(utils.Reword(hinted, got)))
+
+			assert.Contains(t, tt.message(plain), "Please try logging in again.")
+		})
+	}
+}

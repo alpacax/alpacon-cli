@@ -274,7 +274,7 @@ func uploadObject(client *client.AlpaconClient, src []string, dest, username, gr
 				"  • You have read permissions for the source files\n"+
 				"  • For folders, use -r flag: alpacon cp -r /local/folder %s",
 				strings.Join(src, ", "), dest)
-		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
+		} else if wantsPermissionAdvice(err) {
 			utils.CliErrorWithExit("Permission denied uploading to '%s' on server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Upload as root: alpacon cp -u root %s %s\n"+
@@ -315,7 +315,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • You have read permissions for the file\n"+
 				"  • For folders, use -r flag: alpacon cp -r %s %s",
 				remotePath, serverName, remotePath, serverName, filepath.Dir(remotePath), srcDisplay, dest)
-		} else if strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied") {
+		} else if wantsPermissionAdvice(err) {
 			utils.CliErrorWithExit("Permission denied downloading '%s' from server '%s'.\n\n"+
 				"Try these solutions:\n"+
 				"  • Download as root: alpacon cp -u root %s %s\n"+
@@ -340,4 +340,18 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 		return serverName, err
 	}
 	return serverName, nil
+}
+
+// wantsPermissionAdvice reports whether err reads as a permission error the
+// local advice (run as root, pick a writable path) answers: a file permission
+// on the server, or a refusal from a server that sends no hint. A refusal
+// carrying the server's hint gets the hint instead, which the caller's error
+// line prints; the advice would point at the wrong fix for a refusal such as
+// a token's file access rules.
+func wantsPermissionAdvice(err error) bool {
+	if utils.RefusalHint(err) != "" {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "permission denied") || strings.Contains(errStr, "access denied")
 }

@@ -24,7 +24,7 @@ var usernameSetCmd = &cobra.Command{
 
 		response, err := iam.SetUsername(name)
 		if err != nil {
-			utils.CliErrorWithExit("%s", setUsernameErrorText(err))
+			utils.CliErrorWithExit("%s", utils.Reword(err, setUsernameErrorText(err)))
 		}
 
 		utils.CliSuccess(iam.UsernameSetSuccessFmt, response.Username)
@@ -34,7 +34,9 @@ var usernameSetCmd = &cobra.Command{
 // setUsernameErrorText maps a SetUsername error to the message shown to the user.
 func setUsernameErrorText(err error) string {
 	code, _ := utils.ParseErrorResponse(err)
-	if msg, ok := iam.UsernameErrorMessage(code); ok {
+	// A server hint is the guidance when the refusal carries one, and the error
+	// output prints it under this line.
+	if msg, ok := iam.UsernameErrorMessage(code); ok && utils.RefusalHint(err) == "" {
 		return msg
 	}
 	return fmt.Sprintf("Failed to set username: %s", err)

@@ -1,8 +1,13 @@
 package ftp
 
 import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -428,6 +433,52 @@ func TestNormalizeArgsUsername(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantUser, user)
 			assert.Equal(t, tt.wantArgs, tt.args)
+		})
+	}
+}
+
+// fileRefusal returns the error the client makes of a 403 answered with body.
+func fileRefusal(t *testing.T, body string) error {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(ts.Close)
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL, Token: "test-token"}
+	_, err := ac.SendGetRequest("/api/webftp/uploads/")
+	require.Error(t, err)
+	return err
+}
+
+// The run-as-root advice answers a permission on the server's files. A refusal
+// carrying the server's hint, such as a token's file access rules, is answered
+// by the hint instead, which the caller's error line prints.
+func TestWantsPermissionAdvice(t *testing.T) {
+	t.Parallel()
+	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
+	fileACL := `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "missing": "file_preapproval"`
+
+	hinted := fileRefusal(t, fileACL+`, "hint": "`+hint+`"}`)
+	require.Contains(t, hinted.Error(), "permission denied")
+	assert.False(t, wantsPermissionAdvice(hinted))
+	assert.Equal(t, hint, utils.RefusalHint(hinted))
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a file permission on the server", err: errors.New("open /etc/shadow: permission denied"), want: true},
+		{name: "an access denied from the agent", err: errors.New("access denied"), want: true},
+		{name: "a refusal from a server that sends no hint", err: fileRefusal(t, `{"code": "user_no_permission"}`), want: true},
+		{name: "an unrelated failure", err: errors.New("connection reset by peer")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, wantsPermissionAdvice(tt.err), "err: %v", tt.err)
 		})
 	}
 }
