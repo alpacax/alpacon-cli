@@ -94,16 +94,17 @@ func TestSudoDenialHint(t *testing.T) {
 			wantContains: []string{"'sudo' scope", "work-session update [SESSION_ID] --scope", "replaces the whole list"},
 		},
 		{
-			name:         "command-not-authorized names the accountable-user requirement",
-			code:         "SUDO_COMMAND_NOT_AUTHORIZED",
-			wantContains: []string{"accountable user", "personal API token"},
+			name:            "command-not-authorized points to signing in and re-running",
+			code:            "SUDO_COMMAND_NOT_AUTHORIZED",
+			wantContains:    []string{"accountable user", "alpacon login", "re-run the command"},
+			wantNotContains: []string{"personal API token"},
 		},
 		{
 			name:         "risk-denied is a terminal denial",
 			code:         "SUDO_RISK_DENIED",
-			wantContains: []string{"risk"},
+			wantContains: []string{"not permitted at its risk level"},
 			// Disclosure: never echo a score/reasoning, only the category.
-			wantNotContains: []string{"score"},
+			wantNotContains: []string{"score", "work session"},
 		},
 	}
 

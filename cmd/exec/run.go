@@ -160,7 +160,7 @@ var sudoDenialHints = []struct {
 		// Re-running it with the same token repeats it.
 		code: "SUDO_COMMAND_NOT_AUTHORIZED",
 		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
-			"Re-run it under a principal that carries a user (an interactive login, or a personal API token).\n",
+			"Sign in with 'alpacon login', then re-run the command under that login.\n",
 	},
 	{
 		code: "SUDO_NO_WORKSESSION_POLICY",
@@ -203,7 +203,7 @@ var sudoDenialHints = []struct {
 	},
 	{
 		code:     "SUDO_RISK_DENIED",
-		guidance: "sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
+		guidance: "sudo was denied by runtime risk assessment; this command is not permitted at its risk level.\n",
 	},
 }
 
