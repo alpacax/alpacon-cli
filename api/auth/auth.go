@@ -283,7 +283,7 @@ func GetTokenScopes(ac *client.AlpaconClient) ([]TokenScopeAttributes, error) {
 func Logout(ac *client.AlpaconClient, validConfig config.Config) error {
 	_, err := ac.SendPostRequest(logoutURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to send post request: %v", err)
+		return fmt.Errorf("failed to send post request: %w", err)
 	}
 
 	err = config.DeleteConfig(validConfig)

@@ -328,7 +328,7 @@ func downloadObject(client *client.AlpaconClient, sources []string, dest, userna
 				"  • Server name is spelled correctly\n"+
 				"  • Server is registered: alpacon server ls\n"+
 				"  • You have access to this server", serverName)
-		} else if strings.Contains(errStr, "download failed") {
+		} else if strings.Contains(errStr, "download failed") && utils.RefusalHint(err) == "" {
 			utils.CliErrorWithExit("Download failed from server '%s': %s\n\n"+
 				"This might be due to:\n"+
 				"  • Network connectivity issues\n"+

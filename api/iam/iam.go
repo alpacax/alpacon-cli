@@ -488,7 +488,7 @@ func HandleUsernameRequired() (*SetUsernameResponse, error) {
 			}
 			return nil, errors.New(msg)
 		}
-		return nil, fmt.Errorf("failed to set username: %v", err)
+		return nil, fmt.Errorf("failed to set username: %w", err)
 	}
 }
 

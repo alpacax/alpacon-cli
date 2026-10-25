@@ -238,7 +238,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		return nil
 	}
 	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body, statusCode)
-	hint := parseRefusalHint(body, statusCode)
+	hint := utils.ParseRefusalHint(body, statusCode)
 	return &apiError{
 		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing, hint != ""),
 		code:       code,
@@ -1063,6 +1063,13 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 		_ = resp.Body.Close()
 		return nil, withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode)
 	}
+	// A 402, 405 or 429 is a coded refusal too: the shared parser keeps its
+	// code and hint, where the caller would only have the raw body to print.
+	if utils.IsRefusalStatus(resp.StatusCode) {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return nil, withRetryAfter(withStatus(parseAPIError(body, resp.StatusCode), resp.StatusCode), resp.Header)
+	}
 
 	return resp, nil
 }
@@ -1224,40 +1231,13 @@ func withRetryAfter(err error, header http.Header) error {
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
 	err := newAPIError(message, code, source, gate, axis, next, missing)
-	err.hint = parseRefusalHint(body, statusCode)
+	err.hint = utils.ParseRefusalHint(body, statusCode)
 	// A message that is codeOnlyMessage's own sentence for the code gives way to
 	// the server's hint, as authStatusMessage's table does.
 	if err.hint != "" && code != "" && message == codeOnlyMessage(code) {
 		err.message = hintedRefusalMessage(statusCode, code)
 	}
 	return err
-}
-
-// isRefusalStatus reports whether statusCode is one the server answers a
-// coded refusal with, the only responses whose "hint" is the server's
-// guidance rather than a request field of that name.
-func isRefusalStatus(statusCode int) bool {
-	switch statusCode {
-	case http.StatusPaymentRequired, http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusTooManyRequests:
-		return true
-	}
-	return false
-}
-
-// parseRefusalHint returns the "hint" string a 402/403/405/429 body carries,
-// sanitized (utils.SanitizeServerHint), or "" when there is none or nothing
-// printable is left of it. A server that predates the field sends none, and
-// the output stays what it was.
-func parseRefusalHint(body []byte, statusCode int) string {
-	if !isRefusalStatus(statusCode) {
-		return ""
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-	value, _ := parsed["hint"].(string)
-	return utils.SanitizeServerHint(value)
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
@@ -1303,6 +1283,15 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 			continue
 		}
 		if field == "code" {
+			if _, isString := parsed[field].(string); isString {
+				continue
+			}
+		}
+		// A refusal's string "hint" is the server's guidance, which reaches the
+		// output sanitized through ErrorHint; rendered here it would print a
+		// second time, raw. A list "hint", or one on any other status, is a
+		// request field like any other.
+		if field == "hint" && utils.IsRefusalStatus(statusCode) {
 			if _, isString := parsed[field].(string); isString {
 				continue
 			}
@@ -1356,7 +1345,7 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 				return false
 			}
 		case "hint":
-			if !isRefusalStatus(statusCode) {
+			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}
 			if _, ok := value.(string); !ok {

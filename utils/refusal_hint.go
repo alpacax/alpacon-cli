@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"unicode/utf8"
 )
@@ -33,6 +35,34 @@ func SanitizeServerHint(hint string) string {
 		cut--
 	}
 	return strings.TrimSpace(clean[:cut])
+}
+
+// IsRefusalStatus reports whether statusCode is one the server answers a
+// coded refusal with, the only responses whose "hint" is the server's
+// guidance rather than a request field of that name.
+func IsRefusalStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusPaymentRequired, http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// ParseRefusalHint returns the "hint" string a 402/403/405/429 body carries,
+// sanitized (SanitizeServerHint), or "" when there is none or nothing
+// printable is left of it. A server that predates the field sends none. A
+// request that does not go through the shared client reads its refusal's
+// hint here, so its error can carry one too.
+func ParseRefusalHint(body []byte, statusCode int) string {
+	if !IsRefusalStatus(statusCode) {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	value, _ := parsed["hint"].(string)
+	return SanitizeServerHint(value)
 }
 
 // RefusalHint returns the sanitized hint the first error in err's chain that

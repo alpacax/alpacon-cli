@@ -226,3 +226,77 @@ func TestPlanLimitMessage_ServerHintKeepsTheResetDay(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "plan limit reached: Websh hours this month. Resets in 3 days. Upgrade: https://alpacon.io/my-ws/settings/billing. Talk to us: "+talkToUsURL, message)
 }
+
+// A refusal body that is not envelope-only, such as a 405 that also carries
+// "next", still keeps its hint out of the field-error text: the hint reaches
+// the output once, sanitized, through the Hint line.
+func TestSendRequest_RefusalHintNeverRendersAsAFieldError(t *testing.T) {
+	tests := []struct {
+		name     string
+		hint     string
+		wantHint string
+		rawPart  string
+	}{
+		{
+			name:     "a plain hint",
+			hint:     "The workspace's details take partial updates only; send the change as a PATCH instead.",
+			wantHint: "The workspace's details take partial updates only; send the change as a PATCH instead.",
+			rawPart:  "partial updates only",
+		},
+		{
+			name:     "a hint with a newline",
+			hint:     `Send a PATCH.\nError: forged`,
+			wantHint: "Send a PATCH.Error: forged",
+			rawPart:  "forged",
+		},
+		{
+			name:     "an over-long hint",
+			hint:     strings.Repeat("y", 300),
+			wantHint: strings.Repeat("y", utils.MaxServerHintBytes),
+			rawPart:  "yyyy",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := sendRefusal(t, http.StatusMethodNotAllowed,
+				`{"code": "workspace_put_info_disabled", "next": "/api/workspaces/info/", "hint": "`+tt.hint+`"}`)
+
+			assert.NotContains(t, err.Error(), "hint")
+			assert.NotContains(t, err.Error(), tt.rawPart)
+			assert.Equal(t, tt.wantHint, utils.RefusalHint(err))
+
+			_, stderr := testutil.CaptureOutput(t, func() { utils.CliError("failed: %s", err) })
+			assert.Equal(t, 1, strings.Count(stderr, tt.wantHint), "stderr: %q", stderr)
+			assert.NotContains(t, stderr, "\nError: forged")
+		})
+	}
+}
+
+// Outside a refusal status, a "hint" field is a validation message about the
+// request and still renders as one, whatever else the body holds.
+func TestSendRequest_HintFieldOnAValidationErrorStillRenders(t *testing.T) {
+	t.Parallel()
+	err := sendRefusal(t, http.StatusBadRequest, `{"code": "invalid_input", "hint": "This field may not be blank."}`)
+	assert.Equal(t, "hint: This field may not be blank.", err.Error())
+	assert.Empty(t, utils.RefusalHint(err))
+}
+
+// A file download answered with a refusal status keeps the code and hint the
+// shared parser reads, rather than leaving the caller the raw body.
+func TestSendGetRequestForDownload_RefusalKeepsTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "The workspace's plan does not include this; it needs a plan that does."
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "workspace_plan_update_required", "gate": "plan", "hint": "` + hint + `"}`))
+	}))
+	defer ts.Close()
+
+	resp, err := newTestClient(ts.URL).SendGetRequestForDownload("/api/packages/python/x/download/")
+	require.Error(t, err)
+	assert.Nil(t, resp)
+	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
+	assert.Equal(t, hint, utils.RefusalHint(err))
+	assert.NotContains(t, err.Error(), "hint")
+}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -481,4 +482,39 @@ func TestWantsPermissionAdvice(t *testing.T) {
 			assert.Equal(t, tt.want, wantsPermissionAdvice(tt.err), "err: %v", tt.err)
 		})
 	}
+}
+
+// A download whose final fetch is refused with the server's hint reaches cp's
+// caller with the hint on the error, so its error line prints the hint; cp's
+// own checklist for a failed download, which exits on the spot, stays out of
+// it.
+func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
+	t.Parallel()
+	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "my-workspace",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch {
+			case r.URL.Path == "/api/servers/servers/":
+				return http.StatusOK, `{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`
+			case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/downloads/":
+				return http.StatusCreated, `{"id": "t-1", "command": "cmd-1", "download_url": "http://stub.invalid/blob"}`
+			case r.URL.Path == "/api/events/commands/cmd-1/":
+				return http.StatusOK, `{"id": "cmd-1", "status": "completed", "success": true}`
+			case r.URL.Path == "/api/webftp/downloads/t-1/status/":
+				return http.StatusOK, `{"success": true, "message": "done"}`
+			case r.URL.Path == "/blob":
+				return http.StatusForbidden, `{"code": "api_token_acl_not_allowed", "gate": "file_acl", "hint": "` + hint + `"}`
+			default:
+				return http.StatusOK, `{}`
+			}
+		}),
+	}
+
+	serverName, err := downloadObject(ac, []string{"my-server:/home/alice/a.txt"}, t.TempDir(), "", "", false, "")
+	require.Error(t, err)
+	assert.Equal(t, "my-server", serverName)
+	assert.Contains(t, err.Error(), "download failed")
+	assert.Equal(t, hint, utils.RefusalHint(err))
 }

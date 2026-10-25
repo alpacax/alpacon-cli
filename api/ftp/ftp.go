@@ -720,7 +720,10 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 		}
 
 		if utils.IsFatalClientError(resp.StatusCode) {
-			return nil, fetchStatusError{status: resp.StatusCode, code: refusalCode, source: refusalSource}
+			return nil, fetchStatusError{
+				status: resp.StatusCode, code: refusalCode, source: refusalSource,
+				hint: utils.ParseRefusalHint(body, resp.StatusCode),
+			}
 		}
 
 		budget := maxAttempts
@@ -1084,10 +1087,12 @@ func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
 }
 
 // fetchStatusError is the refusal a download URL answered with. It carries the
-// code the response body named, so an MFA refusal reads as one.
+// code the response body named, so an MFA refusal reads as one, and the
+// server's hint, sanitized, which the error output prints under the error.
 type fetchStatusError struct {
 	status       int
 	code, source string
+	hint         string
 }
 
 func (e fetchStatusError) Error() string {
@@ -1096,6 +1101,7 @@ func (e fetchStatusError) Error() string {
 func (e fetchStatusError) HTTPStatusCode() int { return e.status }
 func (e fetchStatusError) ErrorCode() string   { return e.code }
 func (e fetchStatusError) ErrorSource() string { return e.source }
+func (e fetchStatusError) ErrorHint() string   { return e.hint }
 
 func parseRefusal(body []byte) (code, source string) {
 	var refusal utils.ErrorResponse

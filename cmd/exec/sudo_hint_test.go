@@ -555,9 +555,10 @@ func TestSudoDenialHintDefersToTheServerHint(t *testing.T) {
 			wantLocal: true,
 		},
 		{
-			name:      "a line that is not a sentence is not a hint",
-			output:    denialLine("SUDO_NO_WORKSESSION_POLICY") + "build finished\n",
-			wantLocal: true,
+			// The detector cannot tell this from a hint. Accepted: from a server
+			// that sends none, only the local sentence is lost.
+			name:   "command output right under the denial line passes for a hint",
+			output: denialLine("SUDO_NO_WORKSESSION_POLICY") + "build finished\n",
 		},
 	}
 	for _, tt := range tests {
@@ -586,4 +587,36 @@ func TestPendingSudoDenialDefersToTheServerHint(t *testing.T) {
 	hint, pending = pendingSudoDenial(denialLine("SUDO_INTENT_DEVIATION"))
 	assert.True(t, pending)
 	assert.Contains(t, hint, "--title")
+}
+
+// TestRemoteFailureReportDefersToTheServerHint drives what HandleCommandResult
+// prints for a failed command. The server's hint carries no punctuation rule,
+// so one ending in "!" or in nothing at all still stands in for the local
+// sentence, over a terminal's CRLF line endings as well.
+func TestRemoteFailureReportDefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	const crlfDenial = "Alpacon denied this sudo command (SUDO_NO_WORKSESSION_POLICY).\r\n"
+	tests := []struct {
+		name      string
+		output    string
+		wantLocal bool
+	}{
+		{name: "a hint ending in an exclamation mark", output: crlfDenial + "Sign in again!\r\n"},
+		{name: "a hint with no final punctuation", output: crlfDenial + "Run it in a work session whose sudo patterns match it\r\n"},
+		{name: "no hint", output: crlfDenial, wantLocal: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			report, exitCode := remoteFailureReport(&event.RemoteCommandError{ExitCode: 1, Output: tt.output})
+
+			assert.Equal(t, 1, exitCode)
+			if tt.wantLocal {
+				assert.Contains(t, report, "work-session update [SESSION_ID] --sudo")
+				return
+			}
+			assert.NotContains(t, report, "Hint:")
+			assert.NotContains(t, report, "work-session update")
+		})
+	}
 }

@@ -264,16 +264,17 @@ func denialCodePresent(output, code string) bool {
 // serverHintFollows reports whether the line after an occurrence of
 // denialLine in output is the server's hint, which the sudo plugin prints
 // right under the denial line when the server sent one. A line counts when it
-// has the shape the plugin's sanitizer and the server leave it in: non-empty,
-// at most utils.MaxServerHintBytes, no control characters, and a sentence
-// ending in a period. Another denial line does not count (one command line can
-// run several sudo calls), and neither does sudo's own error, which follows
-// the denial line on a host where the PAM module, not the plugin, decided.
+// has the shape the plugin's sanitizer leaves it in: non-empty, at most
+// utils.MaxServerHintBytes, and free of control characters. Its wording and
+// punctuation are the server's and are not checked. Another denial line does
+// not count (one command line can run several sudo calls), and neither does
+// sudo's own error, which follows the denial line on a host where the PAM
+// module, not the plugin, decided.
 //
-// A command's own output landing on that line can pass for a hint and
-// withhold the local sentence; that costs guidance the user can still read
-// in the console, never a step-up or a wait, since only the sentence is
-// keyed on this.
+// From a server that sends no hint, the command's own output landing on that
+// line passes for one and withholds the local sentence. That is accepted: it
+// costs only guidance, never a step-up or a wait, since nothing else is keyed
+// on this.
 func serverHintFollows(output, denialLine string) bool {
 	rest := output
 	for {
@@ -297,7 +298,7 @@ func serverHintFollows(output, denialLine string) bool {
 // accepts as the server's hint.
 func isServerHintLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || len(trimmed) > utils.MaxServerHintBytes || !strings.HasSuffix(trimmed, ".") {
+	if trimmed == "" || len(trimmed) > utils.MaxServerHintBytes {
 		return false
 	}
 	if utils.SanitizeTerminalText(trimmed) != trimmed {
@@ -932,13 +933,8 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			stderrLine, exitCode := remoteCommandOutcome(remoteErr)
-			if stderrLine != "" {
-				fmt.Fprint(os.Stderr, stderrLine)
-			}
-			if hint := sudoDenialHint(remoteErr.Output); hint != "" {
-				fmt.Fprint(os.Stderr, hint)
-			}
+			stderrText, exitCode := remoteFailureReport(remoteErr)
+			fmt.Fprint(os.Stderr, stderrText)
 			os.Exit(exitCode)
 		}
 		var clientTimeout *event.ClientTimeoutError
@@ -958,6 +954,14 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 		}
 		utils.CliErrorWithExit("%s", err)
 	}
+}
+
+// remoteFailureReport is what HandleCommandResult writes to stderr for a
+// command that failed on the server, and the exit code it leaves with: the
+// outcome line, then the sudo denial guidance when the output needs one.
+func remoteFailureReport(remoteErr *event.RemoteCommandError) (string, int) {
+	stderrLine, exitCode := remoteCommandOutcome(remoteErr)
+	return stderrLine + sudoDenialHint(remoteErr.Output), exitCode
 }
 
 // reportCodedRefusal is the one way out for a server refusal the CLI has a
