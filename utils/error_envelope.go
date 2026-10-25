@@ -39,10 +39,13 @@ func buildCliErrorEnvelopeFromErr(operation string, err error, message string) J
 	if err != nil {
 		code, _ = ParseErrorResponse(err)
 	}
-	return buildCliErrorEnvelope(operation, code, message)
+	envelope := buildCliErrorEnvelope(operation, code, message)
+	envelope.NextActions = RefusalNextActions(err)
+	return envelope
 }
 
-// CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code. An
+// CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code and
+// the server's hint as next_actions, table mode prints the hint under the error line. An
 // ErrInvalidID refusal exits 2 through CliUsageErrorEnvelopeWithExit.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
 	if errors.Is(err, ErrInvalidID) {
@@ -53,7 +56,9 @@ func CliErrorEnvelopeWithExit(operation string, err error, format string, args .
 		PrintJSONError(os.Stderr, buildCliErrorEnvelopeFromErr(operation, err, fmt.Sprintf(format, args...)))
 		os.Exit(1)
 	}
-	CliErrorWithExit(format, args...)
+	printCliError(err, format, args...)
+	reportCLIError()
+	os.Exit(1)
 }
 
 // CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
@@ -67,7 +72,8 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 		PrintJSONError(os.Stderr, envelope)
 		os.Exit(code)
 	}
-	CliErrorWithExitCode(code, format, args...)
+	printCliError(err, format, args...)
+	os.Exit(code)
 }
 
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits(2); error_code is fixed to UsageErrorCode.

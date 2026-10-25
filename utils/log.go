@@ -47,13 +47,13 @@ func WarnTerminalTextAltered(w io.Writer, indent string) {
 
 // CliError handles all error messages in the CLI.
 func CliError(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	reportCLIError()
 }
 
 // CliErrorWithExit handles all error messages in the CLI.
 func CliErrorWithExit(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	reportCLIError()
 	os.Exit(1)
 }
@@ -62,8 +62,17 @@ func CliErrorWithExit(msg string, args ...any) {
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	os.Exit(code)
+}
+
+// printCliError writes the red Error line and, under it, the server's guidance
+// for the refusal err carries (RefusalNextActions). The error helpers find err
+// among their own arguments, so every call site that formats a server error
+// into its message prints the server's hint without naming it.
+func printCliError(err error, msg string, args ...any) {
+	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printRefusalNextActions(os.Stderr, err)
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.

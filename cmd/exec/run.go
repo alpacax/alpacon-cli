@@ -93,6 +93,11 @@ var (
 // which is why sudoDenialHint falls back to naming a code this table does not
 // carry.
 //
+// The table is the fallback for a server that sends no hint of its own. A
+// server that does has the sudo plugin print it on the line under the denial
+// line, where the user already reads it in the command's output, so a denial
+// line followed by one (serverHintFollows) gets no sentence from here.
+//
 // The codes are UPPERCASE because the plugin only passes [A-Z0-9_]
 // codes through its sanitizer into the user-facing denial line (lowercase
 // values are dropped). Each hint stays at the denial *category* level (what to
@@ -256,6 +261,55 @@ func denialCodePresent(output, code string) bool {
 	return strings.Contains(output, sudoDenialLinePrefix+code+").")
 }
 
+// serverHintFollows reports whether the line after an occurrence of
+// denialLine in output is the server's hint, which the sudo plugin prints
+// right under the denial line when the server sent one. A line counts when it
+// has the shape the plugin's sanitizer and the server leave it in: non-empty,
+// at most utils.MaxServerHintBytes, no control characters, and a sentence
+// ending in a period. Another denial line does not count (one command line can
+// run several sudo calls), and neither does sudo's own error, which follows
+// the denial line on a host where the PAM module, not the plugin, decided.
+//
+// A command's own output landing on that line can pass for a hint and
+// withhold the local sentence; that costs guidance the user can still read
+// in the console, never a step-up or a wait, since only the sentence is
+// keyed on this.
+func serverHintFollows(output, denialLine string) bool {
+	rest := output
+	for {
+		_, after, found := strings.Cut(rest, denialLine)
+		if !found {
+			return false
+		}
+		rest = after
+		_, next, ok := strings.Cut(after, "\n")
+		if !ok {
+			continue
+		}
+		line, _, _ := strings.Cut(next, "\n")
+		if isServerHintLine(strings.TrimSuffix(line, "\r")) {
+			return true
+		}
+	}
+}
+
+// isServerHintLine reports whether line has the shape serverHintFollows
+// accepts as the server's hint.
+func isServerHintLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || len(trimmed) > utils.MaxServerHintBytes || !strings.HasSuffix(trimmed, ".") {
+		return false
+	}
+	if utils.SanitizeTerminalText(trimmed) != trimmed {
+		return false
+	}
+	// Every line the plugin opens with this words a denial, coded or not.
+	if strings.HasPrefix(trimmed, strings.TrimSuffix(sudoDenialCodelessLine, ".")) {
+		return false
+	}
+	return !strings.HasPrefix(trimmed, "sudo:") && !strings.HasPrefix(trimmed, "sudo-rs:")
+}
+
 // denialHintLine labels guidance—a table entry's or the unknown-code
 // fallback's—as the user-facing hint.
 func denialHintLine(guidance string) string {
@@ -313,13 +367,22 @@ func isSanitizedDenialCode(code string) bool {
 //
 // A denial carrying no code gets a last, thinner hint: without a category from
 // the server there is only the console to point at.
+//
+// Whichever line answers, a server hint under it (serverHintFollows) already
+// said what to do, so the answer is "" then.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
+			if serverHintFollows(output, sudoDenialLinePrefix+h.code+").") {
+				return ""
+			}
 			return denialHintLine(h.guidance)
 		}
 	}
 	if code := firstDenialCode(output); code != "" {
+		if serverHintFollows(output, sudoDenialLinePrefix+code+").") {
+			return ""
+		}
 		return denialHintLine(fmt.Sprintf(
 			"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
 				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
@@ -329,6 +392,9 @@ func sudoDenialHint(output string) string {
 	// forged match reaches no step-up, no --wait loop, and echoes nothing the
 	// command chose. Anchoring harder re-opens the silent denial this closes.
 	if strings.Contains(output, sudoDenialCodelessLine) {
+		if serverHintFollows(output, sudoDenialCodelessLine) {
+			return ""
+		}
 		return denialHintLine(
 			"sudo was denied, and the denial carried no code to explain it.\n" +
 				"Read the denial in the Alpacon console (web).\n")
@@ -370,9 +436,16 @@ func hasSudoApprovalDenial(output string) bool {
 // output, whatever the table order: the classification is identical either way,
 // so answering with the entry that has no way past the wait would drop the only
 // guidance the user could act on.
+//
+// A server hint under that entry's denial line withholds the guidance as in
+// sudoDenialHint; pending is unaffected, since it decides the wait, not a
+// sentence.
 func pendingSudoDenial(output string) (hint string, pending bool) {
 	for _, h := range sudoDenialHints {
 		if h.pendingApproval && h.selfService && denialCodePresent(output, h.code) {
+			if serverHintFollows(output, sudoDenialLinePrefix+h.code+").") {
+				return "", true
+			}
 			return denialHintLine(h.guidance), true
 		}
 	}

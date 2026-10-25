@@ -120,6 +120,10 @@ type apiError struct {
 	// rendering.
 	axis string
 	next string
+	// hint is the "hint" a coded 402/403/405/429 may send beside "code": the
+	// server's own sentence on what the caller can do next. It is kept as
+	// received; utils.RefusalHint sanitizes it before anything prints it.
+	hint string
 	// retryAfter is the Retry-After header's parsed delay, set by
 	// withRetryAfter alongside the *retryAfterError wrapper it returns, so
 	// planLimitMessage can build "resets in N days" without re-parsing the
@@ -239,6 +243,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		source:     source,
 		gate:       gate,
 		missing:    missing,
+		hint:       parseRefusalHint(body, statusCode),
 		apiPayload: isJSONObject(body),
 	}
 }
@@ -1120,11 +1125,15 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
+func (e *apiError) ErrorHint() string {
+	return e.hint
+}
+
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
 
-func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
+func newAPIError(message, code, source, gate, axis, next string, missing []string) *apiError {
 	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
 }
 
@@ -1171,7 +1180,34 @@ func withRetryAfter(err error, header http.Header) error {
 // envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return newAPIError(message, code, source, gate, axis, next, missing)
+	err := newAPIError(message, code, source, gate, axis, next, missing)
+	err.hint = parseRefusalHint(body, statusCode)
+	return err
+}
+
+// isRefusalStatus reports whether statusCode is one the server answers a
+// coded refusal with, the only responses whose "hint" is the server's
+// guidance rather than a request field of that name.
+func isRefusalStatus(statusCode int) bool {
+	switch statusCode {
+	case http.StatusPaymentRequired, http.StatusForbidden, http.StatusMethodNotAllowed, http.StatusTooManyRequests:
+		return true
+	}
+	return false
+}
+
+// parseRefusalHint returns the "hint" string a 402/403/405/429 body carries,
+// trimmed but otherwise as received, or "" when there is none. A server that
+// predates the field sends none, and the output stays what it was.
+func parseRefusalHint(body []byte, statusCode int) string {
+	if !isRefusalStatus(statusCode) {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	return stringField(parsed, "hint")
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
@@ -1260,12 +1296,19 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 // on a 402 (the plan-limit fields—on any other status they are not part of
 // the envelope, so a validation response that happens to have a field named
 // "axis" or "next" still renders as a field error rather than being swallowed
-// into a code-only message), and for
-// "missing" either a single scope string or a list of them.
+// into a code-only message), "hint" the same but on any refusal status, and
+// for "missing" either a single scope string or a list of them.
 func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
 		switch key {
 		case "code", "source", "gate", "detail":
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "hint":
+			if !isRefusalStatus(statusCode) {
+				return false
+			}
 			if _, ok := value.(string); !ok {
 				return false
 			}
