@@ -121,8 +121,9 @@ type apiError struct {
 	axis string
 	next string
 	// hint is the "hint" a coded 402/403/405/429 may send beside "code": the
-	// server's own sentence on what the caller can do next. It is kept as
-	// received; utils.RefusalHint sanitizes it before anything prints it.
+	// server's own sentence on what the caller can do next, already sanitized.
+	// When it is set, the message identifies the refusal and leaves the
+	// guidance to the hint.
 	hint string
 	// retryAfter is the Retry-After header's parsed delay, set by
 	// withRetryAfter alongside the *retryAfterError wrapper it returns, so
@@ -237,13 +238,14 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		return nil
 	}
 	detail, code, source, gate, missing, hasDetail := parseAuthStatusErrorPayload(body, statusCode)
+	hint := parseRefusalHint(body, statusCode)
 	return &apiError{
-		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing),
+		message:    authStatusMessage(statusCode, code, detail, hasDetail, gate, missing, hint != ""),
 		code:       code,
 		source:     source,
 		gate:       gate,
 		missing:    missing,
-		hint:       parseRefusalHint(body, statusCode),
+		hint:       hint,
 		apiPayload: isJSONObject(body),
 	}
 }
@@ -263,7 +265,11 @@ func isJSONObject(body []byte) bool {
 // auth_token_missing/auth_authentication_failed/auth_token_mfa_missing—a user
 // who merely needs step-up MFA, or who hit a policy denial, must not be told
 // to log in again.
-func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string) string {
+//
+// serverHint says the response carried the server's own guidance, which the
+// error output prints under this message: the per-code sentence would say the
+// same thing a second time, so the message then only identifies the refusal.
+func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate string, missing []string, serverHint bool) string {
 	if hasDetail {
 		if statusCode == http.StatusUnauthorized {
 			switch code {
@@ -275,8 +281,10 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return detail
 	}
-	if msg, ok := authStatusCodeMessage(statusCode, code); ok {
-		return msg
+	if !serverHint {
+		if msg, ok := authStatusCodeMessage(statusCode, code); ok {
+			return msg
+		}
 	}
 	if statusCode == http.StatusUnauthorized {
 		if code == "" {
@@ -303,7 +311,23 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		}
 		return fmt.Sprintf("permission denied: missing %s", strings.Join(missing, ", "))
 	}
+	if serverHint {
+		return hintedRefusalMessage(statusCode, code)
+	}
 	return "permission denied: you do not have the required privileges for this action"
+}
+
+// hintedRefusalMessage identifies a refusal whose guidance the server sent as
+// a hint: the status and the code, with no sentence of the CLI's own.
+func hintedRefusalMessage(statusCode int, code string) string {
+	label := "request refused"
+	if statusCode == http.StatusForbidden {
+		label = "permission denied"
+	}
+	if code == "" {
+		return fmt.Sprintf("%s (HTTP %d)", label, statusCode)
+	}
+	return fmt.Sprintf("%s (HTTP %d, code: %s)", label, statusCode, code)
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
@@ -620,7 +644,7 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 	if !errors.As(err, &ae) {
 		return err
 	}
-	if message, ok := planLimitMessage(ae.axis, ae.code, ae.gate, ae.retryAfter, ac.BaseURL); ok {
+	if message, ok := planLimitMessage(ae.axis, ae.code, ae.gate, ae.retryAfter, ac.BaseURL, ae.hint != ""); ok {
 		ae.message = message
 	}
 	return err
@@ -636,7 +660,12 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 //  3. gate=="plan" with no axis: a feature lock, not a limit.
 //  4. Anything else: not a plan-limit response at all; ok is false and the
 //     caller leaves today's message alone.
-func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string) (string, bool) {
+//
+// With serverHint the server's hint, printed under this message, is the
+// guidance, so the remedy sentences and the feature-lock sentence are left
+// out. What the hint cannot carry stays: the limit reached, the reset day and
+// where to upgrade.
+func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string, serverHint bool) (string, bool) {
 	switch {
 	case gate == gatePlan && axis != "":
 		// rule 1: axis already carried by the modern envelope.
@@ -648,13 +677,27 @@ func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspa
 		axis = mapped // rule 2
 	case gate == gatePlan:
 		// rule 3: a feature lock—no axis to name a limit on.
-		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", featureLockSentence, billingLocation(workspaceURL), talkToUsURL), true
+		lock := featureLockSentence
+		if serverHint {
+			lock = hintedRefusalMessage(http.StatusPaymentRequired, code) + "."
+		}
+		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", lock, billingLocation(workspaceURL), talkToUsURL), true
 	default:
 		return "", false // rule 4: some other gate, e.g. role or token_scope
 	}
 
-	message := fmt.Sprintf("plan limit reached: %s. %s Upgrade: %s. Talk to us: %s",
-		axisDisplayName(axis), planLimitRemedy(axis, retryAfter), billingLocation(workspaceURL), talkToUsURL)
+	remedy := planLimitRemedy(axis, retryAfter)
+	if serverHint {
+		remedy = ""
+		if retryAfter > 0 {
+			remedy = monthlyRemedy(retryAfter)
+		}
+	}
+	if remedy != "" {
+		remedy += " "
+	}
+	message := fmt.Sprintf("plan limit reached: %s. %sUpgrade: %s. Talk to us: %s",
+		axisDisplayName(axis), remedy, billingLocation(workspaceURL), talkToUsURL)
 	return message, true
 }
 
@@ -1182,6 +1225,11 @@ func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
 	err := newAPIError(message, code, source, gate, axis, next, missing)
 	err.hint = parseRefusalHint(body, statusCode)
+	// A message that is codeOnlyMessage's own sentence for the code gives way to
+	// the server's hint, as authStatusMessage's table does.
+	if err.hint != "" && code != "" && message == codeOnlyMessage(code) {
+		err.message = hintedRefusalMessage(statusCode, code)
+	}
 	return err
 }
 
@@ -1197,8 +1245,9 @@ func isRefusalStatus(statusCode int) bool {
 }
 
 // parseRefusalHint returns the "hint" string a 402/403/405/429 body carries,
-// trimmed but otherwise as received, or "" when there is none. A server that
-// predates the field sends none, and the output stays what it was.
+// sanitized (utils.SanitizeServerHint), or "" when there is none or nothing
+// printable is left of it. A server that predates the field sends none, and
+// the output stays what it was.
 func parseRefusalHint(body []byte, statusCode int) string {
 	if !isRefusalStatus(statusCode) {
 		return ""
@@ -1207,7 +1256,8 @@ func parseRefusalHint(body []byte, statusCode int) string {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return ""
 	}
-	return stringField(parsed, "hint")
+	value, _ := parsed["hint"].(string)
+	return utils.SanitizeServerHint(value)
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {

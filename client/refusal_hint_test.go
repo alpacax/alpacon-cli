@@ -5,7 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,4 +120,109 @@ func TestSendRequest_RefusalHintIsSanitized(t *testing.T) {
 			assert.Equal(t, tt.want, utils.RefusalHint(err))
 		})
 	}
+}
+
+// A server hint is the guidance, so the CLI's own per-code sentence gives way
+// to it and the message only identifies the refusal; without a hint the local
+// sentence stays.
+func TestSendRequest_ServerHintReplacesTheLocalSentence(t *testing.T) {
+	t.Parallel()
+	const hint = "Use the web console for this change."
+	tests := []struct {
+		name       string
+		status     int
+		code       string
+		local      string
+		wantHinted string
+	}{
+		{
+			name:       "403 code from the auth status table",
+			status:     http.StatusForbidden,
+			code:       utils.ApprovalPolicyConsoleOnly,
+			local:      "approval policies can only be created, changed or deleted from the web console",
+			wantHinted: "permission denied (HTTP 403, code: approval_policy_console_only)",
+		},
+		{
+			name:       "405 code from the code-only table",
+			status:     http.StatusMethodNotAllowed,
+			code:       utils.CommandACLMoved,
+			local:      "command pre-approval ledger",
+			wantHinted: "request refused (HTTP 405, code: command_acl_moved)",
+		},
+		{
+			name:       "429 code from the code-only table",
+			status:     http.StatusTooManyRequests,
+			code:       utils.APIRateLimited,
+			local:      "too many requests—please try again later",
+			wantHinted: "request refused (HTTP 429, code: api_rate_limited)",
+		},
+		{
+			name:       "403 code with no local sentence falls from the generic floor",
+			status:     http.StatusForbidden,
+			code:       "user_no_permission",
+			local:      "permission denied: you do not have the required privileges for this action",
+			wantHinted: "permission denied (HTTP 403, code: user_no_permission)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			hinted := sendRefusal(t, tt.status, `{"code": "`+tt.code+`", "hint": "`+hint+`"}`)
+			assert.Equal(t, tt.wantHinted, hinted.Error())
+			assert.NotContains(t, hinted.Error(), tt.local)
+			assert.Equal(t, hint, utils.RefusalHint(hinted))
+
+			plain := sendRefusal(t, tt.status, `{"code": "`+tt.code+`"}`)
+			assert.Contains(t, plain.Error(), tt.local)
+			assert.Empty(t, utils.RefusalHint(plain))
+		})
+	}
+}
+
+// What a user reads: the hint once, under an Error line that names the
+// refusal, and not the local sentence.
+func TestCliError_ShowsTheServerHintOnceInPlaceOfTheLocalSentence(t *testing.T) {
+	const hint = "Approval policies can be read and changed only from the web console; use the console instead."
+	const local = "approval policies can only be created"
+
+	hinted := sendRefusal(t, http.StatusForbidden, `{"code": "approval_policy_console_only", "hint": "`+hint+`"}`)
+	_, stderr := testutil.CaptureOutput(t, func() { utils.CliError("failed to update the policy: %s", hinted) })
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.Contains(t, stderr, "code: approval_policy_console_only")
+	assert.NotContains(t, stderr, local)
+
+	plain := sendRefusal(t, http.StatusForbidden, `{"code": "approval_policy_console_only"}`)
+	_, stderr = testutil.CaptureOutput(t, func() { utils.CliError("failed to update the policy: %s", plain) })
+	assert.Contains(t, stderr, local)
+	assert.NotContains(t, stderr, "Hint:")
+}
+
+func TestSendRequest_ServerHintReplacesThePlanRemedy(t *testing.T) {
+	t.Parallel()
+	const hint = "The workspace has reached its plan's server limit; it needs a free slot or a plan with a higher limit."
+	limit := `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server"`
+
+	hinted := sendRefusal(t, http.StatusPaymentRequired, limit+`, "hint": "`+hint+`"}`)
+	assert.Equal(t, "plan limit reached: servers. Upgrade: "+selfHostedBillingWords+". Talk to us: "+talkToUsURL, hinted.Error())
+	assert.Equal(t, hint, utils.RefusalHint(hinted))
+
+	plain := sendRefusal(t, http.StatusPaymentRequired, limit+`}`)
+	assert.Contains(t, plain.Error(), countCapRemedy)
+	assert.Contains(t, plain.Error(), serverAxisReregisterHint)
+
+	lock := `{"code": "workspace_plan_update_required", "gate": "plan"`
+	hintedLock := sendRefusal(t, http.StatusPaymentRequired, lock+`, "hint": "The workspace's plan does not include this; it needs a plan that does."}`)
+	assert.Equal(t, "request refused (HTTP 402, code: workspace_plan_update_required). Upgrade: "+selfHostedBillingWords+". Talk to us: "+talkToUsURL, hintedLock.Error())
+
+	plainLock := sendRefusal(t, http.StatusPaymentRequired, lock+`}`)
+	assert.Contains(t, plainLock.Error(), featureLockSentence)
+}
+
+// The reset day comes from Retry-After, which the hint cannot carry, so it
+// stays beside the hint.
+func TestPlanLimitMessage_ServerHintKeepsTheResetDay(t *testing.T) {
+	t.Parallel()
+	message, ok := planLimitMessage("websh", "websh_limit_exceeded", gatePlan, 3*24*time.Hour, "https://my-ws.zz9.alpacon.io", true)
+	require.True(t, ok)
+	assert.Equal(t, "plan limit reached: Websh hours this month. Resets in 3 days. Upgrade: https://alpacon.io/my-ws/settings/billing. Talk to us: "+talkToUsURL, message)
 }

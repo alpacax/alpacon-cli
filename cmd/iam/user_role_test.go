@@ -424,6 +424,31 @@ func TestResolveSubject(t *testing.T) {
 	}
 }
 
+// hintedForbiddenError is codedForbiddenError carrying the server's hint.
+type hintedForbiddenError struct {
+	codedForbiddenError
+	hint string
+}
+
+func (e hintedForbiddenError) ErrorHint() string { return e.hint }
+
+// The server's hint is the guidance, so the refusal passes through unchanged
+// for the error output to print the hint under it; without a hint the local
+// sentence still answers.
+func TestDescribeRBACError_DefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	ac := &client.AlpaconClient{}
+	ac.SetAccessToken("bearer-token")
+	coded := codedForbiddenError{code: codeRolePermissionRequired, gate: "role", missing: []string{"role"}}
+
+	hinted := hintedForbiddenError{codedForbiddenError: coded, hint: "Your roles do not allow this action; it needs a role that covers it."}
+	assert.Equal(t, error(hinted), describeRBACError(ac, gateRoleWrite, hinted))
+
+	got := describeRBACError(ac, gateRoleWrite, coded)
+	require.Error(t, got)
+	assert.Contains(t, got.Error(), "requires the superuser role")
+}
+
 // A coded 403 never reaches the codeless branch, so it needs a case of its own.
 func TestDescribeRBACError_MapsPermissionDenied(t *testing.T) {
 	t.Parallel()

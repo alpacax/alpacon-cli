@@ -963,16 +963,26 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 // reportCodedRefusal is the one way out for a server refusal the CLI has a
 // sentence for: under --output json the envelope carries the server's code and
 // the message; table mode prints the red Error line and the hint. Exits 1.
+// The server's hint, when err carries one, takes the place of the local hint.
 func reportCodedRefusal(operation string, err error, message, hint string) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		utils.CliErrorEnvelopeWithExit(operation, err, "%s.", message)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
-	if hint != "" {
+	if hint := codedRefusalHint(err, hint); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
 	os.Exit(1)
+}
+
+// codedRefusalHint is the hint reportCodedRefusal prints: the server's, when
+// err carries one, otherwise the local one it was given.
+func codedRefusalHint(err error, local string) string {
+	if serverHint := utils.RefusalHint(err); serverHint != "" {
+		return denialHintLine(serverHint + "\n")
+	}
+	return local
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged

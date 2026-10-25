@@ -642,6 +642,18 @@ func TestSudoListener_HandleSudoMFA_CredentialCannotProveMFAPointsToLogin(t *tes
 	assert.Zero(t, others.Load(), "no MFA link lookup or poll after the refusal")
 }
 
+func TestCredentialCannotProveMFAText(t *testing.T) {
+	t.Parallel()
+	const hint = "This credential cannot prove an MFA check; verify the sudo request from a console or CLI sign-in instead."
+
+	hinted := credentialCannotProveMFAText(hint)
+	assert.Equal(t, 1, strings.Count(hinted, hint))
+	assert.NotContains(t, hinted, "sign in with `alpacon login`")
+	assert.True(t, strings.HasSuffix(hinted, "\r\n"), "raw-mode output must end in CRLF: %q", hinted)
+
+	assert.Contains(t, credentialCannotProveMFAText(""), "sign in with `alpacon login` to complete sudo MFA")
+}
+
 // A verification the server never acted on (a 503 here) does not end the wait,
 // but that many in a row do.
 func TestSudoListener_RetryVerifyUntilMFA_RidesThroughUnprocessedAttempts(t *testing.T) {

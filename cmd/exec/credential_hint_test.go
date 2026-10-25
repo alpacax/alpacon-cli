@@ -43,6 +43,26 @@ func TestIsCommandInlineCredentialError(t *testing.T) {
 // the caller actually ran, and never echoes a credential value (there is nothing
 // to echo—the example is fixed—but this guards against a future edit that starts
 // interpolating the rejected line).
+// hintedRefusal is a coded refusal carrying the server's hint.
+type hintedRefusal struct{ code, hint string }
+
+func (e hintedRefusal) Error() string       { return "request refused (code: " + e.code + ")" }
+func (e hintedRefusal) ErrorCode() string   { return e.code }
+func (e hintedRefusal) ErrorSource() string { return "" }
+func (e hintedRefusal) ErrorHint() string   { return e.hint }
+
+func TestCodedRefusalHint_ServerHintReplacesTheLocalOne(t *testing.T) {
+	t.Parallel()
+	local := credentialInlineHint(ExecInvocation)
+	const serverHint = "Move the secret out of the command line and pass it through the environment."
+
+	got := codedRefusalHint(hintedRefusal{code: "command_inline_credential", hint: serverHint}, local)
+	assert.Equal(t, denialHintLine(serverHint+"\n"), got)
+	assert.NotContains(t, got, "--env")
+
+	assert.Equal(t, local, codedRefusalHint(hintedRefusal{code: "command_inline_credential"}, local))
+}
+
 func TestCredentialInlineHint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -2419,7 +2419,7 @@ func TestPlanLimitMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			message, ok := planLimitMessage(tt.axis, tt.code, tt.gate, tt.retryAfter, tt.workspaceURL)
+			message, ok := planLimitMessage(tt.axis, tt.code, tt.gate, tt.retryAfter, tt.workspaceURL, false)
 			assert.Equal(t, tt.wantOK, ok)
 			if tt.wantOK {
 				assert.Equal(t, tt.wantMessage, message)

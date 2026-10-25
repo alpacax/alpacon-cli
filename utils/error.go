@@ -484,7 +484,11 @@ const LoginWithoutTokenHint = "'alpacon login' without -t (on a machine without 
 
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may
 // take; a scope refusal counts, since granting the scope only reaches the next refusal.
+// A refusal carrying the server's hint is returned as it is: the hint is the guidance.
 func InteractiveOnly(err error, action string) error {
+	if RefusalHint(err) != "" {
+		return err
+	}
 	switch code, _ := ParseErrorResponse(err); code {
 	case AuthInteractiveChannelRequiresPresence, AuthMFARequiresHumanPrincipal, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
 		return fmt.Errorf("a token cannot %s; run %s and try again", action, LoginWithoutTokenHint)

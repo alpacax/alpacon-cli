@@ -407,6 +407,25 @@ func TestKubeSessionErrorHint(t *testing.T) {
 	assert.Empty(t, kubeSessionErrorHint(errors.New("plain failure"), "prod-east"))
 }
 
+// hintedKubeError is a coded kube refusal carrying the server's hint.
+type hintedKubeError struct{ code, hint string }
+
+func (e hintedKubeError) Error() string       { return "request refused (code: " + e.code + ")" }
+func (e hintedKubeError) ErrorCode() string   { return e.code }
+func (e hintedKubeError) ErrorSource() string { return "" }
+func (e hintedKubeError) ErrorHint() string   { return e.hint }
+
+// The server's hint is the guidance, so the local sentence gives way and the
+// caller's fallback line prints the error with the hint under it.
+func TestKubeSessionErrorHint_DefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	hinted := hintedKubeError{code: utils.KubeSessionAgentModeNotSupported, hint: "Open the kube session from a work session you created."}
+	assert.Empty(t, kubeSessionErrorHint(hinted, "prod-east"))
+
+	plain := hintedKubeError{code: utils.KubeSessionAgentModeNotSupported}
+	assert.Contains(t, kubeSessionErrorHint(plain, "prod-east"), "requested by an AI agent")
+}
+
 func TestCheckProxyURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

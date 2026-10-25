@@ -139,3 +139,12 @@ func TestCliError_PrintsTheServerHintUnderTheErrorLine(t *testing.T) {
 		assert.NotContains(t, stderr, "\x1b")
 	})
 }
+
+func TestInteractiveOnly_DefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	hinted := &hintedError{code: AuthInteractiveChannelRequiresPresence, hint: sampleHint}
+	assert.Same(t, hinted, InteractiveOnly(hinted, "open a Websh session"))
+
+	plain := &hintedError{code: AuthInteractiveChannelRequiresPresence}
+	assert.ErrorContains(t, InteractiveOnly(plain, "open a Websh session"), "a token cannot open a Websh session")
+}
