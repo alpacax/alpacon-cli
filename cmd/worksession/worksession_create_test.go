@@ -848,6 +848,10 @@ func TestPollForApproval_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	require.ErrorAs(t, err, &pending)
 	assert.Contains(t, err.Error(), "timed out waiting for approval")
 	assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+	// Only the hint goes with the timeout, never the refusal's code or status.
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Empty(t, code)
+	assert.Zero(t, utils.HTTPStatusCode(err))
 }
 
 // A plain timeout carries no hint.

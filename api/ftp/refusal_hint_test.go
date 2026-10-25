@@ -107,6 +107,9 @@ func TestPollTransferStatus_TimeoutWhileThrottledKeepsTheHint(t *testing.T) {
 	require.Error(t, err, "stderr: %s", stderr)
 	assert.Equal(t, "transfer status polling timed out after 2s", err.Error())
 	assert.Equal(t, hint, utils.RefusalHint(err))
+	assert.Zero(t, utils.HTTPStatusCode(err), "a timeout is not the throttle")
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Empty(t, code)
 }
 
 // bulkStatusRefusalServer runs a bulk upload of two files whose status polls

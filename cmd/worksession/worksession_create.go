@@ -370,13 +370,14 @@ func (e *terminalWaitError) Error() string {
 // retryable and gets answered with a second session.
 type pendingWaitError struct {
 	message string
-	// cause is the refusal the last poll got when the wait ended on it, kept so
-	// its hint still prints; nil otherwise.
-	cause error
+	// hint is the server's hint of the refusal the last poll got when the wait
+	// ended on it, so it still prints. Only the hint is kept: the refusal's code
+	// must not reclassify a wait that is still pending.
+	hint string
 }
 
-func (e *pendingWaitError) Error() string { return e.message }
-func (e *pendingWaitError) Unwrap() error { return e.cause }
+func (e *pendingWaitError) Error() string     { return e.message }
+func (e *pendingWaitError) ErrorHint() string { return e.hint }
 
 // terminalWaitErrorCtx is the JSON error envelope context for a wait that
 // settled without a grant. WorkSessionID is a structured field here—not only
@@ -605,7 +606,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 	// hint still reaches the output.
 	var lastRefusal error
 	timedOut := func() error {
-		return &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout), cause: lastRefusal}
+		return &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout), hint: utils.RefusalHint(lastRefusal)}
 	}
 	failures := 0
 	throttles := 0

@@ -206,10 +206,9 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 		case <-deadline:
 			spinner.Stop()
 			timedOut := fmt.Sprintf("MFA step-up timed out after %v", timeout)
-			if lastRefusal != nil {
-				return utils.Reword(lastRefusal, timedOut)
-			}
-			return errors.New(timedOut)
+			// Only the refusal's hint goes with the timeout: its code would read
+			// as that refusal to an MFA retry.
+			return utils.HintOnly(timedOut, lastRefusal)
 		case <-ticker.C:
 			completed, cerr := CheckMFACompletion(ac)
 			lastRefusal = nil

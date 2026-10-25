@@ -129,6 +129,23 @@ func PrintRefusalHints(w io.Writer, err error) {
 	printRefusalNextActions(w, err)
 }
 
+// HintOnly returns an error that reads as message and carries refusal's hint,
+// sanitized, and nothing else of it: no code, no status, no wrapped error. A
+// timeout uses it to keep the guidance of the refusal its last poll got while
+// staying a timeout to everything that classifies errors, such as the
+// work-session gate or an MFA retry. Without a hint on refusal it is a plain
+// error.
+func HintOnly(message string, refusal error) error {
+	return &hintOnlyError{message: message, hint: RefusalHint(refusal)}
+}
+
+type hintOnlyError struct {
+	message, hint string
+}
+
+func (e *hintOnlyError) Error() string     { return e.message }
+func (e *hintOnlyError) ErrorHint() string { return e.hint }
+
 // RawTerminalHintLines renders err's refusal guidance for a terminal that may
 // be in raw mode, where a bare newline leaves the cursor where it stood: one
 // "Hint:" line per distinct hint, each ending in \r\n. Empty when err carries

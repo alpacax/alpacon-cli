@@ -679,7 +679,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			utils.CliWarning("%s", utils.Reword(lastRefusal, fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout)))
+			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
 			outcome, requestID, err := pollApprovalOnce(ac, cmdID)

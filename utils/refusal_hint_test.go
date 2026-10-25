@@ -209,6 +209,25 @@ func TestHTTPStatusCode_JoinedErrors(t *testing.T) {
 		{name: "children differ", err: &BatchError{Header: "h", Failures: []error{statusOnly(403), statusOnly(429)}}, want: 0},
 		{name: "no child has one", err: errors.Join(errors.New("a"), errors.New("b")), want: 0},
 		{name: "a wrapped batch", err: fmt.Errorf("upload: %w", &BatchError{Header: "h", Failures: []error{statusOnly(402)}}), want: 402},
+		// A conflict inside a nested join is still a conflict at the top.
+		{name: "nested joins disagree", err: errors.Join(errors.Join(statusOnly(403), statusOnly(429)), statusOnly(403)), want: 0},
+		{name: "nested joins agree", err: errors.Join(errors.Join(statusOnly(403), errors.New("x")), statusOnly(403)), want: 403},
+		{
+			name: "nested batches disagree",
+			err: &BatchError{Header: "h", Failures: []error{
+				&BatchError{Header: "inner", Failures: []error{statusOnly(403), statusOnly(429)}},
+				statusOnly(403),
+			}},
+			want: 0,
+		},
+		{
+			name: "nested batches agree",
+			err: &BatchError{Header: "h", Failures: []error{
+				&BatchError{Header: "inner", Failures: []error{statusOnly(403), errors.New("disk full")}},
+				fmt.Errorf("b: %w", statusOnly(403)),
+			}},
+			want: 403,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -236,4 +255,24 @@ func TestRawTerminalHintLines(t *testing.T) {
 	pinColor(t, false)
 	assert.Equal(t, "Hint: "+sampleHint+"\r\n", RawTerminalHintLines(&hintedError{hint: sampleHint}))
 	assert.Empty(t, RawTerminalHintLines(errors.New("boom")))
+}
+
+// HintOnly keeps a refusal's hint and nothing else of it, so whatever
+// classifies the error sees a plain one.
+func TestHintOnly(t *testing.T) {
+	t.Parallel()
+	refusal := fmt.Errorf("read: %w", &hintedError{code: WorkSessionExpired, hint: "Retry\nlater."})
+
+	timedOut := HintOnly("timed out", refusal)
+	assert.Equal(t, "timed out", timedOut.Error())
+	assert.Equal(t, "Retrylater.", RefusalHint(timedOut))
+	code, _ := ParseErrorResponse(timedOut)
+	assert.Empty(t, code)
+	assert.Empty(t, StructuredErrorCode(timedOut))
+	_, wraps := timedOut.(interface{ Unwrap() error })
+	assert.False(t, wraps, "a hint-only error wraps nothing")
+
+	plain := HintOnly("timed out", nil)
+	assert.Equal(t, "timed out", plain.Error())
+	assert.Empty(t, RefusalHint(plain))
 }

@@ -139,10 +139,8 @@ func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.Path
 	}
 
 	timedOut := fmt.Sprintf("transfer status polling timed out after %v", timeout)
-	if lastThrottle != nil {
-		return false, "", utils.Reword(lastThrottle, timedOut)
-	}
-	return false, "", errors.New(timedOut)
+	// Only the throttle's hint goes with the timeout, not its status or code.
+	return false, "", utils.HintOnly(timedOut, lastThrottle)
 }
 
 func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size int64) error {

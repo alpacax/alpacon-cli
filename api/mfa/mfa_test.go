@@ -339,4 +339,8 @@ func TestStepUpForSudo_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, "MFA step-up timed out after 105ms", err.Error())
 	assert.Equal(t, hint, utils.RefusalHint(err))
+	// Only the hint goes with the timeout: the refusal's code would read as that
+	// refusal to an MFA retry.
+	assert.Empty(t, utils.StructuredErrorCode(err))
+	assert.Zero(t, utils.HTTPStatusCode(err))
 }

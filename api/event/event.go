@@ -384,7 +384,8 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 	delay := tick
 	failures := 0
 	budget := utils.NewThrottleBudget(timeout)
-	var lastRefusal error
+	// lastRefusalHint is the hint of the refusal the latest poll got, if any.
+	lastRefusalHint := ""
 
 	for {
 		select {
@@ -403,13 +404,13 @@ func pollCommandExecution(ac *client.AlpaconClient, pathID api.PathID, timeout, 
 			}
 		}
 		if !seams.Now().Before(deadline) {
-			return response, &ClientTimeoutError{cause: lastRefusal}
+			return response, &ClientTimeoutError{hint: lastRefusalHint}
 		}
 
 		responseBody, err := ac.SendGetRequest(api.IDURL(getEventURL, pathID, "", nil))
-		lastRefusal = nil
+		lastRefusalHint = ""
 		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
-			lastRefusal = err
+			lastRefusalHint = utils.RefusalHint(err)
 		}
 		if err != nil {
 			if seams.surfaceMFA && utils.StructuredErrorCode(err) == utils.AuthMFARequired {

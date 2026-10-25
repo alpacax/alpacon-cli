@@ -270,41 +270,45 @@ type retryAfterCarrier interface {
 }
 
 // HTTPStatusCode returns the HTTP status carried by err, or 0 if none—lets callers tell 404 from 401.
-// An error that joins several (a BatchError, errors.Join, fmt.Errorf with more
-// than one %w) has the status its children agree on: the one status every
-// child that carries a status has, or 0 when two of them differ.
+// Along a chain the outermost status wins. An error that joins several (a
+// BatchError, errors.Join, fmt.Errorf with more than one %w) has a status only
+// when the whole tree under it names one: the statuses of every branch, nested
+// joins included, are collected, and one distinct status is the answer while
+// two or more give 0.
 func HTTPStatusCode(err error) int {
-	for e := err; e != nil; {
-		if sc, ok := e.(statusCoder); ok {
-			return sc.HTTPStatusCode()
-		}
-		switch wrapped := e.(type) {
-		case interface{ Unwrap() []error }:
-			return agreedStatusCode(wrapped.Unwrap())
-		case interface{ Unwrap() error }:
-			e = wrapped.Unwrap()
-		default:
-			return 0
-		}
+	statuses := map[int]bool{}
+	collectStatusCodes(err, statuses)
+	if len(statuses) != 1 {
+		return 0
+	}
+	for status := range statuses {
+		return status
 	}
 	return 0
 }
 
-// agreedStatusCode is HTTPStatusCode over joined errors: the status every
-// child that has one agrees on, or 0 when none has one or two differ.
-func agreedStatusCode(errs []error) int {
-	agreed := 0
-	for _, child := range errs {
-		status := HTTPStatusCode(child)
-		if status == 0 {
-			continue
+// collectStatusCodes adds the status each branch of err's tree names: the
+// first status along a chain, and every branch of a join.
+func collectStatusCodes(err error, statuses map[int]bool) {
+	for e := err; e != nil; {
+		if sc, ok := e.(statusCoder); ok {
+			if status := sc.HTTPStatusCode(); status != 0 {
+				statuses[status] = true
+			}
+			return
 		}
-		if agreed != 0 && status != agreed {
-			return 0
+		switch wrapped := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, child := range wrapped.Unwrap() {
+				collectStatusCodes(child, statuses)
+			}
+			return
+		case interface{ Unwrap() error }:
+			e = wrapped.Unwrap()
+		default:
+			return
 		}
-		agreed = status
 	}
-	return agreed
 }
 
 // BatchError joins the failures of independent items, such as the files of a
