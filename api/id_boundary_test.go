@@ -277,6 +277,7 @@ func TestURLOffenders_FlagsASinkSentAnUncheckedURL(t *testing.T) {
 		{name: "build_url_with_a_non_constant_path", body: `_ = utils.BuildURL(noteURL, id, nil)`, want: "passes BuildURL a non-constant path"},
 		{name: "path_id_concatenated", body: `_ = noteURL + pathID.String()`, want: "concatenates a PathID into a string"},
 		{name: "path_id_appended", body: "s := noteURL\ns += pathID.String()\n_ = s", want: "concatenates a PathID into a string"},
+		{name: "mutually_recursive_helpers", body: `_, _ = ac.SendGetRequest(first(id))`, extra: "func first(id string) string { return second(id) }\nfunc second(id string) string { return first(id) }", want: "hands SendGetRequest a URL"},
 		{name: "fields_aliased_to_each_other", body: "var x, y session\nx.Note = y.Note\ny.Note = x.Note\n_, _ = ac.SendGetRequest(x.Note)", want: "hands SendGetRequest a URL"},
 		{name: "http_get_function", body: `_, _ = http.Get(noteURL + id)`, want: "hands Get a URL"},
 		{name: "request_url_path_taken_by_address", body: "r, _ := http.NewRequest(http.MethodGet, noteURL, nil)\np := &r.URL.Path\n*p = noteURL + id", want: "takes the address of a request's URL"},
@@ -1024,7 +1025,7 @@ func (f *urlFlowIndex) resultAllowed(call *ast.CallExpr, index int, mode urlMode
 	}
 	key := visit{obj, mode, index}
 	if f.visiting[key] {
-		return true
+		return false
 	}
 	f.visiting[key] = true
 	defer delete(f.visiting, key)
