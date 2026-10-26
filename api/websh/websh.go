@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -323,17 +324,34 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 }
 
 func (wsClient *WebsocketClient) dial(websocketURL string) error {
-	conn, resp, err := websocket.DefaultDialer.Dial(websocketURL, wsClient.header)
+	parsed, err := url.Parse(websocketURL)
+	if err != nil {
+		return utils.WebsocketDialError("websocket connection failed", err, nil)
+	}
+	reconnected := wsClient.conn != nil
+	query := parsed.Query()
+	query.Set("replay_epoch", wsClient.replay.epoch)
+	query.Del("replay")
+	query.Del("replay_from")
+	if !reconnected {
+		query.Set("replay", "1")
+	} else if wsClient.replay.epoch != "" {
+		query.Set("replay_from", strconv.FormatUint(wsClient.replay.offset, 10))
+	}
+	parsed.RawQuery = query.Encode()
+	conn, resp, err := websocket.DefaultDialer.Dial(parsed.String(), wsClient.header)
 	if err != nil {
 		return utils.WebsocketDialError("websocket connection failed", err, resp)
 	}
 	wsClient.conn = newConnection(conn)
+	wsClient.conn.replay = &wsClient.replay
+	wsClient.conn.reconnected = reconnected
 
 	return nil
 }
 
 func newConnection(ws *websocket.Conn) *connection {
-	return &connection{ws: ws, ended: make(chan struct{})}
+	return &connection{ws: ws, ended: make(chan struct{}), replay: &replayState{}}
 }
 
 // finish keeps the first ending. err is written before ended closes, so anyone
@@ -685,13 +703,40 @@ func enterRawMode() (func(), error) {
 }
 
 func (c *connection) readFromServer() {
+	originSeen, legacy, warned := false, false, false
 	for {
-		_, message, err := c.ws.ReadMessage()
+		kind, message, err := c.ws.ReadMessage()
 		if err != nil {
 			c.finish(err)
 			return
 		}
-		_, _ = os.Stdout.Write(message)
+		switch kind {
+		case websocket.TextMessage:
+			var origin struct {
+				Type      string `json:"type"`
+				Epoch     string `json:"epoch"`
+				Offset    uint64 `json:"offset"`
+				Truncated bool   `json:"truncated"`
+			}
+			if legacy || json.Unmarshal(message, &origin) != nil || origin.Type != "replay_origin" || origin.Epoch == "" {
+				continue
+			}
+			originSeen = true
+			*c.replay = replayState{epoch: origin.Epoch, offset: origin.Offset}
+			if origin.Truncated && c.reconnected && !warned {
+				_, _ = fmt.Fprintln(os.Stderr, "[Some output from the disconnect was not kept; showing what remains.]")
+				warned = true
+			}
+		case websocket.BinaryMessage:
+			if originSeen {
+				c.replay.offset += uint64(len(message))
+			} else {
+				// A proxy without origins cannot accept an offset from a prior connection.
+				legacy = true
+				*c.replay = replayState{}
+			}
+			_, _ = os.Stdout.Write(message)
+		}
 	}
 }
 
