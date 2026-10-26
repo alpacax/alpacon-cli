@@ -93,7 +93,7 @@ func LoginAndSaveCredentials(loginReq *LoginRequest, token string, insecure bool
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return err
+		return utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

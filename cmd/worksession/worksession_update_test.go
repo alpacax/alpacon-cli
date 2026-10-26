@@ -86,7 +86,7 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 				Status: "active",
 				Scopes: []string{"sudo"},
 				SudoPolicies: []wsapi.SudoPolicyInline{
-					{ID: "pol-old", Commands: []string{"systemctl restart nginx"}, AllowBypassMFA: true},
+					{ID: "pol-old", Commands: []string{"systemctl restart nginx"}, SessionAuthorized: true},
 				},
 			})
 		case http.MethodPatch:
@@ -105,7 +105,7 @@ func TestApplyWorkSessionUpdate_PreservesExistingSudoPolicies(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-1", wsapi.WorkSessionUpdateRequest{}, []wsapi.SudoPolicyInline{
-		{Commands: []string{"systemctl reload nginx"}, AllowBypassMFA: true},
+		{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true},
 	})
 	require.NoError(t, err)
 	assert.True(t, patchCalled, "PATCH must be issued")
@@ -134,7 +134,7 @@ func TestApplyWorkSessionUpdate_PendingSessionAbortsBeforePATCH(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-pending", wsapi.WorkSessionUpdateRequest{},
-		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, AllowBypassMFA: true}})
+		[]wsapi.SudoPolicyInline{{Commands: []string{"x"}, SessionAuthorized: true}})
 	require.Error(t, err)
 	assert.False(t, patchCalled, "PATCH must not be issued when the validator rejects")
 }
@@ -335,7 +335,7 @@ func TestApplyWorkSessionUpdate_SudoPlusFields(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	_, err := applyWorkSessionUpdate(ac, "ses-1",
 		wsapi.WorkSessionUpdateRequest{Description: "rollout"},
-		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, AllowBypassMFA: true}})
+		[]wsapi.SudoPolicyInline{{Commands: []string{"systemctl reload nginx"}, SessionAuthorized: true}})
 	require.NoError(t, err)
 	assert.Equal(t, "rollout", gotPATCH.Description)
 	assert.Len(t, gotPATCH.SudoPolicies, 1)

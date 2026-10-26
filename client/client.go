@@ -132,18 +132,8 @@ type apiError struct {
 	// can emit a JSON object too. The stale-token retry reads it to drop
 	// gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
+	body       []byte
 }
-
-// statusError carries an HTTP status on errors that aren't *apiError (e.g. an
-// HTML 404 page), so utils.HTTPStatusCode can still read it.
-type statusError struct {
-	err        error
-	statusCode int
-}
-
-func (e *statusError) Error() string       { return e.err.Error() }
-func (e *statusError) Unwrap() error       { return e.err }
-func (e *statusError) HTTPStatusCode() int { return e.statusCode }
 
 // retryAfterError carries the server's Retry-After hint so a retrying caller
 // (the exec/websh poll loop) waits as long as it asked instead of guessing.
@@ -159,7 +149,7 @@ func (e *retryAfterError) RetryAfter() time.Duration { return e.retryAfter }
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
-		return nil, fmt.Errorf("configuration file not found or invalid: %v. Please run 'alpacon login' to configure your connection", err)
+		return nil, fmt.Errorf("configuration file not found or invalid: %w. Please run 'alpacon login' to configure your connection", err)
 	}
 
 	httpClient := httpclient.New(validConfig.Insecure)
@@ -240,6 +230,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		gate:       gate,
 		missing:    missing,
 		apiPayload: isJSONObject(body),
+		body:       body,
 	}
 }
 
@@ -324,14 +315,14 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 		return "approval policies can only be created, changed or deleted from the web console", true
 	case utils.SudoPolicyConsoleOnly:
 		return "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'", true
-	case utils.WorkSessionSudoBypassConsoleOnly:
-		return "this workspace adds MFA-bypass sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access", true
+	case utils.WorkSessionSudoBypassConsoleOnly, utils.WorkSessionSessionAuthorizedSudoConsoleOnly:
+		return "this workspace adds session-authorized sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access", true
 	case utils.SudoVerifyCredentialCannotProveMFA:
 		return "this credential cannot complete sudo MFA—sign in with 'alpacon login' to complete sudo MFA", true
-	case utils.SudoPolicyBypassAgentSessionNeedsPresence:
-		return "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA", true
-	case utils.SudoPolicyBypassAgentSessionNeedsApproval:
-		return "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change", true
+	case utils.SudoPolicyBypassAgentSessionNeedsPresence, utils.SudoPolicySessionAuthorizedAgentSessionNeedsPresence:
+		return "an AI agent session cannot be given session-authorized sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA", true
+	case utils.SudoPolicyBypassAgentSessionNeedsApproval, utils.SudoPolicySessionAuthorizedAgentSessionNeedsApproval:
+		return "session-authorized sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change", true
 	case utils.AuthTokenMissing, utils.AuthAuthenticationFailed:
 		if statusCode == http.StatusUnauthorized {
 			return reauthenticateMessage, true
@@ -493,7 +484,7 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 		// behind it, so a renewal would spend an Auth0 round trip to fail.
 		return nil, false
 	}
-	if !ac.renewAccessToken(sent) {
+	if !ac.renewAccessTokenWithin(req.Context(), sent) {
 		return nil, false
 	}
 	retry, ok := replayableClone(req)
@@ -501,6 +492,22 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 		return nil, false
 	}
 	return ac.setHTTPHeader(retry), true
+}
+
+// renewAccessTokenWithin is renewAccessToken bounded by ctx: once ctx ends it reports false, and the
+// renewal finishes in the background, where its token lands and a save warning may print after the return.
+func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string) bool {
+	if ctx.Done() == nil {
+		return ac.renewAccessToken(sent)
+	}
+	renewed := make(chan bool, 1)
+	go func() { renewed <- ac.renewAccessToken(sent) }()
+	select {
+	case ok := <-renewed:
+		return ok
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // renewAccessToken installs a fresh access token, reporting whether one is now
@@ -586,7 +593,7 @@ func (ac *AlpaconClient) roundTrip(req *http.Request) ([]byte, error) {
 func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, error) {
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
-		return nil, 0, utils.RedactURLError(err)
+		return nil, redirectRefusedStatus(resp), utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -851,7 +858,7 @@ func hasRawSpaceOrBadEscape(query string) bool {
 func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 	resp, err := httpclient.StopAtCrossOrigin(ac.HTTPClient).Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	respBody, err := io.ReadAll(resp.Body)
@@ -863,11 +870,17 @@ func (ac *AlpaconClient) rawRoundTrip(req *http.Request) (*RawResponse, error) {
 
 // Get Request to Alpacon Server
 func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
+	return ac.SendGetRequestWithContext(context.Background(), url)
+}
+
+// SendGetRequestWithContext is SendGetRequest bounded by ctx, a token renewal it
+// runs included: a renewal that outlasts ctx leaves the request's 401 as its result.
+func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	return ac.sendRequest(req)
+	return ac.sendRequest(req.WithContext(ctx))
 }
 
 // POST Request to Alpacon Server
@@ -906,8 +919,8 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 	return ac.SendDeleteRequestWithContext(context.Background(), url)
 }
 
-// SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx. A token renewal the
-// request runs is not: it waits out the grant as any other request does.
+// SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx, a token renewal it
+// runs included: a renewal that outlasts ctx leaves the request's 401 as its result.
 func (ac *AlpaconClient) SendDeleteRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodDelete, url, nil)
 	if err != nil {
@@ -1007,7 +1020,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	resp, err := ac.HTTPClient.Do(req)
 	if err != nil {
 		// A download URL may be presigned, and a transport error prints it whole.
-		return nil, utils.RedactURLError(err)
+		return nil, utils.WithRedirectStatus(utils.RedactURLError(err), resp)
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
@@ -1120,12 +1133,19 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
+func (e *apiError) ErrorFields() map[string]any {
+	return errorExtraFields(e.body)
+}
+
 func (e *apiError) HTTPStatusCode() int {
 	return e.statusCode
 }
 
-func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
-	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
+func redirectRefusedStatus(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
 }
 
 // withStatus tags err with its HTTP status so callers can tell 404 from 401,
@@ -1139,7 +1159,7 @@ func withStatus(err error, statusCode int) error {
 		ae.statusCode = statusCode
 		return err
 	}
-	return &statusError{err: err, statusCode: statusCode}
+	return utils.WithHTTPStatus(err, statusCode)
 }
 
 // withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
@@ -1171,7 +1191,23 @@ func withRetryAfter(err error, header http.Header) error {
 // envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return newAPIError(message, code, source, gate, axis, next, missing)
+	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing, body: body}
+}
+
+func errorExtraFields(body []byte) map[string]any {
+	var parsed map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
+	if decoder.Decode(&parsed) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return nil
+	}
+	if _, isEnvelopeCode := parsed["code"].(string); isEnvelopeCode {
+		delete(parsed, "code")
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	return parsed
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {

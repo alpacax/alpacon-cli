@@ -160,21 +160,21 @@ var sudoDenialHints = []struct {
 		// Re-running it with the same token repeats it.
 		code: "SUDO_COMMAND_NOT_AUTHORIZED",
 		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
-			"Re-run it under a principal that carries a user (an interactive login, or a personal API token).\n",
+			"Sign in with " + utils.LoginWithoutTokenHint + ", then re-run the command under that login.\n",
 	},
 	{
 		code: "SUDO_NO_WORKSESSION_POLICY",
-		guidance: "sudo was denied: this command is not covered by an MFA-bypass policy in your work session.\n" +
+		guidance: "sudo was denied: this command is not covered by a session-authorized sudo policy in your work session.\n" +
 			"Add it and re-run (omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
 			"The addition may require approval before it takes effect.\n",
 	},
 	{
-		// An MFA step-up does not resolve this one—only a policy that bypasses
-		// MFA does—so it stays out of the step-up path.
+		// An MFA step-up does not resolve this one—only a session-authorized
+		// sudo policy does—so it stays out of the step-up path.
 		code: "SUDO_POLICY_MFA_REQUIRED",
 		guidance: "sudo was denied: a policy covers this command but requires MFA, which a non-interactive command cannot complete.\n" +
-			"Cover it with an MFA-bypass policy and re-run (omit SESSION_ID to use the active session):\n" +
+			"Cover it with a session-authorized sudo policy and re-run (omit SESSION_ID to use the active session):\n" +
 			"  alpacon work-session update [SESSION_ID] --sudo \"<command>\"\n" +
 			"The addition may require approval before it takes effect.\n",
 	},
@@ -203,7 +203,7 @@ var sudoDenialHints = []struct {
 	},
 	{
 		code:     "SUDO_RISK_DENIED",
-		guidance: "sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
+		guidance: "sudo was denied by runtime risk assessment; this command is not permitted as submitted.\n",
 	},
 }
 

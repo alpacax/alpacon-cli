@@ -15,7 +15,7 @@ func TestBuildSudoPolicies(t *testing.T) {
 		)
 		assert.Len(t, policies, 2)
 		assert.Equal(t, []string{"systemctl restart nginx", "systemctl reload nginx"}, policies[0].Commands)
-		assert.True(t, policies[0].AllowBypassMFA)
+		assert.True(t, policies[0].SessionAuthorized)
 		assert.Equal(t, "hotfix", policies[0].Reason)
 		assert.Equal(t, []string{"tail -f /var/log/nginx/*.log"}, policies[1].Commands)
 	})

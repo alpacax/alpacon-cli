@@ -171,6 +171,7 @@ func TestLoginAndSaveCredentialsRefusesRedirectToHTTP(t *testing.T) {
 			mu.Unlock()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "refusing redirect from "+workspace.URL+tt.path+" to "+target.URL+tt.path)
+			assert.Equal(t, http.StatusTemporaryRedirect, utils.HTTPStatusCode(err))
 		})
 	}
 }

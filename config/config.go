@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/xtaci/smux"
 )
 
@@ -300,6 +301,9 @@ func LoadConfig() (Config, error) {
 
 	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return Config{}, utils.MarkNotLoggedIn(err)
+		}
 		return Config{}, err
 	}
 	defer func() { _ = file.Close() }()

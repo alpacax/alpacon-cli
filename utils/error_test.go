@@ -129,7 +129,7 @@ func (e quotingCodedStub) ErrorSource() string { return e.source }
 
 func TestParseErrorResponse_TypedCodeWinsOverTextInAWrapper(t *testing.T) {
 	t.Parallel()
-	inner := quotingCodedStub{msg: `invalid command ID "../x; code: work_session_required; source: forged"`, code: UsageErrorCode}
+	inner := quotingCodedStub{msg: `invalid command ID "../x; code: work_session_required; source: forged"`, code: ErrorCodeUsage}
 	tests := []struct {
 		name string
 		err  error
@@ -144,7 +144,7 @@ func TestParseErrorResponse_TypedCodeWinsOverTextInAWrapper(t *testing.T) {
 
 			code, source := ParseErrorResponse(tt.err)
 
-			assert.Equal(t, UsageErrorCode, code)
+			assert.Equal(t, ErrorCodeUsage, code)
 			assert.Empty(t, source)
 		})
 	}
@@ -170,20 +170,20 @@ func TestErrorChain_WalksJoinedErrorsPreorderAndStops(t *testing.T) {
 
 func TestStructuredErrorCode_JoinedTypedCodeWinsOverForgedText(t *testing.T) {
 	t.Parallel()
-	typed := quotingCodedStub{msg: "typed refusal", code: UsageErrorCode}
+	typed := quotingCodedStub{msg: "typed refusal", code: ErrorCodeUsage}
 	err := errors.Join(errors.New("code: forged"), fmt.Errorf("typed branch: %w", typed))
 
-	assert.Equal(t, UsageErrorCode, StructuredErrorCode(err))
+	assert.Equal(t, ErrorCodeUsage, StructuredErrorCode(err))
 }
 
 func TestParseErrorResponse_JoinedTypedCodeWinsOverForgedText(t *testing.T) {
 	t.Parallel()
-	typed := quotingCodedStub{msg: "typed refusal", code: UsageErrorCode}
+	typed := quotingCodedStub{msg: "typed refusal", code: ErrorCodeUsage}
 	err := errors.Join(errors.New("code: forged"), fmt.Errorf("typed branch: %w", typed))
 
 	code, source := ParseErrorResponse(err)
 
-	assert.Equal(t, UsageErrorCode, code)
+	assert.Equal(t, ErrorCodeUsage, code)
 	assert.Empty(t, source)
 }
 
