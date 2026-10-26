@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/acl"
@@ -25,8 +26,9 @@ account. Without --server the entry covers every server in the workspace, and
 the command signer warns about it.
 
 --file issues several entries at once from a JSON array whose items carry the
-ledger's own fields (principal_id, command_pattern, username, and optionally
-groupname, server_ids, expires_at, enabled). The batch is all or nothing: one
+ledger's own fields: principal_id (a service token ID), command_pattern,
+username, server_ids ([] covers every server), and optionally groupname,
+expires_at and enabled. The batch is all or nothing: one
 refused entry refuses the whole file. principal_type may be left out; it can
 only be service_token.
 
@@ -78,6 +80,8 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	session := openLedger()
 	if flagged != nil {
 		entries = []acl.EntryRequest{flagged.resolve(session)}
+	} else {
+		session.confirmServiceTokens(entries)
 	}
 	issued, err := acl.IssueEntries(session.signer, session.workspaceID, entries)
 	if err != nil {
@@ -120,6 +124,7 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	expiresAt, _ := cmd.Flags().GetString("expires-at")
 	disabled, _ := cmd.Flags().GetBool("disabled")
 
+	tokenRef, command, username = strings.TrimSpace(tokenRef), strings.TrimSpace(command), strings.TrimSpace(username)
 	for _, required := range []struct{ flag, value string }{{"token", tokenRef}, {"command", command}, {"username", username}} {
 		if required.value == "" {
 			utils.CliErrorWithExit("--%s is required (or pass --file).", required.flag)
@@ -151,7 +156,7 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 // for every server in the workspace.
 func validateServerRefs(given bool, refs []string) error {
 	if given && len(refs) == 0 {
-		return errors.New("--server has an empty value; name each server, or leave --server out to cover every server")
+		return errEmptyServerScope
 	}
 	_, _, err := partitionServerRefs(refs)
 	return err
@@ -175,6 +180,22 @@ func (f *flagEntry) resolve(session *ledgerSession) acl.EntryRequest {
 	return request
 }
 
+// confirmServiceTokens checks every principal_id of a --file batch against the
+// session's workspace before anything is issued, so the batch cannot pre-approve
+// commands for a personal API token by naming its id.
+func (s *ledgerSession) confirmServiceTokens(entries []acl.EntryRequest) {
+	confirmed := map[string]bool{}
+	for i, entry := range entries {
+		if confirmed[entry.PrincipalID] {
+			continue
+		}
+		if _, err := s.resolveServiceToken(entry.PrincipalID); err != nil {
+			utils.CliErrorWithExit("Entry %d: failed to find service token %s: %s.", i, entry.PrincipalID, err)
+		}
+		confirmed[entry.PrincipalID] = true
+	}
+}
+
 func validateExpiry(expiresAt string) error {
 	if expiresAt == "" {
 		return nil
@@ -188,14 +209,44 @@ func validateExpiry(expiresAt string) error {
 // fileEntry is one item of an --file batch. enabled is a pointer so an item
 // that leaves it out is issued enabled, as the console issues one.
 type fileEntry struct {
-	PrincipalType  string   `json:"principal_type"`
-	PrincipalID    string   `json:"principal_id"`
-	CommandPattern string   `json:"command_pattern"`
-	Username       string   `json:"username"`
-	Groupname      string   `json:"groupname"`
-	ServerIDs      []string `json:"server_ids"`
-	ExpiresAt      string   `json:"expires_at"`
-	Enabled        *bool    `json:"enabled"`
+	PrincipalType  string    `json:"principal_type"`
+	PrincipalID    string    `json:"principal_id"`
+	CommandPattern string    `json:"command_pattern"`
+	Username       string    `json:"username"`
+	Groupname      string    `json:"groupname"`
+	ServerIDs      *[]string `json:"server_ids"`
+	ExpiresAt      string    `json:"expires_at"`
+	Enabled        *bool     `json:"enabled"`
+}
+
+// validate refuses a batch item the flags would refuse. server_ids is required
+// here: an empty list covers every server, so it has to be written as [] on
+// purpose rather than follow from a field left out.
+func (item *fileEntry) validate() error {
+	item.PrincipalID = strings.TrimSpace(item.PrincipalID)
+	item.CommandPattern = strings.TrimSpace(item.CommandPattern)
+	item.Username = strings.TrimSpace(item.Username)
+	if item.PrincipalType == "" {
+		item.PrincipalType = acl.PrincipalTypeServiceToken
+	}
+	switch {
+	case item.PrincipalType != acl.PrincipalTypeServiceToken:
+		return fmt.Errorf("principal_type must be %q; a personal API token has no command list on the ledger", acl.PrincipalTypeServiceToken)
+	case !utils.IsUUID(item.PrincipalID):
+		return errors.New("principal_id must be a service token ID")
+	case item.CommandPattern == "":
+		return errors.New("command_pattern is required")
+	case item.Username == "":
+		return errors.New(`username is required ("*" for any account)`)
+	case item.ServerIDs == nil:
+		return errors.New("server_ids is required; use [] to cover every server")
+	}
+	for _, id := range *item.ServerIDs {
+		if strings.TrimSpace(id) == "" {
+			return errEmptyServerScope
+		}
+	}
+	return validateExpiry(item.ExpiresAt)
 }
 
 // parseEntryFile reads an --file batch. Unknown fields are refused, so a
@@ -219,13 +270,7 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 
 	entries := make([]acl.EntryRequest, 0, len(items))
 	for i, item := range items {
-		if item.PrincipalType == "" {
-			item.PrincipalType = acl.PrincipalTypeServiceToken
-		}
-		if item.PrincipalType != acl.PrincipalTypeServiceToken {
-			return nil, fmt.Errorf("entry %d: principal_type must be %q; a personal API token has no command list on the ledger", i, acl.PrincipalTypeServiceToken)
-		}
-		if err := validateExpiry(item.ExpiresAt); err != nil {
+		if err := item.validate(); err != nil {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
 		entries = append(entries, acl.EntryRequest{
@@ -234,7 +279,7 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 			CommandPattern: item.CommandPattern,
 			Username:       item.Username,
 			Groupname:      item.Groupname,
-			ServerIDs:      item.ServerIDs,
+			ServerIDs:      *item.ServerIDs,
 			ExpiresAt:      item.ExpiresAt,
 			Enabled:        item.Enabled == nil || *item.Enabled,
 		})

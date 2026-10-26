@@ -3,6 +3,7 @@ package acl
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -21,6 +22,7 @@ import (
 type ledgerSession struct {
 	signer       *client.AlpaconClient
 	token        string
+	fresh        bool // the token was issued by this command, not read from the cache
 	workspaceID  string
 	workspaceURL string
 	workspace    *client.AlpaconClient
@@ -66,23 +68,30 @@ func newLedgerSession() (*ledgerSession, error) {
 	}
 	workspaceID := envInfo.Auth0.WorkspaceID
 
-	token, ok := cfg.SignerToken(now())
-	if !ok {
-		token, err = authorizeSigner(cfg, envInfo)
+	target := config.SignerTarget{URL: client.SignerURL(), Audience: client.SignerAudience()}
+	if err = client.CheckSignerURL(target.URL); err != nil {
+		return nil, err
+	}
+
+	token, cached := cfg.SignerToken(now(), target)
+	if !cached {
+		token, err = authorizeSigner(cfg, envInfo, target)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	session := &ledgerSession{
-		signer:       client.NewSignerClient(token, cfg.Insecure),
+		signer:       client.NewSignerClient(token),
 		token:        token,
+		fresh:        !cached,
 		workspaceID:  workspaceID,
 		workspaceURL: cfg.WorkspaceURL,
 	}
 
 	capability, err := acl.GetCapability(session.signer)
 	if err != nil {
+		session.dropRefusedToken(err)
 		return nil, errors.New(session.errorMessage("check your Command ACL admin role", err))
 	}
 	if !capability.Administers(workspaceID) {
@@ -107,11 +116,12 @@ func ledgerUnavailableReason(envInfo *auth0.AuthEnvResponse) string {
 // signer's audience, and caches the token it returns. The signer's API grants
 // no refresh token, so this authorization lasts as long as the access token and
 // is asked for again once it expires.
-func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse) (string, error) {
+func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
 	utils.CliInfo("Pre-approved commands are kept by the command signer, which needs its own authorization. It lasts until its token expires and is not renewed in the background.")
 
-	httpClient := httpclient.New(cfg.Insecure)
-	deviceCode, err := auth0.RequestSignerDeviceCode(cfg.WorkspaceIdentity(), httpClient, envInfo, client.SignerAudience())
+	// Certificates are verified whatever the workspace login chose: --insecure
+	// covers the workspace's host, not this authorization.
+	deviceCode, err := auth0.RequestSignerDeviceCode(cfg.WorkspaceIdentity(), httpclient.New(false), envInfo, target.Audience)
 	if err != nil {
 		return "", fmt.Errorf("could not start the authorization for the command pre-approval ledger: %w", err)
 	}
@@ -124,19 +134,17 @@ func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse) (str
 		return "", errors.New(authorizationFailureMessage(err))
 	}
 
-	return cacheSignerToken(cfg, tokenRes.AccessToken, tokenRes.ExpiresIn)
+	return cacheSignerToken(cfg, target, tokenRes.AccessToken, tokenRes.ExpiresIn)
 }
 
 // cacheSignerToken stores a freshly authorized signer token and hands it back,
-// unless the config no longer holds the login and workspace cfg named.
-func cacheSignerToken(cfg config.Config, token string, expiresIn int) (string, error) {
-	err := config.SaveSignerToken(cfg, token, expiresIn)
+// unless the config no longer holds the login and workspace cfg named. A
+// config another shell's logout removed counts as a changed login.
+func cacheSignerToken(cfg config.Config, target config.SignerTarget, token string, expiresIn int) (string, error) {
+	err := config.SaveSignerToken(cfg, target, token, expiresIn)
 	switch {
-	case errors.Is(err, config.ErrLoginChanged), errors.Is(err, config.ErrWorkspaceChanged):
-		// The token was authorized for the login and workspace this command
-		// started with. Another shell has replaced them, so acting on it now
-		// would manage a workspace the config no longer names.
-		return "", errors.New("another login or workspace switch changed the configuration while you were authorizing. Run the command again")
+	case errors.Is(err, config.ErrLoginChanged), errors.Is(err, config.ErrWorkspaceChanged), errors.Is(err, fs.ErrNotExist):
+		return "", errors.New("another login, logout or workspace switch changed the configuration while you were authorizing. Run the command again")
 	case err != nil:
 		utils.CliWarning("Could not save the authorization, so the next acl command will ask for it again: %s", err)
 	}
@@ -178,13 +186,23 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 
 // fail reports a failed ledger call and exits.
 func (s *ledgerSession) fail(action string, err error) {
+	s.dropRefusedToken(err)
 	utils.CliErrorWithExit("%s", s.errorMessage(action, err))
 }
 
-// errorMessage words a failed signer call. A 401 means the cached signer token
-// is no longer accepted, so it is dropped and the next command authorizes
-// again; the signer's own refusal text is kept for everything else, with the
-// one thing it cannot say added to a 403.
+// dropRefusedToken removes the cached signer token after the signer answered
+// 401, so the next command authorizes again instead of failing the same way.
+func (s *ledgerSession) dropRefusedToken(err error) {
+	if utils.HTTPStatusCode(err) != http.StatusUnauthorized {
+		return
+	}
+	if clearErr := config.ClearSignerToken(s.token); clearErr != nil {
+		utils.CliDebug("could not drop the refused signer token: %v", clearErr)
+	}
+}
+
+// errorMessage words a failed signer call. The signer's own refusal text is
+// kept, with the one thing it cannot say added to a 401 and a 403.
 func (s *ledgerSession) errorMessage(action string, err error) string {
 	status := utils.HTTPStatusCode(err)
 	switch status {
@@ -194,8 +212,11 @@ func (s *ledgerSession) errorMessage(action string, err error) string {
 		return fmt.Sprintf("Failed to %s: could not reach the command signer at %s: %s. Set %s if this workspace uses another signer.",
 			action, utils.RedactURL(client.SignerURL()), utils.RedactURLError(err), client.SignerURLEnvVar)
 	case http.StatusUnauthorized:
-		if clearErr := config.ClearSignerToken(s.token); clearErr != nil {
-			utils.CliDebug("could not drop the refused signer token: %v", clearErr)
+		if s.fresh {
+			// Authorizing again would be refused the same way, so the remedy
+			// is the configuration, not another run.
+			return fmt.Sprintf("Failed to %s: the command signer at %s refused the authorization this command just obtained. Check that %s names the audience that signer accepts.",
+				action, utils.RedactURL(client.SignerURL()), client.SignerAudienceEnvVar)
 		}
 		return fmt.Sprintf("Failed to %s: the command signer no longer accepts your authorization. Run the command again to authorize once more.", action)
 	}

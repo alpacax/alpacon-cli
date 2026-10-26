@@ -187,7 +187,9 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		{name: "token refresh", write: func(started Config) error {
 			return SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
 		}},
-		{name: "signer token", write: func(started Config) error { return SaveSignerToken(started, "signer-2", 3600) }},
+		{name: "signer token", write: func(started Config) error {
+			return SaveSignerToken(started, SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-2", 3600)
+		}},
 		{name: "signer token clear", write: func(started Config) error { return ClearSignerToken(started.SignerAccessToken) }},
 		{name: "work session", write: func(Config) error { return SetActiveWorkSession("uuid-2") }},
 		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor("ws1", "uuid-2") }},
@@ -201,7 +203,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 			setupTestConfig(t)
 			require.NoError(t, CreateConfig("https://ws1.us1.alpacon.io", "ws1", "", "", "access-1", "refresh-1", "alpacon.io", 3600, false))
 			require.NoError(t, SetActiveWorkSession("uuid-1"))
-			require.NoError(t, SaveSignerToken(loadedConfig(t), "signer-1", 3600))
+			require.NoError(t, SaveSignerToken(loadedConfig(t), SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-1", 3600))
 			started := loadedConfig(t)
 			configFile := filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName)
 			before, err := os.ReadFile(configFile)

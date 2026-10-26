@@ -727,3 +727,24 @@ func TestDeleteRegistrationToken_DeletesOnlyAOneSegmentTokenID(t *testing.T) {
 		})
 	}
 }
+
+func TestGetServerNames_WalksEveryPage(t *testing.T) {
+	t.Parallel()
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "1" {
+			_, _ = w.Write([]byte(`{"count": 2, "next": 2, "results": [{"id": "a", "name": "web-01"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"count": 2, "next": null, "results": [{"id": "b", "name": "web-02"}]}`))
+	}))
+	defer ts.Close()
+
+	names, err := GetServerNames(&client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"a": "web-01", "b": "web-02"}, names)
+	assert.Equal(t, 2, requests)
+}

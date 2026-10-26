@@ -40,10 +40,9 @@ func TestSignerAudience_KeepsTheTrailingSlash(t *testing.T) {
 
 func TestNewSignerClient_SendsOnlyTheSignerToken(t *testing.T) {
 	t.Setenv(SignerURLEnvVar, "")
-	ac := NewSignerClient("signer-token", false)
+	ac := NewSignerClient("signer-token")
 
 	assert.Equal(t, DefaultSignerURL, ac.BaseURL)
-	assert.Empty(t, ac.Token, "the workspace API key must never travel to the signer")
 
 	req, err := ac.createRequest(http.MethodGet, "/api/acl/me/", nil)
 	require.NoError(t, err)
@@ -64,11 +63,52 @@ func TestSignerClient_NeverRenewsOnAStaleToken(t *testing.T) {
 	defer ts.Close()
 
 	t.Setenv(SignerURLEnvVar, ts.URL)
-	ac := NewSignerClient("signer-token", false)
+	ac := NewSignerClient("signer-token")
 	_, err := ac.SendGetRequest("/api/acl/me/")
 
 	require.Error(t, err)
 	assert.Equal(t, 0, *renewals)
 	assert.Equal(t, 1, requests)
 	assert.Equal(t, "signer-token", ac.AccessToken())
+}
+
+func TestNewSignerClient_VerifiesTheCertificate(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+	t.Setenv(SignerURLEnvVar, ts.URL)
+
+	_, err := NewSignerClient("signer-token").SendGetRequest("/api/acl/me/")
+
+	require.Error(t, err, "a certificate no system root signed must be refused")
+	assert.False(t, NewSignerClient("signer-token").Insecure)
+}
+
+func TestCheckSignerURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{name: "https", raw: "https://alpacon.ai"},
+		{name: "loopback http", raw: "http://127.0.0.1:8400"},
+		{name: "localhost http", raw: "http://localhost:8400"},
+		{name: "remote http", raw: "http://signer.example.com", wantErr: true},
+		{name: "other scheme", raw: "ftp://signer.example.com", wantErr: true},
+		{name: "no host", raw: "signer.example.com", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := CheckSignerURL(tt.raw)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

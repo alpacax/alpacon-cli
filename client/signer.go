@@ -1,6 +1,9 @@
 package client
 
 import (
+	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -34,6 +37,31 @@ func SignerURL() string {
 	return DefaultSignerURL
 }
 
+// CheckSignerURL refuses a signer URL the signer token must not be sent to:
+// anything but https, except plain http to a loopback host for a signer run on
+// the same machine.
+func CheckSignerURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("%s is not a URL", SignerURLEnvVar)
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme == "http" && isLoopback(parsed.Hostname()) {
+		return nil
+	}
+	return fmt.Errorf("%s must be an https URL; the signer token is not sent over %s", SignerURLEnvVar, parsed.Scheme)
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // SignerAudience returns the Auth0 audience a signer token is requested for,
 // verbatim.
 func SignerAudience() string {
@@ -47,13 +75,14 @@ func SignerAudience() string {
 // command pre-approval ledger. The signer is another host behind another Auth0
 // audience, so it gets its own client: it carries only the signer token, never
 // the workspace login's token or API key, and it never renews a token on a 401,
-// since the only renewal this process has mints a token for the workspace.
-func NewSignerClient(accessToken string, insecure bool) *AlpaconClient {
+// since the only renewal this process has mints a token for the workspace. It
+// always verifies the signer's certificate: a workspace logged in with
+// --insecure opted out for that workspace's host, not for the signer's.
+func NewSignerClient(accessToken string) *AlpaconClient {
 	ac := &AlpaconClient{
-		HTTPClient: httpclient.New(insecure),
+		HTTPClient: httpclient.New(false),
 		BaseURL:    SignerURL(),
 		UserAgent:  utils.GetUserAgent(),
-		Insecure:   insecure,
 		noRenewal:  true,
 	}
 	ac.SetAccessToken(accessToken)

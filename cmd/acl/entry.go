@@ -46,7 +46,7 @@ with --token. Revoked entries are not listed.`,
 		principalID := ""
 		if tokenRef != "" {
 			var err error
-			if principalID, err = session.resolveServiceToken(tokenRef); err != nil {
+			if principalID, err = session.listFilterID(tokenRef); err != nil {
 				utils.CliErrorWithExit("Failed to find service token %q: %s.", tokenRef, err)
 			}
 		}

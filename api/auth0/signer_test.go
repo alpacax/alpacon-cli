@@ -123,3 +123,57 @@ func TestMapAuth0Error_ReturnsSentinels(t *testing.T) {
 	other := &oauthError{Code: "invalid_grant", Desc: "refused"}
 	assert.NotErrorIs(t, mapAuth0Error(other), ErrDeviceCodeDenied)
 }
+
+// The ledger words its own remedy from these sentinels, so PollForToken has to
+// return them unwrapped enough for errors.Is.
+func TestPollForToken_ReturnsSentinels(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want error
+	}{
+		{name: "declined", code: "access_denied", want: ErrDeviceCodeDenied},
+		{name: "still pending when the code runs out", code: "authorization_pending", want: ErrDeviceCodeTimedOut},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orig := requestAccessTokenFunc
+			t.Cleanup(func() { requestAccessTokenFunc = orig })
+			requestAccessTokenFunc = func(string, *AuthEnvResponse) (*TokenResponse, error) {
+				return nil, &oauthError{Code: tt.code, Desc: "refused"}
+			}
+
+			_, err := PollForToken(&DeviceCodeResponse{DeviceCode: "dc", ExpiresIn: 1, Interval: 5}, &AuthEnvResponse{})
+
+			assert.ErrorIs(t, err, tt.want)
+		})
+	}
+}
+
+// The extraction that added the signer variant must leave the login's request
+// as it was: the workspace audience, and offline_access for its refresh token.
+func TestRequestDeviceCode_KeepsTheWorkspaceAudience(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var sent map[string]string
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &sent); err != nil {
+			t.Errorf("decoding the device-code request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"device_code":"dc","user_code":"ABCD-EFGH","expires_in":900,"interval":5}`)
+	}))
+	defer ts.Close()
+	envInfo := &AuthEnvResponse{Auth0: Auth0Config{
+		Method: "auth0", ClientID: "cli-client", Domain: strings.TrimPrefix(ts.URL, "https://"),
+		Audience: "https://alpacon.io/", SchemaName: "frozen-name",
+	}}
+
+	_, err := RequestDeviceCode("myws", ts.Client(), envInfo)
+
+	require.NoError(t, err)
+	assert.Equal(t, "https://alpacon.io/", sent["audience"])
+	assert.Equal(t, "cli-client", sent["client_id"])
+	assert.Contains(t, sent["scope"], "offline_access")
+	assert.Contains(t, sent["scope"], "org:frozen-name")
+}

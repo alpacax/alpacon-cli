@@ -39,6 +39,7 @@ type sessionSeams struct {
 	authorized   string
 	authorizeErr error
 	authorizes   int
+	target       config.SignerTarget
 }
 
 func installSeams(t *testing.T, s *sessionSeams) {
@@ -49,9 +50,19 @@ func installSeams(t *testing.T, s *sessionSeams) {
 		loadConfig, fetchAuthEnv, authorizeSigner, now, newWorkspaceClient = origLoad, origFetch, origAuthorize, origNow, origWorkspace
 	})
 
-	loadConfig = func() (config.Config, error) { return s.cfg, s.cfgErr }
+	loadConfig = func() (config.Config, error) {
+		cfg := s.cfg
+		// A cached token in these fixtures was issued for whichever signer the
+		// test points at, unless the fixture names another one.
+		if cfg.SignerAccessToken != "" && cfg.SignerURL == "" {
+			target := testTarget()
+			cfg.SignerURL, cfg.SignerAudience = target.URL, target.Audience
+		}
+		return cfg, s.cfgErr
+	}
 	fetchAuthEnv = func(string, *http.Client) (*auth0.AuthEnvResponse, error) { return s.env, nil }
-	authorizeSigner = func(config.Config, *auth0.AuthEnvResponse) (string, error) {
+	authorizeSigner = func(_ config.Config, _ *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
+		s.target = target
 		s.authorizes++
 		return s.authorized, s.authorizeErr
 	}
@@ -75,6 +86,11 @@ func stubSigner(t *testing.T, status int, body string) *[]string {
 	t.Cleanup(ts.Close)
 	t.Setenv(client.SignerURLEnvVar, ts.URL)
 	return &auths
+}
+
+// testTarget is the signer the code under test would talk to right now.
+func testTarget() config.SignerTarget {
+	return config.SignerTarget{URL: client.SignerURL(), Audience: client.SignerAudience()}
 }
 
 func loggedIn(signerToken string) config.Config {
@@ -177,13 +193,13 @@ func TestNewLedgerSession_NotACommandACLAdminHere(t *testing.T) {
 func TestNewLedgerSession_DropsARefusedSignerToken(t *testing.T) {
 	seams := &sessionSeams{env: ledgerEnv()}
 	installSeams(t, seams)
+	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type", "code": "token_not_valid"}`)
 	require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
 	cfg, err := config.LoadConfig()
 	require.NoError(t, err)
-	require.NoError(t, config.SaveSignerToken(cfg, "revoked", 86400))
+	require.NoError(t, config.SaveSignerToken(cfg, testTarget(), "revoked", 86400))
 	seams.cfg, err = config.LoadConfig()
 	require.NoError(t, err)
-	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type", "code": "token_not_valid"}`)
 
 	_, err = newLedgerSession()
 
@@ -224,7 +240,7 @@ func TestErrorMessage(t *testing.T) {
 			}))
 			defer ts.Close()
 			t.Setenv(client.SignerURLEnvVar, ts.URL)
-			_, err := client.NewSignerClient("token", false).SendGetRequest("/api/acl/entries/")
+			_, err := client.NewSignerClient("token").SendGetRequest("/api/acl/entries/")
 			require.Error(t, err)
 
 			assert.Equal(t, tt.want, session.errorMessage("list pre-approved commands", err))
@@ -320,7 +336,7 @@ func TestCacheSignerToken_FailsOnceTheConfigMoved(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, tt.move(started))
 
-			token, err := cacheSignerToken(started, "signer", 86400)
+			token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
 
 			require.ErrorContains(t, err, "Run the command again")
 			assert.Empty(t, token)
@@ -334,7 +350,7 @@ func TestCacheSignerToken_ReturnsTheSavedToken(t *testing.T) {
 	started, err := config.LoadConfig()
 	require.NoError(t, err)
 
-	token, err := cacheSignerToken(started, "signer", 86400)
+	token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
 
 	require.NoError(t, err)
 	assert.Equal(t, "signer", token)
@@ -352,4 +368,116 @@ func TestErrorMessage_RedactsTheSignerURL(t *testing.T) {
 	assert.NotContains(t, message, "secret")
 	assert.NotContains(t, message, "token=abc")
 	assert.Contains(t, message, "https://signer.example.com/base")
+}
+
+// A token cached for one signer is never sent to another: a changed
+// ALPACON_AI_URL or audience authorizes again instead.
+func TestNewLedgerSession_DoesNotSendACachedTokenToAnotherSigner(t *testing.T) {
+	cfg := loggedIn("cached")
+	cfg.SignerURL, cfg.SignerAudience = "https://signer.example.com", client.DefaultSignerAudience
+	seams := &sessionSeams{cfg: cfg, env: ledgerEnv(), authorized: "fresh"}
+	installSeams(t, seams)
+	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
+
+	_, err := newLedgerSession()
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, seams.authorizes)
+	assert.Equal(t, testTarget(), seams.target)
+	assert.Equal(t, []string{"Bearer fresh"}, *auths)
+}
+
+func TestNewLedgerSession_RefusesAPlainHTTPSigner(t *testing.T) {
+	seams := &sessionSeams{cfg: loggedIn("cached"), env: ledgerEnv()}
+	installSeams(t, seams)
+	t.Setenv(client.SignerURLEnvVar, "http://signer.example.com")
+
+	_, err := newLedgerSession()
+
+	require.ErrorContains(t, err, "https")
+	assert.Equal(t, 0, seams.authorizes)
+}
+
+// A token refused right after it was issued would be refused again by the next
+// run, so the message points at the configuration instead of a retry.
+func TestNewLedgerSession_AFreshTokenRefusedPointsAtTheAudience(t *testing.T) {
+	seams := &sessionSeams{cfg: loggedIn(""), env: ledgerEnv(), authorized: "fresh"}
+	installSeams(t, seams)
+	stubSigner(t, http.StatusUnauthorized, `{"detail": "Given token not valid for any token type"}`)
+
+	_, err := newLedgerSession()
+
+	require.ErrorContains(t, err, client.SignerAudienceEnvVar)
+	assert.NotContains(t, err.Error(), "Run the command again")
+}
+
+func TestErrorMessage_HasNoSideEffect(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
+	cfg, err := config.LoadConfig()
+	require.NoError(t, err)
+	require.NoError(t, config.SaveSignerToken(cfg, testTarget(), "cached", 86400))
+	refused := statusErr(t, http.StatusUnauthorized, `{"detail": "expired"}`)
+	session := &ledgerSession{token: "cached"}
+
+	_ = session.errorMessage("list pre-approved commands", refused)
+	cfg, err = config.LoadConfig()
+	require.NoError(t, err)
+	assert.Equal(t, "cached", cfg.SignerAccessToken, "wording an error must not change the cache")
+
+	session.dropRefusedToken(refused)
+	cfg, err = config.LoadConfig()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.SignerAccessToken)
+}
+
+func TestCacheSignerToken_FailsAfterALogout(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig(testWorkspaceURL, "ws1", "", "", "access", "refresh", "alpacon.io", 3600, false))
+	started, err := config.LoadConfig()
+	require.NoError(t, err)
+	require.NoError(t, config.DeleteConfig(started))
+
+	token, err := cacheSignerToken(started, testTarget(), "signer", 86400)
+
+	require.ErrorContains(t, err, "logout")
+	assert.Empty(t, token)
+}
+
+// statusErr returns the error the signer client builds for an answer.
+func statusErr(t *testing.T, status int, body string) error {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer ts.Close()
+	t.Setenv(client.SignerURLEnvVar, ts.URL)
+	_, err := client.NewSignerClient("token").SendGetRequest("/api/acl/me/")
+	require.Error(t, err)
+	return err
+}
+
+// The signer finds an entry by id in every workspace the caller administers, so
+// an id from another of them is refused before it is changed.
+func TestCheckEntriesHere(t *testing.T) {
+	const otherEntry = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	const hereEntry = "550e8400-e29b-41d4-a716-446655440000"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		workspace := testWorkspaceID
+		if r.URL.Path == "/api/acl/entries/"+otherEntry+"/" {
+			workspace = "00000000-0000-0000-0000-000000000000"
+		}
+		_, _ = io.WriteString(w, `{"id": "x", "workspace_id": "`+workspace+`"}`)
+	}))
+	defer ts.Close()
+	t.Setenv(client.SignerURLEnvVar, ts.URL)
+	session := &ledgerSession{signer: client.NewSignerClient("token"), workspaceID: testWorkspaceID}
+
+	require.NoError(t, session.checkEntriesHere([]string{hereEntry}))
+	err := session.checkEntriesHere([]string{hereEntry, otherEntry})
+	require.ErrorContains(t, err, "belongs to another workspace")
+	assert.Contains(t, err.Error(), otherEntry)
 }

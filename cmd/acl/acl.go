@@ -42,17 +42,30 @@ func init() {
 	AclCmd.AddCommand(adminCmd)
 }
 
-// resolveServiceToken turns a service token name into the id the ledger
-// stores, in the session's workspace; an id passes through without a lookup.
+// errEmptyServerScope refuses an empty server reference. An empty scope means
+// every server in the workspace, so dropping the empty value would widen the
+// entry past what the caller wrote.
+var errEmptyServerScope = errors.New("a server value is empty; name each server, or leave the scope out on purpose to cover every server")
+
+// resolveServiceToken turns a service token name or id into the id the ledger
+// stores, looked up in the session's workspace. An id is confirmed to be a
+// service token's, so a personal API token's id is refused.
 func (s *ledgerSession) resolveServiceToken(ref string) (string, error) {
-	if utils.IsUUID(strings.TrimSpace(ref)) {
-		return strings.TrimSpace(ref), nil
-	}
 	ac, err := s.workspaceAPI()
 	if err != nil {
 		return "", err
 	}
 	return auth.ResolveServiceTokenID(ac, ref)
+}
+
+// listFilterID is resolveServiceToken for a listing filter: an id passes
+// through, since filtering by an id that is not a service token's only lists
+// nothing, and existing entries of a personal API token stay listable.
+func (s *ledgerSession) listFilterID(ref string) (string, error) {
+	if ref = strings.TrimSpace(ref); utils.IsUUID(ref) {
+		return ref, nil
+	}
+	return s.resolveServiceToken(ref)
 }
 
 // resolveServerScope turns --server values into the ids the ledger stores. An
@@ -85,7 +98,7 @@ func partitionServerRefs(refs []string) (ids []string, names []string, err error
 		ref = strings.TrimSpace(ref)
 		switch {
 		case ref == "":
-			return nil, nil, errors.New("--server has an empty value; name each server, or leave --server out to cover every server")
+			return nil, nil, errEmptyServerScope
 		case utils.IsUUID(ref):
 			ids = append(ids, ref)
 		default:

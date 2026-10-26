@@ -134,10 +134,18 @@ func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
 		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
 	}
-	message := fmt.Sprintf(msg, args...)
-	if !PromptForBool(message) {
+	if !PromptForBool(confirmPrompt(msg, args...)) {
 		CliInfoWithExit("Operation cancelled.")
 	}
+}
+
+// confirmPrompt formats a confirmation prompt with control characters removed,
+// as the Cli* helpers do: an argument can be a server's value, such as an
+// email, whose escape sequences or bidi marks could make the prompt name a
+// different target from the one the answer acts on.
+func confirmPrompt(msg string, args ...any) string {
+	prompt, _ := SanitizeTerminalLine(fmt.Sprintf(msg, args...))
+	return prompt
 }
 
 func PromptForBool(prompt string) bool {

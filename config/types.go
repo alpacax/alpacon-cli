@@ -27,14 +27,13 @@ type Config struct {
 	// the server refuses the endpoints on its own, so this is not a control.
 	KubernetesSurface bool `json:"kubernetes_surface,omitempty"`
 	// SignerAccessToken authorizes the command pre-approval ledger on the
-	// signer, a second Auth0 audience the login's token cannot reach. It comes
-	// with no refresh token, so it lasts until SignerAccessTokenExpiresAt and is
-	// then authorized again. SignerWorkspaceURL is the workspace it was
-	// authorized for: its org claim names that workspace's organization, so it
-	// is not used once the config points at another workspace.
+	// signer. It has no refresh token, so it is authorized again once it
+	// expires. The other three fields bind it to what it was issued for.
 	SignerAccessToken          string `json:"signer_access_token,omitempty"`
 	SignerAccessTokenExpiresAt string `json:"signer_access_token_expires_at,omitempty"`
 	SignerWorkspaceURL         string `json:"signer_workspace_url,omitempty"`
+	SignerURL                  string `json:"signer_url,omitempty"`
+	SignerAudience             string `json:"signer_audience,omitempty"`
 }
 
 // WorkspaceIdentity is the value that names the current workspace to the server

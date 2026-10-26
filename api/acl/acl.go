@@ -4,6 +4,7 @@ package acl
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,6 +62,7 @@ func IssueEntries(ac *client.AlpaconClient, workspaceID string, entries []EntryR
 			return nil, fmt.Errorf("entry %d names principal type %q: only service tokens can be issued pre-approved commands, and a personal API token has no command list on the ledger", i, entry.PrincipalType)
 		}
 	}
+	entries = slices.Clone(entries)
 	for i := range entries {
 		// The ledger reads an empty scope as every server in the workspace; a
 		// nil slice would marshal as null, which is not a list at all.
@@ -78,6 +80,25 @@ func IssueEntries(ac *client.AlpaconClient, workspaceID string, entries []EntryR
 		return nil, err
 	}
 	return issued, nil
+}
+
+// GetEntry reads one entry by id. The signer answers it for every workspace the
+// caller administers, revoked entries included, so the caller compares the
+// entry's workspace_id with the workspace it means to act on.
+func GetEntry(ac *client.AlpaconClient, entryID string) (EntryResponse, error) {
+	pathID, err := api.RequireID(entryID, "entry")
+	if err != nil {
+		return EntryResponse{}, err
+	}
+	body, err := ac.SendGetRequest(api.IDURL(entryURL, pathID, "", nil))
+	if err != nil {
+		return EntryResponse{}, err
+	}
+	var entry EntryResponse
+	if err = json.Unmarshal(body, &entry); err != nil {
+		return EntryResponse{}, err
+	}
+	return entry, nil
 }
 
 // RevokeEntry withdraws one entry. The signer keeps the row readable by id for

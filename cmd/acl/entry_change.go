@@ -1,6 +1,10 @@
 package acl
 
 import (
+	"errors"
+	"fmt"
+	"strings"
+
 	"github.com/alpacax/alpacon-cli/api/acl"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
@@ -32,6 +36,7 @@ trail; to stop an entry for a while instead, disable it.`,
 		}
 
 		session := openLedger()
+		session.requireEntriesHere(args)
 		if len(args) == 1 {
 			if err := acl.RevokeEntry(session.signer, args[0]); err != nil {
 				session.fail("revoke the entry", err)
@@ -78,6 +83,7 @@ func setEntryEnabled(entryID string, enabled bool) {
 	requireEntryIDs([]string{entryID})
 
 	session := openLedger()
+	session.requireEntriesHere([]string{entryID})
 	action, done := "disable the entry", "Disabled"
 	if enabled {
 		action, done = "enable the entry", "Enabled"
@@ -97,4 +103,29 @@ func requireEntryIDs(ids []string) {
 			utils.CliErrorWithExit("%q is not an entry ID. Run 'alpacon acl entry ls' to find it.", id)
 		}
 	}
+}
+
+// requireEntriesHere refuses an entry that belongs to another workspace. The
+// signer finds an entry by id in every workspace the caller administers, while
+// the session confirmed the role only in this one, so without the check an id
+// copied from another workspace would be changed under output that says "this
+// workspace".
+func (s *ledgerSession) requireEntriesHere(ids []string) {
+	if err := s.checkEntriesHere(ids); err != nil {
+		utils.CliErrorWithExit("%s", sentence(upperFirst(err.Error())))
+	}
+}
+
+func (s *ledgerSession) checkEntriesHere(ids []string) error {
+	for _, id := range ids {
+		entry, err := acl.GetEntry(s.signer, id)
+		if err != nil {
+			s.dropRefusedToken(err)
+			return errors.New(s.errorMessage("read entry "+id, err))
+		}
+		if !strings.EqualFold(entry.WorkspaceID, s.workspaceID) {
+			return fmt.Errorf("entry %s belongs to another workspace. Switch to that workspace to change it", id)
+		}
+	}
+	return nil
 }

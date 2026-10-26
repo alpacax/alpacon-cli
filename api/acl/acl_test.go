@@ -8,8 +8,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -174,6 +177,7 @@ func TestIssueEntries_RelaysTheSignersRefusal(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already holds")
+	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
 }
 
 func TestRevokeEntry(t *testing.T) {
@@ -188,12 +192,50 @@ func TestRevokeEntry(t *testing.T) {
 	assert.Equal(t, "/api/acl/entries/"+testEntryID+"/", requests[0].Path)
 }
 
-func TestRevokeEntry_RefusesAnIDThatIsNotOneSegment(t *testing.T) {
+func TestByIDCalls_RefuseAnIDThatIsNotOneSegment(t *testing.T) {
+	t.Parallel()
+	const unsafe = "../admins/" + testEntryID
+	calls := []struct {
+		name string
+		call func(ac *client.AlpaconClient) error
+	}{
+		{name: "get", call: func(ac *client.AlpaconClient) error { _, err := GetEntry(ac, unsafe); return err }},
+		{name: "revoke", call: func(ac *client.AlpaconClient) error { return RevokeEntry(ac, unsafe) }},
+		{name: "enable", call: func(ac *client.AlpaconClient) error { _, err := SetEntryEnabled(ac, unsafe, true); return err }},
+	}
+	for _, tt := range calls {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ac, stub := newStubSigner(t, func(*http.Request) (int, string) { return http.StatusNoContent, "" })
+
+			require.ErrorIs(t, tt.call(ac), utils.ErrInvalidID)
+			assert.Empty(t, stub.recorded())
+		})
+	}
+}
+
+// An admin grant id comes from the signer's own list, so a malformed one is the
+// server's fault rather than the caller's.
+func TestRevokeAdmin_RefusesAnUnusableGrantID(t *testing.T) {
 	t.Parallel()
 	ac, stub := newStubSigner(t, func(*http.Request) (int, string) { return http.StatusNoContent, "" })
 
-	require.Error(t, RevokeEntry(ac, "../admins/"+testEntryID))
+	require.ErrorIs(t, RevokeAdmin(ac, "../entries"), api.ErrUnusableID)
 	assert.Empty(t, stub.recorded())
+}
+
+func TestGetEntry(t *testing.T) {
+	t.Parallel()
+	ac, stub := newStubSigner(t, ok(`{"id": "`+testEntryID+`", "workspace_id": "`+testWorkspaceID+`", "command_pattern": "uptime"}`))
+
+	entry, err := GetEntry(ac, testEntryID)
+
+	require.NoError(t, err)
+	assert.Equal(t, testWorkspaceID, entry.WorkspaceID)
+	requests := stub.recorded()
+	require.Len(t, requests, 1)
+	assert.Equal(t, http.MethodGet, requests[0].Method)
+	assert.Equal(t, "/api/acl/entries/"+testEntryID+"/", requests[0].Path)
 }
 
 func TestRevokeEntries(t *testing.T) {
@@ -280,6 +322,7 @@ func TestRevokeAdmin_RelaysTheLastAdminRefusal(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "This is the last admin of the workspace.")
+	assert.Equal(t, http.StatusBadRequest, utils.HTTPStatusCode(err))
 }
 
 func TestFindAdmin(t *testing.T) {
@@ -332,7 +375,7 @@ func TestToEntryAttributes(t *testing.T) {
 	assert.Equal(t, "never", attributes[0].ExpiresAt)
 	assert.Equal(t, "legacy (api_token)", attributes[1].Principal)
 	assert.Equal(t, "all servers", attributes[1].Servers)
-	assert.NotEqual(t, "never", attributes[1].ExpiresAt)
+	assert.Equal(t, utils.TimeUtils(time.Date(2027, 1, 15, 10, 0, 0, 0, time.UTC)), attributes[1].ExpiresAt)
 }
 
 func TestEntryAttributes_JSONFieldNames(t *testing.T) {
@@ -380,4 +423,11 @@ func TestCapability_AdministersNeedsTheFlag(t *testing.T) {
 	t.Parallel()
 	capability := Capability{IsLedgerAdmin: false, WorkspaceIDs: []string{testWorkspaceID}}
 	assert.False(t, capability.Administers(testWorkspaceID))
+}
+
+func TestAdminAttributes_JSONFieldNames(t *testing.T) {
+	t.Parallel()
+	body, err := json.Marshal(AdminAttributes{ID: "grant-1", Subject: "auth0|alice", Email: "alice@example.com"})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id": "grant-1", "subject": "auth0|alice", "email": "alice@example.com", "granted_by": "", "created_at": ""}`, string(body))
 }
