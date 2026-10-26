@@ -387,7 +387,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // user/group, work-session, or --env keys) so the pending-approval message can
 // tell a human exactly what to re-run once the request is approved. It uses --
 // before the command so remote flags are never re-parsed as alpacon flags.
-// The -u, -g and --work-session values come quoted from runAsFlags.
+// The -u, -g and --work-session values come quoted from runAsFlags, and the
+// server is quoted with argvQuote, as useFileExecutionRefusal quotes it.
 // The Command stays a pure, executable string; when --env keys are present the
 // caveat rides in Description, since the rerun re-reads each value from the
 // shell and a machine consumer replaying Command verbatim would otherwise
@@ -427,7 +428,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		if parsed.File.ReuseDays > 0 {
 			parts = append(parts, "--reuse-days "+strconv.Itoa(parsed.File.ReuseDays))
 		}
-		parts = append(parts, parsed.Server)
+		parts = append(parts, argvQuote(parsed.Server))
 		if len(parsed.File.Args) > 0 {
 			parts = append(parts, "--")
 			for _, a := range parsed.File.Args {
@@ -435,7 +436,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 			}
 		}
 	} else {
-		parts = append(parts, parsed.Server, "--", parsed.Command)
+		parts = append(parts, argvQuote(parsed.Server), "--", parsed.Command)
 	}
 
 	action := utils.NextAction{Command: strings.Join(parts, " ")}
