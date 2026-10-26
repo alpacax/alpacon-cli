@@ -1474,25 +1474,32 @@ func TestReplay_OlderProxyKeepsReconnectWithoutOffset(t *testing.T) {
 }
 
 func TestReplay_OlderProxyReconnectDoesNotDuplicateBacklog(t *testing.T) {
-	tests := []struct {
-		name         string
-		firstBacklog string
-	}{
-		{name: "legacy output", firstBacklog: "history"},
-		{name: "no frames"},
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{backlog: "history", closeCode: websocket.CloseServiceRestart},
+		replayRound{closeCode: websocket.CloseAbnormalClosure},
+		replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
+	)
+	assert.Equal(t, "historylive", stdout)
+	for _, query := range queries[1:] {
+		assert.Equal(t, []string{""}, query["replay_epoch"])
+		assert.NotContains(t, query, "replay")
+		assert.NotContains(t, query, "replay_from")
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			queries, stdout, _ := runReplaySession(t,
-				replayRound{backlog: tt.firstBacklog, closeCode: websocket.CloseServiceRestart},
-				replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
-			)
-			assert.Equal(t, tt.firstBacklog+"live", stdout)
-			assert.Equal(t, []string{""}, queries[1]["replay_epoch"])
-			assert.NotContains(t, queries[1], "replay")
-			assert.NotContains(t, queries[1], "replay_from")
-		})
-	}
+}
+
+func TestReplay_DropBeforeFirstFrameReplaysBacklogOnce(t *testing.T) {
+	queries, stdout, _ := runReplaySession(t,
+		replayRound{closeCode: websocket.CloseAbnormalClosure},
+		replayRound{backlog: "history", closeCode: websocket.CloseServiceRestart},
+		replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
+	)
+	assert.Equal(t, []string{""}, queries[1]["replay_epoch"])
+	assert.Equal(t, "1", queries[1].Get("replay"))
+	assert.NotContains(t, queries[1], "replay_from")
+	assert.Equal(t, "historylive", stdout)
+	assert.Equal(t, []string{""}, queries[2]["replay_epoch"])
+	assert.NotContains(t, queries[2], "replay")
+	assert.NotContains(t, queries[2], "replay_from")
 }
 
 func TestReplay_UnknownTextBeforeOriginIsIgnored(t *testing.T) {
@@ -1536,8 +1543,6 @@ type replayRound struct {
 	closeCode int
 }
 
-// runReplaySession plays successive channels of one session, including real
-// close frames and transport drops, through the production reconnect loop.
 func runReplaySession(t *testing.T, rounds ...replayRound) ([]url.Values, string, string) {
 	t.Helper()
 	var upgrades atomic.Int32

@@ -26,8 +26,9 @@ type WebsocketClient struct {
 }
 
 type replayState struct {
-	epoch  string
-	offset uint64
+	epoch         string
+	offset        uint64
+	outputWritten bool
 }
 
 // connection is one WebSocket connection of a session. A session outlives its

@@ -328,7 +328,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	dialURL := websocketURL
 	if wsClient.reconnect != nil {
 		query := map[string]string{"replay_epoch": wsClient.replay.epoch}
-		if !reconnected || wsClient.replay.epoch != "" {
+		if wsClient.replay.epoch != "" || !wsClient.replay.outputWritten {
 			query["replay"] = "1"
 		}
 		if reconnected && wsClient.replay.epoch != "" {
@@ -722,7 +722,8 @@ func (c *connection) readFromServer() {
 				continue
 			}
 			originSeen = true
-			*c.replay = replayState{epoch: origin.Epoch, offset: origin.Offset}
+			c.replay.epoch = origin.Epoch
+			c.replay.offset = origin.Offset
 			if origin.Truncated && c.reconnected && !warned {
 				_, _ = fmt.Fprint(c.notice, "[Some output from the disconnect was not kept; showing what remains.]\r\n")
 				warned = true
@@ -733,9 +734,11 @@ func (c *connection) readFromServer() {
 			} else {
 				// A proxy without origins cannot accept an offset from a prior connection.
 				legacy = true
-				*c.replay = replayState{}
+				c.replay.epoch = ""
+				c.replay.offset = 0
 			}
-			_, _ = os.Stdout.Write(message)
+			n, _ := os.Stdout.Write(message)
+			c.replay.outputWritten = c.replay.outputWritten || n > 0
 		}
 	}
 }
