@@ -87,6 +87,12 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 	CliUsageErrorEnvelopeWithExit("", msg, args...)
 }
 
+// CliArgumentErrorWithExit refuses a bad argument with exit 1 and error_code usage_error, for the
+// commands whose bad input exited 1 before exit 2 was defined.
+func CliArgumentErrorWithExit(msg string, args ...any) {
+	CliErrorWithCode(ExitCodeGeneralError, ErrorCodeUsage, msg, args...)
+}
+
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 	var cause error
 	for _, arg := range args {

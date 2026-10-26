@@ -94,7 +94,7 @@ func Execute() {
 		return
 	}
 	if jsonMode {
-		utils.CliErrorWithCode(1, utils.ErrorCodeUsage, "%s", err)
+		utils.CliArgumentErrorWithExit("%s", err)
 	}
 	utils.CliErrorWithExit("While executing the command: %s", err)
 }
