@@ -325,20 +325,24 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 
 func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	reconnected := wsClient.conn != nil
-	query := map[string]string{"replay_epoch": wsClient.replay.epoch}
-	if !reconnected {
-		query["replay"] = "1"
-	} else if wsClient.replay.epoch != "" {
-		query["replay_from"] = strconv.FormatUint(wsClient.replay.offset, 10)
+	dialURL := websocketURL
+	if wsClient.reconnect != nil {
+		query := map[string]string{"replay_epoch": wsClient.replay.epoch, "replay": "1"}
+		if reconnected && wsClient.replay.epoch != "" {
+			query["replay_from"] = strconv.FormatUint(wsClient.replay.offset, 10)
+		}
+		dialURL = utils.SetQuery(websocketURL, query, "replay", "replay_from")
 	}
-	dialURL := utils.SetQuery(websocketURL, query, "replay", "replay_from")
 	conn, resp, err := websocket.DefaultDialer.Dial(dialURL, wsClient.header)
 	if err != nil {
 		return utils.WebsocketDialError("websocket connection failed", err, resp)
 	}
 	wsClient.conn = newConnection(conn)
 	wsClient.conn.replay = &wsClient.replay
-	wsClient.conn.reconnected = reconnected
+	if wsClient.reconnect != nil {
+		wsClient.conn.reconnected = reconnected
+		wsClient.conn.notice = wsClient.reconnect.notice
+	}
 
 	return nil
 }
@@ -717,7 +721,7 @@ func (c *connection) readFromServer() {
 			originSeen = true
 			*c.replay = replayState{epoch: origin.Epoch, offset: origin.Offset}
 			if origin.Truncated && c.reconnected && !warned {
-				_, _ = fmt.Fprintln(os.Stderr, "[Some output from the disconnect was not kept; showing what remains.]")
+				_, _ = fmt.Fprint(c.notice, "[Some output from the disconnect was not kept; showing what remains.]\r\n")
 				warned = true
 			}
 		case websocket.BinaryMessage:

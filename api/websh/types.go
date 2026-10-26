@@ -41,6 +41,7 @@ type connection struct {
 	pumps       sync.WaitGroup
 	replay      *replayState
 	reconnected bool
+	notice      io.Writer
 }
 
 // reconnector is what an interactive session needs to survive a dropped
