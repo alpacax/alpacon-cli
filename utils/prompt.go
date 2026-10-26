@@ -142,10 +142,16 @@ func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
 		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
 	}
-	message := fmt.Sprintf(msg, args...)
-	if !PromptForBool(message) {
+	if !PromptForBool(confirmPrompt(msg, args...)) {
 		CliInfoWithExit("Operation cancelled.")
 	}
+}
+
+// confirmPrompt formats a confirmation prompt without control characters, so a
+// server's value such as an email cannot repaint what the answer acts on.
+func confirmPrompt(msg string, args ...any) string {
+	prompt, _ := SanitizeTerminalLine(fmt.Sprintf(msg, args...))
+	return prompt
 }
 
 func PromptForBool(prompt string) bool {
@@ -173,4 +179,27 @@ func promptForBool(r io.Reader, prompt string) bool {
 		}
 		CliWarning("Invalid input. Please enter 'y' (yes) or 'n' (no).")
 	}
+}
+
+// PrintDeviceCodePrompt sanitizes the URL and the code before Blue and Bold go
+// on—the reverse order would strip the highlight along with the escapes. Both
+// come from the authorization server, and a person reads them off the screen.
+//
+// The line strip and not the block one: a URL and a device code are single
+// values, so a newline in either is the server writing its own line into a
+// prompt the CLI is supposed to own.
+//
+// It hands back the URL it printed, because that is the one the browser has to
+// be opened on. Opening the raw value would take the operator somewhere other
+// than the address they just read off the screen, which is the whole thing this
+// is here to prevent.
+func PrintDeviceCodePrompt(w io.Writer, verificationURI, userCode string) (printedURI string) {
+	uri, uriAltered := SanitizeTerminalLine(verificationURI)
+	code, codeAltered := SanitizeTerminalLine(userCode)
+	if uriAltered || codeAltered {
+		WarnTerminalTextAltered(w, "")
+	}
+	_, _ = fmt.Fprintf(w, "\nPlease authenticate by visiting:\n%s\n\n", Blue(uri))
+	_, _ = fmt.Fprintf(w, "Verification code: %s\n\n", Bold(code))
+	return uri
 }

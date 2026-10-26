@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/alpacax/alpacon-cli/cmd/acl"
 	"github.com/alpacax/alpacon-cli/cmd/agent"
 	apicmd "github.com/alpacax/alpacon-cli/cmd/api"
 	"github.com/alpacax/alpacon-cli/cmd/approval"
@@ -196,6 +197,9 @@ func init() {
 
 	// kube
 	RootCmd.AddCommand(kube.KubeCmd)
+
+	// acl
+	RootCmd.AddCommand(acl.AclCmd)
 
 	// whoami
 	RootCmd.AddCommand(whoamiCmd)

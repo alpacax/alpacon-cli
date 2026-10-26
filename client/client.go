@@ -475,7 +475,7 @@ func (ac *AlpaconClient) sendRequestWithStatus(req *http.Request) ([]byte, int, 
 // renewedRequest reports whether err is a renewable stale-token rejection and,
 // if the renewal succeeds, returns the request to replay.
 func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Request, bool) {
-	if !isStaleCredential(err) {
+	if ac.noRenewal || !isStaleCredential(err) {
 		return nil, false
 	}
 	sent, ok := strings.CutPrefix(req.Header.Get("Authorization"), bearerPrefix)

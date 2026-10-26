@@ -431,7 +431,26 @@ $ alpacon token acl <type> ls     my-token
 $ alpacon token acl <type> delete <acl-id>
 ```
 
-On servers that manage command ACLs on the command pre-approval ledger, `alpacon token acl command add` and `delete` are refused with `command_acl_moved`; a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console, and a personal API token has no command list on the ledger. `alpacon token acl command ls` is unaffected, and servers without the ledger still accept these writes.
+On servers that manage command ACLs on the command pre-approval ledger, `alpacon token acl command add` and `delete` are refused with `command_acl_moved`; a Command ACL admin issues or revokes the entry with `alpacon acl entry` (below) or under Pre-approved commands on the service token's page in the web console, and a personal API token has no command list on the ledger. `alpacon token acl command ls` is unaffected, and servers without the ledger still accept these writes.
+
+### Pre-approved commands
+On workspaces that keep command ACLs on the command pre-approval ledger, `alpacon acl` manages the same entries the web console shows under Pre-approved commands: each one pre-approves a command pattern for a service token, run as one account, on chosen servers or on every server in the workspace. A personal API token has no command list on the ledger: `alpacon acl entry add` refuses one before sending anything, while entries an API token already holds can still be listed and revoked.
+
+```bash
+$ alpacon acl entry ls [--token deploy-bot]
+$ alpacon acl entry add --token deploy-bot --command "docker compose *" \
+    --username deploy --server web-01,web-02 [--expires-at 2027-01-15T10:00:00Z]
+$ alpacon acl entry add --file entries.json      # several entries, all or nothing
+$ alpacon acl entry disable <entry-id>           # stop matching, keep the entry
+$ alpacon acl entry enable  <entry-id>
+$ alpacon acl entry rm <entry-id>...             # revoke
+
+$ alpacon acl admin ls
+$ alpacon acl admin grant 'auth0|65f0c1d2e3b4a5c6d7e8f901' --email alice@example.com
+$ alpacon acl admin revoke alice@example.com
+```
+
+Only a Command ACL admin of the workspace may use these commands, and only with a browser login: the ledger is kept by the command signer, which accepts a person's own sign-in and no API token. The first `alpacon acl` command asks you to authorize the signer in the browser, the same way `alpacon login` does. That authorization is stored in `~/.alpacon/config.json` for the workspace it was given for, is used only with the command signer and audience it was issued for, is not renewed in the background, and is asked for again when it expires; `alpacon logout` and a new `alpacon login` remove it. An entry added without `--server` covers every server in the workspace, and the signer warns about it. The signer refuses to revoke the last Command ACL admin. On a workspace that does not use the ledger, `alpacon acl` says so and exits 1. Set `ALPACON_AI_URL` (and, for a signer behind another Auth0 API, `ALPACON_AI_AUDIENCE`) to reach a self-hosted command signer; Alpacon Cloud workspaces need no configuration. The signer URL must be https (plain http is accepted only for a loopback host), and its certificate is verified even when the workspace login used `--insecure`.
 
 ### Agent (Alpamon) management
 ```bash
