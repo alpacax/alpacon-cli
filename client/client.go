@@ -132,6 +132,7 @@ type apiError struct {
 	// can emit a JSON object too. The stale-token retry reads it to drop
 	// gateway refusals, and nothing may read it as proof of who wrote the body.
 	apiPayload bool
+	body       []byte
 }
 
 // retryAfterError carries the server's Retry-After hint so a retrying caller
@@ -148,7 +149,7 @@ func (e *retryAfterError) RetryAfter() time.Duration { return e.retryAfter }
 func NewAlpaconAPIClient() (*AlpaconClient, error) {
 	validConfig, err := config.LoadConfig()
 	if err != nil {
-		return nil, fmt.Errorf("configuration file not found or invalid: %v. Please run 'alpacon login' to configure your connection", err)
+		return nil, fmt.Errorf("configuration file not found or invalid: %w. Please run 'alpacon login' to configure your connection", err)
 	}
 
 	httpClient := httpclient.New(validConfig.Insecure)
@@ -229,6 +230,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		gate:       gate,
 		missing:    missing,
 		apiPayload: isJSONObject(body),
+		body:       body,
 	}
 }
 
@@ -1131,12 +1133,12 @@ func (e *apiError) ErrorMissing() []string {
 	return e.missing
 }
 
-func (e *apiError) HTTPStatusCode() int {
-	return e.statusCode
+func (e *apiError) ErrorFields() map[string]any {
+	return errorExtraFields(e.body)
 }
 
-func newAPIError(message, code, source, gate, axis, next string, missing []string) error {
-	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing}
+func (e *apiError) HTTPStatusCode() int {
+	return e.statusCode
 }
 
 func redirectRefusedStatus(resp *http.Response) int {
@@ -1189,7 +1191,23 @@ func withRetryAfter(err error, header http.Header) error {
 // envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
 	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	return newAPIError(message, code, source, gate, axis, next, missing)
+	return &apiError{message: message, code: code, source: source, gate: gate, axis: axis, next: next, missing: missing, body: body}
+}
+
+func errorExtraFields(body []byte) map[string]any {
+	var parsed map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
+	if decoder.Decode(&parsed) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return nil
+	}
+	if _, isEnvelopeCode := parsed["code"].(string); isEnvelopeCode {
+		delete(parsed, "code")
+	}
+	if len(parsed) == 0 {
+		return nil
+	}
+	return parsed
 }
 
 func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {

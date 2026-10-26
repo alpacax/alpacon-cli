@@ -129,6 +129,7 @@ func TestSendGetRequest_RefusedRedirectKeepsStatus(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, http.StatusFound, utils.HTTPStatusCode(err))
+	assert.Equal(t, "http_302", utils.ClassifyError(err))
 }
 
 // The refresh-token grant is a POST, and Go replays a POST body on a 307 to
