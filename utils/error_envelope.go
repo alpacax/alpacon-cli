@@ -33,7 +33,7 @@ func newFailureEnvelope(exitCode int, errorCode, operation string, err error, me
 		Context:    cliErrorCtx{Operation: operation},
 		HTTPStatus: HTTPStatusCode(err),
 		RetryAfter: retryAfterSeconds(RetryAfter(err)),
-		Server:     ServerErrorFields(err),
+		Server:     serverErrorFields(err),
 	}
 }
 

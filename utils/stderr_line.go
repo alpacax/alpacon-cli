@@ -24,3 +24,10 @@ func (stderrTracker) Write(p []byte) (int, error) {
 func TrackedStderr() io.Writer {
 	return stderrTracker{}
 }
+
+// StderrForChild returns os.Stderr itself, so the child still sees a terminal, and treats
+// the line as left open, since the CLI cannot see what the child writes.
+func StderrForChild() *os.File {
+	stderrMidLine.Store(true)
+	return os.Stderr
+}

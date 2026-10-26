@@ -149,7 +149,7 @@ func PrintJSONError[T any](w io.Writer, envelope JSONErrorEnvelope[T]) {
 		}, "")
 	}
 	line = append(line, '\n')
-	if w == io.Writer(os.Stderr) {
+	if w == os.Stderr {
 		if stderrMidLine.Swap(false) || activeSpinners.Load() > 0 {
 			line = append([]byte{'\n'}, line...)
 		}

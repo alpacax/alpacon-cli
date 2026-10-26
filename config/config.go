@@ -234,7 +234,7 @@ func LoadConfig() (Config, error) {
 	file, err := openCheckedConfigFile(configFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return Config{}, fmt.Errorf("%w: %w", utils.ErrNotLoggedIn, err)
+			return Config{}, utils.MarkNotLoggedIn(err)
 		}
 		return Config{}, err
 	}

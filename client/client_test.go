@@ -3162,14 +3162,18 @@ func TestCheckAuthStatusKeepsExtraFields(t *testing.T) {
 	t.Parallel()
 	err := checkAuthStatus(http.StatusForbidden, []byte(`{"code":"rbac_permission_required","gate":"role"}`))
 
-	assert.Equal(t, map[string]any{"gate": "role"}, utils.ServerErrorFields(err))
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, map[string]any{"gate": "role"}, apiErr.ErrorFields())
 }
 
 func TestAPIErrorFieldsKeepLargeIntegersVerbatim(t *testing.T) {
 	t.Parallel()
 	err := parseAPIError([]byte(`{"code":"x","detail":"d","sequence":9007199254740993}`), http.StatusConflict)
 
-	encoded, marshalErr := json.Marshal(utils.ServerErrorFields(err))
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	encoded, marshalErr := json.Marshal(apiErr.ErrorFields())
 
 	require.NoError(t, marshalErr)
 	assert.JSONEq(t, `{"detail":"d","sequence":9007199254740993}`, string(encoded))

@@ -114,7 +114,7 @@ func TestServerErrorFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := ServerErrorFields(tt.err)
+			got := serverErrorFields(tt.err)
 			if tt.want == nil {
 				assert.Nil(t, got)
 				return

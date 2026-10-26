@@ -156,7 +156,7 @@ func promptForBool(r io.Reader, prompt string) bool {
 	reader := bufio.NewReader(r)
 
 	for {
-		fmt.Fprintf(TrackedStderr(), "%s [y/n]: ", prompt)
+		_, _ = fmt.Fprintf(TrackedStderr(), "%s [y/n]: ", prompt)
 		line, err := reader.ReadString('\n')
 		noteEchoedNewline(r, err)
 		input := strings.TrimSpace(strings.ToLower(line))

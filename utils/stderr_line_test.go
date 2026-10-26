@@ -29,7 +29,7 @@ func TestPrintJSONErrorStartsOnItsOwnLine(t *testing.T) {
 		wantHead  string
 	}{
 		{"after a prompt left open", "Username: ", 2, "Username: \n"},
-		{"after a child's unterminated output", "fail", 2, "fail\n"},
+		{"after unterminated output", "fail", 2, "fail\n"},
 		{"at line start", "Warning: slow\n", 2, "Warning: slow\n"},
 		{"with nothing written", "", 1, ""},
 	}
@@ -62,4 +62,18 @@ func TestPrintJSONErrorLeavesStderrAtLineStart(t *testing.T) {
 	})
 
 	assert.NotContains(t, stderr, "\n\n")
+}
+
+// Serial: swaps os.Stderr and reads the process-wide line state.
+func TestPrintJSONErrorStartsOnItsOwnLineAfterAChild(t *testing.T) {
+	stderrMidLine.Store(false)
+	t.Cleanup(func() { stderrMidLine.Store(false) })
+
+	_, stderr := testutil.CaptureOutput(t, func() {
+		_, _ = fmt.Fprint(StderrForChild(), "fail")
+		PrintJSONError(os.Stderr, JSONErrorEnvelope[cliErrorCtx]{ExitCode: 1, ErrorCode: ErrorCodeCLI, Message: "boom"})
+	})
+
+	assert.True(t, strings.HasPrefix(stderr, "fail\n"), "stderr: %q", stderr)
+	lastLineIsEnvelope(t, stderr)
 }

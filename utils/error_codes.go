@@ -24,6 +24,16 @@ const (
 // ErrNotLoggedIn marks a missing config file; a malformed or unreadable one stays cli_error.
 var ErrNotLoggedIn = errors.New("not logged in")
 
+type notLoggedInError struct{ err error }
+
+func (e notLoggedInError) Error() string   { return e.err.Error() }
+func (e notLoggedInError) Unwrap() []error { return []error{ErrNotLoggedIn, e.err} }
+
+// MarkNotLoggedIn tags err with ErrNotLoggedIn and leaves its message as it was.
+func MarkNotLoggedIn(err error) error {
+	return notLoggedInError{err: err}
+}
+
 var serverCodeShape = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 // HTTPErrorCode is the synthetic code for a server or proxy answer that carried none.
@@ -31,8 +41,8 @@ func HTTPErrorCode(status int) string {
 	return fmt.Sprintf("http_%d", status)
 }
 
-// ClassifyError picks the error_code for err: the server's code, else network_error for a
-// transport failure, else http_<status>, else cli_error. A missing config file is not_logged_in.
+// ClassifyError picks the error_code for err: the server's code, else http_<status>, else
+// network_error for a transport failure, else cli_error. A missing config file is not_logged_in.
 func ClassifyError(err error) string {
 	if code := StructuredErrorCode(err); code != "" {
 		return code
@@ -95,7 +105,7 @@ type fieldsCarrier interface {
 	ErrorFields() map[string]any
 }
 
-func ServerErrorFields(err error) map[string]any {
+func serverErrorFields(err error) map[string]any {
 	for e := range errorChain(err) {
 		if carrier, ok := e.(fieldsCarrier); ok {
 			if fields := carrier.ErrorFields(); len(fields) > 0 {

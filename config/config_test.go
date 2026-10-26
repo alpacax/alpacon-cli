@@ -433,6 +433,7 @@ func TestLoadConfig_MissingFileIsNotLoggedIn(t *testing.T) {
 
 	require.ErrorIs(t, err, utils.ErrNotLoggedIn)
 	require.ErrorIs(t, err, os.ErrNotExist)
+	assert.NotContains(t, err.Error(), utils.ErrNotLoggedIn.Error())
 	assert.Equal(t, utils.ErrorCodeNotLoggedIn, utils.ClassifyError(err))
 }
 
