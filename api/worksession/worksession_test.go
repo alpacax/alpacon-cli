@@ -765,6 +765,7 @@ func TestFormatDuration(t *testing.T) {
 		{30 * time.Hour, "30:00:00"},
 		{45 * time.Second, "00:00:45"},
 		{1500 * time.Millisecond, "00:00:02"},
+		{400 * time.Millisecond, "00:00:01"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -772,4 +773,17 @@ func TestFormatDuration(t *testing.T) {
 			assert.Equal(t, tt.want, FormatDuration(tt.in))
 		})
 	}
+}
+
+func TestGetClusterWorkSessionsRefusesAnUnusableID(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"../other","status":"pending"}]}`))
+	}))
+	defer ts.Close()
+
+	_, err := GetClusterWorkSessions(newTestClient(ts), ClusterSessionFilter{ClusterID: "c-1"})
+
+	require.ErrorIs(t, err, api.ErrUnusableID)
 }

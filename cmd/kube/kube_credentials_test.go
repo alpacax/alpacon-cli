@@ -3,9 +3,11 @@ package kube
 import (
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,14 +107,20 @@ func TestClusterServer(t *testing.T) {
 
 func TestRetrieveWithinGivesUp(t *testing.T) {
 	t.Parallel()
-	block := make(chan struct{})
-	defer close(block)
-	_, err := retrieveWithin(10*time.Millisecond, func() (*kubernetes.KubeSessionDetail, error) {
-		<-block
-		return nil, nil
+	synctest.Test(t, func(t *testing.T) {
+		block := make(chan struct{})
+		start := time.Now()
+
+		_, err := retrieveWithin(retrieveTimeout, func() (*kubernetes.KubeSessionDetail, error) {
+			<-block
+			return nil, nil
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no answer within")
+		assert.Equal(t, retrieveTimeout, time.Since(start))
+		close(block)
 	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no answer within")
 }
 
 func TestStoreRecordsFindsEveryWorkspace(t *testing.T) {
@@ -130,8 +138,19 @@ func TestStoreRecordsFindsEveryWorkspace(t *testing.T) {
 	assert.Len(t, got, 2)
 }
 
+// loggedIn writes a login under a fresh HOME and returns it.
+func loggedIn(t *testing.T) config.Config {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	require.NoError(t, config.CreateConfig("https://ws.example.com", "ws", "", "", "access-1", "refresh-1", "", 3600, false))
+	login, err := config.LoadConfig()
+	require.NoError(t, err)
+	return login
+}
+
+// Serial: it sets HOME.
 func TestSaveExtendedRecordKeepsANewerLogin(t *testing.T) {
-	t.Parallel()
+	login := loggedIn(t)
 	store := kubeSessionStore{dir: t.TempDir()}
 	newer := testRecord("prod-east")
 	newer.KubeSessionID = "k-2"
@@ -139,10 +158,46 @@ func TestSaveExtendedRecordKeepsANewerLogin(t *testing.T) {
 
 	stale := testRecord("prod-east")
 	stale.TokenExpiredAt = stale.TokenExpiredAt.Add(time.Hour)
-	saveExtendedRecord(store, stale)
+	saveExtendedRecord(store, login, stale)
 
 	got, err := store.read(testKey("prod-east"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, "k-2", got.KubeSessionID, "a record from an older session never replaces a newer login's")
+}
+
+// Serial: it sets HOME. A moved expiry is not saved for a login a logout
+// ended, or the record the logout removed would come back.
+func TestSaveExtendedRecordSkipsAfterALogout(t *testing.T) {
+	login := loggedIn(t)
+	store := kubeSessionStore{dir: t.TempDir()}
+	record := testRecord("prod-east")
+	require.NoError(t, store.write(record))
+	require.NoError(t, config.DeleteConfig(login))
+
+	moved := record
+	moved.TokenExpiredAt = record.TokenExpiredAt.Add(time.Hour)
+	saveExtendedRecord(store, login, moved)
+
+	got, err := store.read(record.key())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, record.TokenExpiredAt, got.TokenExpiredAt)
+}
+
+// Serial: it sets HOME. A logout during a kube login's approval wait leaves
+// the lock that login holds, so a second login to the cluster is still kept
+// out instead of locking a new file at the same path.
+func TestLogoutKeepsTheLockAWaitingLoginHolds(t *testing.T) {
+	login := loggedIn(t)
+	store, err := defaultKubeSessionStore()
+	require.NoError(t, err)
+	held, err := store.lock(testKey("prod-east"))
+	require.NoError(t, err)
+	defer func() { _ = held.Release() }()
+
+	require.NoError(t, config.DeleteConfig(login))
+
+	_, err = store.lock(testKey("prod-east"))
+	require.ErrorIs(t, err, errStoreLocked)
 }

@@ -205,7 +205,7 @@ func DeleteConfig(login Config) error {
 		// The kube session records hold bearer tokens that outlive this login.
 		// They go first: the config is what a retry checks the login against,
 		// so removing it first would let a retry pass over records left behind.
-		if err := os.RemoveAll(filepath.Join(dir, KubeSessionDir)); err != nil {
+		if err := deleteKubeSessions(filepath.Join(dir, KubeSessionDir)); err != nil {
 			return fmt.Errorf("failed to delete the saved kube sessions: %w", err)
 		}
 		// Remove what the link names, or the refresh token stays in the dotfiles tree;
@@ -218,6 +218,47 @@ func DeleteConfig(login Config) error {
 			return fmt.Errorf("failed to delete config file: %v", err)
 		}
 		return nil
+	})
+}
+
+// deleteKubeSessions removes the saved kube session records and any staging
+// file a killed write left, all of which can hold a token. The lock files and
+// the directory stay: a kube login waiting on approval holds one of those
+// locks, and removing the file under it would let a second login lock a new
+// file at the same path.
+func deleteKubeSessions(dir string) error {
+	for _, pattern := range []string{"*.json", "*.tmp"} {
+		paths, err := filepath.Glob(filepath.Join(dir, pattern))
+		if err != nil {
+			return err
+		}
+		for _, path := range paths {
+			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// WhileLoggedIn runs fn under the config lock while the config still holds
+// login's credentials, and returns ErrLoginChanged without running it once a
+// logout or another login has replaced them. A logout takes the same lock, so
+// nothing fn writes outside the config can land after the logout that should
+// have removed it. fn must not write the config: the lock is not reentrant.
+func WhileLoggedIn(login Config, fn func() error) error {
+	return withConfigLock(func() error {
+		cfg, err := LoadConfig()
+		if errors.Is(err, fs.ErrNotExist) {
+			return ErrLoginChanged
+		}
+		if err != nil {
+			return fmt.Errorf("failed to load config: %w", err)
+		}
+		if !cfg.sameLogin(login) {
+			return ErrLoginChanged
+		}
+		return fn()
 	})
 }
 

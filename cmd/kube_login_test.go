@@ -212,7 +212,7 @@ func TestKubeLoginCreatesAClusterSessionAndWritesTheExecContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 
 	stdout, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", path,
-		"--intent", "debug api pods", "--scope", "kube_exec", "--duration", "90m")
+		"--purpose", "debug api pods", "--scope", "kube_exec", "--duration", "90m")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.Empty(t, stdout)
@@ -274,7 +274,7 @@ func TestKubeLoginAgainReusesTheSessionAndClosesThePreviousKubeSession(t *testin
 	ts := srv.start(t)
 	home := kubeLoginHome(t, ts.URL)
 	path := filepath.Join(t.TempDir(), "config")
-	args := []string{"prod-east", "--kubeconfig", path, "--intent", "x", "--scope", "kube", "--duration", "1h"}
+	args := []string{"prod-east", "--kubeconfig", path, "--purpose", "x", "--scope", "kube", "--duration", "1h"}
 	_, stderr, exitCode := runKubeLogin(t, home, args...)
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 
@@ -312,7 +312,7 @@ func TestKubeLoginRefusesBadInputBeforeAnyRequest(t *testing.T) {
 		{name: "bad duration", args: []string{"--duration", "soon"}, message: "invalid --duration value"},
 		{name: "zero wait", args: []string{"--wait-approval", "0s"}, message: "invalid --wait-approval value"},
 		{name: "bad port", args: []string{"--proxy-port", "70000"}, message: "--proxy-port must be a port number"},
-		{name: "session and intent", args: []string{"--work-session", loginWSID, "--intent", "x"}, message: "cannot be combined with --work-session"},
+		{name: "session and purpose", args: []string{"--work-session", loginWSID, "--purpose", "x"}, message: "cannot be combined with --work-session"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -330,7 +330,7 @@ func TestKubeLoginRefusesBadInputBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-func TestKubeLoginWithoutIntentNonInteractivelyIsAUsageError(t *testing.T) {
+func TestKubeLoginWithoutPurposeNonInteractivelyIsAUsageError(t *testing.T) {
 	t.Parallel()
 	srv := &kubeLoginServer{}
 	ts := srv.start(t)
@@ -339,7 +339,7 @@ func TestKubeLoginWithoutIntentNonInteractivelyIsAUsageError(t *testing.T) {
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"))
 
 	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
-	assert.Contains(t, stderr, "Non-interactive mode requires --intent, --scope and --duration")
+	assert.Contains(t, stderr, "Non-interactive mode requires --purpose, --scope and --duration")
 	assert.NotContains(t, srv.seen(), "POST /api/work-sessions/sessions/")
 }
 
@@ -350,7 +350,7 @@ func TestKubeLoginRefusesATokenLogin(t *testing.T) {
 	home := kubeEnabledHome(t, ts.URL)
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--intent", "x", "--scope", "kube", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
 
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
 	assert.Contains(t, stderr, "cannot open a kube session")
@@ -377,7 +377,7 @@ func TestKubeLoginApprovalOutcomes(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config")
 
 			_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", path,
-				"--intent", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
+				"--purpose", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
 
 			assert.Equal(t, tt.exitCode, exitCode, "stderr: %s", stderr)
 			assert.Contains(t, stderr, tt.message)
@@ -447,7 +447,7 @@ func TestKubeLoginGivesAnAgentTheKubeScope(t *testing.T) {
 	home := kubeLoginHome(t, ts.URL)
 
 	_, stderr, exitCode := runKubeLoginWithEnv(t, home, []string{"AI_AGENT=test-agent"},
-		"prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"), "--intent", "x", "--duration", "1h")
+		"prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"), "--purpose", "x", "--duration", "1h")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	wsBody, _, _ := srv.bodies()
@@ -497,7 +497,7 @@ func TestKubeLoginCreatesWhenTheActiveSessionLacksAScope(t *testing.T) {
 	home := kubeLoginHome(t, ts.URL, map[string]any{"active_work_sessions": map[string]string{"ws": loginWSID}})
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--intent", "x", "--scope", "kube,kube_exec", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube,kube_exec", "--duration", "1h")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.Equal(t, 1, srv.count("POST /api/work-sessions/sessions/"))
@@ -533,7 +533,7 @@ func TestKubeLoginLeavesAnotherWorkspacesRecordAlone(t *testing.T) {
 	require.NoError(t, err)
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--intent", "x", "--scope", "kube", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.Zero(t, srv.count("GET /api/work-sessions/sessions/0b5d7e9a-0000-4000-8000-0000000000bb/"))
@@ -555,7 +555,7 @@ func TestKubeLoginJSONResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 
 	stdout, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--output", "json",
-		"--kubeconfig", path, "--intent", "x", "--scope", "kube", "--duration", "1h")
+		"--kubeconfig", path, "--purpose", "x", "--scope", "kube", "--duration", "1h")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	assert.JSONEq(t, fmt.Sprintf(`{
@@ -603,7 +603,7 @@ func TestKubeLoginResumeCommandKeepsItsFlags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", path, "--proxy-port", "18443",
-		"--intent", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h", "--wait-approval", "1s")
 
 	assert.Equal(t, utils.ExitCodePendingApproval, exitCode, "stderr: %s", stderr)
 	// How the path is quoted follows the platform's shell; a Windows temp path
@@ -631,7 +631,7 @@ func TestKubeCredentialsServesTheLoginToken(t *testing.T) {
 	ts := srv.start(t)
 	home := kubeLoginHome(t, ts.URL)
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--intent", "x", "--scope", "kube", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 
 	stdout, stderr, exitCode := runKubeCredentials(t, home)
@@ -651,7 +651,7 @@ func TestKubeCredentialsEndsWithTheGateCodeForAClosedSession(t *testing.T) {
 	ts := srv.start(t)
 	home := kubeLoginHome(t, ts.URL)
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--intent", "x", "--scope", "kube", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
 	srv.mu.Lock()
 	srv.kubeClosed = true
@@ -676,4 +676,37 @@ func TestKubeCredentialsWithoutALoginEndsWithTheGateCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "No kube session is saved for prod-east")
+}
+
+// --intent was the flag's first name and still reaches --purpose.
+func TestKubeLoginTakesIntentAsPurpose(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
+		"--intent", "debug api pods", "--scope", "kube", "--duration", "1h")
+
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	wsBody, _, _ := srv.bodies()
+	assert.Equal(t, "debug api pods", wsBody["description"])
+}
+
+// A kubeconfig kube login cannot write stops it before a WorkSession, and so
+// an approval request, exists.
+func TestKubeLoginChecksTheKubeconfigBeforeAnyWorkSession(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+	path := filepath.Join(t.TempDir(), "config")
+	require.NoError(t, os.WriteFile(path, []byte("clusters: [unclosed\n"), 0600))
+
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", path,
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "Failed to open the kubeconfig")
+	assert.Empty(t, srv.seen(), "nothing is asked of the server for a login that cannot be written")
 }

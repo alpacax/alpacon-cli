@@ -187,6 +187,9 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		{name: "token refresh", write: func(started Config) error {
 			return SaveRefreshedAuth0Token(started.RefreshToken, "access-2", 3600)
 		}},
+		{name: "while logged in", write: func(started Config) error {
+			return WhileLoggedIn(started, func() error { return nil })
+		}},
 		{name: "work session", write: func(Config) error { return SetActiveWorkSession("uuid-2") }},
 		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor("ws1", "uuid-2") }},
 		{name: "work session clear", write: func(Config) error {

@@ -73,11 +73,11 @@ func TestReadKubeLoginInput(t *testing.T) {
 		},
 		{
 			name:  "new session flags",
-			flags: kubeLoginFlagValues{intent: " debug ", scopes: []string{"kube_exec"}, duration: "2h", waitApproval: "30m", proxyPort: 18443},
-			set:   []string{"intent", "scope", "duration", "wait-approval", "proxy-port"},
+			flags: kubeLoginFlagValues{purpose: " debug ", scopes: []string{"kube_exec"}, duration: "2h", waitApproval: "30m", proxyPort: 18443},
+			set:   []string{"purpose", "scope", "duration", "wait-approval", "proxy-port"},
 			check: func(t *testing.T, in kubeLoginInput) {
 				t.Helper()
-				assert.Equal(t, "debug", in.intent)
+				assert.Equal(t, "debug", in.purpose)
 				assert.Equal(t, []string{"kube", "kube_exec"}, in.scopes)
 				assert.Equal(t, 2*time.Hour, in.duration)
 				assert.Equal(t, 30*time.Minute, in.waitTimeout)
@@ -120,7 +120,7 @@ func TestReadKubeLoginInput(t *testing.T) {
 		{name: "blank cluster", cluster: "  ", wantErr: "CLUSTER must name a cluster"},
 		{name: "empty work session", set: []string{"work-session"}, wantErr: "--work-session must name"},
 		{name: "bad wait", flags: kubeLoginFlagValues{waitApproval: "soon"}, set: []string{"wait-approval"}, wantErr: "invalid --wait-approval value"},
-		{name: "empty intent", set: []string{"intent"}, wantErr: "--intent cannot be empty"},
+		{name: "empty purpose", set: []string{"purpose"}, wantErr: "--purpose cannot be empty"},
 		{name: "bad duration", flags: kubeLoginFlagValues{duration: "-1h"}, set: []string{"duration"}, wantErr: "must be a positive duration"},
 		{name: "bad port", flags: kubeLoginFlagValues{proxyPort: 0}, set: []string{"proxy-port"}, wantErr: "--proxy-port must be a port number"},
 		{name: "session and scope", flags: kubeLoginFlagValues{workSession: "ws-1", scopes: []string{"kube"}}, set: []string{"work-session", "scope"}, wantErr: "cannot be combined with --work-session"},

@@ -250,3 +250,22 @@ func TestWorkSessionUpdateRefusesAKubeScopeWithServers(t *testing.T) {
 	_, requests := srv.sent()
 	assert.Zero(t, requests)
 }
+
+func TestWorkSessionUseRefusesAClusterSessionAsAUsageError(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/work-sessions/sessions/ses-k/" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"ses-k","status":"active","requester_type":"user","scopes":["kube"],"clusters":[{"id":"c-1","name":"prod-east"}]}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, "use", "ses-k")
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "alpacon kube login prod-east --work-session ses-k")
+}

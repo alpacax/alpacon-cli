@@ -882,9 +882,32 @@ func TestDeleteConfigRemovesTheSavedKubeSessions(t *testing.T) {
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
 	kubeDir := filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)
 	require.NoError(t, os.MkdirAll(kubeDir, 0700))
-	require.NoError(t, os.WriteFile(filepath.Join(kubeDir, "0123456789abcdef.json"), []byte(`{"channel_token":"tok"}`), 0600))
+	record := filepath.Join(kubeDir, "0123456789abcdef.json")
+	staging := filepath.Join(kubeDir, "0123456789abcdef.123.tmp")
+	lock := filepath.Join(kubeDir, "0123456789abcdef.lock")
+	for _, path := range []string{record, staging, lock} {
+		require.NoError(t, os.WriteFile(path, []byte(`{"channel_token":"tok"}`), 0600))
+	}
 
 	require.NoError(t, DeleteConfig(loadedConfig(t)))
 
-	assert.NoDirExists(t, kubeDir)
+	assert.NoFileExists(t, record)
+	assert.NoFileExists(t, staging)
+	assert.FileExists(t, lock, "a kube login waiting on approval may hold it")
+}
+
+func TestWhileLoggedInRunsOnlyForTheSameLogin(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "access-1", "refresh-1", "", 3600, false))
+	login := loadedConfig(t)
+
+	ran := false
+	require.NoError(t, WhileLoggedIn(login, func() error { ran = true; return nil }))
+	assert.True(t, ran, "fn runs for the login it was given")
+
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "access-2", "refresh-2", "", 3600, false))
+	require.ErrorIs(t, WhileLoggedIn(login, func() error { t.Error("ran under another login"); return nil }), ErrLoginChanged)
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+	require.ErrorIs(t, WhileLoggedIn(login, func() error { t.Error("ran after a logout"); return nil }), ErrLoginChanged)
 }

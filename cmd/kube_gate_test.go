@@ -73,7 +73,6 @@ func TestKubeGateBlocksWhenDisabled(t *testing.T) {
 		{"kube", "config", "--help"},
 		{"kube", "login", "prod"},
 		{"kube", "login", "--help"},
-		{"kube", "credentials", "--cluster", "prod"},
 		{"kube", "proxy", "prod"},
 		{"kube", "proxy", "prod", "--port", "18444"},
 	}
@@ -199,4 +198,23 @@ func TestKubeGateHelperProcess(t *testing.T) {
 	RootCmd.SetArgs(args)
 	Execute()
 	os.Exit(0)
+}
+
+// kubectl runs kube credentials for a context an earlier login wrote, so the
+// gate of whatever workspace is current now, or of no login at all, does not
+// stand in its way.
+func TestKubeGatePassesCredentialsThrough(t *testing.T) {
+	t.Parallel()
+	for _, cfg := range []map[string]any{
+		nil,
+		{"workspace_url": "https://ws.example.com", "workspace_name": "ws", "token": "tok", "kubernetes_surface": false},
+	} {
+		home := writeKubeGateConfig(t, cfg)
+
+		_, stderr, exitCode := runKubeGate(t, home, "kube", "credentials", "--cluster", "prod")
+
+		assert.Equal(t, utils.ExitCodeWorkSessionDenied, exitCode, "stderr: %s", stderr)
+		assert.Contains(t, stderr, "No kube session is saved for prod")
+		assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
+	}
 }

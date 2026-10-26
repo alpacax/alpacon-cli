@@ -123,7 +123,20 @@ func GetClusterWorkSessions(ac *client.AlpaconClient, filter ClusterSessionFilte
 	if filter.AssignedUser != "" {
 		params["assigned_user"] = filter.AssignedUser
 	}
-	return api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	sessions, err := api.FetchAllPages[WorkSession](ac, workSessionURL, params)
+	if err != nil {
+		return nil, err
+	}
+	// A listed ID goes on to a read or an approval wait, so it is held to what
+	// a server-sent ID must be before any of it reaches a path.
+	for i := range sessions {
+		pathID, err := api.RequireResponseID(sessions[i].ID, "work session")
+		if err != nil {
+			return nil, err
+		}
+		sessions[i].ID = pathID.String()
+	}
+	return sessions, nil
 }
 
 // FormatDuration renders d the way the server reads a duration, HH:MM:SS

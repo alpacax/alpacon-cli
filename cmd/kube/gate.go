@@ -21,21 +21,32 @@ func exitNotEnabled() {
 //
 // This is a courtesy, not a control: the server refuses /api/kubernetes/ on
 // its own whenever the surface is off.
+//
+// kube credentials stays reachable under the stand-in. kubectl runs it for a
+// context an earlier login wrote, perhaps in another workspace or before a
+// logout, and it reads only the saved session, so the current workspace's
+// answer says nothing about it.
 func ApplySurfaceGate(root *cobra.Command, enabled bool) {
-	applySurfaceGate(root, KubeCmd, enabled)
+	applySurfaceGate(root, KubeCmd, enabled, kubeCredentialsCmd)
 }
 
-func applySurfaceGate(root, real *cobra.Command, enabled bool) {
+// applySurfaceGate moves keep, children of real, under the stand-in.
+func applySurfaceGate(root, real *cobra.Command, enabled bool, keep ...*cobra.Command) {
 	if enabled {
 		return
 	}
 	root.RemoveCommand(real)
-	root.AddCommand(newDisabledKubeCmd(real))
+	disabled := newDisabledKubeCmd(real)
+	for _, child := range keep {
+		real.RemoveCommand(child)
+		disabled.AddCommand(child)
+	}
+	root.AddCommand(disabled)
 }
 
 // newDisabledKubeCmd answers every path under real's name and aliases with the
-// not-enabled message: no children, no flag parsing and arbitrary args, so
-// nothing Cobra checks first can fail.
+// not-enabled message: no flag parsing and arbitrary args, so nothing Cobra
+// checks first can fail.
 func newDisabledKubeCmd(real *cobra.Command) *cobra.Command {
 	disabled := &cobra.Command{
 		Use:                real.Use,

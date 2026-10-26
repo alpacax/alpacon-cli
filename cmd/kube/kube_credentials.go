@@ -11,6 +11,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 )
@@ -18,8 +19,9 @@ import (
 // execCredentialVersion is the ExecCredential version kubectl asks for.
 const execCredentialVersion = "client.authentication.k8s.io/v1"
 
-// retrieveTimeout bounds the check of the session behind the token, so a
-// server that stops answering delays kubectl by at most this much.
+// retrieveTimeout bounds the check of the session behind the token, the
+// access-token refresh building the client can run included, so a server
+// that stops answering delays kubectl by at most this much.
 const retrieveTimeout = 5 * time.Second
 
 var kubeCredentialsCluster string
@@ -92,12 +94,13 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 		utils.CliErrorWithExit("Failed to read the saved kube sessions: %s.", err)
 	}
 
-	// The client is needed only to check the session; without a login the
-	// saved token is still served until it expires.
-	ac, clientErr := client.NewAlpaconAPIClient()
+	// Read without the network: the config names the logged-in workspace, and
+	// the login a moved expiry is saved for. Without a login the saved token is
+	// still served until it expires.
+	login, loginErr := config.LoadConfig()
 	workspaceURL := ""
-	if clientErr == nil {
-		workspaceURL = ac.BaseURL
+	if loginErr == nil {
+		workspaceURL = login.WorkspaceURL
 	}
 	record := pickRecord(records, clusterServer(os.Getenv("KUBERNETES_EXEC_INFO")), workspaceURL)
 	if record == nil {
@@ -105,9 +108,16 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 	}
 
 	var retrieve func() (*kubernetes.KubeSessionDetail, error)
-	if clientErr == nil && record.WorkspaceURL == ac.BaseURL {
+	if loginErr == nil && record.WorkspaceURL == login.WorkspaceURL {
 		retrieve = func() (*kubernetes.KubeSessionDetail, error) {
 			return retrieveWithin(retrieveTimeout, func() (*kubernetes.KubeSessionDetail, error) {
+				ac, err := client.NewAlpaconAPIClient()
+				if err != nil {
+					return nil, err
+				}
+				if ac.BaseURL != record.WorkspaceURL {
+					return nil, errors.New("the login moved to another workspace")
+				}
 				return kubernetes.GetSession(ac, record.KubeSessionID)
 			})
 		}
@@ -120,10 +130,10 @@ func runKubeCredentials(cmd *cobra.Command, args []string) {
 		utils.CliWarning("Could not check the kube session for %s (%s); using the saved token until it expires.", cluster, checkErr)
 	}
 
-	if !expiry.Equal(record.TokenExpiredAt) {
+	if loginErr == nil && !expiry.Equal(record.TokenExpiredAt) {
 		updated := *record
 		updated.TokenExpiredAt = expiry
-		saveExtendedRecord(store, updated)
+		saveExtendedRecord(store, login, updated)
 	}
 
 	if err := utils.PrintJSONValue(os.Stdout, execCredential{
@@ -216,17 +226,20 @@ func retrieveWithin(timeout time.Duration, read func() (*kubernetes.KubeSessionD
 }
 
 // saveExtendedRecord keeps a moved expiry, so the next run need not learn it
-// again. A login holding the record's lock is about to replace it, so the
-// update is skipped then, and any other failure only costs that lookup.
-func saveExtendedRecord(store kubeSessionStore, record kubeSessionRecord) {
+// again. A login holding the record's lock is about to replace it, and a
+// logout since login removed it, so the update is skipped then; any other
+// failure only costs that lookup.
+func saveExtendedRecord(store kubeSessionStore, login config.Config, record kubeSessionRecord) {
 	lock, err := store.lock(record.key())
 	if err != nil {
 		return
 	}
 	defer func() { _ = lock.Release() }()
-	current, err := store.read(record.key())
-	if err != nil || current == nil || current.KubeSessionID != record.KubeSessionID {
-		return
-	}
-	_ = store.write(record)
+	_ = config.WhileLoggedIn(login, func() error {
+		current, err := store.read(record.key())
+		if err != nil || current == nil || current.KubeSessionID != record.KubeSessionID {
+			return nil
+		}
+		return store.write(record)
+	})
 }

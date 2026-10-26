@@ -21,6 +21,7 @@ import (
 	"github.com/alpacax/alpacon-cli/pkg/kubeconfig"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 const opKubeLogin = "kube_login"
@@ -34,7 +35,7 @@ const credentialPluginCommand = "alpacon"
 
 type kubeLoginFlagValues struct {
 	workSession  string
-	intent       string
+	purpose      string
 	scopes       []string
 	duration     string
 	waitApproval string
@@ -56,7 +57,7 @@ kube scope. With --work-session that session is used as given. Otherwise the
 command reuses one of yours that fits: the one ALPACON_WORK_SESSION names, the
 active WorkSession, the one an earlier login to this cluster used, or another
 session for the cluster that is active or still waiting on approval. Only when none
-fits does it create one, from --intent, --scope and --duration, prompting for
+fits does it create one, from --purpose, --scope and --duration, prompting for
 any that is missing in an interactive shell. A session waiting on approval is
 waited on for --wait-approval (default 5m). The active WorkSession is never
 changed, so exec, websh, cp and tunnel keep the session they use.
@@ -72,7 +73,7 @@ else the first existing file in KUBECONFIG (the last one listed when none
 exists), else ~/.kube/config. Use --proxy-port to send kubectl through
 'alpacon kube proxy' on that local port.`,
 	Example: `  alpacon kube login prod-east
-  alpacon kube login prod-east --intent "debug crashlooping api pods" --scope kube,kube_exec --duration 2h
+  alpacon kube login prod-east --purpose "debug crashlooping api pods" --scope kube,kube_exec --duration 2h
   alpacon kube login prod-east --work-session 3f1c9a2e-7b4d-4e8a-9c6f-0d2b5e8a1f47
   alpacon kube login prod-east --kubeconfig ~/.kube/alpacon --proxy-port 18443`,
 	// Counted in runKubeLogin, so a wrong count is a usage error (exit 2)
@@ -83,7 +84,14 @@ exists), else ~/.kube/config. Use --proxy-port to send kubectl through
 
 func init() {
 	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under (default: one of yours that targets the cluster, or a new one)")
-	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.intent, "intent", "", "What you're doing and why, for a new WorkSession (required in non-interactive mode when one is created)")
+	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.purpose, "purpose", "", "What you're doing and why, for a new WorkSession, as in 'work-session create' (required in non-interactive mode when one is created)")
+	// --intent was the flag's first name; it still reaches --purpose.
+	kubeLoginCmd.Flags().SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
+		if name == "intent" {
+			name = "purpose"
+		}
+		return pflag.NormalizedName(name)
+	})
 	kubeLoginCmd.Flags().StringSliceVar(&kubeLoginFlags.scopes, "scope", nil, "Scopes for a new WorkSession: kube, or kube,kube_exec to also exec, attach and port-forward into pods (kube_exec is refused for an AI agent)")
 	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.duration, "duration", "", "Lifetime of a new WorkSession, counted from activation (e.g. 30m, 2h)")
 	kubeLoginCmd.Flags().StringVar(&kubeLoginFlags.waitApproval, "wait-approval", "", "How long to wait for a WorkSession pending approval (default 5m)")
@@ -95,7 +103,7 @@ type kubeLoginInput struct {
 	cluster       string
 	workSession   string // from --work-session, used as given
 	envSession    string // from ALPACON_WORK_SESSION, used only when it fits
-	intent        string
+	purpose       string
 	scopes        []string // nil until named
 	duration      time.Duration
 	waitTimeout   time.Duration
@@ -110,7 +118,7 @@ func readKubeLoginInput(cluster string, flags kubeLoginFlagValues, changed func(
 	in := kubeLoginInput{
 		cluster:       strings.TrimSpace(cluster),
 		workSession:   strings.TrimSpace(flags.workSession),
-		intent:        strings.TrimSpace(flags.intent),
+		purpose:       strings.TrimSpace(flags.purpose),
 		waitTimeout:   utils.DefaultApprovalWaitTimeout,
 		requesterType: "user",
 	}
@@ -127,8 +135,8 @@ func readKubeLoginInput(cluster string, flags kubeLoginFlagValues, changed func(
 		in.requesterType = "agent"
 	}
 
-	if changed("intent") && in.intent == "" {
-		return in, errors.New("--intent cannot be empty")
+	if changed("purpose") && in.purpose == "" {
+		return in, errors.New("--purpose cannot be empty")
 	}
 	if changed("scope") {
 		scopes, err := parseKubeScopes(flags.scopes)
@@ -161,8 +169,8 @@ func readKubeLoginInput(cluster string, flags kubeLoginFlagValues, changed func(
 		in.proxyPort = flags.proxyPort
 	}
 
-	if in.workSession != "" && (changed("intent") || changed("scope") || changed("duration")) {
-		return in, errors.New("--intent, --scope and --duration describe a new WorkSession and cannot be combined with --work-session, which names an existing one")
+	if in.workSession != "" && (changed("purpose") || changed("scope") || changed("duration")) {
+		return in, errors.New("--purpose, --scope and --duration describe a new WorkSession and cannot be combined with --work-session, which names an existing one")
 	}
 	return in, nil
 }
@@ -185,6 +193,13 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 	// approval request nothing can use.
 	if ac.AccessToken() == "" {
 		utils.CliErrorEnvelopeWithExit(opKubeLogin, nil, "Tokens issued by Alpacon (service or personal API token) cannot open a kube session; it needs %s.", utils.LoginWithoutTokenHint)
+	}
+	// The login the session is saved for. A logout or another login during
+	// the approval wait replaces it, and then nothing is saved: a token a
+	// logout should have removed must not appear after it.
+	login, err := config.LoadConfig()
+	if err != nil {
+		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to read the login: %s.", err)
 	}
 
 	path, err := kubeconfig.ResolvePath(kubeLoginFlags.kubeconfig)
@@ -271,10 +286,15 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 				ProxyURL:       session.ProxyURL,
 				SavedAt:        time.Now().UTC(),
 			}
-			if err := store.write(record); err != nil {
+			if err := config.WhileLoggedIn(login, func() error { return store.write(record) }); err != nil {
+				if errors.Is(err, config.ErrLoginChanged) {
+					return nil, errors.New("you logged out or logged in again while this login was running, so its kube session was not saved")
+				}
 				return nil, fmt.Errorf("failed to save the kube session: %w", err)
 			}
-			return func() error { return store.restore(key, previous) }, nil
+			return func() error {
+				return config.WhileLoggedIn(login, func() error { return store.restore(key, previous) })
+			}, nil
 		},
 	}
 	result, err := openKubeSession(ac, editor, opts, clusterID, writer)
@@ -491,12 +511,12 @@ func findClusterSession(ac *client.AlpaconClient, want sessionWant, now time.Tim
 // and waits for it to activate.
 func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID string) workSessionChoice {
 	interactive := utils.IsInteractiveShell()
-	intent := in.intent
-	if intent == "" {
+	purpose := in.purpose
+	if purpose == "" {
 		if !interactive {
-			utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "No WorkSession for %s was found to reuse. Non-interactive mode requires --intent, --scope and --duration to create one, or --work-session to name one.", in.cluster)
+			utils.CliUsageErrorEnvelopeWithExit(opKubeLogin, "No WorkSession for %s was found to reuse. Non-interactive mode requires --purpose, --scope and --duration to create one, or --work-session to name one.", in.cluster)
 		}
-		intent = utils.PromptForRequiredInput("Intent (what you're doing and why): ")
+		purpose = utils.PromptForRequiredInput("Purpose (what you're doing and why): ")
 	}
 	scopes := in.scopes
 	if scopes == nil && in.requesterType == "agent" {
@@ -518,7 +538,7 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 	}
 
 	session, err := wsapi.CreateWorkSession(ac, wsapi.WorkSessionCreateRequest{
-		Description:   intent,
+		Description:   purpose,
 		RequesterType: in.requesterType,
 		Scopes:        scopes,
 		Clusters:      []string{clusterID},

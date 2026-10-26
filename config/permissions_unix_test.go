@@ -561,6 +561,6 @@ func TestDeleteConfigRetriesTheKubeSessionsItCouldNotDelete(t *testing.T) {
 
 	require.NoError(t, os.Chmod(kubeDir, 0700))
 	require.NoError(t, DeleteConfig(login))
-	assert.NoDirExists(t, kubeDir)
+	assert.NoFileExists(t, filepath.Join(kubeDir, "0123456789abcdef.json"))
 	assert.NoFileExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName))
 }
