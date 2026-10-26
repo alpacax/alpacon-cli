@@ -379,8 +379,12 @@ func TestSudoListener_AnnouncesOutageOncePerOutage(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -405,8 +409,12 @@ func TestSudoListener_StaysQuietBeforeFirstSubscribe(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		assert.False(t, sl.WaitConnected(300*time.Millisecond), "a listener that never upgrades must not report a connection")
 	})
@@ -433,8 +441,12 @@ func TestSudoListener_AnnouncesOutageWhenSessionCreateFails(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -465,8 +477,12 @@ func TestSudoListener_AnnouncesOutageWhenResubscribeFails(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before an outage counts")
 
@@ -492,8 +508,12 @@ func TestSudoListener_AnnouncesTheNextOutageAfterRecovering(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must connect and subscribe")
 
@@ -560,8 +580,12 @@ func TestSudoListener_RetriesAnUnauthorizedSessionAfterTheFirstSubscribe(t *test
 	_, stderr := testutil.CaptureOutput(t, func() {
 		sl := NewSudoListener(ac, "my-server", "session-1")
 		sl.reconnectBaseDelay = testReconnectBaseDelay
+		sl.closeUnopened = func(id string) { closeSession(ac, id, eventSessionCloseTimeout) }
 		sl.Start()
-		defer sl.Stop()
+		defer func() {
+			sl.Stop()
+			<-sl.stopped
+		}()
 
 		require.True(t, sl.WaitConnected(3*time.Second), "the first dial must subscribe before a 401 counts as post-subscribe")
 		require.Eventually(t, func() bool { return sessions.Load() >= 3 }, 3*time.Second, 10*time.Millisecond)
