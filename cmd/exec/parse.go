@@ -292,68 +292,68 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		}
 	}
 
-	if stopped {
-		stop.OutputFormat = outputFormat
-		return stop
-	}
-
 	if detach && wait {
-		return RemoteExecArgs{
+		halt(RemoteExecArgs{
 			Err: "--wait and --detach cannot be combined; --detach returns immediately and would ignore --wait",
-		}
+		})
 	}
 	if detach && waitApproval > 0 {
-		return RemoteExecArgs{
+		halt(RemoteExecArgs{
 			Err: "--wait-approval and --detach cannot be combined; --detach returns immediately and would ignore --wait-approval",
-		}
+		})
 	}
 	if overwrite && !upload {
-		return RemoteExecArgs{Err: "--overwrite requires --upload; it only applies to the file --upload writes"}
+		halt(RemoteExecArgs{Err: "--overwrite requires --upload; it only applies to the file --upload writes"})
 	}
 	if filePath == "" {
 		if fileFrom != "" {
-			return RemoteExecArgs{Err: "--file-from requires --file"}
+			halt(RemoteExecArgs{Err: "--file-from requires --file"})
 		}
 		if interpreter != "" {
-			return RemoteExecArgs{Err: "--interpreter requires --file"}
+			halt(RemoteExecArgs{Err: "--interpreter requires --file"})
 		}
 		if reuseDays > 0 {
-			return RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"}
+			halt(RemoteExecArgs{Err: "--reuse-days requires --file; only a verified file execution can propose a reuse duration"})
 		}
 		if upload {
-			return RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"}
+			halt(RemoteExecArgs{Err: "--upload requires --file; it writes the script to the --file path on the server"})
 		}
 		if fromServer {
-			return RemoteExecArgs{Err: "--from-server requires --file; it reads the script from the --file path on the server"}
+			halt(RemoteExecArgs{Err: "--from-server requires --file; it reads the script from the --file path on the server"})
 		}
 	} else {
 		if len(env) > 0 {
-			return RemoteExecArgs{
+			halt(RemoteExecArgs{
 				Err: "--env cannot be combined with --file; a verified file takes no environment—set the variables inside the script",
-			}
+			})
 		}
 		if fromServer && upload {
-			return RemoteExecArgs{
+			halt(RemoteExecArgs{
 				Err: "--from-server cannot be combined with --upload; --from-server submits the file already on the server, --upload writes a local copy there",
-			}
+			})
 		}
 		if fromServer && fileFrom != "" {
-			return RemoteExecArgs{
+			halt(RemoteExecArgs{
 				Err: "--from-server cannot be combined with --file-from; the content is read from the --file path on the server, not from a local file",
-			}
+			})
 		}
 		// The upload writes to the cleaned path while the agent opens the path as
 		// given, and a symlink before ".." makes those two different files.
 		if upload && pathpkg.Clean(filePath) != filePath {
-			return RemoteExecArgs{
+			halt(RemoteExecArgs{
 				Err: fmt.Sprintf("--upload needs a clean --file path, without '.', '..', or repeated or trailing slashes: %s", filePath),
-			}
+			})
 		}
 		if len(commandParts) > 0 && !separated {
-			return RemoteExecArgs{
+			halt(RemoteExecArgs{
 				Err: "--file cannot be combined with a command line; put the script's arguments after --",
-			}
+			})
 		}
+	}
+
+	if stopped {
+		stop.OutputFormat = outputFormat
+		return stop
 	}
 
 	if server != "" && strings.Contains(server, "@") && !strings.Contains(server, ":") {
