@@ -471,8 +471,7 @@ func (p checkedPackage) urlOffenders(decoded map[string]bool) (offenders []strin
 		}
 	}
 	for i, file := range p.files {
-		utilsName, apiName := importName(file, utilsPkgPath), importName(file, apiPkgPath)
-		if utilsName == "." || apiName == "." {
+		if importName(file, utilsPkgPath) == "." || importName(file, apiPkgPath) == "." {
 			offenders = append(offenders, repoPath(p.paths[i])+" dot-imports a URL builder's package")
 			continue
 		}
@@ -520,6 +519,12 @@ func (p checkedPackage) urlOffenders(decoded map[string]bool) (offenders []strin
 					}
 				}
 				if fn := p.funcOf(calleeIdent(n)); fn != nil {
+					switch {
+					case isFunc(fn, utilsPkgPath, buildURLName) && len(n.Args) == 3 && p.info.Types[n.Args[1]].Value == nil:
+						report(n.Pos(), "passes %s a non-constant path", buildURLName)
+					case isFunc(fn, apiPkgPath, idURLName) && len(n.Args) == 4 && p.info.Types[n.Args[2]].Value == nil:
+						report(n.Pos(), "passes %s a non-constant action", idURLName)
+					}
 					if i, ok := p.sinkURLParam(fn); ok {
 						sinks[fn.Name()] = true
 						arg := p.argument(n, i)
@@ -531,16 +536,6 @@ func (p checkedPackage) urlOffenders(decoded map[string]bool) (offenders []strin
 						case !flow.allowed(arg, asURL):
 							report(arg.Pos(), "hands %s %s", fn.Name(), uncheckedURL)
 						}
-					}
-				}
-				switch {
-				case isCall(n, utilsName, buildURLName, 3):
-					if p.info.Types[n.Args[1]].Value == nil {
-						report(n.Pos(), "passes %s a non-constant path", buildURLName)
-					}
-				case isCall(n, apiName, idURLName, 4) || (p.path == apiPkgPath && isBareCall(n, idURLName, 4)):
-					if p.info.Types[n.Args[2]].Value == nil {
-						report(n.Pos(), "passes %s a non-constant action", idURLName)
 					}
 				}
 			}
@@ -1164,18 +1159,4 @@ func assemblerNames(file *ast.File) map[string]map[string]bool {
 func funcName(fn any) string {
 	full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 	return full[strings.LastIndex(full, ".")+1:]
-}
-
-func isCall(call *ast.CallExpr, pkg, name string, arity int) bool {
-	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
-	if !ok || pkg == "" || sel.Sel.Name != name || len(call.Args) != arity {
-		return false
-	}
-	x, ok := sel.X.(*ast.Ident)
-	return ok && x.Name == pkg
-}
-
-func isBareCall(call *ast.CallExpr, name string, arity int) bool {
-	ident, ok := ast.Unparen(call.Fun).(*ast.Ident)
-	return ok && ident.Name == name && len(call.Args) == arity
 }
