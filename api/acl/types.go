@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// PrincipalTypeServiceToken is the principal type an entry issued from the CLI
-// names. The ledger also holds api_token entries carried over from before, and
-// lists them, but issues new ones only for service tokens.
+// PrincipalTypeServiceToken is the only principal type IssueEntries issues;
+// api_token entries already on the ledger are still listed and revocable.
 const PrincipalTypeServiceToken = "service_token"
 
 // Capability is the signer's answer to what the caller may do with the ledger.
@@ -16,9 +15,8 @@ type Capability struct {
 	WorkspaceIDs  []string `json:"workspace_ids"`
 }
 
-// Administers reports whether the caller is a Command ACL admin of workspaceID.
-// Both halves of the answer have to agree: a workspace listed beside a false
-// flag is not taken as a grant.
+// Administers reports whether the caller is a Command ACL admin of workspaceID:
+// the flag and the listed workspace must agree.
 func (c Capability) Administers(workspaceID string) bool {
 	return c.IsLedgerAdmin && slices.ContainsFunc(c.WorkspaceIDs, func(id string) bool { return strings.EqualFold(id, workspaceID) })
 }
@@ -54,10 +52,9 @@ type EntryAttributes struct {
 	CreatedBy string `json:"created_by" table:"Created by"`
 }
 
-// EntryRequest is one entry to issue. The workspace travels once, on the bulk
-// envelope; the region and the author come from the signer token, not the body.
+// EntryRequest is one entry to issue, for the service token PrincipalID names.
+// IssueEntries states the principal type on the wire.
 type EntryRequest struct {
-	PrincipalType  string   `json:"principal_type"`
 	PrincipalID    string   `json:"principal_id"`
 	CommandPattern string   `json:"command_pattern"`
 	Username       string   `json:"username"`
@@ -67,9 +64,15 @@ type EntryRequest struct {
 	Enabled        bool     `json:"enabled"`
 }
 
+// wireEntry is an EntryRequest as sent, with the principal type it can only be.
+type wireEntry struct {
+	PrincipalType string `json:"principal_type"`
+	EntryRequest
+}
+
 type bulkIssueRequest struct {
-	WorkspaceID string         `json:"workspace_id"`
-	Entries     []EntryRequest `json:"entries"`
+	WorkspaceID string      `json:"workspace_id"`
+	Entries     []wireEntry `json:"entries"`
 }
 
 type bulkRevokeRequest struct {

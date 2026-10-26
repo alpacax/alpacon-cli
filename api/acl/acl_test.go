@@ -149,7 +149,7 @@ func TestIssueEntries_SendsOneEnvelope(t *testing.T) {
 	})
 
 	issued, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{{
-		PrincipalType: PrincipalTypeServiceToken, PrincipalID: testTokenID,
+		PrincipalID:    testTokenID,
 		CommandPattern: "uptime", Username: "*", Enabled: true,
 	}})
 
@@ -173,7 +173,7 @@ func TestIssueEntries_RelaysTheSignersRefusal(t *testing.T) {
 		return http.StatusBadRequest, `{"entries": ["Row 0 is a grant the ledger already holds: 'uptime' as '*'. Revoke it first to reissue."], "code": "duplicate_entry"}`
 	})
 
-	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{{PrincipalType: PrincipalTypeServiceToken, PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"}})
+	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{{PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"}})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already holds")
@@ -387,17 +387,26 @@ func TestEntryAttributes_JSONFieldNames(t *testing.T) {
 
 // The console never issues an api_token entry nor shows one on a personal API
 // token's page, so one issued here could not be seen or revoked there.
-func TestIssueEntries_RefusesAPersonalAPITokenBeforeSending(t *testing.T) {
+func TestIssueEntries_SendsEveryEntryAsAServiceTokens(t *testing.T) {
 	t.Parallel()
 	ac, stub := newStubSigner(t, func(*http.Request) (int, string) { return http.StatusCreated, `[]` })
+	entries := []EntryRequest{
+		{PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"},
+		{PrincipalID: testTokenID, CommandPattern: "df -h", Username: "*", ServerIDs: []string{testServerID}},
+	}
 
-	_, err := IssueEntries(ac, testWorkspaceID, []EntryRequest{
-		{PrincipalType: PrincipalTypeServiceToken, PrincipalID: testTokenID, CommandPattern: "uptime", Username: "*"},
-		{PrincipalType: "api_token", PrincipalID: testTokenID, CommandPattern: "df -h", Username: "*"},
-	})
+	_, err := IssueEntries(ac, testWorkspaceID, entries)
 
-	require.ErrorContains(t, err, "a personal API token has no command list on the ledger")
-	assert.Empty(t, stub.recorded(), "no request may reach the signer")
+	require.NoError(t, err)
+	requests := stub.recorded()
+	require.Len(t, requests, 1)
+	var sent bulkIssueRequest
+	require.NoError(t, json.Unmarshal([]byte(requests[0].Body), &sent))
+	require.Len(t, sent.Entries, 2)
+	for _, entry := range sent.Entries {
+		assert.Equal(t, PrincipalTypeServiceToken, entry.PrincipalType)
+	}
+	assert.Nil(t, entries[0].ServerIDs, "the caller's slice is left as it was")
 }
 
 // Listing and revoking keep working for api_token entries already held.

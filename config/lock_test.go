@@ -190,7 +190,7 @@ func TestEveryWriterWaitsForTheLockAndLeavesTheFileAlone(t *testing.T) {
 		{name: "signer token", write: func(started Config) error {
 			return SaveSignerToken(started, SignerTarget{URL: "https://alpacon.ai", Audience: "https://alpacon.ai/"}, "signer-2", 3600)
 		}},
-		{name: "signer token clear", write: func(started Config) error { return ClearSignerToken(started.SignerAccessToken) }},
+		{name: "signer token clear", write: func(started Config) error { return ClearSignerToken(started.Signer.AccessToken) }},
 		{name: "work session", write: func(Config) error { return SetActiveWorkSession("uuid-2") }},
 		{name: "work session for a workspace", write: func(Config) error { return SetActiveWorkSessionFor("ws1", "uuid-2") }},
 		{name: "work session clear", write: func(Config) error {

@@ -141,7 +141,6 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 		tokenRef:   tokenRef,
 		serverRefs: serverRefs,
 		request: acl.EntryRequest{
-			PrincipalType:  acl.PrincipalTypeServiceToken,
 			CommandPattern: command,
 			Username:       username,
 			Groupname:      groupname,
@@ -151,9 +150,8 @@ func entryFromFlags(cmd *cobra.Command) *flagEntry {
 	}
 }
 
-// validateServerRefs refuses a --server that was given but names nothing, such
-// as --server "" or a stray comma. Read as omitted, it would issue the entry
-// for every server in the workspace.
+// validateServerRefs refuses a --server given with nothing in it, such as
+// --server "" or a stray comma, which would otherwise cover every server.
 func validateServerRefs(given bool, refs []string) error {
 	if given && len(refs) == 0 {
 		return errEmptyServerScope
@@ -180,9 +178,8 @@ func (f *flagEntry) resolve(session *ledgerSession) acl.EntryRequest {
 	return request
 }
 
-// confirmServiceTokens checks every principal_id of a --file batch against the
-// session's workspace before anything is issued, so the batch cannot pre-approve
-// commands for a personal API token by naming its id.
+// confirmServiceTokens checks every --file principal_id against the session's
+// workspace before anything is issued, so none can be a personal API token's.
 func (s *ledgerSession) confirmServiceTokens(entries []acl.EntryRequest) {
 	confirmed := map[string]bool{}
 	for i, entry := range entries {
@@ -196,18 +193,24 @@ func (s *ledgerSession) confirmServiceTokens(entries []acl.EntryRequest) {
 	}
 }
 
+// validateExpiry refuses an unreadable time and one not in the future, which
+// would issue an entry that never matches.
 func validateExpiry(expiresAt string) error {
 	if expiresAt == "" {
 		return nil
 	}
-	if _, err := time.Parse(time.RFC3339, expiresAt); err != nil {
+	parsed, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
 		return fmt.Errorf("--expires-at must be an RFC 3339 time such as 2027-01-15T10:00:00Z, not %q", expiresAt)
+	}
+	if !parsed.After(now()) {
+		return fmt.Errorf("--expires-at %s is not in the future", expiresAt)
 	}
 	return nil
 }
 
-// fileEntry is one item of an --file batch. enabled is a pointer so an item
-// that leaves it out is issued enabled, as the console issues one.
+// fileEntry is one item of an --file batch. principal_type is read only to
+// refuse anything but a service token; an omitted enabled issues it enabled.
 type fileEntry struct {
 	PrincipalType  string    `json:"principal_type"`
 	PrincipalID    string    `json:"principal_id"`
@@ -219,18 +222,14 @@ type fileEntry struct {
 	Enabled        *bool     `json:"enabled"`
 }
 
-// validate refuses a batch item the flags would refuse. server_ids is required
-// here: an empty list covers every server, so it has to be written as [] on
-// purpose rather than follow from a field left out.
+// validate refuses what the flags would refuse. server_ids is required, so
+// covering every server is written as [] on purpose, never by omission.
 func (item *fileEntry) validate() error {
 	item.PrincipalID = strings.TrimSpace(item.PrincipalID)
 	item.CommandPattern = strings.TrimSpace(item.CommandPattern)
 	item.Username = strings.TrimSpace(item.Username)
-	if item.PrincipalType == "" {
-		item.PrincipalType = acl.PrincipalTypeServiceToken
-	}
 	switch {
-	case item.PrincipalType != acl.PrincipalTypeServiceToken:
+	case item.PrincipalType != "" && item.PrincipalType != acl.PrincipalTypeServiceToken:
 		return fmt.Errorf("principal_type must be %q; a personal API token has no command list on the ledger", acl.PrincipalTypeServiceToken)
 	case !utils.IsUUID(item.PrincipalID):
 		return errors.New("principal_id must be a service token ID")
@@ -274,7 +273,6 @@ func parseEntryFile(data []byte) ([]acl.EntryRequest, error) {
 			return nil, fmt.Errorf("entry %d: %w", i, err)
 		}
 		entries = append(entries, acl.EntryRequest{
-			PrincipalType:  item.PrincipalType,
 			PrincipalID:    item.PrincipalID,
 			CommandPattern: item.CommandPattern,
 			Username:       item.Username,

@@ -2,10 +2,14 @@ package acl
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alpacax/alpacon-cli/api/acl"
+	"github.com/alpacax/alpacon-cli/client"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,7 +44,7 @@ func TestParseEntryFile(t *testing.T) {
 		fileItem(map[string]any{"command_pattern": "  uptime ", "username": " * "}),
 		fileItem(map[string]any{
 			"command_pattern": "df -h", "username": "root", "server_ids": []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"},
-			"expires_at": "2027-01-15T10:00:00Z", "enabled": false,
+			"expires_at": "2099-01-15T10:00:00Z", "enabled": false,
 		}),
 	)
 
@@ -48,9 +52,9 @@ func TestParseEntryFile(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []acl.EntryRequest{
-		{PrincipalType: "service_token", PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true},
-		{PrincipalType: "service_token", PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
-			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2027-01-15T10:00:00Z", Enabled: false},
+		{PrincipalID: fileTokenID, CommandPattern: "uptime", Username: "*", ServerIDs: []string{}, Enabled: true},
+		{PrincipalID: fileTokenID, CommandPattern: "df -h", Username: "root",
+			ServerIDs: []string{"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}, ExpiresAt: "2099-01-15T10:00:00Z", Enabled: false},
 	}, entries)
 }
 
@@ -73,6 +77,7 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 		{name: "misspelled field", data: string(fileOf(t, fileItem(map[string]any{"server_id": []string{"x"}}))), wantErr: "server_id"},
 		{name: "trailing data", data: valid + ` {"unexpected": true}`, wantErr: "continues after it"},
 		{name: "second array", data: `[] ` + valid, wantErr: "continues after it"},
+		{name: "explicit service token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "service_token", "username": ""}))), wantErr: "entry 0: username"},
 		{name: "personal API token", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "api_token"}))), wantErr: "entry 0: principal_type"},
 		{name: "other principal type", data: string(fileOf(t, fileItem(map[string]any{"principal_type": "user"}))), wantErr: "entry 0: principal_type"},
 		{name: "principal id missing", data: string(fileOf(t, fileItem(map[string]any{"principal_id": nil}))), wantErr: "entry 0: principal_id"},
@@ -83,6 +88,7 @@ func TestParseEntryFile_Refusals(t *testing.T) {
 		{name: "server ids null", data: strings.Replace(valid, `"server_ids":[]`, `"server_ids":null`, 1), wantErr: "entry 0: server_ids is required"},
 		{name: "empty server id", data: string(fileOf(t, fileItem(map[string]any{"server_ids": []string{""}}))), wantErr: "entry 0: a server value is empty"},
 		{name: "second entry refused", data: string(fileOf(t, fileItem(nil), fileItem(map[string]any{"username": ""}))), wantErr: "entry 1: username"},
+		{name: "expiry in the past", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "2001-01-01T00:00:00Z"}))), wantErr: "entry 0: --expires-at 2001-01-01T00:00:00Z is not in the future"},
 		{name: "unreadable expiry", data: string(fileOf(t, fileItem(map[string]any{"expires_at": "tomorrow"}))), wantErr: "entry 0: --expires-at must be an RFC 3339 time"},
 	}
 	for _, tt := range tests {
@@ -145,8 +151,48 @@ func TestEntryAdd_ServerFlagEmptyShapesAreRefused(t *testing.T) {
 }
 
 func TestValidateExpiry(t *testing.T) {
-	t.Parallel()
+	orig := now
+	t.Cleanup(func() { now = orig })
+	now = func() time.Time { return time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC) }
+
 	require.NoError(t, validateExpiry(""))
 	require.NoError(t, validateExpiry("2027-01-15T10:00:00+09:00"))
-	assert.ErrorContains(t, validateExpiry("2027-01-15"), "RFC 3339")
+	require.ErrorContains(t, validateExpiry("2027-01-15"), "RFC 3339")
+	require.ErrorContains(t, validateExpiry("2026-10-26T12:00:00Z"), "not in the future", "now is not in the future either")
+	assert.ErrorContains(t, validateExpiry("2026-10-25T12:00:00Z"), "not in the future")
+}
+
+// A listing fetches names only for what its entries reference.
+func TestWorkspaceNames_FetchesOnlyWhatTheEntriesNeed(t *testing.T) {
+	tests := []struct {
+		name      string
+		entries   []acl.EntryResponse
+		wantPaths []string
+	}{
+		{name: "no entries", entries: nil, wantPaths: nil},
+		{name: "only unscoped entries", entries: []acl.EntryResponse{{PrincipalType: "service_token", PrincipalID: fileTokenID}},
+			wantPaths: []string{"/api/auth/service-tokens/tokens/"}},
+		{name: "only a legacy api_token entry with servers", entries: []acl.EntryResponse{{PrincipalType: "api_token", ServerIDs: []string{"s1"}}},
+			wantPaths: []string{"/api/servers/servers/"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"count": 0, "next": null, "results": []}`))
+			}))
+			defer ts.Close()
+			installSeams(t, &sessionSeams{})
+			newWorkspaceClient = func() (*client.AlpaconClient, error) {
+				return &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}, nil
+			}
+			session := &ledgerSession{workspaceURL: ts.URL}
+
+			session.workspaceNames(tt.entries)
+
+			assert.Equal(t, tt.wantPaths, paths)
+		})
+	}
 }

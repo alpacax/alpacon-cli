@@ -4,7 +4,6 @@ package acl
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -21,9 +20,8 @@ const (
 	adminURL           = "/api/acl/admins/"
 )
 
-// GetCapability asks the signer whether the caller is a Command ACL admin, and
-// of which workspaces. It answers 200 for any person, including one who
-// administers nothing, so a refusal elsewhere can be told apart from that.
+// GetCapability asks the signer which workspaces the caller administers. It
+// answers 200 even for none, so "not an admin" is not confused with a 403.
 func GetCapability(ac *client.AlpaconClient) (Capability, error) {
 	body, err := ac.SendGetRequest(capabilityURL)
 	if err != nil {
@@ -37,8 +35,7 @@ func GetCapability(ac *client.AlpaconClient) (Capability, error) {
 }
 
 // ListEntries returns the workspace's active entries, narrowed to one service
-// token when principalID is set. The signer refuses a list that names no
-// workspace rather than spanning every workspace the caller administers.
+// token when principalID is set; the signer refuses a list naming no workspace.
 func ListEntries(ac *client.AlpaconClient, workspaceID, principalID string) ([]EntryResponse, error) {
 	params := map[string]string{"workspace_id": workspaceID}
 	if principalID != "" {
@@ -48,30 +45,19 @@ func ListEntries(ac *client.AlpaconClient, workspaceID, principalID string) ([]E
 	return api.FetchAllPages[EntryResponse](ac, entryURL, params)
 }
 
-// IssueEntries issues every entry or none: the bulk route refuses the whole
-// batch on one bad row, and it is used for a single entry too so both meet the
-// same duplicate refusal.
-//
-// Only service tokens are issued entries. The ledger keeps api_token entries
-// for tokens that held them before, but the web console neither issues nor
-// shows them on a personal API token's page, so one issued here could not be
-// seen or revoked there. The refusal happens before any request is sent.
+// IssueEntries issues every entry or none, one entry included, through the bulk
+// route. Every entry goes out as a service token's: the console cannot show an api_token one.
 func IssueEntries(ac *client.AlpaconClient, workspaceID string, entries []EntryRequest) ([]EntryResponse, error) {
-	for i, entry := range entries {
-		if entry.PrincipalType != PrincipalTypeServiceToken {
-			return nil, fmt.Errorf("entry %d names principal type %q: only service tokens can be issued pre-approved commands, and a personal API token has no command list on the ledger", i, entry.PrincipalType)
+	wire := make([]wireEntry, 0, len(entries))
+	for _, entry := range entries {
+		// An empty scope is every server; nil would marshal as null, not a list.
+		if entry.ServerIDs == nil {
+			entry.ServerIDs = []string{}
 		}
-	}
-	entries = slices.Clone(entries)
-	for i := range entries {
-		// The ledger reads an empty scope as every server in the workspace; a
-		// nil slice would marshal as null, which is not a list at all.
-		if entries[i].ServerIDs == nil {
-			entries[i].ServerIDs = []string{}
-		}
+		wire = append(wire, wireEntry{PrincipalType: PrincipalTypeServiceToken, EntryRequest: entry})
 	}
 
-	body, err := ac.SendPostRequest(entryBulkURL, bulkIssueRequest{WorkspaceID: workspaceID, Entries: entries})
+	body, err := ac.SendPostRequest(entryBulkURL, bulkIssueRequest{WorkspaceID: workspaceID, Entries: wire})
 	if err != nil {
 		return nil, err
 	}
@@ -82,9 +68,8 @@ func IssueEntries(ac *client.AlpaconClient, workspaceID string, entries []EntryR
 	return issued, nil
 }
 
-// GetEntry reads one entry by id. The signer answers it for every workspace the
-// caller administers, revoked entries included, so the caller compares the
-// entry's workspace_id with the workspace it means to act on.
+// GetEntry reads one entry by id, from any workspace the caller administers,
+// so the caller compares its workspace_id with the one it means to act on.
 func GetEntry(ac *client.AlpaconClient, entryID string) (EntryResponse, error) {
 	pathID, err := api.RequireID(entryID, "entry")
 	if err != nil {
@@ -178,10 +163,8 @@ func RevokeAdmin(ac *client.AlpaconClient, adminID string) error {
 	return err
 }
 
-// FindAdmin picks the grant ref names among one workspace's admins: a grant id,
-// an Auth0 subject, or an email. An email two grants share is refused rather
-// than resolved to the first, since revoking the wrong person is not something
-// the caller could see afterwards.
+// FindAdmin picks the grant ref names—a grant id, subject or email—among one
+// workspace's admins, refusing an email two grants share rather than guess.
 func FindAdmin(admins []AdminResponse, ref string) (AdminResponse, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -208,9 +191,8 @@ func FindAdmin(admins []AdminResponse, ref string) (AdminResponse, error) {
 	}
 }
 
-// ToEntryAttributes projects entries for a table. tokenNames and serverNames map
-// ids to names where the workspace could supply them; an id with no name is
-// shown as it is.
+// ToEntryAttributes projects entries for a table, showing names where the
+// workspace supplied them and the id otherwise.
 func ToEntryAttributes(entries []EntryResponse, tokenNames, serverNames map[string]string) []EntryAttributes {
 	attributes := make([]EntryAttributes, 0, len(entries))
 	for _, entry := range entries {

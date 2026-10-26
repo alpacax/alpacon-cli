@@ -2,6 +2,8 @@ package config
 
 import (
 	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,13 +21,13 @@ const (
 func TestSignerToken(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
-	valid := Config{
-		WorkspaceURL:               signerTestWorkspace,
-		SignerAccessToken:          "signer",
-		SignerAccessTokenExpiresAt: now.Add(time.Hour).Format(time.RFC3339),
-		SignerWorkspaceURL:         signerTestWorkspace,
-		SignerURL:                  testTarget.URL,
-		SignerAudience:             testTarget.Audience,
+	valid := func() Config {
+		return Config{WorkspaceURL: signerTestWorkspace, Signer: &SignerGrant{
+			AccessToken:  "signer",
+			ExpiresAt:    now.Add(time.Hour).Format(time.RFC3339),
+			WorkspaceURL: signerTestWorkspace,
+			Target:       testTarget,
+		}}
 	}
 
 	tests := []struct {
@@ -34,19 +36,19 @@ func TestSignerToken(t *testing.T) {
 		want   bool
 	}{
 		{name: "valid", mutate: func(*Config) {}, want: true},
-		{name: "none cached", mutate: func(c *Config) { c.SignerAccessToken = "" }},
+		{name: "none cached", mutate: func(c *Config) { c.Signer = nil }},
+		{name: "empty token", mutate: func(c *Config) { c.Signer.AccessToken = "" }},
 		{name: "authorized for another workspace", mutate: func(c *Config) { c.WorkspaceURL = signerTestOtherWorkspace }},
-		{name: "issued for another signer URL", mutate: func(c *Config) { c.SignerURL = "https://signer.example.com" }},
-		{name: "issued for another audience", mutate: func(c *Config) { c.SignerAudience = "https://signer.example.com/" }},
-		{name: "cached before the binding existed", mutate: func(c *Config) { c.SignerURL, c.SignerAudience = "", "" }},
-		{name: "expired", mutate: func(c *Config) { c.SignerAccessTokenExpiresAt = now.Add(-time.Second).Format(time.RFC3339) }},
-		{name: "inside the expiry margin", mutate: func(c *Config) { c.SignerAccessTokenExpiresAt = now.Add(30 * time.Second).Format(time.RFC3339) }},
-		{name: "unreadable expiry", mutate: func(c *Config) { c.SignerAccessTokenExpiresAt = "tomorrow" }},
+		{name: "issued for another signer URL", mutate: func(c *Config) { c.Signer.Target.URL = "https://signer.example.com" }},
+		{name: "issued for another audience", mutate: func(c *Config) { c.Signer.Target.Audience = "https://signer.example.com/" }},
+		{name: "expired", mutate: func(c *Config) { c.Signer.ExpiresAt = now.Add(-time.Second).Format(time.RFC3339) }},
+		{name: "inside the expiry margin", mutate: func(c *Config) { c.Signer.ExpiresAt = now.Add(30 * time.Second).Format(time.RFC3339) }},
+		{name: "unreadable expiry", mutate: func(c *Config) { c.Signer.ExpiresAt = "tomorrow" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := valid
+			cfg := valid()
 			tt.mutate(&cfg)
 			token, ok := cfg.SignerToken(now, testTarget)
 			assert.Equal(t, tt.want, ok)
@@ -69,7 +71,8 @@ func TestSaveSignerToken_CachesForTheLoginsWorkspace(t *testing.T) {
 	token, ok := cfg.SignerToken(time.Now(), testTarget)
 	require.True(t, ok, "a token cached a moment ago must be usable")
 	assert.Equal(t, "signer", token)
-	assert.Equal(t, signerTestWorkspace, cfg.SignerWorkspaceURL)
+	assert.Equal(t, signerTestWorkspace, cfg.Signer.WorkspaceURL)
+	assert.Equal(t, testTarget, cfg.Signer.Target)
 	assert.Equal(t, "access", cfg.AccessToken, "the login's own token stays as it was")
 }
 
@@ -98,7 +101,7 @@ func TestSaveSignerToken_WritesNothingOnceTheConfigMoved(t *testing.T) {
 
 			require.ErrorIs(t, err, tt.wantErr)
 			if cfg, loadErr := LoadConfig(); loadErr == nil {
-				assert.Empty(t, cfg.SignerAccessToken)
+				assert.Nil(t, cfg.Signer)
 			}
 		})
 	}
@@ -110,13 +113,11 @@ func TestClearSignerToken_LeavesAnotherShellsTokenAlone(t *testing.T) {
 	require.NoError(t, SaveSignerToken(loadedConfig(t), testTarget, "newer", 86400))
 
 	require.NoError(t, ClearSignerToken("refused"))
-	assert.Equal(t, "newer", loadedConfig(t).SignerAccessToken)
+	assert.Equal(t, "newer", loadedConfig(t).Signer.AccessToken)
 
 	require.NoError(t, ClearSignerToken("newer"))
 	cfg := loadedConfig(t)
-	assert.Empty(t, cfg.SignerAccessToken)
-	assert.Empty(t, cfg.SignerAccessTokenExpiresAt)
-	assert.Empty(t, cfg.SignerWorkspaceURL)
+	assert.Nil(t, cfg.Signer)
 }
 
 // The signer token has no refresh token to revoke, so nothing but the login's
@@ -127,10 +128,27 @@ func TestSignerToken_EndsWithTheLogin(t *testing.T) {
 	require.NoError(t, SaveSignerToken(loadedConfig(t), testTarget, "signer", 86400))
 
 	require.NoError(t, CreateConfig(signerTestWorkspace, "ws1", "", "", "access-2", "refresh-2", "alpacon.io", 3600, false))
-	assert.Empty(t, loadedConfig(t).SignerAccessToken, "a new login starts without the old signer token")
+	assert.Nil(t, loadedConfig(t).Signer, "a new login starts without the old signer token")
 
 	require.NoError(t, SaveSignerToken(loadedConfig(t), testTarget, "signer-2", 86400))
 	require.NoError(t, DeleteConfig(loadedConfig(t)))
 	_, err := LoadConfig()
 	assert.Error(t, err, "logout removes the file that held the signer token")
+}
+
+// A token cached in the flat layout an earlier build of this branch wrote is
+// ignored, and the next acl command simply authorizes again.
+func TestSignerToken_IgnoresTheOldFlatCache(t *testing.T) {
+	setupTestConfig(t)
+	dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	old := `{"workspace_url": "` + signerTestWorkspace + `", "workspace_name": "ws1", "access_token": "access", "refresh_token": "refresh",
+		"signer_access_token": "old", "signer_access_token_expires_at": "2099-01-01T00:00:00Z", "signer_workspace_url": "` + signerTestWorkspace + `"}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ConfigFileName), []byte(old), 0600))
+
+	cfg := loadedConfig(t)
+	_, ok := cfg.SignerToken(time.Now(), testTarget)
+
+	assert.False(t, ok)
+	assert.Equal(t, "access", cfg.AccessToken, "the rest of the config still loads")
 }

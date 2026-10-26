@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	// SignerURLEnvVar overrides the signer's base URL. A self-hosted workspace
-	// runs its own signer and nothing advertises where it is, so the operator
-	// states it here.
+	// SignerURLEnvVar overrides the signer's base URL; nothing advertises where
+	// a self-hosted signer is.
 	SignerURLEnvVar = "ALPACON_AI_URL"
 	// DefaultSignerURL is the signer serving Alpacon Cloud workspaces.
 	DefaultSignerURL = "https://alpacon.ai"
@@ -22,9 +21,8 @@ const (
 	// SignerAudienceEnvVar overrides the Auth0 audience a signer token is
 	// requested for, for a self-hosted signer behind its own API identifier.
 	SignerAudienceEnvVar = "ALPACON_AI_AUDIENCE"
-	// DefaultSignerAudience is the Alpacon Cloud signer's Auth0 audience. An
-	// audience is an opaque identifier matched character for character, so its
-	// trailing slash is part of it.
+	// DefaultSignerAudience is the Alpacon Cloud signer's Auth0 audience, matched
+	// character for character, trailing slash included.
 	DefaultSignerAudience = "https://alpacon.ai/"
 )
 
@@ -37,9 +35,8 @@ func SignerURL() string {
 	return DefaultSignerURL
 }
 
-// CheckSignerURL refuses a signer URL the signer token must not be sent to:
-// anything but https, except plain http to a loopback host for a signer run on
-// the same machine.
+// CheckSignerURL refuses a signer URL the token must not be sent to: anything
+// but https, except plain http to a loopback host.
 func CheckSignerURL(raw string) error {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" {
@@ -71,13 +68,8 @@ func SignerAudience() string {
 	return DefaultSignerAudience
 }
 
-// NewSignerClient builds a client for the command signer, which holds the
-// command pre-approval ledger. The signer is another host behind another Auth0
-// audience, so it gets its own client: it carries only the signer token, never
-// the workspace login's token or API key, and it never renews a token on a 401,
-// since the only renewal this process has mints a token for the workspace. It
-// always verifies the signer's certificate: a workspace logged in with
-// --insecure opted out for that workspace's host, not for the signer's.
+// NewSignerClient builds a signer client carrying only the signer token. It never
+// renews on a 401 and always verifies the certificate, whatever the workspace chose.
 func NewSignerClient(accessToken string) *AlpaconClient {
 	ac := &AlpaconClient{
 		HTTPClient: httpclient.New(false),

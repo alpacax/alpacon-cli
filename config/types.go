@@ -26,14 +26,9 @@ type Config struct {
 	// server never said yes. It only decides whether 'alpacon kube' is shown—
 	// the server refuses the endpoints on its own, so this is not a control.
 	KubernetesSurface bool `json:"kubernetes_surface,omitempty"`
-	// SignerAccessToken authorizes the command pre-approval ledger on the
-	// signer. It has no refresh token, so it is authorized again once it
-	// expires. The other three fields bind it to what it was issued for.
-	SignerAccessToken          string `json:"signer_access_token,omitempty"`
-	SignerAccessTokenExpiresAt string `json:"signer_access_token_expires_at,omitempty"`
-	SignerWorkspaceURL         string `json:"signer_workspace_url,omitempty"`
-	SignerURL                  string `json:"signer_url,omitempty"`
-	SignerAudience             string `json:"signer_audience,omitempty"`
+	// Signer caches the command signer's token and what it was issued for;
+	// nil when nothing is cached.
+	Signer *SignerGrant `json:"signer,omitempty"`
 }
 
 // WorkspaceIdentity is the value that names the current workspace to the server

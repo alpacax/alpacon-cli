@@ -105,11 +105,8 @@ func requireEntryIDs(ids []string) {
 	}
 }
 
-// requireEntriesHere refuses an entry that belongs to another workspace. The
-// signer finds an entry by id in every workspace the caller administers, while
-// the session confirmed the role only in this one, so without the check an id
-// copied from another workspace would be changed under output that says "this
-// workspace".
+// requireEntriesHere refuses an entry of another workspace: the signer finds an
+// id in every workspace the caller administers, the session checked only this one.
 func (s *ledgerSession) requireEntriesHere(ids []string) {
 	if err := s.checkEntriesHere(ids); err != nil {
 		utils.CliErrorWithExit("%s", sentence(upperFirst(err.Error())))

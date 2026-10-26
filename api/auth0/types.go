@@ -41,9 +41,8 @@ type AuthEnvResponse struct {
 	Auth0    Auth0Config `json:"auth0"`
 	Language string      `json:"language"`
 	Surfaces Surfaces    `json:"surfaces"`
-	// CommandACLSurface names the service that holds this workspace's command
-	// ACLs: CommandACLSurfaceAI when they live on the command pre-approval
-	// ledger, anything else when the workspace keeps them itself.
+	// CommandACLSurface is CommandACLSurfaceAI when the workspace's command ACLs
+	// live on the command pre-approval ledger.
 	CommandACLSurface CommandACLSurface `json:"command_acl_surface"`
 }
 

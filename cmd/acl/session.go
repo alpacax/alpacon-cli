@@ -46,10 +46,8 @@ func openLedger() *ledgerSession {
 	return session
 }
 
-// newLedgerSession checks that this workspace keeps its command ACLs on the
-// ledger, authorizes the signer audience when no usable signer token is cached,
-// and confirms the account is a Command ACL admin of this workspace before any
-// command runs, so a refusal names its cause instead of arriving as a bare 403.
+// newLedgerSession checks the workspace uses the ledger, authorizes the signer
+// when nothing usable is cached, and confirms the Command ACL admin role here.
 func newLedgerSession() (*ledgerSession, error) {
 	cfg, err := loadConfig()
 	if err != nil {
@@ -112,10 +110,8 @@ func ledgerUnavailableReason(envInfo *auth0.AuthEnvResponse) string {
 	return ""
 }
 
-// runSignerDeviceCode runs the second device-code authorization, for the
-// signer's audience, and caches the token it returns. The signer's API grants
-// no refresh token, so this authorization lasts as long as the access token and
-// is asked for again once it expires.
+// runSignerDeviceCode authorizes the signer's audience and caches the token,
+// which has no refresh token and is asked for again once it expires.
 func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, target config.SignerTarget) (string, error) {
 	utils.CliInfo("Pre-approved commands are kept by the command signer, which needs its own authorization. It lasts until its token expires and is not renewed in the background.")
 
@@ -137,9 +133,8 @@ func runSignerDeviceCode(cfg config.Config, envInfo *auth0.AuthEnvResponse, targ
 	return cacheSignerToken(cfg, target, tokenRes.AccessToken, tokenRes.ExpiresIn)
 }
 
-// cacheSignerToken stores a freshly authorized signer token and hands it back,
-// unless the config no longer holds the login and workspace cfg named. A
-// config another shell's logout removed counts as a changed login.
+// cacheSignerToken stores a fresh signer token and returns it, or fails once
+// another shell's login, logout or switch has replaced cfg.
 func cacheSignerToken(cfg config.Config, target config.SignerTarget, token string, expiresIn int) (string, error) {
 	err := config.SaveSignerToken(cfg, target, token, expiresIn)
 	switch {
@@ -164,11 +159,8 @@ func authorizationFailureMessage(err error) string {
 	}
 }
 
-// workspaceAPI returns a client for the workspace this session was opened for,
-// which resolves the names the ledger stores as ids. It is built once and
-// refused when the config has moved to another workspace since the session
-// opened, so a name is never resolved in one workspace for a ledger call
-// filed under another.
+// workspaceAPI returns one workspace client for the session, refused once the
+// config has moved to another workspace, so lookups match the ledger call.
 func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	if s.workspace != nil {
 		return s.workspace, nil

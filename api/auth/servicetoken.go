@@ -22,9 +22,8 @@ type serviceTokenSummary struct {
 // workspace, such as a personal API token's.
 var ErrNotAServiceToken = errors.New("no service token in this workspace has that ID")
 
-// ResolveServiceTokenID returns the id of the service token nameOrID names. An
-// id is looked up too, so a personal API token's id is refused rather than
-// taken for a service token's; a name must match one token exactly.
+// ResolveServiceTokenID returns a service token's id. An id is confirmed by a
+// lookup, so a personal API token's is refused; a name must match exactly once.
 func ResolveServiceTokenID(ac *client.AlpaconClient, nameOrID string) (string, error) {
 	nameOrID = strings.TrimSpace(nameOrID)
 	if utils.IsUUID(nameOrID) {

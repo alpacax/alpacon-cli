@@ -54,9 +54,10 @@ func installSeams(t *testing.T, s *sessionSeams) {
 		cfg := s.cfg
 		// A cached token in these fixtures was issued for whichever signer the
 		// test points at, unless the fixture names another one.
-		if cfg.SignerAccessToken != "" && cfg.SignerURL == "" {
-			target := testTarget()
-			cfg.SignerURL, cfg.SignerAudience = target.URL, target.Audience
+		if cfg.Signer != nil && cfg.Signer.Target == (config.SignerTarget{}) {
+			grant := *cfg.Signer
+			grant.Target = testTarget()
+			cfg.Signer = &grant
 		}
 		return cfg, s.cfgErr
 	}
@@ -96,9 +97,7 @@ func testTarget() config.SignerTarget {
 func loggedIn(signerToken string) config.Config {
 	cfg := config.Config{WorkspaceURL: testWorkspaceURL, WorkspaceName: "ws1", AccessToken: "access", RefreshToken: "refresh"}
 	if signerToken != "" {
-		cfg.SignerAccessToken = signerToken
-		cfg.SignerAccessTokenExpiresAt = "2026-10-23T00:00:00Z"
-		cfg.SignerWorkspaceURL = testWorkspaceURL
+		cfg.Signer = &config.SignerGrant{AccessToken: signerToken, ExpiresAt: "2026-10-23T00:00:00Z", WorkspaceURL: testWorkspaceURL}
 	}
 	return cfg
 }
@@ -206,7 +205,7 @@ func TestNewLedgerSession_DropsARefusedSignerToken(t *testing.T) {
 	require.ErrorContains(t, err, "Run the command again to authorize once more")
 	after, err := config.LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, after.SignerAccessToken)
+	assert.Nil(t, after.Signer)
 	assert.Equal(t, "access", after.AccessToken, "the workspace login is left as it was")
 }
 
@@ -374,7 +373,7 @@ func TestErrorMessage_RedactsTheSignerURL(t *testing.T) {
 // ALPACON_AI_URL or audience authorizes again instead.
 func TestNewLedgerSession_DoesNotSendACachedTokenToAnotherSigner(t *testing.T) {
 	cfg := loggedIn("cached")
-	cfg.SignerURL, cfg.SignerAudience = "https://signer.example.com", client.DefaultSignerAudience
+	cfg.Signer.Target = config.SignerTarget{URL: "https://signer.example.com", Audience: client.DefaultSignerAudience}
 	seams := &sessionSeams{cfg: cfg, env: ledgerEnv(), authorized: "fresh"}
 	installSeams(t, seams)
 	auths := stubSigner(t, http.StatusOK, adminOfWorkspace)
@@ -423,12 +422,13 @@ func TestErrorMessage_HasNoSideEffect(t *testing.T) {
 	_ = session.errorMessage("list pre-approved commands", refused)
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
-	assert.Equal(t, "cached", cfg.SignerAccessToken, "wording an error must not change the cache")
+	require.NotNil(t, cfg.Signer, "wording an error must not change the cache")
+	assert.Equal(t, "cached", cfg.Signer.AccessToken)
 
 	session.dropRefusedToken(refused)
 	cfg, err = config.LoadConfig()
 	require.NoError(t, err)
-	assert.Empty(t, cfg.SignerAccessToken)
+	assert.Nil(t, cfg.Signer)
 }
 
 func TestCacheSignerToken_FailsAfterALogout(t *testing.T) {

@@ -56,7 +56,7 @@ with --token. Revoked entries are not listed.`,
 			session.fail("list pre-approved commands", err)
 		}
 
-		tokenNames, serverNames := session.workspaceNames()
+		tokenNames, serverNames := session.workspaceNames(entries)
 		utils.PrintTable(acl.ToEntryAttributes(entries, tokenNames, serverNames))
 	},
 }

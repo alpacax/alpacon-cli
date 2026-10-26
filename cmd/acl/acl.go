@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/acl"
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -42,14 +43,12 @@ func init() {
 	AclCmd.AddCommand(adminCmd)
 }
 
-// errEmptyServerScope refuses an empty server reference. An empty scope means
-// every server in the workspace, so dropping the empty value would widen the
-// entry past what the caller wrote.
+// errEmptyServerScope refuses an empty server value: an empty scope is every
+// server, so dropping the value would widen the entry.
 var errEmptyServerScope = errors.New("a server value is empty; name each server, or leave the scope out on purpose to cover every server")
 
-// resolveServiceToken turns a service token name or id into the id the ledger
-// stores, looked up in the session's workspace. An id is confirmed to be a
-// service token's, so a personal API token's id is refused.
+// resolveServiceToken turns a service token name or id into its id in the
+// session's workspace; an id must be a service token's.
 func (s *ledgerSession) resolveServiceToken(ref string) (string, error) {
 	ac, err := s.workspaceAPI()
 	if err != nil {
@@ -59,8 +58,7 @@ func (s *ledgerSession) resolveServiceToken(ref string) (string, error) {
 }
 
 // listFilterID is resolveServiceToken for a listing filter: an id passes
-// through, since filtering by an id that is not a service token's only lists
-// nothing, and existing entries of a personal API token stay listable.
+// through, so a personal API token's existing entries stay listable.
 func (s *ledgerSession) listFilterID(ref string) (string, error) {
 	if ref = strings.TrimSpace(ref); utils.IsUUID(ref) {
 		return ref, nil
@@ -68,10 +66,8 @@ func (s *ledgerSession) listFilterID(ref string) (string, error) {
 	return s.resolveServiceToken(ref)
 }
 
-// resolveServerScope turns --server values into the ids the ledger stores. An
-// id passes through, because a listed entry prints ids where a server has been
-// deleted; anything else is a server name resolved through the session's
-// workspace API.
+// resolveServerScope turns --server values into ids. An id passes through;
+// a name is resolved through the session's workspace API.
 func (s *ledgerSession) resolveServerScope(refs []string) ([]string, error) {
 	ids, names, err := partitionServerRefs(refs)
 	if err != nil || len(names) == 0 {
@@ -89,10 +85,8 @@ func (s *ledgerSession) resolveServerScope(refs []string) ([]string, error) {
 	return append(ids, resolved...), nil
 }
 
-// partitionServerRefs splits --server values into ids and names. An empty
-// value is refused rather than dropped: an empty scope means every server in
-// the workspace, so dropping a stray empty value could leave a scope that
-// covers far more than the caller wrote.
+// partitionServerRefs splits --server values into ids and names, refusing an
+// empty value rather than dropping it (see errEmptyServerScope).
 func partitionServerRefs(refs []string) (ids []string, names []string, err error) {
 	for _, ref := range refs {
 		ref = strings.TrimSpace(ref)
@@ -108,20 +102,32 @@ func partitionServerRefs(refs []string) (ids []string, names []string, err error
 	return ids, names, nil
 }
 
-// workspaceNames maps service token and server ids to names for a listing. It
-// is best effort: a listing is still correct with ids, so a failure here only
-// costs readability and is reported under ALPACON_DEBUG.
-func (s *ledgerSession) workspaceNames() (tokenNames, serverNames map[string]string) {
+// workspaceNames maps the ids the listed entries reference to names, fetching
+// only what they need. Best effort: a failure leaves ids and logs under ALPACON_DEBUG.
+func (s *ledgerSession) workspaceNames(entries []acl.EntryResponse) (tokenNames, serverNames map[string]string) {
+	needTokens, needServers := false, false
+	for _, entry := range entries {
+		needTokens = needTokens || entry.PrincipalType == acl.PrincipalTypeServiceToken
+		needServers = needServers || len(entry.ServerIDs) > 0
+	}
+	if !needTokens && !needServers {
+		return nil, nil
+	}
+
 	ac, err := s.workspaceAPI()
 	if err != nil {
 		utils.CliDebug("showing ids instead of names: %v", err)
 		return nil, nil
 	}
-	if tokenNames, err = auth.GetServiceTokenNames(ac); err != nil {
-		utils.CliDebug("showing service token ids instead of names: %v", err)
+	if needTokens {
+		if tokenNames, err = auth.GetServiceTokenNames(ac); err != nil {
+			utils.CliDebug("showing service token ids instead of names: %v", err)
+		}
 	}
-	if serverNames, err = server.GetServerNames(ac); err != nil {
-		utils.CliDebug("showing server ids instead of names: %v", err)
+	if needServers {
+		if serverNames, err = server.GetServerNames(ac); err != nil {
+			utils.CliDebug("showing server ids instead of names: %v", err)
+		}
 	}
 	return tokenNames, serverNames
 }

@@ -171,11 +171,8 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 	return requestDeviceCode(httpClient, envInfo, scope, envInfo.Auth0.Audience)
 }
 
-// RequestSignerDeviceCode starts a second device-code authorization for the
-// signer's audience, which the workspace login's token cannot reach. It asks for
-// the same org scope as a login, so the token carries the same org claim, but
-// never for offline_access: the signer's API grants no refresh token, so this
-// authorization lasts exactly as long as its access token.
+// RequestSignerDeviceCode authorizes the signer's audience with the login's org
+// scope but no offline_access: the signer's API grants no refresh token.
 func RequestSignerDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse, audience string) (*DeviceCodeResponse, error) {
 	scope := signerDeviceCodeScope(resolveOrgName(envInfo, workspaceName), currentDeviceID())
 	return requestDeviceCode(httpClient, envInfo, scope, audience)
@@ -278,9 +275,8 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 	}
 }
 
-// The three ways PollForToken ends without a token that a person caused or
-// can retry, as sentinels so a caller outside 'alpacon login' can word its own
-// remedy. The text is what 'alpacon login' prints.
+// Sentinels for the device-code endings a caller may word its own remedy for;
+// the text is what 'alpacon login' prints.
 var (
 	ErrDeviceCodeTimedOut = errors.New("authentication timed out. Please restart the login process")
 	ErrDeviceCodeDenied   = errors.New("authentication was denied. You may have cancelled the browser prompt")
