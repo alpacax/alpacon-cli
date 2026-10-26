@@ -75,6 +75,13 @@ func (s kubeSessionStore) recordPath(k recordKey) string {
 	return filepath.Join(s.dir, recordBase(k)+".json")
 }
 
+// stagingPattern names the temp file a write renames into the record. A
+// logout deletes these names too, so a change here must keep matching what
+// config.DeleteConfig removes.
+func stagingPattern(k recordKey) string {
+	return recordBase(k) + ".*.tmp"
+}
+
 var errStoreLocked = errors.New("another 'alpacon kube login' for this cluster is running")
 
 // lock serializes the logins of one cluster, whichever kubeconfig each one
@@ -149,7 +156,7 @@ func (s kubeSessionStore) write(record kubeSessionRecord) error {
 		return err
 	}
 	path := s.recordPath(record.key())
-	tmp, err := os.CreateTemp(s.dir, recordBase(record.key())+".*.tmp")
+	tmp, err := os.CreateTemp(s.dir, stagingPattern(record.key()))
 	if err != nil {
 		return err
 	}

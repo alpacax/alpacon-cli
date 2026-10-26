@@ -26,6 +26,7 @@ import (
 const (
 	loginClusterID = "6a3f1c2e-0000-4000-8000-000000000001"
 	loginWSID      = "0b5d7e9a-0000-4000-8000-000000000002"
+	serverWSID     = "0b5d7e9a-0000-4000-8000-0000000000f0" // a server session
 	loginToken     = "login-channel-token"
 )
 
@@ -38,6 +39,9 @@ type kubeLoginServer struct {
 	kubeCreateCode string // code refusing the kube session, if any
 	pendingReads   int    // reads of the session that answer pending before wsPollStatus
 	kubeClosed     bool   // a read of the kube session answers it closed
+	requesterType  string // requester_type the session list must filter on; default user
+	clusters       string // JSON array the cluster lookup answers; default prod-east
+	surfaceOff     bool   // the cluster lookup answers 404
 
 	mu       sync.Mutex
 	requests []string
@@ -69,7 +73,15 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kubernetes/clusters/":
-			_, _ = fmt.Fprintf(w, `{"count":1,"results":[{"id":%q,"name":"prod-east"}]}`, loginClusterID)
+			if s.surfaceOff {
+				http.Error(w, `{"detail":"Not found."}`, http.StatusNotFound)
+				return
+			}
+			clusters := s.clusters
+			if clusters == "" {
+				clusters = fmt.Sprintf(`[{"id":%q,"name":"prod-east"}]`, loginClusterID)
+			}
+			_, _ = fmt.Fprintf(w, `{"count":1,"results":%s}`, clusters)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/iam/users/-/":
 			_, _ = w.Write([]byte(`{"id":"u-1","username":"alice"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/":
@@ -78,6 +90,17 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 			}
 			if got := r.URL.Query().Get("status"); got != "active,approved,pending" {
 				t.Errorf("session list filtered by status %q", got)
+			}
+			// Only the caller's own sessions may be reused or waited on.
+			if got := r.URL.Query().Get("assigned_user"); got != "u-1" {
+				t.Errorf("session list filtered by assigned_user %q", got)
+			}
+			wantRequester := s.requesterType
+			if wantRequester == "" {
+				wantRequester = "user"
+			}
+			if got := r.URL.Query().Get("requester_type"); got != wantRequester {
+				t.Errorf("session list filtered by requester_type %q, want %q", got, wantRequester)
 			}
 			list := s.wsList
 			if list == "" {
@@ -91,6 +114,9 @@ func (s *kubeLoginServer) start(t *testing.T) *httptest.Server {
 			s.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(s.workSession(s.wsCreateStatus)))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/"+serverWSID+"/":
+			_, _ = fmt.Fprintf(w, `{"id":%q,"status":"active","requester_type":"user","scopes":["command"],
+				"servers":[{"id":"s-1","name":"web-01"}],"clusters":[],"expires_at":"2099-01-01T00:00:00Z"}`, serverWSID)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/work-sessions/sessions/"+loginWSID+"/":
 			s.mu.Lock()
 			status := s.wsPollStatus
@@ -442,7 +468,7 @@ func TestKubeLoginWaitsOnANamedPendingSession(t *testing.T) {
 // An agent session holds only kube, so an agent need not say so.
 func TestKubeLoginGivesAnAgentTheKubeScope(t *testing.T) {
 	t.Parallel()
-	srv := &kubeLoginServer{wsCreateStatus: "active"}
+	srv := &kubeLoginServer{wsCreateStatus: "active", requesterType: "agent"}
 	ts := srv.start(t)
 	home := kubeLoginHome(t, ts.URL)
 
@@ -473,34 +499,98 @@ func TestKubeLoginFailuresAreEnvelopesUnderJSON(t *testing.T) {
 	assert.Contains(t, envelope["message"], "cannot open a kube session")
 }
 
-func TestKubeLoginReusesTheActiveWorkSessionWhenItFits(t *testing.T) {
+// The active slot holds only a server session, which no kube session opens
+// under, so it is not read: a fitting session comes from the list or is created.
+func TestKubeLoginIgnoresTheActiveWorkSession(t *testing.T) {
 	t.Parallel()
-	srv := &kubeLoginServer{wsPollStatus: "active"}
+	srv := &kubeLoginServer{wsCreateStatus: "active"}
 	ts := srv.start(t)
-	home := kubeLoginHome(t, ts.URL, map[string]any{"active_work_sessions": map[string]string{"ws": loginWSID}})
-
-	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"))
-
-	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
-	assert.Zero(t, srv.count("POST /api/work-sessions/sessions/"))
-	assert.Zero(t, srv.count("GET /api/work-sessions/sessions/"), "a fitting active session needs no list")
-	_, kubeBody, _ := srv.bodies()
-	assert.Equal(t, loginWSID, kubeBody["work_session"])
-}
-
-// The active session holds kube alone, so a login that asks for kube_exec
-// files a new session rather than one that would refuse exec.
-func TestKubeLoginCreatesWhenTheActiveSessionLacksAScope(t *testing.T) {
-	t.Parallel()
-	srv := &kubeLoginServer{wsCreateStatus: "active", wsPollStatus: "active"}
-	ts := srv.start(t)
-	home := kubeLoginHome(t, ts.URL, map[string]any{"active_work_sessions": map[string]string{"ws": loginWSID}})
+	home := kubeLoginHome(t, ts.URL, map[string]any{"active_work_sessions": map[string]string{"ws": serverWSID}})
 
 	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
-		"--purpose", "x", "--scope", "kube,kube_exec", "--duration", "1h")
+		"--purpose", "x", "--scope", "kube", "--duration", "1h")
 
 	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	assert.Zero(t, srv.count("GET /api/work-sessions/sessions/"+serverWSID+"/"))
 	assert.Equal(t, 1, srv.count("POST /api/work-sessions/sessions/"))
+}
+
+// ALPACON_WORK_SESSION is used when it serves the cluster, waited on while it
+// is pending, and passed over for a lookup when it names a server session.
+func TestKubeLoginWithTheWorkSessionVariable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		srv     *kubeLoginServer
+		env     string
+		args    []string
+		message string
+		creates int
+	}{
+		{name: "usable", srv: &kubeLoginServer{wsPollStatus: "active"}, env: loginWSID,
+			message: "Using WorkSession " + loginWSID + " from ALPACON_WORK_SESSION"},
+		{name: "pending", srv: &kubeLoginServer{wsPollStatus: "active", pendingReads: 1}, env: loginWSID,
+			message: "is pending; waiting up to 5m0s"},
+		{name: "a server session", srv: &kubeLoginServer{wsCreateStatus: "active"}, env: serverWSID,
+			args:    []string{"--purpose", "x", "--scope", "kube", "--duration", "1h"},
+			message: "ALPACON_WORK_SESSION names a WorkSession that does not serve prod-east", creates: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := tt.srv.start(t)
+			home := kubeLoginHome(t, ts.URL)
+
+			_, stderr, exitCode := runKubeLoginWithEnv(t, home, []string{"ALPACON_WORK_SESSION=" + tt.env},
+				append([]string{"prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config")}, tt.args...)...)
+
+			require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+			assert.Contains(t, stderr, tt.message)
+			assert.Equal(t, tt.creates, tt.srv.count("POST /api/work-sessions/sessions/"))
+			_, kubeBody, _ := tt.srv.bodies()
+			assert.Equal(t, loginWSID, kubeBody["work_session"])
+		})
+	}
+}
+
+func TestKubeLoginClusterLookupFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		srv     *kubeLoginServer
+		message string
+	}{
+		{name: "surface off", srv: &kubeLoginServer{surfaceOff: true}, message: "Kubernetes support is not enabled on this workspace"},
+		{name: "unknown cluster", srv: &kubeLoginServer{clusters: "[]"}, message: "Failed to find the cluster: no cluster found with the given name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := tt.srv.start(t)
+			home := kubeLoginHome(t, ts.URL)
+
+			_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"),
+				"--purpose", "x", "--scope", "kube", "--duration", "1h")
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+			assert.Contains(t, stderr, tt.message)
+			assert.Equal(t, []string{"GET /api/kubernetes/clusters/"}, tt.srv.seen(), "no WorkSession is looked up or created")
+		})
+	}
+}
+
+// A --work-session that is not one path segment never reaches a request path.
+func TestKubeLoginRefusesAnUnusableWorkSessionID(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+
+	_, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--kubeconfig", filepath.Join(t.TempDir(), "config"), "--work-session", "../x")
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "Invalid --work-session")
+	assert.Equal(t, []string{"GET /api/kubernetes/clusters/"}, srv.seen())
 }
 
 func TestKubeLoginPicksAnActiveSessionFromTheList(t *testing.T) {
@@ -709,4 +799,23 @@ func TestKubeLoginChecksTheKubeconfigBeforeAnyWorkSession(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
 	assert.Contains(t, stderr, "Failed to open the kubeconfig")
 	assert.Empty(t, srv.seen(), "nothing is asked of the server for a login that cannot be written")
+}
+
+// A named session is read before it is used, so the result reports the
+// scopes it grants like any other.
+func TestKubeLoginJSONResultForANamedSession(t *testing.T) {
+	t.Parallel()
+	srv := &kubeLoginServer{wsPollStatus: "active"}
+	ts := srv.start(t)
+	home := kubeLoginHome(t, ts.URL)
+
+	stdout, stderr, exitCode := runKubeLogin(t, home, "prod-east", "--output", "json",
+		"--kubeconfig", filepath.Join(t.TempDir(), "config"), "--work-session", loginWSID)
+
+	require.Equal(t, 0, exitCode, "stderr: %s", stderr)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+	assert.Equal(t, loginWSID, result["work_session_id"])
+	assert.Equal(t, false, result["work_session_created"])
+	assert.Equal(t, []any{"kube"}, result["scopes"])
 }

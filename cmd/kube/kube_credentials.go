@@ -171,9 +171,12 @@ func pickRecord(records []kubeSessionRecord, server, workspaceURL string) *kubeS
 
 // credentialExpiry decides how long the saved token stays good. With
 // retrieve, the server's answer wins: a closed or expired session is gone,
-// and an extended one moves the expiry. A check that fails, or a record of
-// another workspace this login cannot check (retrieve nil), falls back to
-// the saved expiry, so a passing outage does not lock kubectl out.
+// and an extended one moves the expiry. So is one the server will not show
+// this login (404, 401 or 403): another account logged in without a logout,
+// or the login itself was revoked, and the token must not go on acting for
+// it. Any other failed check, or a record of another workspace this login
+// cannot check (retrieve nil), falls back to the saved expiry, so a passing
+// outage does not lock kubectl out.
 func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() (*kubernetes.KubeSessionDetail, error)) (time.Time, error) {
 	saved := record.TokenExpiredAt
 	if retrieve == nil {
@@ -184,7 +187,8 @@ func credentialExpiry(record *kubeSessionRecord, now time.Time, retrieve func() 
 	}
 	session, err := retrieve()
 	if err != nil {
-		if utils.HTTPStatusCode(err) == http.StatusNotFound {
+		switch utils.HTTPStatusCode(err) {
+		case http.StatusNotFound, http.StatusUnauthorized, http.StatusForbidden:
 			return time.Time{}, errSessionGone
 		}
 		if !saved.After(now) {

@@ -38,9 +38,10 @@ var kubeConfigCmd = &cobra.Command{
 	Short: "Write a kubeconfig context for a cluster",
 	Long: `Open a kube session on a cluster and write a context named alpacon-CLUSTER
 into your kubeconfig, then make it the current context so kubectl, k9s, and
-other clients use it right away. The session runs under --work-session, or the
-active WorkSession, which must target the cluster with the kube scope; create
-one with 'alpacon work-session create --cluster CLUSTER --scope kube'.
+other clients use it right away. The session runs under --work-session, or
+the WorkSession ALPACON_WORK_SESSION names, which must target the cluster with
+the kube scope; create one with
+'alpacon work-session create --cluster CLUSTER --scope kube'.
 'alpacon kube login' finds or creates that session itself and keeps the token
 out of the kubeconfig.
 
@@ -64,7 +65,7 @@ port instead of connecting to the cluster's proxy host directly.`,
 }
 
 func init() {
-	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: the active one)")
+	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.workSession, "work-session", "", "WorkSession ID to open the kube session under; it must target the cluster (default: ALPACON_WORK_SESSION)")
 	kubeConfigCmd.Flags().StringVar(&kubeConfigFlags.kubeconfig, "kubeconfig", "", "kubeconfig file to write (default: the file kubectl writes)")
 	kubeConfigCmd.Flags().IntVar(&kubeConfigFlags.proxyPort, "proxy-port", 0, "route kubectl through 'alpacon kube proxy' on this local port")
 }
@@ -110,9 +111,12 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 	if err != nil {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 	}
-	workSessionID, err := worksession.ResolveFor(kubeConfigFlags.workSession, ac.WorkspaceName)
-	if err != nil {
-		utils.CliErrorWithExit("%s", err)
+	// The active WorkSession is not a fallback: it can only hold a server
+	// session, which no kube session opens under. Without either, the server
+	// refuses with the gate code and the hint names 'kube login'.
+	workSessionID := kubeConfigFlags.workSession
+	if workSessionID == "" {
+		workSessionID = os.Getenv(worksession.WorkSessionEnvVar)
 	}
 
 	path, err := kubeconfig.ResolvePath(kubeConfigFlags.kubeconfig)
@@ -122,38 +126,64 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 	// The file is opened, locked, and checked before the session exists: its
 	// token is handed out once, so a file it cannot be written to must be
 	// found out while there is still nothing to lose.
-	editor, err := kubeconfig.Open(path)
+	held, err := holdKubeconfig(path, func(msg string) { utils.CliErrorWithExit("%s", msg) })
 	if err != nil {
 		utils.CliErrorWithExit("Failed to open the kubeconfig: %s.", err)
 	}
-	// Every exit below runs through os.Exit, which skips deferred calls, so
-	// each releases the kubeconfig lock first; a lock left behind would block
-	// kubectl's own writes to the file. OnceFunc makes a release from the
-	// interrupt watcher and one from here safe to overlap.
-	release := sync.OnceFunc(func() { _ = editor.Close() })
-	defer release()
-	interrupt := watchInterrupt(func() {
-		release()
-		utils.CliErrorWithExit("Interrupted; the kubeconfig may not have been written, and a kube session may have been left open until the WorkSession ends.")
-	})
-	defer interrupt.stop()
+	defer held.done()
 
-	result, err := openKubeConfig(ac, editor, kubeConfigOptions{
+	result, err := openKubeConfig(ac, held.editor, kubeConfigOptions{
 		clusterName:   clusterName,
 		workSessionID: workSessionID,
 		kubeconfig:    path,
 		proxyPort:     proxyPort,
-		interrupted:   interrupt.fired.Load,
+		interrupted:   held.interrupt.fired.Load,
 	})
 	// The file is written or abandoned either way, so nothing below needs the
 	// lock, and a failed write to stdout cannot strand it.
-	interrupt.stop()
-	release()
+	held.done()
 	if err != nil {
 		exitKubeConfigError(err, clusterName, workSessionID)
 	}
 
 	printKubeConfigResult(result, ac.Insecure)
+}
+
+// interruptedMessage is how a command ends on a second Ctrl+C.
+const interruptedMessage = "Interrupted; the kubeconfig may not have been written, and a kube session may have been left open until the WorkSession ends."
+
+// heldKubeconfig is a kubeconfig opened and locked for one write, with the
+// Ctrl+C watch that guards it.
+type heldKubeconfig struct {
+	editor    *kubeconfig.Editor
+	interrupt *interruptWatch
+	release   func()
+}
+
+// holdKubeconfig opens and locks the kubeconfig at path and watches for
+// Ctrl+C. Every exit after it runs through os.Exit, which skips deferred
+// calls, so each releases the lock first, a second Ctrl+C included, before
+// quit ends the command with interruptedMessage: a lock left behind would
+// block kubectl's own writes to the file.
+func holdKubeconfig(path string, quit func(msg string)) (*heldKubeconfig, error) {
+	editor, err := kubeconfig.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	// OnceFunc makes a release from the watcher and one from the command safe
+	// to overlap.
+	release := sync.OnceFunc(func() { _ = editor.Close() })
+	interrupt := watchInterrupt(func() {
+		release()
+		quit(interruptedMessage)
+	})
+	return &heldKubeconfig{editor: editor, interrupt: interrupt, release: release}, nil
+}
+
+// done stops the watch and releases the lock; calling it again does nothing.
+func (h *heldKubeconfig) done() {
+	h.interrupt.stop()
+	h.release()
 }
 
 // interruptWatch records a first Ctrl+C instead of acting on it, so the main
@@ -258,9 +288,6 @@ func openKubeConfig(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts ku
 	if err != nil {
 		return nil, &clusterLookupError{err: err}
 	}
-	if opts.isInterrupted() {
-		return nil, errInterrupted
-	}
 	return openKubeSession(ac, editor, opts, clusterID, kubeSessionWriter{})
 }
 
@@ -280,6 +307,9 @@ type kubeSessionWriter struct {
 // openKubeSession opens a kube session under the work session and writes its
 // context. Any failure after the session exists closes it again.
 func openKubeSession(ac *client.AlpaconClient, editor *kubeconfig.Editor, opts kubeConfigOptions, clusterID string, w kubeSessionWriter) (*kubeConfigResult, error) {
+	if opts.isInterrupted() {
+		return nil, errInterrupted
+	}
 	session, err := kubernetes.CreateSession(ac, kubernetes.KubeSessionCreateRequest{
 		Cluster:     clusterID,
 		WorkSession: opts.workSessionID,

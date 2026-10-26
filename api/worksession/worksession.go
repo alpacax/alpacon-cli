@@ -57,13 +57,13 @@ func ProjectAttributes(ws *WorkSession) WorkSessionAttributes {
 		Scopes:      strings.Join(ws.Scopes, ", "),
 		Servers:     strings.Join(ServerNames(ws), ", "),
 		Clusters:    strings.Join(ClusterNames(ws), ", "),
-		ExpiresAt:   formatExpiresAt(ws.ExpiresAt),
+		ExpiresAt:   FormatExpiresAt(ws.ExpiresAt),
 	}
 }
 
-// formatExpiresAt leaves blank the expiry of a session created with a
+// FormatExpiresAt leaves blank the expiry of a session created with a
 // duration, which has none until it activates.
-func formatExpiresAt(t time.Time) string {
+func FormatExpiresAt(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}

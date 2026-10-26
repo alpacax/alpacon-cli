@@ -50,10 +50,6 @@ var workSessionDescribeCmd = &cobra.Command{
 		if session.AssignedUser != nil {
 			assignedUser = session.AssignedUser.Name
 		}
-		expiresAt := ""
-		if !session.ExpiresAt.IsZero() {
-			expiresAt = session.ExpiresAt.Local().Format("2006-01-02 15:04")
-		}
 		startedAt := ""
 		if session.StartedAt != nil {
 			startedAt = session.StartedAt.Local().Format("2006-01-02 15:04")
@@ -73,7 +69,7 @@ var workSessionDescribeCmd = &cobra.Command{
 			{"Clusters", strings.Join(wsapi.ClusterNames(session), ", ")},
 			{"Created by", createdBy},
 			{"Assigned user", assignedUser},
-			{"Expires at", expiresAt},
+			{"Expires at", wsapi.FormatExpiresAt(session.ExpiresAt)},
 			{"Started at", startedAt},
 			{"Completed at", completedAt},
 			{"Added at", session.AddedAt.Local().Format("2006-01-02 15:04")},

@@ -97,25 +97,30 @@ commands, especially for AI agents and operators managing multiple workspaces.`,
 			if wsErr != nil {
 				utils.CliWarning("Could not fetch active work-session: %s", wsErr)
 			} else if ws != nil {
-				expiresAt := ""
-				if !ws.ExpiresAt.IsZero() {
-					expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
-				}
 				// normalized() mirrors this into ActiveWorksessionCanonical.
-				output.ActiveWorksession = &activeWorkSessionSummary{
-					ID:        ws.ID,
-					Status:    ws.Status,
-					Scopes:    ws.Scopes,
-					Servers:   wsapi.ServerNames(ws),
-					Clusters:  wsapi.ClusterNames(ws),
-					ExpiresAt: expiresAt,
-				}
+				output.ActiveWorksession = summarizeWorkSession(ws)
 			}
 		}
 
 		warnIfExpiringSoon(cfg)
 		printWhoami(output)
 	},
+}
+
+// summarizeWorkSession is what whoami reports of the work session in use.
+func summarizeWorkSession(ws *wsapi.WorkSession) *activeWorkSessionSummary {
+	expiresAt := ""
+	if !ws.ExpiresAt.IsZero() {
+		expiresAt = ws.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	return &activeWorkSessionSummary{
+		ID:        ws.ID,
+		Status:    ws.Status,
+		Scopes:    ws.Scopes,
+		Servers:   wsapi.ServerNames(ws),
+		Clusters:  wsapi.ClusterNames(ws),
+		ExpiresAt: expiresAt,
+	}
 }
 
 type activeWorkSessionSummary struct {

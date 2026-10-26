@@ -880,29 +880,6 @@ func TestClearActiveWorkSessionFor_MatchesAnIDThatDiffersOnlyInCase(t *testing.T
 	assert.Empty(t, got)
 }
 
-func TestGetActiveWorkSessionFor_ReadsTheNamedWorkspace(t *testing.T) {
-	setupTestConfig(t)
-	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
-	require.NoError(t, SetActiveWorkSession("uuid-1"))
-
-	got, err := GetActiveWorkSessionFor("ws-a")
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-1", got)
-
-	got, err = GetActiveWorkSessionFor("ws-b")
-	require.NoError(t, err)
-	assert.Empty(t, got, "another workspace's slot is not this one's")
-}
-
-func TestGetActiveWorkSessionFor_NoConfigIsNotAnError(t *testing.T) {
-	setupTestConfig(t)
-
-	got, err := GetActiveWorkSessionFor("ws-a")
-
-	require.NoError(t, err)
-	assert.Empty(t, got)
-}
-
 func TestDeleteConfigRemovesTheSavedKubeSessions(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))

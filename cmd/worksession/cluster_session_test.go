@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/kubernetes"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -97,7 +98,9 @@ func TestTargetErrorHint(t *testing.T) {
 
 // clusterCreateServer answers a cluster lookup and records the create body.
 type clusterCreateServer struct {
-	status string
+	status   string
+	clusters string // JSON array the cluster lookup answers; default prod-east
+	notFound bool   // the cluster lookup answers 404, as with the surface off
 
 	mu       sync.Mutex
 	body     map[string]any
@@ -116,7 +119,15 @@ func (s *clusterCreateServer) start(t *testing.T) *httptest.Server {
 			if r.URL.Query().Get("name") != "prod-east" {
 				t.Errorf("cluster lookup by %q", r.URL.Query().Get("name"))
 			}
-			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"6a3f1c2e-0000-4000-8000-000000000001","name":"prod-east"}]}`))
+			if s.notFound {
+				http.Error(w, `{"detail":"Not found."}`, http.StatusNotFound)
+				return
+			}
+			clusters := s.clusters
+			if clusters == "" {
+				clusters = `[{"id":"6a3f1c2e-0000-4000-8000-000000000001","name":"prod-east"}]`
+			}
+			_, _ = w.Write([]byte(`{"count":1,"results":` + clusters + `}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
 			raw, _ := io.ReadAll(r.Body)
 			var body map[string]any
@@ -208,6 +219,11 @@ func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {
 			message: "pass --cluster instead of --server",
 		},
 		{
+			name:    "blank cluster",
+			args:    []string{"--scope", "kube", "--cluster", " "},
+			message: "--cluster must name a cluster",
+		},
+		{
 			name:    "use",
 			args:    []string{"--scope", "kube", "--cluster", "prod-east", "--use"},
 			message: "--use cannot be combined with --cluster",
@@ -231,6 +247,48 @@ func TestWorkSessionCreateClusterRefusesFlagsBeforeAnyRequest(t *testing.T) {
 			assert.Contains(t, stderr, tt.message)
 			_, requests := srv.sent()
 			assert.Zero(t, requests)
+		})
+	}
+}
+
+// Cobra refuses the pair itself, so it exits 1 like any other flag error.
+func TestWorkSessionCreateRefusesServerWithCluster(t *testing.T) {
+	t.Parallel()
+	srv := &clusterCreateServer{status: "active"}
+	ts := srv.start(t)
+
+	_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL,
+		"create", "--purpose", "debug", "--expires-in", "1h", "--scope", "kube", "--server", "web-01", "--cluster", "prod-east")
+
+	assert.NotZero(t, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "[cluster server]")
+	_, requests := srv.sent()
+	assert.Zero(t, requests)
+}
+
+func TestWorkSessionCreateClusterLookupFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		srv     *clusterCreateServer
+		message string
+	}{
+		{name: "surface off", srv: &clusterCreateServer{notFound: true}, message: kubernetes.SurfaceNotEnabledMessage},
+		{name: "unknown cluster", srv: &clusterCreateServer{clusters: "[]"}, message: "Failed to find the cluster: no cluster found with the given name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := tt.srv.start(t)
+
+			_, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL,
+				"create", "--purpose", "debug", "--expires-in", "1h", "--scope", "kube", "--cluster", "prod-east")
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+			assert.Contains(t, stderr, tt.message)
+			body, requests := tt.srv.sent()
+			assert.Nil(t, body, "no session is created")
+			assert.Equal(t, 1, requests)
 		})
 	}
 }

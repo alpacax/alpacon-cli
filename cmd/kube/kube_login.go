@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/iam"
@@ -55,9 +54,9 @@ other clients use it right away.
 The kube session runs under a WorkSession that targets the cluster with the
 kube scope. With --work-session that session is used as given. Otherwise the
 command reuses one of yours that fits: the one ALPACON_WORK_SESSION names, the
-active WorkSession, the one an earlier login to this cluster used, or another
-session for the cluster that is active or still waiting on approval. Only when none
-fits does it create one, from --purpose, --scope and --duration, prompting for
+one an earlier login to this cluster used, or another session for the cluster
+that is active or still waiting on approval. Only when none fits does it
+create one, from --purpose, --scope and --duration, prompting for
 any that is missing in an interactive shell. A session waiting on approval is
 waited on for --wait-approval (default 5m). The active WorkSession is never
 changed, so exec, websh, cp and tunnel keep the session they use.
@@ -250,26 +249,18 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 
 	choice := chooseWorkSession(ac, in, clusterID, previous)
 
-	editor, err := kubeconfig.Open(path)
+	held, err := holdKubeconfig(path, func(msg string) { utils.CliErrorEnvelopeWithExit(opKubeLogin, nil, "%s", msg) })
 	if err != nil {
 		utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Failed to open the kubeconfig: %s.", err)
 	}
-	// Every exit below runs through os.Exit, which skips deferred calls, so
-	// each releases the kubeconfig lock first; see runKubeConfig.
-	release := sync.OnceFunc(func() { _ = editor.Close() })
-	defer release()
-	interrupt := watchInterrupt(func() {
-		release()
-		utils.CliErrorEnvelopeWithExit(opKubeLogin, nil, "Interrupted; the kubeconfig may not have been written, and a kube session may have been left open until the WorkSession ends.")
-	})
-	defer interrupt.stop()
+	defer held.done()
 
 	opts := kubeConfigOptions{
 		clusterName:   in.cluster,
 		workSessionID: choice.id,
 		kubeconfig:    path,
 		proxyPort:     in.proxyPort,
-		interrupted:   interrupt.fired.Load,
+		interrupted:   held.interrupt.fired.Load,
 	}
 	writer := kubeSessionWriter{
 		exec: credentialPlugin(in.cluster),
@@ -297,9 +288,8 @@ func runKubeLogin(cmd *cobra.Command, args []string) {
 			}, nil
 		},
 	}
-	result, err := openKubeSession(ac, editor, opts, clusterID, writer)
-	interrupt.stop()
-	release()
+	result, err := openKubeSession(ac, held.editor, opts, clusterID, writer)
+	held.done()
 	if err != nil {
 		exitKubeLoginError(err, in.cluster, choice.id)
 	}
@@ -393,6 +383,16 @@ func (w sessionWant) usable(ws *wsapi.WorkSession, now time.Time) bool {
 	return ws.StartsAt == nil || !ws.StartsAt.After(now)
 }
 
+// waitable reports whether ws fits and is still waiting on approval, so the
+// command waits it out instead of filing another.
+func (w sessionWant) waitable(ws *wsapi.WorkSession, now time.Time) bool {
+	return w.fits(ws, now) && (ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved)
+}
+
+func chosen(ws *wsapi.WorkSession, created bool) workSessionChoice {
+	return workSessionChoice{id: ws.ID, created: created, scopes: ws.Scopes}
+}
+
 // pickClusterSession picks from the caller's sessions for the cluster: one
 // usable now first, else the newest still waiting on approval.
 func pickClusterSession(sessions []wsapi.WorkSession, want sessionWant, now time.Time) (ws *wsapi.WorkSession, wait bool) {
@@ -402,7 +402,7 @@ func pickClusterSession(sessions []wsapi.WorkSession, want sessionWant, now time
 		if want.usable(s, now) {
 			return s, false
 		}
-		if want.fits(s, now) && (s.Status == wsapi.StatusPending || s.Status == wsapi.StatusApproved) {
+		if want.waitable(s, now) {
 			if waiting == nil || s.AddedAt.After(waiting.AddedAt) {
 				waiting = s
 			}
@@ -426,11 +426,13 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 		if errors.Is(err, utils.ErrInvalidID) {
 			utils.CliErrorEnvelopeWithExit(opKubeLogin, err, "Invalid --work-session: %s.", err)
 		}
-		if err == nil && (ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved) && want.fits(ws, now) {
-			final := waitForWorkSession(ac, in, ws)
-			return workSessionChoice{id: final.ID, scopes: final.Scopes}
+		if err != nil {
+			return workSessionChoice{id: in.workSession}
 		}
-		return workSessionChoice{id: in.workSession}
+		if want.waitable(ws, now) {
+			return chosen(waitForWorkSession(ac, in, ws), false)
+		}
+		return chosen(ws, false)
 	}
 
 	// ALPACON_WORK_SESSION usually names the server session exec and websh
@@ -440,43 +442,30 @@ func chooseWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clusterID st
 		switch {
 		case err == nil && want.usable(ws, now):
 			utils.CliInfo("Using WorkSession %s from %s.", utils.SanitizeTerminalText(ws.ID), worksession.WorkSessionEnvVar)
-			return workSessionChoice{id: ws.ID, scopes: ws.Scopes}
-		case err == nil && (ws.Status == wsapi.StatusPending || ws.Status == wsapi.StatusApproved) && want.fits(ws, now):
-			final := waitForWorkSession(ac, in, ws)
-			return workSessionChoice{id: final.ID, scopes: final.Scopes}
+			return chosen(ws, false)
+		case err == nil && want.waitable(ws, now):
+			return chosen(waitForWorkSession(ac, in, ws), false)
 		default:
 			utils.CliInfo("%s names a WorkSession that does not serve %s; looking for one that does.", worksession.WorkSessionEnvVar, utils.SanitizeTerminalText(in.cluster))
 		}
 	}
 
-	// The active WorkSession, then the one the previous login used: each is
-	// one read, and a failed read only means it is not reused.
-	var candidates []string
-	active, err := config.GetActiveWorkSessionFor(ac.WorkspaceName)
-	if err == nil && active != "" {
-		candidates = append(candidates, active)
-	}
-	if previous != nil && previous.WorkSessionID != "" && !strings.EqualFold(previous.WorkSessionID, active) {
-		candidates = append(candidates, previous.WorkSessionID)
-	}
-	for _, id := range candidates {
-		ws, err := wsapi.GetWorkSession(ac, id)
-		if err != nil {
-			continue
-		}
-		if want.usable(ws, now) {
+	// The session the previous login used is one read, and a failed read only
+	// means it is not reused. The active WorkSession is not a candidate: it
+	// can only hold a server session.
+	if previous != nil && previous.WorkSessionID != "" {
+		if ws, err := wsapi.GetWorkSession(ac, previous.WorkSessionID); err == nil && want.usable(ws, now) {
 			utils.CliInfo("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
-			return workSessionChoice{id: ws.ID, scopes: ws.Scopes}
+			return chosen(ws, false)
 		}
 	}
 
 	if ws, wait := findClusterSession(ac, want, now); ws != nil {
 		if !wait {
 			utils.CliInfo("Using WorkSession %s.", utils.SanitizeTerminalText(ws.ID))
-			return workSessionChoice{id: ws.ID, scopes: ws.Scopes}
+			return chosen(ws, false)
 		}
-		final := waitForWorkSession(ac, in, ws)
-		return workSessionChoice{id: final.ID, scopes: final.Scopes}
+		return chosen(waitForWorkSession(ac, in, ws), false)
 	}
 
 	return createClusterWorkSession(ac, in, clusterID)
@@ -554,10 +543,9 @@ func createClusterWorkSession(ac *client.AlpaconClient, in kubeLoginInput, clust
 	utils.CliInfo("WorkSession %s created for %s (status: %s).", utils.SanitizeTerminalText(session.ID), utils.SanitizeTerminalText(in.cluster), utils.SanitizeTerminalText(session.Status))
 
 	if session.Status == wsapi.StatusActive {
-		return workSessionChoice{id: session.ID, created: true, scopes: session.Scopes}
+		return chosen(session, true)
 	}
-	final := waitForWorkSession(ac, in, session)
-	return workSessionChoice{id: final.ID, created: true, scopes: final.Scopes}
+	return chosen(waitForWorkSession(ac, in, session), true)
 }
 
 // waitForWorkSession waits for ws to activate, saying first how to come back

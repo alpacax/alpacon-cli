@@ -2,6 +2,7 @@ package kube
 
 import (
 	"errors"
+	"os"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -40,6 +41,9 @@ func TestCredentialExpiry(t *testing.T) {
 		{name: "expired on the server", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{TokenExpiredAt: &past}, nil), gone: true},
 		{name: "no expiry in the answer", saved: saved, retrieve: read(&kubernetes.KubeSessionDetail{}, nil), want: saved},
 		{name: "session not found", saved: saved, retrieve: read(nil, statusError{404}), gone: true},
+		{name: "another account logged in", saved: saved, retrieve: read(nil, statusError{403}), gone: true},
+		{name: "login rejected", saved: saved, retrieve: read(nil, statusError{401}), gone: true},
+		{name: "server error while the token is good", saved: saved, retrieve: read(nil, statusError{503}), want: saved, warn: true},
 		{name: "check fails while the token is good", saved: saved, retrieve: read(nil, errors.New("connection refused")), want: saved, warn: true},
 		{name: "check fails after the token expired", saved: past, retrieve: read(nil, errors.New("connection refused")), gone: true},
 		{name: "another workspace, token good", saved: saved, want: saved},
@@ -200,4 +204,23 @@ func TestLogoutKeepsTheLockAWaitingLoginHolds(t *testing.T) {
 
 	_, err = store.lock(testKey("prod-east"))
 	require.ErrorIs(t, err, errStoreLocked)
+}
+
+// Serial: it sets HOME. A logout removes every file the store writes for a
+// record, the staging file a write died before renaming included, so a change
+// to the store's naming that logout no longer matches fails here.
+func TestLogoutRemovesWhatTheStoreWrites(t *testing.T) {
+	login := loggedIn(t)
+	store, err := defaultKubeSessionStore()
+	require.NoError(t, err)
+	record := testRecord("prod-east")
+	require.NoError(t, store.write(record))
+	staging, err := os.CreateTemp(store.dir, stagingPattern(record.key()))
+	require.NoError(t, err)
+	require.NoError(t, staging.Close())
+
+	require.NoError(t, config.DeleteConfig(login))
+
+	assert.NoFileExists(t, store.recordPath(record.key()))
+	assert.NoFileExists(t, staging.Name())
 }

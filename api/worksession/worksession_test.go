@@ -729,6 +729,7 @@ func TestProjectAttributesShowsTheCluster(t *testing.T) {
 	})
 	assert.Equal(t, "prod-east", row.Clusters)
 	assert.Empty(t, row.Servers)
+	assert.Empty(t, row.ExpiresAt, "no expiry until a duration session activates")
 	assert.Equal(t, "kube, kube_exec", row.Scopes)
 }
 

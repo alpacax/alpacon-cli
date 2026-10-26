@@ -481,21 +481,6 @@ func GetActiveWorkSession() (string, error) {
 	return activeWorkSessionOn(cfg, cfg.WorkspaceIdentity()), nil
 }
 
-// GetActiveWorkSessionFor returns workspaceName's active work-session UUID,
-// for a caller holding a client: it reads the slot of the workspace the
-// client was built for, not whichever one the file names by now. Returns ""
-// (no error) when none is set or no config file exists.
-func GetActiveWorkSessionFor(workspaceName string) (string, error) {
-	cfg, err := LoadConfig()
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return "", nil
-		}
-		return "", err
-	}
-	return activeWorkSessionOn(cfg, workspaceName), nil
-}
-
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
 // so ending one session never drops another the user has since switched to. Reports whether it cleared.
 func ClearActiveWorkSessionFor(workspaceName, uuid string) (bool, error) {
