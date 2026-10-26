@@ -100,7 +100,7 @@ func TestSinkURLParam_FindsTheURLOfEveryRequestSink(t *testing.T) {
 	p, err := checkPackage("example.com/empty", nil, imports)
 	require.NoError(t, err)
 	clientSinks := map[string]int{
-		"SendRawRequest": 1, "SendGetRequest": 0, "SendGetRequestToURL": 0, "SendGetRequestForDownload": 0,
+		"SendRawRequest": 1, "SendGetRequest": 0, "SendGetRequestWithContext": 1, "SendGetRequestToURL": 0, "SendGetRequestForDownload": 0,
 		"SendPostRequest": 0, "SendPostRequestWithStatus": 0, "SendPatchRequest": 0, "SendMultipartStreamRequest": 0,
 		"SendDeleteRequest": 0, "SendDeleteRequestWithContext": 1, "SendDeleteRequestWithBody": 0,
 	}
