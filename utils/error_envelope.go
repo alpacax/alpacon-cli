@@ -18,10 +18,9 @@ type cliErrorCtx struct {
 // operation falls back to CommandName.
 func newFailureEnvelope(exitCode int, errorCode, operation string, err error, message string) JSONErrorEnvelope[cliErrorCtx] {
 	if errorCode == "" {
-		errorCode = ClassifyError(err)
-	}
-	if errorCode == ErrorCodeCLI {
-		errorCode = exitCodeFallback(exitCode)
+		if errorCode = ClassifyError(err); errorCode == ErrorCodeCLI {
+			errorCode = exitCodeFallback(exitCode)
+		}
 	}
 	if operation == "" {
 		operation = CommandName

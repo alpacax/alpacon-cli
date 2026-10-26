@@ -62,6 +62,7 @@ func TestNewFailureEnvelopeFallsBackToTheExitCodesCode(t *testing.T) {
 	tests := []struct {
 		name     string
 		exitCode int
+		code     string
 		err      error
 		want     string
 	}{
@@ -72,11 +73,12 @@ func TestNewFailureEnvelopeFallsBackToTheExitCodesCode(t *testing.T) {
 		{name: "server code wins over the not approved exit", exitCode: ExitCodeNotApproved, err: serverErr, want: "rbac_permission_required"},
 		{name: "http status wins over the exit", exitCode: ExitCodeNotApproved, err: &fakeAPIError{status: 404}, want: "http_404"},
 		{name: "busy exit stays cli_error", exitCode: ExitCodeServerBusy, want: ErrorCodeCLI},
+		{name: "explicit cli_error survives the not approved exit", exitCode: ExitCodeNotApproved, code: ErrorCodeCLI, want: ErrorCodeCLI},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			env := newFailureEnvelope(tt.exitCode, "", "op", tt.err, "m")
+			env := newFailureEnvelope(tt.exitCode, tt.code, "op", tt.err, "m")
 
 			assert.Equal(t, tt.exitCode, env.ExitCode)
 			assert.Equal(t, tt.want, env.ErrorCode)
