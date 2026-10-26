@@ -38,7 +38,7 @@ the current status. --sudo, --starts-at and --expires-at are also checked locall
 before the request. To change the expiry of an approved or active session, use
 'alpacon work-session extend'.
 
---scope and --server replace the whole list (not append). --sudo adds MFA-bypass
+--scope and --server replace the whole list (not append). --sudo adds session-authorized
 sudo command patterns to the session's existing policies; this is the recovery
 path when an 'exec' sudo was denied. The additions may require approval before
 they take effect.
@@ -287,6 +287,6 @@ func init() {
 	workSessionUpdateCmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; replaces the whole list)")
 	workSessionUpdateCmd.Flags().StringVar(&updateStartsAt, "starts-at", "", "New scheduled start time (RFC3339; pending sessions only)")
 	workSessionUpdateCmd.Flags().StringVar(&updateExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339; pending sessions only — use 'extend' for approved/active sessions)")
-	workSessionUpdateCmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as MFA-bypass policies (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
+	workSessionUpdateCmd.Flags().StringArrayVar(&updateSudo, "sudo", nil, "Sudo command patterns to add as session-authorized sudo policies (repeatable; each value is a comma-separated pattern list forming one policy, wildcards allowed)")
 	workSessionUpdateCmd.Flags().StringVar(&updateSudoReason, "sudo-reason", "", "Justification applied to the sudo policies added via --sudo")
 }

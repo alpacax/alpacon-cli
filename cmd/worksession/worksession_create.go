@@ -63,9 +63,9 @@ required, combine --use with --wait. The session is attached once it reaches the
 active state. Use --wait-approval DURATION to wait longer than the default 5 minutes.
 
 If the work needs sudo, pre-declare the command patterns with --sudo. This attaches
-MFA-bypass sudo policies to the session so a non-interactive caller (e.g. an AI agent
-running 'exec') can run those exact sudo commands without an interactive MFA
-prompt. The 'sudo' scope is added automatically, and the policies are submitted for
+session-authorized sudo policies so a non-interactive caller (e.g. an AI agent
+running 'exec') can run matching sudo commands inside the approved work session
+without an MFA prompt. The 'sudo' scope is added automatically, and the policies are submitted for
 approval together with the session. If a sudo command is later denied, add it to the
 session with 'alpacon work-session update <id> --sudo "<command>"'.
 
@@ -172,9 +172,9 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 				scopeList = append(scopeList, s)
 			}
 		}
-		// Build sudo bypass policies from --sudo. Each --sudo value is a
+		// Build session-authorized sudo policies from --sudo. Each --sudo value is a
 		// comma-separated list of command patterns forming one policy; the
-		// policies are MFA-bypass (the only way a non-interactive caller
+		// policies are session-authorized (the only way a non-interactive caller
 		// running 'exec' can sudo). The server binds each policy to
 		// the session assignee automatically, so they never apply to other
 		// users. The 'sudo' scope is required server-side, so add it implicitly.
@@ -563,7 +563,7 @@ func validateAgentScopes(requesterType string, scopes []string) error {
 	return nil
 }
 
-// buildSudoPolicies turns repeatable --sudo values into MFA-bypass policy
+// buildSudoPolicies turns repeatable --sudo values into session-authorized sudo policy
 // definitions. Each value is a comma-separated list of command patterns
 // (wildcards permitted) forming one policy. Empty values are skipped.
 func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
@@ -574,9 +574,9 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 			continue
 		}
 		policies = append(policies, wsapi.SudoPolicyInline{
-			Commands:       commands,
-			Reason:         reason,
-			AllowBypassMFA: true,
+			Commands:          commands,
+			Reason:            reason,
+			SessionAuthorized: true,
 		})
 	}
 	return policies

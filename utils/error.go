@@ -49,23 +49,26 @@ const (
 	// widened from the web console only.
 	SudoPolicyConsoleOnly = "sudo_policy_console_only"
 
-	// WorkSessionSudoBypassConsoleOnly rides a 403: a work session can receive an
-	// MFA-bypass sudo policy without a person's approval from the web console only.
-	WorkSessionSudoBypassConsoleOnly = "work_session_sudo_bypass_console_only"
+	// A work session can receive a session-authorized sudo policy without a
+	// person's approval from the web console only; both names ride a 403.
+	WorkSessionSudoBypassConsoleOnly            = "work_session_sudo_bypass_console_only"
+	WorkSessionSessionAuthorizedSudoConsoleOnly = "work_session_session_authorized_sudo_console_only"
 
 	// SudoVerifyCredentialCannotProveMFA rides a 403 on sudo grant verification:
 	// the credential is an API token, a service token or a non-interactive token,
 	// so it cannot complete sudo MFA. Signing in interactively can.
 	SudoVerifyCredentialCannotProveMFA = "sudo_verify_credential_cannot_prove_mfa"
 
-	// Refusals of an MFA-bypass sudo policy bound to an AI agent session, both
+	// Refusals of a session-authorized sudo policy bound to an AI agent session, both
 	// on a 403. NeedsPresence: the write would leave the policy on an agent
 	// session without a person proving presence for that request (a fresh MFA
 	// on an interactive login). NeedsApproval: a direct write of such a policy
 	// is refused; it has to arrive as a modification of the session, which a
 	// person approves.
-	SudoPolicyBypassAgentSessionNeedsPresence = "sudo_policy_bypass_agent_session_needs_presence"
-	SudoPolicyBypassAgentSessionNeedsApproval = "sudo_policy_bypass_agent_session_needs_approval"
+	SudoPolicyBypassAgentSessionNeedsPresence            = "sudo_policy_bypass_agent_session_needs_presence"
+	SudoPolicyBypassAgentSessionNeedsApproval            = "sudo_policy_bypass_agent_session_needs_approval"
+	SudoPolicySessionAuthorizedAgentSessionNeedsPresence = "sudo_policy_session_authorized_agent_session_needs_presence"
+	SudoPolicySessionAuthorizedAgentSessionNeedsApproval = "sudo_policy_session_authorized_agent_session_needs_approval"
 
 	// Codes the server sends on its own 404/429/406/415 refusals, with no detail.
 	APINotFound             = "api_not_found"

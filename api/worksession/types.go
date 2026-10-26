@@ -1,6 +1,7 @@
 package worksession
 
 import (
+	"encoding/json"
 	"slices"
 	"time"
 
@@ -121,10 +122,10 @@ type WorkSessionCreateRequest struct {
 // SudoPolicyInline is a sudo policy bound to a work session. It serves three
 // roles: read (when returned on a WorkSession), create (attached at session
 // create time), and modify (sent on update). Commands are the allowed patterns
-// (wildcards permitted); AllowBypassMFA lets matching sudo run without
-// interactive MFA, which is the only way a non-interactive caller (e.g. an AI
-// agent running 'exec') can sudo. Users is intentionally omitted — the
-// server binds the policy to the session assignee automatically so it never
+// (wildcards permitted); SessionAuthorized lets matching sudo run inside the
+// approved work session without an MFA prompt, which is the only way a
+// non-interactive caller (e.g. an AI agent running 'exec') can sudo. Users is
+// intentionally omitted—the server binds the policy to the session assignee so it never
 // applies to other workspace users.
 //
 // ID is set only on read and on modify: the sudo_policies field of an update
@@ -133,10 +134,39 @@ type WorkSessionCreateRequest struct {
 // Omitting an existing policy from the set deletes it, so callers must preserve
 // the current entries.
 type SudoPolicyInline struct {
-	ID             string   `json:"id,omitempty"`
-	Commands       []string `json:"commands"`
-	Reason         string   `json:"reason,omitempty"`
-	AllowBypassMFA bool     `json:"allow_bypass_mfa"`
+	ID                string   `json:"id,omitempty"`
+	Commands          []string `json:"commands"`
+	Reason            string   `json:"reason,omitempty"`
+	SessionAuthorized bool     `json:"session_authorized"`
+}
+
+// MarshalJSON sends both names so older servers receive the same policy.
+func (p SudoPolicyInline) MarshalJSON() ([]byte, error) {
+	type alias SudoPolicyInline
+	return json.Marshal(struct {
+		alias
+		AllowBypassMFA bool `json:"allow_bypass_mfa"`
+	}{alias: alias(p), AllowBypassMFA: p.SessionAuthorized})
+}
+
+func (p *SudoPolicyInline) UnmarshalJSON(data []byte) error {
+	type alias SudoPolicyInline
+	wire := struct {
+		*alias
+		AllowBypassMFA    json.RawMessage `json:"allow_bypass_mfa"`
+		SessionAuthorized json.RawMessage `json:"session_authorized"`
+	}{alias: (*alias)(p)}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	// Presence, rather than truth, decides which name wins.
+	if wire.SessionAuthorized != nil {
+		return json.Unmarshal(wire.SessionAuthorized, &p.SessionAuthorized)
+	}
+	if wire.AllowBypassMFA != nil {
+		return json.Unmarshal(wire.AllowBypassMFA, &p.SessionAuthorized)
+	}
+	return nil
 }
 
 // WorkSessionUpdateRequest is a partial update: omitempty leaves unset fields

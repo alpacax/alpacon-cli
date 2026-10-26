@@ -2,6 +2,7 @@ package worksession
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -545,8 +546,8 @@ func TestUpdateWorkSession(t *testing.T) {
 	defer ts.Close()
 
 	req := WorkSessionUpdateRequest{SudoPolicies: []SudoPolicyInline{
-		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, AllowBypassMFA: true},
-		{Commands: []string{"tail -f /var/log/nginx/*.log"}, AllowBypassMFA: true},
+		{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, SessionAuthorized: true},
+		{Commands: []string{"tail -f /var/log/nginx/*.log"}, SessionAuthorized: true},
 	}}
 	session, err := UpdateWorkSession(newTestClient(ts), "ses-abc", req)
 	require.NoError(t, err)
@@ -717,4 +718,50 @@ func TestEndedStatuses_CallerCannotChangeTheList(t *testing.T) {
 
 	assert.False(t, IsEndedStatus("active"), "mutating the returned slice must not reach the shared list")
 	assert.Len(t, EndedStatuses(), 5)
+}
+
+func TestSudoPolicyInlineMarshalJSON(t *testing.T) {
+	t.Parallel()
+	for _, enabled := range []bool{false, true} {
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			t.Parallel()
+			policy := SudoPolicyInline{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, Reason: "maintenance", SessionAuthorized: enabled}
+			body, err := json.Marshal(policy)
+			require.NoError(t, err)
+			assert.JSONEq(t, fmt.Sprintf(`{"id":"pol-1","commands":["systemctl restart nginx"],"reason":"maintenance","allow_bypass_mfa":%t,"session_authorized":%t}`, enabled, enabled), string(body))
+		})
+	}
+	t.Run("optional fields stay omitted", func(t *testing.T) {
+		t.Parallel()
+		body, err := json.Marshal(SudoPolicyInline{})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"commands":null,"allow_bypass_mfa":false,"session_authorized":false}`, string(body))
+	})
+}
+
+func TestSudoPolicyInlineUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, fields string
+		want         bool
+	}{
+		{"old true", `"allow_bypass_mfa":true`, true},
+		{"old false", `"allow_bypass_mfa":false`, false},
+		{"new true", `"session_authorized":true`, true},
+		{"new false", `"session_authorized":false`, false},
+		{"both true", `"allow_bypass_mfa":true,"session_authorized":true`, true},
+		{"both false", `"allow_bypass_mfa":false,"session_authorized":false`, false},
+		{"new false wins", `"allow_bypass_mfa":true,"session_authorized":false`, false},
+		{"new true wins", `"session_authorized":true,"allow_bypass_mfa":false`, true},
+		{"new key ignores invalid old value", `"session_authorized":true,"allow_bypass_mfa":"unused"`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var policy SudoPolicyInline
+			err := json.Unmarshal([]byte(`{"id":"pol-1","commands":["systemctl restart nginx"],"reason":"maintenance",`+tt.fields+`}`), &policy)
+			require.NoError(t, err)
+			assert.Equal(t, SudoPolicyInline{ID: "pol-1", Commands: []string{"systemctl restart nginx"}, Reason: "maintenance", SessionAuthorized: tt.want}, policy)
+		})
+	}
 }

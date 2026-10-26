@@ -142,9 +142,9 @@ func TestCliErrorEnvelopeWithExitInvalidIDHelperProcess(t *testing.T) {
 	CliErrorEnvelopeWithExit("wait", err, "Failed to wait: %s.", err)
 }
 
-func TestBuildCliErrorEnvelopeFromErr_SudoBypassAgentSessionRefusals(t *testing.T) {
+func TestBuildCliErrorEnvelopeFromErr_SessionAuthorizedSudoRefusals(t *testing.T) {
 	t.Parallel()
-	for _, code := range []string{SudoPolicyBypassAgentSessionNeedsPresence, SudoPolicyBypassAgentSessionNeedsApproval} {
+	for _, code := range []string{WorkSessionSudoBypassConsoleOnly, WorkSessionSessionAuthorizedSudoConsoleOnly, SudoPolicyBypassAgentSessionNeedsPresence, SudoPolicySessionAuthorizedAgentSessionNeedsPresence, SudoPolicyBypassAgentSessionNeedsApproval, SudoPolicySessionAuthorizedAgentSessionNeedsApproval} {
 		t.Run(code, func(t *testing.T) {
 			t.Parallel()
 			err := errors.New("code: " + code + "; source: ")
