@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"testing"
@@ -134,4 +135,31 @@ func TestRedactURLErrorHostOnlyHidesThePathOfAnUnparsableHostlessURL(t *testing.
 	got := RedactURLErrorHostOnly(parseErr)
 
 	assert.Equal(t, `parse "ws:": net/url: invalid control character in URL`, got.Error())
+}
+
+func TestWebsocketDialError(t *testing.T) {
+	t.Parallel()
+	badHandshake := errors.New("bad handshake")
+	tokenURL := &url.Error{Op: "Get", URL: "wss://proxy.example.com/ws/tunnel/PATHTOKEN123/", Err: badHandshake}
+	tests := []struct {
+		name string
+		err  error
+		resp *http.Response
+		want string
+	}{
+		{name: "no handshake response keeps the error alone", err: badHandshake, want: "dial failed: bad handshake"},
+		{name: "a handshake response adds its status", err: badHandshake, resp: &http.Response{Status: "403 Forbidden"}, want: "dial failed: bad handshake (status 403 Forbidden)"},
+		{name: "a status line loses its terminal controls", err: badHandshake, resp: &http.Response{Status: "403 \x1b[31mForbidden\x1b[0m"}, want: "dial failed: bad handshake (status 403 Forbidden)"},
+		{name: "a URL error keeps only the host", err: tokenURL, want: `dial failed: Get "wss://proxy.example.com": bad handshake`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := WebsocketDialError("dial failed", tc.err, tc.resp)
+
+			require.EqualError(t, err, tc.want)
+			assert.ErrorIs(t, err, badHandshake)
+		})
+	}
 }

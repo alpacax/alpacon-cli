@@ -205,14 +205,19 @@ func TestGetTunnelSessionReturnsErrorOnMalformedBody(t *testing.T) {
 func TestGetTunnelSessionGivesUpWhenTheContextExpires(t *testing.T) {
 	t.Parallel()
 	ac := newTunnelDetailClient(t, func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second): // a request sent without ctx fails the elapsed check, not the run
+		}
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
+	start := time.Now()
 	detail, err := tunnel.GetTunnelSession(ctx, ac, "tun-1")
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Less(t, time.Since(start), 2*time.Second)
 	assert.Nil(t, detail)
 }
 
