@@ -17,7 +17,7 @@ const (
 )
 
 func reportCLIError() {
-	fmt.Fprintln(os.Stderr, "For issues, check the latest version or report on", gitIssueURL)
+	_, _ = fmt.Fprintln(TrackedStderr(), "For issues, check the latest version or report on", gitIssueURL)
 }
 
 // cliMessage exists because client.parseAPIError puts the server's error detail
@@ -47,13 +47,17 @@ func WarnTerminalTextAltered(w io.Writer, indent string) {
 
 // CliError handles all error messages in the CLI.
 func CliError(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	reportCLIError()
 }
 
-// CliErrorWithExit handles all error messages in the CLI.
+// CliErrorWithExit handles all error messages in the CLI. Under --output json it prints
+// one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(1, "", msg, args)
+	}
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	reportCLIError()
 	os.Exit(1)
 }
@@ -62,8 +66,34 @@ func CliErrorWithExit(msg string, args ...any) {
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(code, "", msg, args)
+	}
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
 	os.Exit(code)
+}
+
+// CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
+// exit code, so only exit 1 keeps the report footer.
+func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
+	if OutputFormat == OutputFormatJSON {
+		exitWithEnvelope(exitCode, errorCode, msg, args)
+	}
+	if exitCode == ExitCodeGeneralError {
+		CliErrorWithExit(msg, args...)
+	}
+	CliErrorWithExitCode(exitCode, msg, args...)
+}
+
+func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
+	var cause error
+	for _, arg := range args {
+		if e, ok := arg.(error); ok && e != nil {
+			cause = e
+			break
+		}
+	}
+	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)})
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.
@@ -91,12 +121,12 @@ func CliDebug(msg string, args ...any) {
 	if !DebugEnabled() {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Debug"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s%s: %s\n", spinnerLineBreak(), Yellow("Debug"), cliMessage(msg, args...))
 }
 
 // CliInfo handles all informational messages in the CLI.
 func CliInfo(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Blue("Info"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Blue("Info"), cliMessage(msg, args...))
 }
 
 // CliWarning handles all warning messages in the CLI.
@@ -106,7 +136,7 @@ func CliInfo(msg string, args ...any) {
 // The break and the text go out as one write so a spinner frame cannot wedge
 // itself between them.
 func CliWarning(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
 }
 
 // spinnerLineBreak returns the newline that moves a message off the line a
@@ -138,11 +168,11 @@ func spinnerLineBreak() string {
 
 // CliSuccess handles all success messages in the CLI.
 func CliSuccess(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Green("Success"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Green("Success"), cliMessage(msg, args...))
 }
 
 // CliInfoWithExit prints an informational message to stderr and exits the program with a status code of 0
 func CliInfoWithExit(msg string, args ...any) {
-	fmt.Fprintf(os.Stderr, "%s: %s\n", Blue("Info"), cliMessage(msg, args...))
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Blue("Info"), cliMessage(msg, args...))
 	os.Exit(0) // Use exit code 0 to indicate successful completion.
 }

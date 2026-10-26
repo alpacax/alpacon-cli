@@ -22,7 +22,7 @@ func (e *invalidIDError) Error() string {
 	return fmt.Sprintf("invalid %s ID %q: must be a single path segment", e.what, e.id)
 }
 func (e *invalidIDError) Unwrap() error       { return utils.ErrInvalidID }
-func (e *invalidIDError) ErrorCode() string   { return utils.UsageErrorCode }
+func (e *invalidIDError) ErrorCode() string   { return utils.ErrorCodeUsage }
 func (e *invalidIDError) ErrorSource() string { return "" }
 
 type unusableResponseIDError struct{ what string }
