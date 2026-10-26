@@ -528,6 +528,23 @@ func BuildURL(basePath, relativePath string, params map[string]string) string {
 	return u.String()
 }
 
+// SetQuery changes only the query string, leaving an invalid URL for the caller to handle.
+func SetQuery(rawURL string, set map[string]string, del ...string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	for _, key := range del {
+		q.Del(key)
+	}
+	for key, value := range set {
+		q.Set(key, value)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func IsUUID(str string) bool {
 	return uuidRegex.MatchString(str)
 }

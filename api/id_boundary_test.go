@@ -47,6 +47,7 @@ var (
 	buildURLName  = funcName(utils.BuildURL)
 	idURLName     = funcName(IDURL)
 	keepsURLName  = funcName(utils.RemovePrefixBeforeAPI)
+	setQueryName  = funcName(utils.SetQuery)
 	pathIDName    = reflect.TypeFor[PathID]().Name()
 	stringName    = funcName(PathID.String)
 	clientName    = reflect.TypeFor[client.AlpaconClient]().Name()
@@ -266,6 +267,7 @@ func TestURLOffenders_FlagsASinkSentAnUncheckedURL(t *testing.T) {
 		{name: "named_base_parameter_reassigned", body: `login(ac, noteURL, id)`, extra: "func login(ac *client.AlpaconClient, workspaceURL, id string) {\nworkspaceURL += id\n_, _ = ac.SendGetRequestToURL(utils.BuildURL(workspaceURL, noteURL, nil))\n}", want: "hands SendGetRequestToURL a URL"},
 		{name: "auth0_domain_overwritten", body: "var env auth0.AuthEnvResponse\nenv.Auth0.Domain = id\n_, _ = http.NewRequest(http.MethodPost, utils.BuildURL(\"https://\"+env.Auth0.Domain, \"/oauth/token\", nil), nil)", want: "hands NewRequest a URL"},
 		{name: "remove_prefix_of_an_unchecked_url", body: `_, _ = ac.SendGetRequestForDownload(utils.RemovePrefixBeforeAPI(noteURL + id))`, want: "hands SendGetRequestForDownload a URL"},
+		{name: "set_query_on_an_unchecked_url", body: `_, _, _ = websocket.DefaultDialer.Dial(utils.SetQuery(noteURL + id, map[string]string{"k": id}), nil)`, want: "hands Dial a URL"},
 		{name: "raw_request_through_an_interface_with_unnamed_parameters", body: "var r rawSender = ac\n_, _ = r.SendRawRequest(http.MethodGet, noteURL+id, nil, nil)", extra: "type rawSender interface{ SendRawRequest(string, string, io.Reader, http.Header) (*client.RawResponse, error) }", want: "hands SendRawRequest a URL"},
 		{name: "request_method_the_client_does_not_have", body: "var s fooSender\n_ = s.SendFooRequest(noteURL)", extra: "type fooSender interface{ SendFooRequest(string) error }", want: "whose URL parameter this check cannot find"},
 		{name: "request_url_path_changed", body: "r, _ := http.NewRequest(http.MethodGet, noteURL, nil)\nr.URL.Path = noteURL + id", want: "changes a request's URL"},
@@ -291,6 +293,7 @@ func TestURLOffenders_FlagsASinkSentAnUncheckedURL(t *testing.T) {
 		{name: "server_url_through_a_function_literal", body: "fetchVia(func(u string) { _, _ = ac.HTTPClient.Get(u) }, resp)", extra: "func fetchVia(fetch func(string), resp session) { fetch(resp.WebsocketURL) }"},
 		{name: "workspace_base", body: `login(ac, id)`, extra: "func login(ac *client.AlpaconClient, workspaceURL string) {\n_, _ = ac.SendGetRequestToURL(utils.BuildURL(workspaceURL, noteURL, nil))\n}"},
 		{name: "remove_prefix_of_a_server_url", body: `_, _ = ac.SendGetRequestForDownload(utils.RemovePrefixBeforeAPI(resp.WebsocketURL))`},
+		{name: "set_query_on_a_server_url", body: `_, _, _ = websocket.DefaultDialer.Dial(utils.SetQuery(resp.WebsocketURL, map[string]string{"k": id}), nil)`},
 		{name: "raw_request_through_an_interface", body: "var r rawSender = ac\n_, _ = r.SendRawRequest(http.MethodGet, noteURL, nil, nil)", extra: "type rawSender interface{ SendRawRequest(string, string, io.Reader, http.Header) (*client.RawResponse, error) }"},
 		{name: "helper_called_with_a_constant", body: `get(ac, noteURL)`, extra: "func get(ac *client.AlpaconClient, u string) { _, _ = ac.SendGetRequest(u) }"},
 	} {
@@ -1011,6 +1014,8 @@ func (f *urlFlowIndex) resultAllowed(call *ast.CallExpr, index int, mode urlMode
 			return len(call.Args) == 4 && f.allowed(call.Args[0], asBase)
 		case isFunc(fn, utilsPkgPath, keepsURLName):
 			return len(call.Args) == 1 && f.allowed(call.Args[0], mode)
+		case isFunc(fn, utilsPkgPath, setQueryName):
+			return len(call.Args) >= 2 && f.allowed(call.Args[0], mode)
 		}
 	}
 	obj := f.p.info.Uses[ident]
