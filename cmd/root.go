@@ -62,6 +62,10 @@ AI agents add --requester-type agent to step 2 and drop --use and websh, which a
 agent session refuses; step 3 then names the session before the server:
   alpacon exec --work-session <SESSION_ID> <SERVER> -- <COMMAND>
 
+For a Kubernetes cluster, 'alpacon kube login <CLUSTER>' finds or creates a
+session that targets the cluster (scopes kube, kube_exec) and writes the
+kubeconfig context kubectl uses.
+
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		switch utils.OutputFormat {

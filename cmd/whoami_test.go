@@ -10,9 +10,12 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/iam"
+	"github.com/alpacax/alpacon-cli/api/types"
+	wsapi "github.com/alpacax/alpacon-cli/api/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyApplicationPrincipal(t *testing.T) {
@@ -317,6 +320,38 @@ func TestPrintWhoamiJSON_PreflightFields(t *testing.T) {
 			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_work_session"]))
 			assert.JSONEq(t, tt.wantActiveRaw, string(got["active_worksession"]))
 			assert.JSONEq(t, `"browser_login"`, string(got["auth_classification"]))
+		})
+	}
+}
+
+// A cluster session lists its cluster and no servers; one created with a
+// duration has no expiry until it activates, so none is reported.
+func TestSummarizeWorkSessionJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		ws   *wsapi.WorkSession
+		want string
+	}{
+		{
+			name: "cluster session before activation",
+			ws: &wsapi.WorkSession{ID: "ws-k", Status: "pending", Scopes: []string{"kube"}, Servers: []types.ServerSummary{},
+				Clusters: []types.ClusterSummary{{ID: "c-1", Name: "prod-east"}}},
+			want: `{"id":"ws-k","status":"pending","scopes":["kube"],"servers":[],"clusters":["prod-east"]}`,
+		},
+		{
+			name: "server session",
+			ws: &wsapi.WorkSession{ID: "ws-s", Status: "active", Scopes: []string{"websh"},
+				Servers: []types.ServerSummary{{ID: "s-1", Name: "web-01"}}, ExpiresAt: time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)},
+			want: `{"id":"ws-s","status":"active","scopes":["websh"],"servers":["web-01"],"expires_at":"2026-06-01T12:00:00Z"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			body, err := json.Marshal(summarizeWorkSession(tt.ws))
+			require.NoError(t, err)
+			assert.JSONEq(t, tt.want, string(body))
 		})
 	}
 }

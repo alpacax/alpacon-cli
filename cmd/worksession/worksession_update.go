@@ -139,6 +139,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 		}
 
 		if len(serverNames) > 0 {
+			if err := validateServerScopes(req.Scopes); err != nil {
+				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "Invalid --scope: %s.", err)
+			}
 			ids, err := server.ResolveServerNames(ac, serverNames)
 			if err != nil {
 				utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
@@ -148,6 +151,9 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 
 		updated, err := applyWorkSessionUpdate(ac, sessionID, req, newSudo)
 		if err != nil {
+			if hint := TargetErrorHint(err); hint != "" {
+				utils.CliErrorEnvelopeWithExit(opUpdate, err, "Failed to update work session: %s.", hint)
+			}
 			utils.CliErrorEnvelopeWithExit(opUpdate, err, "%s.", err)
 		}
 
@@ -283,7 +289,7 @@ func parseRFC3339Flag(flag, val string) (string, error) {
 func init() {
 	workSessionUpdateCmd.Flags().StringVar(&updateTitle, "title", "", "New session title")
 	workSessionUpdateCmd.Flags().StringVar(&updateDescription, "description", "", "New session description (markdown supported)")
-	workSessionUpdateCmd.Flags().StringSliceVar(&updateScopes, "scope", nil, "Replace the session scopes. Valid: command, editor, sudo, tunnel, webftp, websh (repeatable; comma-separated values also accepted; replaces the whole list)")
+	workSessionUpdateCmd.Flags().StringSliceVar(&updateScopes, "scope", nil, "Replace the session scopes. Valid: command, editor, sudo, tunnel, webftp, websh, and kube, kube_exec on a cluster session (repeatable; comma-separated values also accepted; replaces the whole list)")
 	workSessionUpdateCmd.Flags().StringSliceVar(&updateServers, "server", nil, "Replace the target servers by name (repeatable; comma-separated values also accepted; replaces the whole list)")
 	workSessionUpdateCmd.Flags().StringVar(&updateStartsAt, "starts-at", "", "New scheduled start time (RFC3339; pending sessions only)")
 	workSessionUpdateCmd.Flags().StringVar(&updateExpiresAt, "expires-at", "", "New absolute expiry time (RFC3339; pending sessions only — use 'extend' for approved/active sessions)")

@@ -2,9 +2,6 @@ package kube
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -74,33 +71,6 @@ func TestFormatTime(t *testing.T) {
 	assert.Empty(t, formatTime(nil))
 	assert.Empty(t, formatTime(&time.Time{}))
 	assert.Equal(t, "2026-09-30 17:15", formatTime(&ts))
-}
-
-type statusErr struct{ code int }
-
-func (e statusErr) Error() string       { return fmt.Sprintf("status %d", e.code) }
-func (e statusErr) HTTPStatusCode() int { return e.code }
-
-func TestIsSurfaceOff(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{name: "not found", err: statusErr{http.StatusNotFound}, expected: true},
-		{name: "wrapped not found", err: fmt.Errorf("fetching page 1: %w", statusErr{http.StatusNotFound}), expected: true},
-		{name: "server error", err: statusErr{http.StatusInternalServerError}},
-		{name: "forbidden", err: statusErr{http.StatusForbidden}},
-		{name: "no status", err: errors.New("connection refused")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.expected, isSurfaceOff(tt.err))
-		})
-	}
 }
 
 func TestDescribeRows(t *testing.T) {

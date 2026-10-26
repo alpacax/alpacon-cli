@@ -4,19 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/alpacax/alpacon-cli/utils"
 )
-
-// isSurfaceOff reports whether err carries a 404, which the server answers for
-// every path under /api/kubernetes/ when the Kubernetes surface is off.
-func isSurfaceOff(err error) bool {
-	return utils.HTTPStatusCode(err) == http.StatusNotFound
-}
 
 // formatJSONValue renders a free-form JSON field on one line; null or absent is blank.
 func formatJSONValue(raw json.RawMessage) string {

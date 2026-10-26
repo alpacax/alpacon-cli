@@ -44,7 +44,7 @@ func TestPollForApproval_TerminalStatusesAreDistinguishable(t *testing.T) {
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+			_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantMsg)
@@ -66,7 +66,7 @@ func TestPollForApproval_WidensTheGapAsTheWaitAges(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	// 1ms base tick: the fast window is the first 10ms, then the gap is 5ms.
-	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-1", false, time.Millisecond, 60*time.Millisecond)
 
 	require.Error(t, err)
 	got := polls.Load()
@@ -81,7 +81,7 @@ func TestPollForApproval_RejectionNamesTheSession(t *testing.T) {
 	defer ts.Close()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
+	_, err := WaitForApproval(ac, "ws-1", false, time.Millisecond, time.Second)
 
 	var terminal *terminalWaitError
 	require.ErrorAs(t, err, &terminal)
@@ -98,7 +98,7 @@ func TestPollForApproval_APIFailureIsNotTerminal(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 	require.Error(t, err)
 	var terminal *terminalWaitError
@@ -121,7 +121,7 @@ func TestPollForApproval_GivingUpIsPending(t *testing.T) {
 
 	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+		_, err = WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
 	})
 
 	var pending *pendingWaitError
@@ -147,7 +147,7 @@ func TestPollForApproval_RidesThroughATransientFailure(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	session, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+	session, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -177,7 +177,7 @@ func TestPollForApproval_WarningSanitizesServerText(t *testing.T) {
 
 	var err error
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, err = pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
+		_, err = WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Second)
 	})
 
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func TestPollForApproval_FatalClientErrorEndsTheWaitAtOnce(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, time.Minute)
 
 	require.Error(t, err)
 	assert.Equal(t, 1, requests, "a 404 must not be retried")
@@ -212,7 +212,7 @@ func TestPollForApproval_TimeoutIsNotTerminal(t *testing.T) {
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+	_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
 
 	require.Error(t, err)
 	// Still pending is exit 4's territory, not the settled-negative code.
@@ -245,7 +245,7 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	start := time.Now()
-	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
@@ -277,7 +277,7 @@ func TestPollForApproval_SustainedThrottleDoesNotTripTheFailureCap(t *testing.T)
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
+	session, err := WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
@@ -307,7 +307,7 @@ func TestPollForApproval_APendingReadDoesNotRefillTheThrottleBudget(t *testing.T
 	testutil.CaptureOutput(t, func() {
 		synctest.Test(t, func(*testing.T) {
 			start := time.Now()
-			_, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			_, err = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 			elapsed = time.Since(start)
 		})
 	})
@@ -338,7 +338,7 @@ func TestPollForApproval_ThrottleWarnsOnce(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
 	_, stderr := testutil.CaptureOutput(t, func() {
-		_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 	})
 
 	assert.Equal(t, 1, strings.Count(stderr, "rate limited by the server"))
@@ -370,7 +370,7 @@ func TestPollForApproval_ElapsedTracksWallClockAcrossAThrottleExtension(t *testi
 
 	_, stderr := testutil.CaptureOutput(t, func() {
 		synctest.Test(t, func(*testing.T) {
-			_, _ = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+			_, _ = WaitForApproval(ac, "ws-uuid", false, interval, timeout)
 		})
 	})
 
@@ -393,7 +393,7 @@ func TestPollForApproval_WaitsFullTimeout(t *testing.T) {
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	timeout := 30 * time.Millisecond
 	start := time.Now()
-	_, err := pollForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
+	_, err := WaitForApproval(ac, "ses-p", false, 10*time.Millisecond, timeout)
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
@@ -494,20 +494,20 @@ func TestResolveWaitTimeout(t *testing.T) {
 
 func TestValidateAgentScopes_AgentWithWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("agent", []string{"command", "websh"})
+	err := ValidateAgentScopes("agent", []string{"command", "websh"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "\"websh\" is not allowed")
 }
 
 func TestValidateAgentScopes_AgentWithoutWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("agent", []string{"command", "webftp"})
+	err := ValidateAgentScopes("agent", []string{"command", "webftp"})
 	assert.NoError(t, err)
 }
 
 func TestValidateAgentScopes_UserWithWebsh(t *testing.T) {
 	t.Parallel()
-	err := validateAgentScopes("user", []string{"command", "websh"})
+	err := ValidateAgentScopes("user", []string{"command", "websh"})
 	assert.NoError(t, err)
 }
 
@@ -821,7 +821,7 @@ func TestPollForApproval_EveryEndedStatusHasACase(t *testing.T) {
 			defer ts.Close()
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
+			_, err := WaitForApproval(ac, "ws-uuid", false, time.Millisecond, 50*time.Millisecond)
 
 			var terminal *terminalWaitError
 			assert.ErrorAs(t, err, &terminal, "no case for ended status %q in the create --wait switch", status)
