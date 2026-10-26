@@ -134,17 +134,6 @@ type apiError struct {
 	apiPayload bool
 }
 
-// statusError carries an HTTP status on errors that aren't *apiError (e.g. an
-// HTML 404 page), so utils.HTTPStatusCode can still read it.
-type statusError struct {
-	err        error
-	statusCode int
-}
-
-func (e *statusError) Error() string       { return e.err.Error() }
-func (e *statusError) Unwrap() error       { return e.err }
-func (e *statusError) HTTPStatusCode() int { return e.statusCode }
-
 // retryAfterError carries the server's Retry-After hint so a retrying caller
 // (the exec/websh poll loop) waits as long as it asked instead of guessing.
 type retryAfterError struct {
@@ -1144,7 +1133,7 @@ func withStatus(err error, statusCode int) error {
 		ae.statusCode = statusCode
 		return err
 	}
-	return &statusError{err: err, statusCode: statusCode}
+	return utils.WithHTTPStatus(err, statusCode)
 }
 
 // withRetryAfter tags err with the Retry-After delay. Only delta-seconds is parsed—
