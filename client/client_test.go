@@ -1457,12 +1457,13 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
-// A caller that bounds a request bounds the renewal it triggers too: a refresh
-// grant that outlasts ctx must not hold the request past it.
 func TestSendGetRequestWithContext_StopsWaitingOnARenewalPastTheDeadline(t *testing.T) {
-	finished := make(chan struct{})
+	release, finished := make(chan struct{}), make(chan struct{})
 	swapTokenRenewal(t, func(*AlpaconClient) error {
-		time.Sleep(2 * time.Second) // a grant far slower than the caller's deadline
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second): // a request that waits on the grant fails the elapsed check, not the run
+		}
 		close(finished)
 		return nil
 	})
@@ -1478,10 +1479,36 @@ func TestSendGetRequestWithContext_StopsWaitingOnARenewalPastTheDeadline(t *test
 	_, err := ac.SendGetRequestWithContext(ctx, "/api/test/")
 
 	elapsed := time.Since(start)
+	close(release)
 	<-finished // the renewal goroutine reads the seam, so it ends before the seam is restored
 
-	assert.Less(t, elapsed, time.Second)
+	assert.Less(t, elapsed, 2*time.Second)
 	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+}
+
+func TestSendGetRequestWithContext_RetriesWithARenewalInsideTheDeadline(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status": "approved"}`))
+	}))
+	defer ts.Close()
+	ac := newBearerTestClient(ts.URL, "stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	body, err := ac.SendGetRequestWithContext(ctx, "/api/test/")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status": "approved"}`, string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent)
 }
 
 // The server rejects a stale token in its permission layer, before the view

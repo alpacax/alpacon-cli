@@ -503,8 +503,8 @@ func (ac *AlpaconClient) renewedRequest(req *http.Request, err error) (*http.Req
 	return ac.setHTTPHeader(retry), true
 }
 
-// renewAccessTokenWithin is renewAccessToken bounded by ctx: once ctx ends it stops
-// waiting and reports false, and the renewal finishes and installs its token unobserved.
+// renewAccessTokenWithin is renewAccessToken bounded by ctx: once ctx ends it reports false, and the
+// renewal finishes in the background, where its token lands and a save warning may print after the return.
 func (ac *AlpaconClient) renewAccessTokenWithin(ctx context.Context, sent string) bool {
 	if ctx.Done() == nil {
 		return ac.renewAccessToken(sent)
@@ -883,7 +883,7 @@ func (ac *AlpaconClient) SendGetRequest(url string) ([]byte, error) {
 }
 
 // SendGetRequestWithContext is SendGetRequest bounded by ctx, a token renewal it
-// runs included: past ctx it returns the stale-token error instead.
+// runs included: a renewal that outlasts ctx leaves the request's 401 as its result.
 func (ac *AlpaconClient) SendGetRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -929,7 +929,7 @@ func (ac *AlpaconClient) SendDeleteRequest(url string) ([]byte, error) {
 }
 
 // SendDeleteRequestWithContext is SendDeleteRequest bounded by ctx, a token renewal it
-// runs included: past ctx it returns the stale-token error instead.
+// runs included: a renewal that outlasts ctx leaves the request's 401 as its result.
 func (ac *AlpaconClient) SendDeleteRequestWithContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := ac.createRequest(http.MethodDelete, url, nil)
 	if err != nil {
