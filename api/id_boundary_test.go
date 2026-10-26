@@ -16,7 +16,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -28,15 +27,13 @@ import (
 	"github.com/alpacax/alpacon-cli/utils"
 )
 
-const auth0ConfigName = apiPkgPath + "/auth0.Auth0Config"
-
-const resolveSinkField = "Endpoint"
-
 const (
 	apiPkgPath       = "github.com/alpacax/alpacon-cli/api"
 	clientPkgPath    = "github.com/alpacax/alpacon-cli/client"
 	utilsPkgPath     = "github.com/alpacax/alpacon-cli/utils"
 	websocketPkgPath = "github.com/gorilla/websocket"
+	auth0ConfigName  = apiPkgPath + "/auth0.Auth0Config"
+	resolveSinkField = "Endpoint"
 )
 
 const (
@@ -90,7 +87,7 @@ func TestAPILayerSendsRequestsOnlyToCheckedURLs(t *testing.T) {
 		offenders = append(offenders, found...)
 		maps.Copy(sinks, sent)
 	}
-	sort.Strings(offenders)
+	slices.Sort(offenders)
 
 	assert.Empty(t, offenders, "build the URL with utils.BuildURL or api.IDURL, checking an ID with api.RequireID or api.RequireResponseID")
 	assert.Subset(t, slices.Collect(maps.Keys(sinks)), []string{"SendGetRequest", "SendPatchRequest", "FetchAllPages", "NewRequest", "Get", "Dial", resolveName + "." + resolveSinkField})
@@ -779,15 +776,17 @@ func (p checkedPackage) urlFlow(decoded map[string]bool) *urlFlowIndex {
 }
 
 func (f *urlFlowIndex) markInterfaceMethodsEscaped() {
+	names := map[string]bool{}
 	for _, tv := range f.p.info.Types {
 		if iface, ok := tv.Type.Underlying().(*types.Interface); ok && tv.IsType() {
 			for m := range iface.Methods() {
-				for fn := range f.decls {
-					if fn != nil && fn.Signature().Recv() != nil && fn.Name() == m.Name() {
-						f.escaped[fn] = true
-					}
-				}
+				names[m.Name()] = true
 			}
+		}
+	}
+	for fn := range f.decls {
+		if fn != nil && fn.Signature().Recv() != nil && names[fn.Name()] {
+			f.escaped[fn] = true
 		}
 	}
 }
@@ -804,7 +803,7 @@ func (f *urlFlowIndex) addParams(ft *ast.FuncType, owner param) {
 				obj = f.p.info.Defs[name]
 			}
 			if obj != nil {
-				f.params[obj] = param{owner.fn, owner.lit, owner.index}
+				f.params[obj] = owner
 			}
 			if owner.fn != nil {
 				f.paramsOf[owner.fn] = append(f.paramsOf[owner.fn], obj)
