@@ -95,15 +95,15 @@ func TestUseFileExecutionRefusal(t *testing.T) {
 	}
 }
 
-func TestUseFileExecutionAccountFlags(t *testing.T) {
+func TestRunAsFlags(t *testing.T) {
 	t.Parallel()
-	assert.Empty(t, useFileExecutionAccountFlags(RemoteExecArgs{Server: "prod"}))
+	assert.Empty(t, runAsFlags(RemoteExecArgs{Server: "prod"}))
 	assert.Equal(t,
 		[]string{"-u root", "-g wheel", "--work-session ses-1"},
-		useFileExecutionAccountFlags(RemoteExecArgs{Server: "prod", Username: "root", Groupname: "wheel", WorkSessionID: "ses-1"}))
+		runAsFlags(RemoteExecArgs{Server: "prod", Username: "root", Groupname: "wheel", WorkSessionID: "ses-1"}))
 	assert.Equal(t,
 		[]string{"-u 'a b'", "-g '$(id)'", "--work-session 'ses;1'"},
-		useFileExecutionAccountFlags(RemoteExecArgs{Server: "prod", Username: "a b", Groupname: "$(id)", WorkSessionID: "ses;1"}))
+		runAsFlags(RemoteExecArgs{Server: "prod", Username: "a b", Groupname: "$(id)", WorkSessionID: "ses;1"}))
 }
 
 // rejectedCommandID is a UUID because exec logs refuses any other job id.
@@ -208,11 +208,11 @@ func TestExecUseFileExecutionRefusalPrintsGuidance(t *testing.T) {
 		assert.Equal(t, []utils.NextAction{
 			{
 				Command:     "alpacon exec -u root --upload --file /path/to/script.sh --file-from ./script.sh prod",
-				Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path",
+				Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path and --interpreter ABSOLUTE_PATH for a script /bin/bash does not run",
 			},
 			{
 				Command:     "alpacon exec -u root --file /path/to/script.sh --from-server prod",
-				Description: "or, when a copy is already saved at that path on the server, run it there",
+				Description: "when a copy is already saved at that path on the server, run it there, adding --interpreter ABSOLUTE_PATH for a script /bin/bash does not run",
 			},
 		}, envelope.NextActions)
 	})
@@ -285,9 +285,9 @@ func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
 
 		_, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, rejectedCommandID)
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
-		assert.Contains(t, stderr, "replace <account> with that account")
-		assert.Contains(t, stderr, "  alpacon exec -u <account> -g <group> --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod\n")
-		assert.Contains(t, stderr, "  alpacon exec -u <account> -g <group> --work-session ses-1 --file /path/to/script.sh --from-server prod\n")
+		assert.Contains(t, stderr, "replace ACCOUNT with that account")
+		assert.Contains(t, stderr, "  alpacon exec -u ACCOUNT -g GROUP --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod\n")
+		assert.Contains(t, stderr, "  alpacon exec -u ACCOUNT -g GROUP --work-session ses-1 --file /path/to/script.sh --from-server prod\n")
 	})
 
 	t.Run("json", func(t *testing.T) {
@@ -299,14 +299,14 @@ func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
 		var envelope cliErrorEnvelope
 		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
-		assert.Contains(t, envelope.Message, "replace <account> with that account")
+		assert.Contains(t, envelope.Message, "replace ACCOUNT with that account")
 		commands := make([]string, 0, len(envelope.NextActions))
 		for _, a := range envelope.NextActions {
 			commands = append(commands, a.Command)
 		}
 		assert.Equal(t, []string{
-			"alpacon exec -u <account> -g <group> --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
-			"alpacon exec -u <account> -g <group> --work-session ses-1 --file /path/to/script.sh --from-server prod",
+			"alpacon exec -u ACCOUNT -g GROUP --work-session ses-1 --upload --file /path/to/script.sh --file-from ./script.sh prod",
+			"alpacon exec -u ACCOUNT -g GROUP --work-session ses-1 --file /path/to/script.sh --from-server prod",
 		}, commands)
 	})
 
@@ -319,10 +319,18 @@ func TestExecLogsUseFileExecutionRefusalWithoutAccount(t *testing.T) {
 		assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
 		var envelope cliErrorEnvelope
 		require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr: %s", stderr)
-		assert.NotContains(t, envelope.Message, "<group>")
+		assert.NotContains(t, envelope.Message, "GROUP")
 		require.Len(t, envelope.NextActions, 2)
 		assert.Equal(t,
-			"alpacon exec -u <account> -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
+			"alpacon exec -u ACCOUNT -g wheel --work-session ses-1 --file /path/to/script.sh --from-server prod",
 			envelope.NextActions[1].Command)
 	})
+}
+
+// TestReRunHintQuotesRunAsFlags pins that the pending-approval hint quotes the
+// account flags the same way the use_file_execution guidance does.
+func TestReRunHintQuotesRunAsFlags(t *testing.T) {
+	t.Parallel()
+	hint := reRunHint(RemoteExecArgs{Server: "prod", Command: "uptime", Username: "root", Groupname: "a b", WorkSessionID: "ses;1"})
+	assert.Equal(t, "alpacon exec -u root -g 'a b' --work-session 'ses;1' prod -- uptime", hint.Command)
 }

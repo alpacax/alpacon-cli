@@ -416,23 +416,27 @@ func useFileExecutionRefusal(commandID, server string, accountFlags []string, wi
 	}
 	prefix := strings.Join(append([]string{string(ExecInvocation)}, accountFlags...), " ")
 	serverArg := argvQuote(server)
+	// The refused body may be perl -e or another interpreter's, and --file runs
+	// the script with DefaultInterpreter unless --interpreter names another.
+	const interpreterNote = "--interpreter ABSOLUTE_PATH for a script " + DefaultInterpreter + " does not run"
 	actions = []utils.NextAction{
 		{
 			Command:     prefix + " --upload --file /path/to/script.sh --file-from ./script.sh " + serverArg,
-			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path",
+			Description: "save the script to a local file, then write it to the server and run it in one step, adding --overwrite to replace a file already at that path and " + interpreterNote,
 		},
 		{
 			Command:     prefix + " --file /path/to/script.sh --from-server " + serverArg,
-			Description: "or, when a copy is already saved at that path on the server, run it there",
+			Description: "when a copy is already saved at that path on the server, run it there, adding " + interpreterNote,
 		},
 	}
 	return message, actions
 }
 
-// useFileExecutionAccountFlags returns the -u, -g and --work-session flags of
-// the refused run, sanitized for a raw write and quoted with argvQuote so a
-// pasted command keeps each value one argument, in the order reRunHint uses.
-func useFileExecutionAccountFlags(parsed RemoteExecArgs) []string {
+// runAsFlags returns the -u, -g and --work-session flags of a run for a hint
+// to repeat, sanitized for a raw write and quoted with argvQuote so a pasted
+// command keeps each value one argument. reRunHint and the use_file_execution
+// guidance both build their flags here.
+func runAsFlags(parsed RemoteExecArgs) []string {
 	quote := func(s string) string { return argvQuote(utils.SanitizeTerminalText(s)) }
 	var flags []string
 	if parsed.Username != "" {
@@ -456,7 +460,7 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 	if !errors.As(err, &rejected) || rejected.Cause != event.RejectionCauseUseFileExecution {
 		return false
 	}
-	reportUseFileExecution(rejected, parsed.Server, useFileExecutionAccountFlags(parsed), len(parsed.Env) > 0, "")
+	reportUseFileExecution(rejected, parsed.Server, runAsFlags(parsed), len(parsed.Env) > 0, "")
 	return true
 }
 
@@ -466,17 +470,16 @@ func HandleUseFileExecutionRefusal(err error, parsed RemoteExecArgs) bool {
 // code as error_code and the replacement commands as next_actions.
 func reportUseFileExecution(rejected *event.CommandRejectedError, server string, accountFlags []string, withEnv bool, accountNote string) {
 	message, actions := useFileExecutionRefusal(rejected.CommandID, server, accountFlags, withEnv, accountNote)
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		utils.CliErrorEnvelopeWithNextActions(utils.ExitCodeNotApproved, "command", rejected, message+".", actions)
-		return
-	}
-	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
+	var hint strings.Builder
 	for i, action := range actions {
 		line := action.Description + ":\n  " + action.Command + "\n"
-		if i == 0 {
+		switch i {
+		case 0:
 			line = denialHintLine(line)
+		case 1:
+			line = "or, " + line
 		}
-		fmt.Fprint(os.Stderr, line)
+		hint.WriteString(line)
 	}
-	os.Exit(utils.ExitCodeNotApproved)
+	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", rejected, message, hint.String(), actions)
 }

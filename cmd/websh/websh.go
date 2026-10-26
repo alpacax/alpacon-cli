@@ -155,6 +155,12 @@ line carries a credential—a -p/--password flag, a KEY=VALUE secret such as
 PGPASSWORD=..., or a user:pass@host connection string—with exit code 1. Pass
 the secret with --env="KEY" instead; --output json emits an error envelope on
 stderr with error_code command_inline_credential.
+A command whose line carries a script body—a heredoc, a multi-line -c or -e
+body, or a decoded payload piped into a shell—can be refused when the
+workspace approval policy blocks script bodies, with exit code 6 and the code
+use_file_execution. Save the script to a file and run it with
+'alpacon exec --file', as the printed commands show; --output json carries them
+in next_actions.
 Requires an active WorkSession when using Browser login (Auth0). Token auth (API
 token or Service token) bypasses this requirement for 'websh SERVER COMMAND',
 but cannot open an interactive terminal or watch, join, or invite to a session—those

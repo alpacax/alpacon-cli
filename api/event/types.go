@@ -97,14 +97,15 @@ type FileExecutionSuggestion struct {
 type CommandRejectedError struct {
 	CommandID string
 	Expired   bool
-	// Cause is the server's rejection_cause, empty for a reviewer's refusal.
+	// Cause is the server's rejection_cause, such as approval_rejected for a
+	// reviewer's refusal; empty on older servers.
 	Cause string
 }
 
 // RejectionCauseUseFileExecution is the rejection_cause of a command whose line
 // carried a script body: a heredoc, a multi-line -c or -e body, or a decoded
 // payload piped into a shell. Nothing can verify a script in that shape, so the
-// server can refuse it after verification, when the workspace approval policy
+// server can refuse it after submission, when the workspace approval policy
 // blocks script bodies, and ask for the file lane instead. The refusal is per
 // command, so it covers one server even when the same script went to several.
 const RejectionCauseUseFileExecution = "use_file_execution"
@@ -326,9 +327,15 @@ func (e *CommandRejectedError) Error() string {
 	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
 
-// ErrorCode returns the rejection cause for the --output json envelope; a
-// reviewer's refusal has none and returns "".
-func (e *CommandRejectedError) ErrorCode() string { return e.Cause }
+// ErrorCode returns use_file_execution for the --output json envelope; every
+// other refusal returns "" until the CLI has a sentence for its cause, since
+// Error() still reads it as a reviewer's.
+func (e *CommandRejectedError) ErrorCode() string {
+	if e.Cause == RejectionCauseUseFileExecution {
+		return e.Cause
+	}
+	return ""
+}
 
 // ErrorSource completes the coded error the envelope reads; a rejection names
 // no source.

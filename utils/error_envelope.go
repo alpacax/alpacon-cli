@@ -70,10 +70,11 @@ func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format 
 	CliErrorWithExitCode(code, format, args...)
 }
 
-// CliErrorEnvelopeWithNextActions prints the --output json error envelope with
-// a caller-chosen exit code and the follow-ups that replace the refused request,
-// then exits with that code.
-func CliErrorEnvelopeWithNextActions(code int, operation string, err error, message string, actions []NextAction) {
+// CliJSONErrorEnvelopeWithExit prints the --output json error envelope with a
+// caller-chosen exit code and the follow-ups that replace the refused request,
+// then exits with that code. It is JSON only, unlike its siblings: the caller
+// prints the table mode message itself.
+func CliJSONErrorEnvelopeWithExit(code int, operation string, err error, message string, actions []NextAction) {
 	envelope := buildCliErrorEnvelopeFromErr(operation, err, message)
 	envelope.ExitCode = code
 	envelope.NextActions = actions

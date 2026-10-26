@@ -891,15 +891,22 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 // sentence for: under --output json the envelope carries the server's code and
 // the message; table mode prints the red Error line and the hint. Exits 1.
 func reportCodedRefusal(operation string, err error, message, hint string) {
+	reportCodedRefusalWithExit(1, operation, err, message, hint, nil)
+}
+
+// reportCodedRefusalWithExit is reportCodedRefusal with a chosen exit code and
+// the next_actions the JSON envelope carries; table mode shows only the hint,
+// so it should spell out the same actions for a person.
+func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
-		utils.CliErrorEnvelopeWithExit(operation, err, "%s.", message)
+		utils.CliJSONErrorEnvelopeWithExit(code, operation, err, message+".", actions)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
-	os.Exit(1)
+	os.Exit(code)
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged

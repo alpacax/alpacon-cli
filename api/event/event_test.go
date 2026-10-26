@@ -411,11 +411,29 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
 }
 
-func TestCommandRejectedError_ReviewerRefusalHasNoCode(t *testing.T) {
+// TestCommandRejectedError_OtherCausesHaveNoCode pins that only
+// use_file_execution reaches the envelope as error_code: a reviewer's refusal
+// arrives with rejection_cause approval_rejected, and a cause the CLI has no
+// sentence for keeps the reviewer message and no code.
+func TestCommandRejectedError_OtherCausesHaveNoCode(t *testing.T) {
 	t.Parallel()
-	err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected"})
-	code, _ := utils.ParseErrorResponse(err)
-	assert.Empty(t, code)
+	cases := []struct {
+		name  string
+		cause string
+	}{
+		{name: "no cause", cause: ""},
+		{name: "reviewer rejection", cause: "approval_rejected"},
+		{name: "unknown cause", cause: "risk_denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected", RejectionCause: tc.cause})
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Empty(t, code)
+			assert.Equal(t, "command cmd-9 was rejected by a reviewer", err.Error())
+		})
+	}
 }
 
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {

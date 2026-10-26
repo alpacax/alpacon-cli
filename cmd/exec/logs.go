@@ -135,7 +135,7 @@ func init() {
 
 // logsAccountFlags repeats the refused run's -u, -g and --work-session flags
 // from the command detail. A detail with no username (an older server, or a
-// field the viewer cannot see) gets an -u <account> placeholder and a note to
+// field the viewer cannot see) gets an -u ACCOUNT placeholder and a note to
 // fill it in: a command without -u would run as the server's default account.
 // -g gets a placeholder too unless the detail names the group, since the
 // original may have carried one.
@@ -144,15 +144,16 @@ func logsAccountFlags(details event.EventDetails) (flags []string, note string) 
 	if details.WorkSession != nil {
 		original.WorkSessionID = details.WorkSession.ID
 	}
-	flags = useFileExecutionAccountFlags(original)
+	flags = runAsFlags(original)
 	if details.Username != "" {
 		return flags, ""
 	}
-	placeholders := []string{"-u <account>"}
-	note = "the command detail does not name the account the command ran as, so replace <account> with that account"
+	// Bare words, not <account>: a shell reads angle brackets as redirections.
+	placeholders := []string{"-u ACCOUNT"}
+	note = "the command detail does not name the account the command ran as, so replace ACCOUNT with that account"
 	if details.Groupname == "" {
-		placeholders = append(placeholders, "-g <group>")
-		note += " and <group> with its group, or drop -g if it had none"
+		placeholders = append(placeholders, "-g GROUP")
+		note += " and GROUP with its group, or drop -g if it had none"
 	}
 	note += ": without -u the command runs as the server's default account"
 	return append(placeholders, flags...), note
