@@ -163,12 +163,10 @@ func (w *wsListener) connectAndListen() bool {
 	}
 
 	dialer := newListenerDialer(w.handshakeTimeout)
-	conn, _, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
+	conn, resp, dialErr := dialer.Dial(session.WebsocketURL, w.wsHeader)
 	if dialErr != nil {
 		if w.onDialFailed != nil {
-			// The URL carries a channel token in its path, which a URL error prints
-			// whole, so only the host is kept.
-			w.onDialFailed(utils.RedactURLErrorHostOnly(dialErr))
+			w.onDialFailed(utils.WebsocketDialError("failed to connect to the event channel", dialErr, resp))
 		}
 		w.closeUnopenedSession(session.ID)
 		return false
