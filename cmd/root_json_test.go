@@ -11,87 +11,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOwnFlagArgsStopsAtTheServerAndTheSeparator(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   []string
-		want []string
-	}{
-		{"flag then server then remote flag", []string{"--output", "json", "srv", "ls", "--output", "json"}, []string{"--output", "json"}},
-		{"remote command carries its own output flag", []string{"srv", "--output", "json"}, []string{}},
-		{"value flag hides a server-looking value", []string{"-u", "alice", "--output=json", "srv", "x"}, []string{"-u", "alice", "--output=json"}},
-		{"separator ends own flags", []string{"--output", "json", "--", "srv", "--output", "table"}, []string{"--output", "json"}},
-		{"read-only boolean value", []string{"--read-only", "true", "--output=json", "srv"}, []string{"--read-only", "true", "--output=json"}},
-		{"flags only", []string{"--output=json"}, []string{"--output=json"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, append([]string{}, ownFlagArgs(tt.in)...))
-		})
-	}
-}
-
-func TestWebshOwnArgsFollowsTheParserPastTheServer(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   []string
-		want []string
-	}{
-		{"flags after the server", []string{"my-server", "--output", "json", "--read-only=maybe"}, []string{"my-server", "--output", "json", "--read-only=maybe"}},
-		{"stops at the first command token", []string{"my-server", "--share", "ls", "--output", "json"}, []string{"my-server", "--share"}},
-		{"value flag hides a command-looking value", []string{"my-server", "-u", "ls", "--output=json", "ls"}, []string{"my-server", "-u", "ls", "--output=json"}},
-		{"unknown flag after the server starts the command", []string{"my-server", "-x", "--output", "json"}, []string{"my-server"}},
-		{"read-only boolean value", []string{"my-server", "--read-only", "false", "--output=json"}, []string{"my-server", "--read-only", "false", "--output=json"}},
-		{"separator after the server starts the command", []string{"my-server", "--", "--output", "json"}, []string{"my-server"}},
-		{"flags before the server", []string{"--output", "json", "my-server", "ls"}, []string{"--output", "json", "my-server"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.want, append([]string{}, websshOwnArgs(tt.in)...))
-		})
-	}
-}
-
 // Serial: Find builds the merged flag set lazily on package-level commands.
-func TestScanArgsResolvesCanonicalCommandNames(t *testing.T) {
+func TestScanOutputFormatReadsTheValueTheCommandsParserWillRead(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		wantName string
-		wantScan []string
+		name       string
+		args       []string
+		wantName   string
+		wantFormat string
 	}{
-		{"alias resolves to canonical path", []string{"ws", "ls", "--output", "json"}, "workspace ls", []string{"ws", "ls", "--output", "json"}},
-		{"root alone", nil, "", []string{}},
-		{"flag before command", []string{"--output", "json", "server", "ls"}, "server ls", []string{"--output", "json", "server", "ls"}},
-		{"exec hides remote flags", []string{"exec", "srv", "ls", "--output", "json"}, "exec", []string{}},
-		{"exec own flag kept", []string{"exec", "--output", "json", "srv", "ls"}, "exec", []string{"--output", "json"}},
-		{"websh flag after the server kept", []string{"websh", "srv", "--output", "json"}, "websh", []string{"srv", "--output", "json"}},
-		{"websh remote command flags hidden", []string{"websh", "srv", "ls", "--output", "json"}, "websh", []string{"srv"}},
-		{"exec value flag hides an output-looking value", []string{"exec", "--interpreter", "--output=json", "srv", "--", "echo"}, "exec", []string{"--interpreter"}},
-		{"websh work-session value that looks like our flag", []string{"websh", "--work-session", "--output=json", "srv"}, "websh", []string{"--work-session", "srv"}},
-		{"exec output keeps its own value", []string{"exec", "--output", "json", "srv"}, "exec", []string{"--output", "json"}},
-		{"websh value flag hides an output-looking value", []string{"websh", "srv", "-u", "--output=json"}, "websh", []string{"srv", "-u"}},
-		{"value of a value flag is not a flag", []string{"event", "wait", "--type", "--output=json", "--timeout", "0"}, "event wait", []string{"event", "wait", "--type", "--timeout"}},
-		{"output after a value flag still counts", []string{"event", "wait", "--type", "x", "--output", "json"}, "event wait", []string{"event", "wait", "--type", "--output", "json"}},
-		{"unknown flag does not hop", []string{"event", "wait", "--bogus", "--output=json"}, "event wait", []string{"event", "wait", "--bogus", "--output=json"}},
-		{"bundle ending in a value flag takes the next token", []string{"cp", "-ru", "--output=json", "onlyone"}, "cp", []string{"cp", "-ru", "onlyone"}},
-		{"bundle of bools does not hop", []string{"cp", "-r", "--output", "json", "a", "b"}, "cp", []string{"cp", "-r", "--output", "json", "a", "b"}},
-		{"attached shorthand value does not hop", []string{"cp", "-uroot", "--output", "json", "a", "b"}, "cp", []string{"cp", "-uroot", "--output", "json", "a", "b"}},
-		{"bundle with attached value does not hop", []string{"cp", "-ruroot", "--output=json"}, "cp", []string{"cp", "-ruroot", "--output=json"}},
-		{"shorthand equals form does not hop", []string{"cp", "-u=root", "--output=json"}, "cp", []string{"cp", "-u=root", "--output=json"}},
-		{"unknown shorthand in a bundle stops the walk", []string{"cp", "-rzu", "--output=json"}, "cp", []string{"cp", "-rzu", "--output=json"}},
-		{"bool flag does not hop", []string{"event", "wait", "--help", "--output=json"}, "event wait", []string{"event", "wait", "--help", "--output=json"}},
-		{"long bool flag does not hop", []string{"server", "create", "--json", "--output=json", "--bogus"}, "server create", []string{"server", "create", "--json", "--output=json", "--bogus"}},
+		{"alias resolves to canonical path", []string{"ws", "ls", "--output", "json"}, "workspace ls", utils.OutputFormatJSON},
+		{"root alone", nil, "", ""},
+		{"flag before command", []string{"--output", "json", "server", "ls"}, "server ls", utils.OutputFormatJSON},
+		{"last output wins", []string{"server", "ls", "--output", "json", "--output", "table"}, "server ls", ""},
+		{"exec remote command flags are not ours", []string{"exec", "srv", "ls", "--output", "json"}, "exec", ""},
+		{"exec own flag", []string{"exec", "--output", "json", "srv", "ls"}, "exec", utils.OutputFormatJSON},
+		{"exec flag after an unknown flag", []string{"exec", "--bogus", "--output", "json", "srv"}, "exec", utils.OutputFormatJSON},
+		{"exec flag after help", []string{"exec", "-h", "--output", "json"}, "exec", utils.OutputFormatJSON},
+		{"exec flag after the separator is the server", []string{"exec", "--", "--output", "json"}, "exec", ""},
+		{"exec value flag takes an output-looking value", []string{"exec", "--interpreter", "--output=json", "srv", "--", "echo"}, "exec", ""},
+		{"exec attached short value", []string{"exec", "-ualice", "--output", "json", "srv"}, "exec", utils.OutputFormatJSON},
+		{"websh flag after the server", []string{"websh", "srv", "--output", "json"}, "websh", utils.OutputFormatJSON},
+		{"websh remote command flags are not ours", []string{"websh", "srv", "ls", "--output", "json"}, "websh", ""},
+		{"websh prefix flag takes the next token", []string{"websh", "-ualice", "--output", "json", "srv"}, "websh", ""},
+		{"websh long prefix flag takes the next token", []string{"websh", "--username-extra", "--output=json", "srv"}, "websh", ""},
+		{"websh value flag takes an output-looking value", []string{"websh", "--work-session", "--output=json", "srv"}, "websh", ""},
+		{"websh flag after a bad read-only value", []string{"websh", "srv", "--read-only=maybe", "--output", "json"}, "websh", utils.OutputFormatJSON},
+		{"websh separator starts the command", []string{"websh", "srv", "--", "--output", "json"}, "websh", ""},
+		{"value of a value flag is not a flag", []string{"event", "wait", "--type", "--output=json", "--timeout", "0"}, "event wait", ""},
+		{"output after a value flag still counts", []string{"event", "wait", "--type", "x", "--output", "json"}, "event wait", utils.OutputFormatJSON},
+		{"unknown flag does not hop", []string{"event", "wait", "--bogus", "--output=json"}, "event wait", utils.OutputFormatJSON},
+		{"bundle ending in a value flag takes the next token", []string{"cp", "-ru", "--output=json", "onlyone"}, "cp", ""},
+		{"bundle of bools does not hop", []string{"cp", "-r", "--output", "json", "a", "b"}, "cp", utils.OutputFormatJSON},
+		{"attached shorthand value does not hop", []string{"cp", "-uroot", "--output", "json", "a", "b"}, "cp", utils.OutputFormatJSON},
+		{"bundle with attached value does not hop", []string{"cp", "-ruroot", "--output=json"}, "cp", utils.OutputFormatJSON},
+		{"shorthand equals form does not hop", []string{"cp", "-u=root", "--output=json"}, "cp", utils.OutputFormatJSON},
+		{"unknown shorthand in a bundle stops the walk", []string{"cp", "-rzu", "--output=json"}, "cp", utils.OutputFormatJSON},
+		{"bool flag does not hop", []string{"event", "wait", "--help", "--output=json"}, "event wait", utils.OutputFormatJSON},
+		{"long bool flag does not hop", []string{"server", "create", "--json", "--output=json", "--bogus"}, "server create", utils.OutputFormatJSON},
+		{"separator ends the scan", []string{"tunnel", "srv", "--", "psql", "--output", "json"}, "tunnel", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, scan := scanArgs(tt.args)
+			name, format := scanOutputFormat(tt.args)
 			assert.Equal(t, tt.wantName, name)
-			assert.Equal(t, tt.wantScan, append([]string{}, scan...))
+			assert.Equal(t, tt.wantFormat, format)
 		})
 	}
 }
@@ -103,6 +66,7 @@ func runExecuteHelper(t *testing.T, args ...string) (stdout, stderr string, exit
 }
 
 func TestExecuteJSONReportsCobraErrorsAsOneUsageEnvelope(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []string
@@ -114,6 +78,10 @@ func TestExecuteJSONReportsCobraErrorsAsOneUsageEnvelope(t *testing.T) {
 		{"unknown subcommand", []string{"--output", "json", "server", "nope"}, "server", "unknown command"},
 		{"group without subcommand", []string{"--output", "json", "server"}, "server", "a subcommand is required"},
 		{"alias reports canonical name", []string{"ws", "ls", "--output", "json", "--bogus"}, "workspace ls", "unknown flag: --bogus"},
+		{"earlier table output does not undo the json scan", []string{"server", "ls", "--output", "table", "--bogus", "--output", "json"}, "server ls", "unknown flag: --bogus"},
+		{"help command", []string{"help", "--output", "json", "--bogus"}, "help", "unknown flag: --bogus"},
+		{"completion command", []string{"completion", "bash", "--output", "json", "--bogus"}, "completion bash", "unknown flag: --bogus"},
+		{"unknown help topic", []string{"help", "nosuch", "--output", "json"}, "help", `unknown help topic "nosuch"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -143,12 +111,15 @@ func lastEnvelopeOfStderr(t *testing.T, stderr string) map[string]any {
 }
 
 func TestExecuteJSONSendsHelpToStderr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
 	}{
 		{"help flag", []string{"--output", "json", "server", "--help"}},
 		{"help command", []string{"--output", "json", "help", "server"}},
+		{"exec help flag", []string{"exec", "--output", "json", "--help"}},
+		{"websh help flag", []string{"websh", "--output", "json", "-h"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -162,79 +133,76 @@ func TestExecuteJSONSendsHelpToStderr(t *testing.T) {
 	}
 }
 
-func TestExecuteTableModeKeepsCobraErrorAndHelpOnStdout(t *testing.T) {
+func TestExecuteTableModeWritesCobraErrorToStderr(t *testing.T) {
 	t.Parallel()
 	stdout, stderr, code := runExecuteHelper(t, "server", "--bogus")
 
 	assert.Equal(t, 1, code)
-	assert.Contains(t, stderr, "Error: unknown flag: --bogus")
-	assert.Contains(t, stderr, "While executing the command: unknown flag: --bogus")
 	assert.Empty(t, stdout)
-
-	helpOut, _, helpCode := runExecuteHelper(t, "server", "--help")
-	assert.Equal(t, 0, helpCode)
-	assert.Contains(t, helpOut, "Usage:")
+	assert.Contains(t, stderr, "While executing the command: unknown flag: --bogus")
 }
 
-func TestExecuteJSONExecAndWebshParseFailuresAreEnvelopes(t *testing.T) {
+func TestExecuteTableModeWritesHelpToStdout(t *testing.T) {
+	t.Parallel()
+	stdout, _, code := runExecuteHelper(t, "server", "--help")
+
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stdout, "Usage:")
+}
+
+func TestExecuteJSONExecWebshAndCpArgumentFailuresAreUsageEnvelopes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name string
-		args []string
+		name        string
+		args        []string
+		wantCommand string
+		wantMessage string
 	}{
-		{"exec unknown flag", []string{"exec", "--output", "json", "--bogus", "srv", "ls"}},
-		{"websh missing flag value", []string{"websh", "--output=json", "-u"}},
-		{"exec unknown flag with output last", []string{"exec", "--bogus", "--output=json"}},
+		{"exec unknown flag", []string{"exec", "--output", "json", "--bogus", "srv", "uptime"}, "exec", "unknown flag: --bogus"},
+		{"exec unknown flag with output last", []string{"exec", "--bogus", "--output=json"}, "exec", "unknown flag: --bogus"},
+		{"websh missing flag value", []string{"websh", "--output=json", "--work-session"}, "websh", "--work-session requires a value"},
+		{"websh flag after the server", []string{"websh", "my-server", "--output", "json", "--read-only=maybe"}, "websh", "--read-only value must be either"},
+		{"exec flag without value", []string{"exec", "--output", "json", "--purpose"}, "exec", "flag needs an argument: --purpose"},
+		{"websh empty output keeps the earlier json", []string{"websh", "--output=json", "--output"}, "websh", "--output requires a value"},
+		{"websh without a server", []string{"websh", "--output", "json", "-s"}, "websh", "Server name is required"},
+		{"cp output after a bool bundle", []string{"cp", "-r", "--output", "json", "onlyone"}, "cp", "at least two arguments"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr, code := runExecuteHelper(t, tt.args...)
 
-			assert.NotEqual(t, 0, code)
+			assert.Equal(t, utils.ExitCodeGeneralError, code)
 			assert.Empty(t, stdout)
 			env := lastEnvelopeOfStderr(t, stderr)
-			assert.Equal(t, false, env["ok"])
-			assert.NotEmpty(t, env["error_code"])
+			assert.Equal(t, utils.ErrorCodeUsage, env["error_code"])
+			assert.Equal(t, tt.wantCommand, env["command"])
+			assert.Contains(t, env["message"], tt.wantMessage)
 		})
 	}
 }
 
-func TestExecuteJSONWebshFlagsAfterTheServerSelectJSON(t *testing.T) {
+func TestExecuteTableModeWhenAValueFlagTakesTheOutputToken(t *testing.T) {
 	t.Parallel()
-	stdout, stderr, code := runExecuteHelper(t, "websh", "my-server", "--output", "json", "--read-only=maybe")
+	tests := []struct {
+		name        string
+		args        []string
+		wantCode    int
+		wantMessage string
+	}{
+		{"event wait type value", []string{"event", "wait", "--type", "--output=json", "--timeout", "0"}, utils.ExitCodeUsageError, "--timeout must be positive"},
+		{"cp bundle ending in a value flag", []string{"cp", "-ru", "--output=json", "onlyone"}, utils.ExitCodeGeneralError, "You must specify at least two arguments"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, stderr, code := runExecuteHelper(t, tt.args...)
 
-	assert.NotEqual(t, 0, code)
-	assert.Empty(t, stdout)
-	env := lastEnvelopeOfStderr(t, stderr)
-	assert.Equal(t, false, env["ok"])
-	assert.NotEmpty(t, env["error_code"])
-	assert.InDelta(t, code, env["exit_code"], 0)
-	assert.Equal(t, "websh", env["command"])
-}
-
-func TestExecuteEventWaitTypeValueIsNotTakenForOutputFlag(t *testing.T) {
-	t.Parallel()
-	_, stderr, code := runExecuteHelper(t, "event", "wait", "--type", "--output=json", "--timeout", "0")
-
-	assert.NotEqual(t, 0, code)
-	assert.NotContains(t, strings.TrimSpace(stderr), `{"ok":false`)
-	assert.Contains(t, stderr, "Error:")
-}
-
-func TestExecuteCpBundleValueFlagTakesOutputLookingToken(t *testing.T) {
-	t.Parallel()
-	_, stderr, code := runExecuteHelper(t, "cp", "-ru", "--output=json", "onlyone")
-
-	assert.NotEqual(t, 0, code)
-	assert.NotContains(t, strings.TrimSpace(stderr), `{"ok":false`)
-}
-
-func TestExecuteCpOutputAfterBoolBundleSelectsJSON(t *testing.T) {
-	t.Parallel()
-	_, stderr, code := runExecuteHelper(t, "cp", "-r", "--output", "json", "onlyone")
-
-	assert.NotEqual(t, 0, code)
-	assert.Equal(t, false, lastEnvelopeOfStderr(t, stderr)["ok"])
+			assert.Equal(t, tt.wantCode, code)
+			assert.Contains(t, stderr, tt.wantMessage)
+			assert.NotContains(t, stderr, `{"ok":false`)
+		})
+	}
 }
 
 func TestExecuteJSONHelperProcess(t *testing.T) {

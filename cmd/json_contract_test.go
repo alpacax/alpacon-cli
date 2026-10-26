@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -15,14 +15,15 @@ type contractLeaf struct {
 	name string
 }
 
-// Hidden commands are skipped (help topics, stand-ins with their own tests); help and completion
-// only exist once Cobra executes.
+// contractLeaves skips hidden commands, which are stand-ins with tests of their own.
 func contractLeaves() []contractLeaf {
+	RootCmd.InitDefaultHelpCmd()
+	RootCmd.InitDefaultCompletionCmd()
 	var leaves []contractLeaf
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
 		for _, sub := range c.Commands() {
-			if sub.Hidden || sub.Name() == "help" || sub.Name() == "completion" {
+			if sub.Hidden {
 				continue
 			}
 			if sub.Runnable() {
@@ -36,24 +37,15 @@ func contractLeaves() []contractLeaf {
 	return leaves
 }
 
-// assertEnvelopeContract checks the promise every failure makes under --output json.
-func assertEnvelopeContract(t *testing.T, stdout, stderr string, code int, wantCommand string) map[string]any {
+func assertEnvelopeContract(t *testing.T, stdout, stderr string, code int, wantCommand, wantError string) {
 	t.Helper()
 	assert.NotEqual(t, 0, code)
-
-	if strings.TrimSpace(stdout) != "" {
-		dec := json.NewDecoder(strings.NewReader(stdout))
-		var first any
-		require.NoError(t, dec.Decode(&first), "stdout: %q", stdout)
-		assert.False(t, dec.More(), "stdout holds more than one JSON value: %q", stdout)
-	}
-
+	assert.Empty(t, stdout)
 	env := lastEnvelopeOfStderr(t, stderr)
 	assert.Equal(t, false, env["ok"])
-	assert.NotEmpty(t, env["error_code"])
+	assert.Equal(t, wantError, env["error_code"])
 	assert.InDelta(t, code, env["exit_code"], 0)
 	assert.Equal(t, wantCommand, env["command"])
-	return env
 }
 
 // Serial: the walk reads package-level Cobra commands. The children are separate processes.
@@ -67,19 +59,23 @@ func TestJSONContractEveryLeafFailsWithAnEnvelope(t *testing.T) {
 			// Flags go straight after the command path, so exec and websh (DisableFlagParsing)
 			// see them before any positional argument.
 			args := append(append([]string{}, leaf.path...), "--output", "json", "--definitely-not-a-flag")
+			wantCommand, wantError := leaf.name, utils.ErrorCodeUsage
+			switch leaf.path[0] {
+			case "websh":
+				args = append(args[:len(args)-1], "my-server", "--read-only=maybe") // websh reads an unknown flag as the server name
+			case "kube":
+				wantCommand, wantError = "kube", utils.ErrorCodeCLI // no config in the child, so the surface gate answers for the group
+			}
 
 			stdout, stderr, code := runExecuteHelper(t, args...)
 
-			want := leaf.name
-			if leaf.path[0] == "kube" {
-				want = "kube" // the child has no config, so the surface gate answers for the whole group
-			}
-			assertEnvelopeContract(t, stdout, stderr, code, want)
+			assertEnvelopeContract(t, stdout, stderr, code, wantCommand, wantError)
 		})
 	}
 }
 
 func TestJSONContractFailuresThatAreNotBadFlags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		args        []string
@@ -105,9 +101,8 @@ func TestJSONContractFailuresThatAreNotBadFlags(t *testing.T) {
 
 			stdout, stderr, code := runExecuteHelper(t, args...)
 
-			env := assertEnvelopeContract(t, stdout, stderr, code, tt.wantCommand)
+			assertEnvelopeContract(t, stdout, stderr, code, tt.wantCommand, tt.wantError)
 			assert.Equal(t, tt.wantCode, code)
-			assert.Equal(t, tt.wantError, env["error_code"])
 		})
 	}
 }

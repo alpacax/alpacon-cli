@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPreScanOutputFormat(t *testing.T) {
+func TestPreScanOutputFormatReturnsJSONOnlyWhenTheLastOutputBeforeTheSeparatorIsJSON(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string

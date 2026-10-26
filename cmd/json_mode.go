@@ -4,54 +4,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/cmd/exec"
+	"github.com/alpacax/alpacon-cli/cmd/websh"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
-
-// remoteValueFlags take a separate value token in exec and websh; the scan must hop over it.
-var remoteValueFlags = map[string]bool{
-	"-u": true, "--username": true, "-g": true, "--groupname": true,
-	"--work-session": true, "--purpose": true, "--output": true,
-	"--file": true, "--file-from": true, "--interpreter": true,
-	"--reuse-days": true, "--wait-approval": true,
-}
-
-// websshOwnArgs mirrors websh.ParseWebshArgs: it keeps parsing flags after the server and
-// ends at the first token no flag case claims once the server is known.
-func websshOwnArgs(rest []string) []string {
-	serverSeen := false
-	for i := 0; i < len(rest); i++ {
-		arg := rest[i]
-		switch {
-		case arg == "-s" || arg == "--share" || arg == "-h" || arg == "--help" ||
-			arg == "--env" || strings.HasPrefix(arg, "--env="):
-		case strings.HasPrefix(arg, "-u") || strings.HasPrefix(arg, "--username") ||
-			strings.HasPrefix(arg, "-g") || strings.HasPrefix(arg, "--groupname") ||
-			arg == "--work-session" || strings.HasPrefix(arg, "--work-session=") ||
-			arg == "--output" || strings.HasPrefix(arg, "--output="):
-			if !strings.Contains(arg, "=") && i+1 < len(rest) {
-				i++
-			}
-		case strings.HasPrefix(arg, "--read-only"):
-			if next := strings.ToLower(strings.TrimSpace(argAt(rest, i+1))); !strings.Contains(arg, "=") && (next == "true" || next == "false") {
-				i++
-			}
-		case serverSeen:
-			return rest[:i]
-		default:
-			serverSeen = true
-		}
-	}
-	return rest
-}
-
-func argAt(args []string, i int) string {
-	if i < len(args) {
-		return args[i]
-	}
-	return ""
-}
 
 // withoutFlagValues drops the separate value token of every flag the command defines as
 // taking one, so pflag's reading of "--type --output=json" is the scan's. --output keeps its value.
@@ -123,57 +81,18 @@ func commandName(c *cobra.Command) string {
 	return strings.TrimPrefix(c.CommandPath(), RootCmd.Name()+" ")
 }
 
-// ownFlagArgs keeps the leading flags of an exec or websh line up to the server; every token
-// after the server belongs to the remote command, and so does everything after "--".
-func ownFlagArgs(rest []string) []string {
-	for i := 0; i < len(rest); i++ {
-		arg := rest[i]
-		switch {
-		case arg == "--":
-			return rest[:i]
-		case remoteValueFlags[arg]:
-			i++
-		case arg == "--read-only" && i+1 < len(rest) && (rest[i+1] == "true" || rest[i+1] == "false"):
-			i++
-		case !strings.HasPrefix(arg, "-"):
-			return rest[:i]
-		}
-	}
-	return rest
-}
-
-var websshHoppedFlags = map[string]bool{
-	"-u": true, "--username": true, "-g": true, "--groupname": true,
-	"--work-session": true, "--output": true,
-}
-
-// withoutRemoteValues drops the separate value token of each flag in valueFlags, as both
-// parsers consume it whatever it looks like; --output keeps its own.
-func withoutRemoteValues(own []string, valueFlags map[string]bool) []string {
-	out := make([]string, 0, len(own))
-	for i := 0; i < len(own); i++ {
-		out = append(out, own[i])
-		if !valueFlags[own[i]] || i+1 >= len(own) {
-			continue
-		}
-		i++
-		if own[i-1] == "--output" {
-			out = append(out, own[i])
-		}
-	}
-	return out
-}
-
-func scanArgs(args []string) (string, []string) {
+// scanOutputFormat returns the command path and the --output value its parser will read.
+func scanOutputFormat(args []string) (string, string) {
 	target, rest, _ := RootCmd.Find(args)
 	name := commandName(target)
 	switch name {
 	case "exec":
-		return name, withoutRemoteValues(ownFlagArgs(rest), remoteValueFlags)
+		return name, exec.ParseRemoteExecArgs(rest).OutputFormat
 	case "websh":
-		return name, withoutRemoteValues(websshOwnArgs(rest), websshHoppedFlags)
+		parsed, _ := websh.ParseWebshArgs(rest)
+		return name, parsed.OutputFormat
 	}
-	return name, withoutFlagValues(target, args)
+	return name, utils.PreScanOutputFormat(withoutFlagValues(target, args))
 }
 
 // routeHelpToStderr keeps stdout for data: under json a help screen is diagnostics.
@@ -182,16 +101,36 @@ func routeHelpToStderr() {
 	RootCmd.SetHelpFunc(func(c *cobra.Command, args []string) {
 		if utils.OutputFormat == utils.OutputFormatJSON && c.OutOrStdout() == os.Stdout {
 			c.SetOut(os.Stderr)
-			defer c.SetOut(os.Stdout)
+			defer c.SetOut(nil)
 		}
 		defaultHelp(c, args)
 	})
 }
 
+// failUnknownHelpTopic makes "help nosuch" a usage_error under json; Cobra prints the usage and exits 0.
+func failUnknownHelpTopic() {
+	help, _, err := RootCmd.Find([]string{"help"})
+	if err != nil || help == RootCmd {
+		return
+	}
+	run := help.Run
+	help.Run = func(c *cobra.Command, args []string) {
+		if utils.OutputFormat == utils.OutputFormatJSON {
+			if target, _, err := RootCmd.Find(args); target == nil || err != nil {
+				utils.CliArgumentErrorWithExit("unknown help topic %q", strings.Join(args, " "))
+			}
+		}
+		run(c, args)
+	}
+}
+
 func prepareOutputMode(args []string) bool {
-	name, scan := scanArgs(args)
+	RootCmd.InitDefaultHelpCmd()
+	RootCmd.InitDefaultCompletionCmd()
+	failUnknownHelpTopic()
+	name, format := scanOutputFormat(args)
 	utils.CommandName = name
-	if utils.PreScanOutputFormat(scan) != utils.OutputFormatJSON {
+	if format != utils.OutputFormatJSON {
 		return false
 	}
 	utils.OutputFormat = utils.OutputFormatJSON

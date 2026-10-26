@@ -90,6 +90,7 @@ func Execute() {
 		return
 	}
 	if jsonMode {
+		utils.OutputFormat = utils.OutputFormatJSON
 		utils.CliArgumentErrorWithExit("%s", err)
 	}
 	utils.CliErrorWithExit("While executing the command: %s", err)
