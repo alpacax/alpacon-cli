@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -233,6 +234,125 @@ func TestExecReviewerRejectionKeepsItsSentence(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode)
 	assert.Contains(t, stderr, "rejected by a reviewer")
 	assert.NotContains(t, stderr, "--file")
+}
+
+// TestReviewerRejectionCauseKeepsItsSentence pins that the approval_rejected
+// cause a reviewer's refusal carries stays off the file lane on both exec and
+// exec logs: exit 6, the reviewer sentence, no --file guidance, and the
+// envelope's not_approved code rather than use_file_execution.
+func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		format string
+		run    func(t *testing.T, serverURL, format string) (string, int)
+	}{
+		{
+			name:   "exec table",
+			format: utils.OutputFormatTable,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecHelper(t, serverURL, "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
+			name:   "exec json",
+			format: utils.OutputFormatJSON,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecHelper(t, serverURL, "--output", "json", "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
+			name:   "exec logs table",
+			format: utils.OutputFormatTable,
+			run: func(t *testing.T, serverURL, format string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecLogsHelper(t, serverURL, format, rejectedCommandID)
+				return stderr, exitCode
+			},
+		},
+		{
+			name:   "exec logs json",
+			format: utils.OutputFormatJSON,
+			run: func(t *testing.T, serverURL, format string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecLogsHelper(t, serverURL, format, rejectedCommandID)
+				return stderr, exitCode
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := newRejectedCommandServer("approval_rejected")
+			defer ts.Close()
+
+			stderr, exitCode := tc.run(t, ts.URL, tc.format)
+			assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+			assert.Contains(t, stderr, "rejected by a reviewer")
+			assert.NotContains(t, stderr, "--file")
+			if tc.format != utils.OutputFormatJSON {
+				return
+			}
+			// exec may print a polling-fallback warning ahead of the envelope,
+			// so the envelope starts at the last line that opens with a brace.
+			start := strings.LastIndex("\n"+stderr, "\n{")
+			require.GreaterOrEqual(t, start, 0, "stderr: %s", stderr)
+			var envelope cliErrorEnvelope
+			require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
+			assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeNotApproved, envelope.ErrorCode)
+		})
+	}
+}
+
+func TestLogsAccountFlags(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		details   event.EventDetails
+		wantFlags []string
+		wantNote  string
+	}{
+		{
+			name:      "username without groupname and no work session",
+			details:   event.EventDetails{Username: "root"},
+			wantFlags: []string{"-u root"},
+		},
+		{
+			name:      "username without groupname with a work session",
+			details:   event.EventDetails{Username: "root", WorkSession: &event.CommandWorkSession{ID: "ses-1"}},
+			wantFlags: []string{"-u root", "--work-session ses-1"},
+		},
+		{
+			name:      "username and groupname and no work session",
+			details:   event.EventDetails{Username: "root", Groupname: "wheel"},
+			wantFlags: []string{"-u root", "-g wheel"},
+		},
+		{
+			name:      "groupname without username and no work session",
+			details:   event.EventDetails{Groupname: "wheel"},
+			wantFlags: []string{"-u ACCOUNT", "-g wheel"},
+			wantNote:  "the command detail does not name the account the command ran as, so replace ACCOUNT with that account: without -u the command runs as the server's default account",
+		},
+		{
+			name:      "no account and no work session",
+			details:   event.EventDetails{},
+			wantFlags: []string{"-u ACCOUNT", "-g GROUP"},
+			wantNote:  "the command detail does not name the account the command ran as, so replace ACCOUNT with that account and GROUP with its group, or drop -g if it had none: without -u the command runs as the server's default account",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			flags, note := logsAccountFlags(tc.details)
+			assert.Equal(t, tc.wantFlags, flags)
+			assert.Equal(t, tc.wantNote, note)
+		})
+	}
 }
 
 // TestExecLogsUseFileExecutionRefusal covers the detach path: exec logs reads
