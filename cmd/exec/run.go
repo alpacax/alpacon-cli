@@ -160,7 +160,7 @@ var sudoDenialHints = []struct {
 		// Re-running it with the same token repeats it.
 		code: "SUDO_COMMAND_NOT_AUTHORIZED",
 		guidance: "sudo was denied: this command names no accountable user, so it cannot be elevated—a service token is not one on this deployment.\n" +
-			"Re-run it under a principal that carries a user (an interactive login, or a personal API token).\n",
+			"Sign in with " + utils.LoginWithoutTokenHint + ", then re-run the command under that login.\n",
 	},
 	{
 		code: "SUDO_NO_WORKSESSION_POLICY",
@@ -203,7 +203,7 @@ var sudoDenialHints = []struct {
 	},
 	{
 		code:     "SUDO_RISK_DENIED",
-		guidance: "sudo was denied by runtime risk assessment; this command is not permitted in this work session.\n",
+		guidance: "sudo was denied by runtime risk assessment; this command is not permitted as submitted.\n",
 	},
 }
 
@@ -898,10 +898,7 @@ func reportCodedRefusal(operation string, err error, message, hint string) {
 // the next_actions the JSON envelope carries; table mode shows only the hint,
 // so it should spell out the same actions for a person.
 func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		utils.CliJSONErrorEnvelopeWithExit(code, operation, err, message+".", actions)
-		return
-	}
+	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint != "" {
 		fmt.Fprint(os.Stderr, hint)

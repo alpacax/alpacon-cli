@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,8 +9,10 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
@@ -21,6 +24,8 @@ import (
 )
 
 const smuxHeaderSize = 8 // version, command, length, stream id
+
+const openStatusTimeout = 5 * time.Second // bounds the lookup that explains a failed dial
 
 // StartOptions contains user-provided inputs for starting a tunnel runtime.
 type StartOptions struct {
@@ -100,13 +105,10 @@ func Start(opts StartOptions) (*Runtime, error) {
 	// The tunnel session exists from here on; what fails after it is returned
 	// untagged, so a refused dial never reads as a refused create.
 	smuxConfig := config.GetSmuxConfig()
-	headers := alpaconClient.SetWebsocketHeader()
-	wsConn, _, err := newTunnelDialer(smuxConfig.MaxFrameSize).Dial(tunnelSession.WebsocketURL, headers)
+	wsConn, err := dialTunnel(alpaconClient, tunnelSession, opts.ServerName, smuxConfig.MaxFrameSize, openStatusTimeout)
 	if err != nil {
 		_ = listener.Close()
-		// The URL carries a channel token in its path, which a URL error prints
-		// whole, so only the host is kept.
-		return nil, fmt.Errorf("failed to connect to proxy server: %w", utils.RedactURLErrorHostOnly(err))
+		return nil, err
 	}
 
 	session, err := smux.Client(basetunnel.NewWebSocketConn(wsConn), smuxConfig)
@@ -357,4 +359,50 @@ func extractTCPPort(addr net.Addr) (int, error) {
 func isRetryableAcceptError(err error) bool {
 	var ne net.Error
 	return errors.As(err, &ne) && ne.Timeout()
+}
+
+// dialTunnel connects to the tunnel proxy and, when that fails, asks the session why it did not open.
+func dialTunnel(ac *client.AlpaconClient, tunnelSession *tunnelapi.TunnelSessionResponse, serverName string, maxFrameSize int, lookupTimeout time.Duration) (*websocket.Conn, error) {
+	wsConn, resp, err := newTunnelDialer(maxFrameSize).Dial(tunnelSession.WebsocketURL, ac.SetWebsocketHeader())
+	if err == nil {
+		return wsConn, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
+	defer cancel()
+	detail, lookupErr := tunnelapi.GetTunnelSession(ctx, ac, tunnelSession.ID)
+	if lookupErr != nil {
+		utils.CliDebug("could not read why the tunnel session did not open: %v", utils.RedactURLError(lookupErr))
+	}
+	return nil, explainDialFailure(serverName, err, resp, detail)
+}
+
+// explainDialFailure reports why the tunnel did not open when the session detail says so,
+// and otherwise the dial error with its handshake status.
+func explainDialFailure(serverName string, dialErr error, resp *http.Response, detail *tunnelapi.TunnelSessionDetail) error {
+	if detail != nil {
+		switch detail.OpenStatus {
+		case tunnelapi.OpenStatusFailed:
+			if reason := oneLineReason(detail.OpenFailure.Result); reason != "" {
+				return fmt.Errorf("failed to open tunnel on %s: %s", serverName, reason)
+			}
+			return fmt.Errorf("failed to open tunnel on %s", serverName)
+		case tunnelapi.OpenStatusPending:
+			if resp != nil && resp.StatusCode == http.StatusServiceUnavailable {
+				return fmt.Errorf("failed to open tunnel on %s: the agent did not respond to the tunnel request", serverName)
+			}
+		}
+	}
+	return utils.WebsocketDialError("failed to connect to proxy server", dialErr, resp)
+}
+
+// oneLineReason returns agent text as one line. Whitespace becomes a space before the
+// sanitizer runs, which would otherwise drop a tab or line break and join the words around it.
+func oneLineReason(result string) string {
+	spaced := strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return ' '
+		}
+		return r
+	}, result)
+	return strings.Join(strings.Fields(utils.SanitizeTerminalText(spaced)), " ")
 }
