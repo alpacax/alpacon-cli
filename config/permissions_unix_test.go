@@ -564,3 +564,22 @@ func TestDeleteConfigRetriesTheKubeSessionsItCouldNotDelete(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(kubeDir, "0123456789abcdef.json"))
 	assert.NoFileExists(t, filepath.Join(os.Getenv("HOME"), ConfigFileDir, ConfigFileName))
 }
+
+// kube login never writes through a symbolic link at the session directory,
+// so a logout does not follow one into files it never wrote.
+func TestDeleteConfigLeavesASymlinkedKubeSessionDirectory(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	target := t.TempDir()
+	files := []string{"0123456789abcdef.json", "notes.json", "draft.tmp"}
+	for _, name := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(target, name), []byte("keep"), 0600))
+	}
+	require.NoError(t, os.Symlink(target, filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)))
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+
+	for _, name := range files {
+		assert.FileExists(t, filepath.Join(target, name))
+	}
+}

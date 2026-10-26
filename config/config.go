@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -225,21 +226,38 @@ func DeleteConfig(login Config) error {
 // file a killed write left, all of which can hold a token. The lock files and
 // the directory stay: a kube login waiting on approval holds one of those
 // locks, and removing the file under it would let a second login lock a new
-// file at the same path.
+// file at the same path. A dir that is a symbolic link is left alone, since
+// kube login never writes through one, and inside a real one only the names
+// kube login writes are removed.
 func deleteKubeSessions(dir string) error {
-	for _, pattern := range []string{"*.json", "*.tmp"} {
-		paths, err := filepath.Glob(filepath.Join(dir, pattern))
-		if err != nil {
-			return err
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !kubeSessionFileName.MatchString(entry.Name()) {
+			continue
 		}
-		for _, path := range paths {
-			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
+		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
 		}
 	}
 	return nil
 }
+
+// kubeSessionFileName matches a kube session record, a 16-hex-digit name
+// with .json, and the staging file a write renames into it.
+var kubeSessionFileName = regexp.MustCompile(`^[0-9a-f]{16}(\.json|\.[0-9]+\.tmp)$`)
 
 // WhileLoggedIn runs fn under the config lock while the config still holds
 // login's credentials, and returns ErrLoginChanged without running it once a

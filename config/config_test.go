@@ -896,6 +896,22 @@ func TestDeleteConfigRemovesTheSavedKubeSessions(t *testing.T) {
 	assert.FileExists(t, lock, "a kube login waiting on approval may hold it")
 }
 
+func TestDeleteConfigRemovesOnlyKubeSessionFiles(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	kubeDir := filepath.Join(os.Getenv("HOME"), ConfigFileDir, KubeSessionDir)
+	require.NoError(t, os.MkdirAll(kubeDir, 0700))
+	for _, name := range []string{"notes.json", "0123456789ABCDEF.json", "0123456789abcdef.x.tmp", "backup.tmp"} {
+		require.NoError(t, os.WriteFile(filepath.Join(kubeDir, name), []byte("keep"), 0600))
+	}
+
+	require.NoError(t, DeleteConfig(loadedConfig(t)))
+
+	entries, err := os.ReadDir(kubeDir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 4, "files kube login never writes stay")
+}
+
 func TestWhileLoggedInRunsOnlyForTheSameLogin(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "access-1", "refresh-1", "", 3600, false))
