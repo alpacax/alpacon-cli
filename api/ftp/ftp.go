@@ -703,7 +703,7 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 	for count := range maxAttempts {
 		resp, err = httpClient.Get(url)
 		if err != nil {
-			return nil, fmt.Errorf("network error while downloading: %w", utils.RedactURLError(err))
+			return nil, fmt.Errorf("network error while downloading: %w", utils.WithRedirectStatus(utils.RedactURLError(err), resp))
 		}
 
 		if resp.StatusCode == http.StatusOK {
