@@ -1176,7 +1176,7 @@ func errorExtraFields(body []byte) map[string]any {
 	var parsed map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber() // json.Number re-encodes verbatim; float64 would round past 2^53
-	if decoder.Decode(&parsed) != nil {
+	if decoder.Decode(&parsed) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return nil
 	}
 	if _, isEnvelopeCode := parsed["code"].(string); isEnvelopeCode {

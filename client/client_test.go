@@ -3167,6 +3167,15 @@ func TestCheckAuthStatusKeepsExtraFields(t *testing.T) {
 	assert.Equal(t, map[string]any{"gate": "role"}, apiErr.ErrorFields())
 }
 
+func TestAPIErrorFieldsIgnoreABodyWithTrailingData(t *testing.T) {
+	t.Parallel()
+	err := parseAPIError([]byte(`{"code":"x","detail":"d"}<html>`), http.StatusBadGateway)
+
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Nil(t, apiErr.ErrorFields())
+}
+
 func TestAPIErrorFieldsKeepLargeIntegersVerbatim(t *testing.T) {
 	t.Parallel()
 	err := parseAPIError([]byte(`{"code":"x","detail":"d","sequence":9007199254740993}`), http.StatusConflict)
