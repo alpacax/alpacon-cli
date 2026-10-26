@@ -86,7 +86,7 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -187,7 +187,7 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -424,7 +424,7 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -477,7 +477,7 @@ func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken stri
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return utils.WithRedirectStatus(err, resp)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -511,7 +511,7 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 
 	resp, err := deviceTokenClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

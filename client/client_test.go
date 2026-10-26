@@ -2804,6 +2804,21 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 	}
 }
 
+func TestSendRawRequest_RedirectLoopKeepsStatus(t *testing.T) {
+	t.Parallel()
+	ac := newBearerTestClient("https://workspace.example", "secret")
+	ac.HTTPClient.Transport = rawRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		response := rawTestResponse(http.StatusFound, "text/plain", "redirect")
+		response.Header.Set("Location", "/x")
+		return response, nil
+	})
+
+	_, err := ac.SendRawRequest(http.MethodGet, "/x", nil, nil)
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusFound, utils.HTTPStatusCode(err))
+}
+
 func TestNormalizeRawEndpoint_RestrictsToWorkspacePath(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
