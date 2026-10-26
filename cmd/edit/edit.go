@@ -382,7 +382,7 @@ func runLocalEditor(editor, filePath string) error {
 	cmd := exec.Command(parts[0], append(parts[1:], filePath)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = utils.StderrForChild()
 	return cmd.Run()
 }
 

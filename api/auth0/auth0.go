@@ -86,7 +86,7 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -167,10 +167,27 @@ func currentDeviceID() string {
 }
 
 func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse) (*DeviceCodeResponse, error) {
+	scope := deviceCodeScope(resolveOrgName(envInfo, workspaceName), currentDeviceID())
+	return requestDeviceCode(httpClient, envInfo, scope, envInfo.Auth0.Audience)
+}
+
+// RequestSignerDeviceCode authorizes the signer's audience with the login's org
+// scope but no offline_access: the signer's API grants no refresh token.
+func RequestSignerDeviceCode(workspaceName string, httpClient *http.Client, envInfo *AuthEnvResponse, audience string) (*DeviceCodeResponse, error) {
+	scope := signerDeviceCodeScope(resolveOrgName(envInfo, workspaceName), currentDeviceID())
+	return requestDeviceCode(httpClient, envInfo, scope, audience)
+}
+
+// signerDeviceCodeScope is deviceCodeScope without offline_access.
+func signerDeviceCodeScope(orgName, deviceID string) string {
+	return appendDeviceScope(fmt.Sprintf("openid profile email cli org:%s", orgName), deviceID)
+}
+
+func requestDeviceCode(httpClient *http.Client, envInfo *AuthEnvResponse, scope, audience string) (*DeviceCodeResponse, error) {
 	data := map[string]string{
 		"client_id": envInfo.Auth0.ClientID,
-		"scope":     deviceCodeScope(resolveOrgName(envInfo, workspaceName), currentDeviceID()),
-		"audience":  envInfo.Auth0.Audience,
+		"scope":     scope,
+		"audience":  audience,
 	}
 
 	jsonData, err := json.Marshal(data)
@@ -187,7 +204,7 @@ func RequestDeviceCode(workspaceName string, httpClient *http.Client, envInfo *A
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -230,7 +247,7 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 	startTime := time.Now()
 	lifetime := min(max(deviceCodeRes.ExpiresIn, 0), maxDeviceCodeLifetimeSeconds)
 	interval := min(devicePollInterval(deviceCodeRes.Interval), lifetime+1)
-	timeoutErr := fmt.Errorf("authentication timed out. Please restart the login process")
+	timeoutErr := ErrDeviceCodeTimedOut
 
 	spinner := utils.NewSpinner("Waiting for authentication...")
 	spinner.Start()
@@ -258,14 +275,22 @@ func PollForToken(deviceCodeRes *DeviceCodeResponse, envInfo *AuthEnvResponse) (
 	}
 }
 
+// Sentinels for the device-code endings a caller may word its own remedy for;
+// the text is what 'alpacon login' prints.
+var (
+	ErrDeviceCodeTimedOut = errors.New("authentication timed out. Please restart the login process")
+	ErrDeviceCodeDenied   = errors.New("authentication was denied. You may have cancelled the browser prompt")
+	ErrDeviceCodeExpired  = errors.New("authentication session expired. Please run 'alpacon login' again")
+)
+
 // mapAuth0Error converts OAuth error codes to user-friendly messages.
 func mapAuth0Error(err error) error {
 	errStr := err.Error()
 	switch {
 	case strings.Contains(errStr, "access_denied"):
-		return fmt.Errorf("authentication was denied. You may have cancelled the browser prompt")
+		return ErrDeviceCodeDenied
 	case strings.Contains(errStr, "expired_token"):
-		return fmt.Errorf("authentication session expired. Please run 'alpacon login' again")
+		return ErrDeviceCodeExpired
 	default:
 		return err
 	}
@@ -424,7 +449,7 @@ func requestRefreshedToken(envInfo *AuthEnvResponse, httpClient *http.Client, re
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -477,7 +502,7 @@ func RevokeToken(httpClient *http.Client, workspaceURL string, refreshToken stri
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return utils.WithRedirectStatus(err, resp)
 	}
 
 	defer func() { _ = resp.Body.Close() }()
@@ -511,7 +536,7 @@ func requestAccessToken(deviceCode string, envInfo *AuthEnvResponse) (*TokenResp
 
 	resp, err := deviceTokenClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, utils.WithRedirectStatus(err, resp)
 	}
 	defer func() { _ = resp.Body.Close() }()
 

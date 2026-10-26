@@ -348,7 +348,8 @@ func TestSendRequest_403ConsoleOnlyCodesNameTheConsole(t *testing.T) {
 		{"workspace_execution_control_console_only", "this change loosens execution control and can only be made from the web console"},
 		{"approval_policy_console_only", "approval policies can only be created, changed or deleted from the web console"},
 		{"sudo_policy_console_only", "sudo policies are created or widened from the web console only; to run a command with sudo on a work session that an approver decides, use 'alpacon work-session update <ID> --sudo \"<command>\"'"},
-		{"work_session_sudo_bypass_console_only", "this workspace adds MFA-bypass sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access"},
+		{"work_session_sudo_bypass_console_only", "this workspace adds session-authorized sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access"},
+		{"work_session_session_authorized_sudo_console_only", "this workspace adds session-authorized sudo to a work session from the web console only; open the session in the console and add Sudo there, or use your standing sudo access"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
@@ -1457,6 +1458,60 @@ func TestSendGetRequest_RenewsAStaleTokenAndRetries(t *testing.T) {
 	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent, "the retry must carry the renewed token")
 }
 
+func TestSendGetRequestWithContext_StopsWaitingOnARenewalPastTheDeadline(t *testing.T) {
+	release, finished := make(chan struct{}), make(chan struct{})
+	swapTokenRenewal(t, func(*AlpaconClient) error {
+		select {
+		case <-release:
+		case <-time.After(5 * time.Second): // a request that waits on the grant fails the elapsed check, not the run
+		}
+		close(finished)
+		return nil
+	})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		staleTokenHandler(w)
+	}))
+	defer ts.Close()
+	ac := newBearerTestClient(ts.URL, "stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := ac.SendGetRequestWithContext(ctx, "/api/test/")
+
+	elapsed := time.Since(start)
+	close(release)
+	<-finished // the renewal goroutine reads the seam, so it ends before the seam is restored
+
+	assert.Less(t, elapsed, 2*time.Second)
+	assert.Equal(t, http.StatusUnauthorized, utils.HTTPStatusCode(err))
+}
+
+func TestSendGetRequestWithContext_RetriesWithARenewalInsideTheDeadline(t *testing.T) {
+	renewals := stubTokenRenewal(t, "fresh")
+	var sent []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent = append(sent, r.Header.Get("Authorization"))
+		if len(sent) == 1 {
+			staleTokenHandler(w)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status": "approved"}`))
+	}))
+	defer ts.Close()
+	ac := newBearerTestClient(ts.URL, "stale")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	body, err := ac.SendGetRequestWithContext(ctx, "/api/test/")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"status": "approved"}`, string(body))
+	assert.Equal(t, 1, *renewals)
+	assert.Equal(t, []string{"Bearer stale", "Bearer fresh"}, sent)
+}
+
 // The server rejects a stale token in its permission layer, before the view
 // runs, so the first attempt changed nothing—but only a replayed body makes the
 // retry the same request.
@@ -2133,6 +2188,16 @@ func TestNewAlpaconAPIClient_CarriesInsecureFromConfig(t *testing.T) {
 // login through the new URL leaves a host label that the server never calls the
 // workspace. The client must carry the schema_name, because that is what MFA
 // links and the usage lookup name the workspace by.
+func TestNewAlpaconAPIClient_MissingConfigIsNotLoggedIn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := NewAlpaconAPIClient()
+
+	require.Error(t, err)
+	assert.Equal(t, utils.ErrorCodeNotLoggedIn, utils.ClassifyError(err))
+	assert.Contains(t, err.Error(), "Please run 'alpacon login'")
+}
+
 func TestNewAlpaconAPIClient_PinsSchemaNameWhenSlugWasRenamed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -2804,6 +2869,22 @@ func TestSendRawRequest_DoesNotFollowRedirectOffWorkspaceHost(t *testing.T) {
 	}
 }
 
+func TestSendRawRequest_RedirectLoopKeepsStatus(t *testing.T) {
+	t.Parallel()
+	ac := newBearerTestClient("https://workspace.example", "secret")
+	ac.HTTPClient.Transport = rawRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		response := rawTestResponse(http.StatusFound, "text/plain", "redirect")
+		response.Header.Set("Location", "/x")
+		return response, nil
+	})
+
+	_, err := ac.SendRawRequest(http.MethodGet, "/x", nil, nil)
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusFound, utils.HTTPStatusCode(err))
+	assert.Equal(t, "http_302", utils.ClassifyError(err))
+}
+
 func TestNormalizeRawEndpoint_RestrictsToWorkspacePath(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -3047,11 +3128,13 @@ func TestSendRequest_CursorPaginationCodesExplainTheRemedy(t *testing.T) {
 	}
 }
 
-func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing.T) {
+func TestSendRequest_403SessionAuthorizedAgentSessionRefusalsNameTheNextStep(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ code, want string }{
-		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given MFA-bypass sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
-		{utils.SudoPolicyBypassAgentSessionNeedsApproval, "MFA-bypass sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
+		{utils.SudoPolicyBypassAgentSessionNeedsPresence, "an AI agent session cannot be given session-authorized sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
+		{"sudo_policy_session_authorized_agent_session_needs_presence", "an AI agent session cannot be given session-authorized sudo (--sudo) unless a person is present, which the server reads from a sign-in that completed MFA shortly before—run 'alpacon login' again from your own terminal, completing MFA, then retry right away; or drop --sudo, and each sudo command asks for MFA"},
+		{utils.SudoPolicyBypassAgentSessionNeedsApproval, "session-authorized sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
+		{"sudo_policy_session_authorized_agent_session_needs_approval", "session-authorized sudo cannot be bound to an AI agent session directly—request it on the work session with 'alpacon work-session update <ID> --sudo \"<command>\"', and a person approves the change"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {
@@ -3079,6 +3162,44 @@ func TestSendRequest_403SudoBypassAgentSessionRefusalsNameTheNextStep(t *testing
 	}
 }
 
+func TestAPIErrorFieldsKeepEveryKeyButTheEnvelopeCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want map[string]any
+	}{
+		{
+			name: "every key but code",
+			body: `{"code":"plan_limit","gate":"plan","axis":"servers","next":"/api/x/","missing":["a"],"field_errors":{"n":[{"code":"required"}]}}`,
+			want: map[string]any{
+				"gate": "plan", "axis": "servers", "next": "/api/x/", "missing": []any{"a"},
+				"field_errors": map[string]any{"n": []any{map[string]any{"code": "required"}}},
+			},
+		},
+		{name: "code only", body: `{"code":"x"}`},
+		{name: "field error on a code field", body: `{"code":["This field is required."]}`, want: map[string]any{"code": []any{"This field is required."}}},
+		{name: "html body", body: `<html>502</html>`},
+		{name: "empty body", body: ``},
+		{name: "json array", body: `["a"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := parseAPIError([]byte(tt.body), 400)
+
+			var carrier interface{ ErrorFields() map[string]any }
+			require.ErrorAs(t, err, &carrier)
+			got := carrier.ErrorFields()
+			assert.Equal(t, tt.want, got)
+			if got != nil {
+				got["mutated"] = true
+				assert.NotContains(t, carrier.ErrorFields(), "mutated")
+			}
+		})
+	}
+}
+
 func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
 	cases := map[string]string{
 		utils.WorkSessionTargetAccountAbsent:       "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account",
@@ -3092,4 +3213,35 @@ func TestCodeOnlyMessage_TargetAccountRefusals(t *testing.T) {
 	assert.Equal(t, "work_session_target_account_not_reachable", utils.WorkSessionTargetAccountNotReachable)
 	assert.Equal(t, "target_account_other_person", utils.TargetAccountOtherPerson)
 	assert.Equal(t, "work_session_account_not_approved", utils.WorkSessionAccountNotApproved)
+}
+
+func TestCheckAuthStatusKeepsExtraFields(t *testing.T) {
+	t.Parallel()
+	err := checkAuthStatus(http.StatusForbidden, []byte(`{"code":"rbac_permission_required","gate":"role"}`))
+
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, map[string]any{"gate": "role"}, apiErr.ErrorFields())
+}
+
+func TestAPIErrorFieldsIgnoreABodyWithTrailingData(t *testing.T) {
+	t.Parallel()
+	err := parseAPIError([]byte(`{"code":"x","detail":"d"}<html>`), http.StatusBadGateway)
+
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Nil(t, apiErr.ErrorFields())
+}
+
+func TestAPIErrorFieldsKeepLargeIntegersVerbatim(t *testing.T) {
+	t.Parallel()
+	err := parseAPIError([]byte(`{"code":"x","detail":"d","sequence":9007199254740993}`), http.StatusConflict)
+
+	var apiErr *apiError
+	require.ErrorAs(t, err, &apiErr)
+	encoded, marshalErr := json.Marshal(apiErr.ErrorFields())
+
+	require.NoError(t, marshalErr)
+	assert.JSONEq(t, `{"detail":"d","sequence":9007199254740993}`, string(encoded))
+	assert.Contains(t, string(encoded), "9007199254740993")
 }

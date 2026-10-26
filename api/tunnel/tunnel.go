@@ -1,9 +1,11 @@
 package tunnel
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/client"
 )
@@ -42,4 +44,22 @@ func CreateTunnelSession(ac *client.AlpaconClient, serverName, username, groupna
 	}
 
 	return &response, nil
+}
+
+// GetTunnelSession fetches a tunnel session's detail, sessionID being the ID CreateTunnelSession returned.
+func GetTunnelSession(ctx context.Context, ac *client.AlpaconClient, sessionID string) (*TunnelSessionDetail, error) {
+	pathID, err := api.RequireResponseID(sessionID, "tunnel session")
+	if err != nil {
+		return nil, err
+	}
+	responseBody, err := ac.SendGetRequestWithContext(ctx, api.IDURL(tunnelSessionURL, pathID, "", nil))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tunnel session: %w", err)
+	}
+
+	var detail TunnelSessionDetail
+	if err := json.Unmarshal(responseBody, &detail); err != nil {
+		return nil, fmt.Errorf("failed to parse tunnel session detail: %w", err)
+	}
+	return &detail, nil
 }

@@ -164,6 +164,19 @@ func TestSendRequest_ServerHintReplacesTheLocalSentence(t *testing.T) {
 			wantHinted: "permission denied (HTTP 403, code: user_no_permission)",
 		},
 	}
+	for _, code := range []string{
+		utils.WorkSessionSudoBypassConsoleOnly, utils.WorkSessionSessionAuthorizedSudoConsoleOnly,
+		utils.SudoPolicyBypassAgentSessionNeedsPresence, utils.SudoPolicySessionAuthorizedAgentSessionNeedsPresence,
+		utils.SudoPolicyBypassAgentSessionNeedsApproval, utils.SudoPolicySessionAuthorizedAgentSessionNeedsApproval,
+	} {
+		tests = append(tests, struct {
+			name       string
+			status     int
+			code       string
+			local      string
+			wantHinted string
+		}{code, http.StatusForbidden, code, "session-authorized sudo", "permission denied (HTTP 403, code: " + code + ")"})
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -299,4 +312,13 @@ func TestSendGetRequestForDownload_RefusalKeepsTheHint(t *testing.T) {
 	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
 	assert.Equal(t, hint, utils.RefusalHint(err))
 	assert.NotContains(t, err.Error(), "hint")
+}
+
+func TestSendRequest_HintedRefusalCodeDisplay(t *testing.T) {
+	t.Parallel()
+	err := sendRefusal(t, http.StatusForbidden, `{"code":"permission_\u001b[2Jdenied","hint":"Retry later."}`)
+
+	assert.Equal(t, "permission denied (HTTP 403, code: permission_denied)", err.Error())
+	assert.Equal(t, "permission_\x1b[2Jdenied", utils.StructuredErrorCode(err))
+	assert.Equal(t, "Retry later.", utils.RefusalHint(err))
 }

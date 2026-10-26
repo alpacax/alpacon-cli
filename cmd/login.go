@@ -571,25 +571,7 @@ func shouldFailOnProfileError(token string) bool {
 	return token == ""
 }
 
-// printDeviceCodePrompt sanitizes the URL and the code before Blue and Bold go
-// on—the reverse order would strip the highlight along with the escapes. Both
-// come from the authorization server, and a person reads them off the screen.
-//
-// The line strip and not the block one: a URL and a device code are single
-// values, so a newline in either is the server writing its own line into a
-// prompt the CLI is supposed to own.
-//
-// It hands back the URL it printed, because that is the one the browser has to
-// be opened on. Opening the raw value would take the operator somewhere other
-// than the address they just read off the screen, which is the whole thing this
-// is here to prevent.
+// printDeviceCodePrompt prints the device-code prompt; see utils.PrintDeviceCodePrompt.
 func printDeviceCodePrompt(w io.Writer, verificationURI, userCode string) (printedURI string) {
-	uri, uriAltered := utils.SanitizeTerminalLine(verificationURI)
-	code, codeAltered := utils.SanitizeTerminalLine(userCode)
-	if uriAltered || codeAltered {
-		utils.WarnTerminalTextAltered(w, "")
-	}
-	_, _ = fmt.Fprintf(w, "\nPlease authenticate by visiting:\n%s\n\n", utils.Blue(uri))
-	_, _ = fmt.Fprintf(w, "Verification code: %s\n\n", utils.Bold(code))
-	return uri
+	return utils.PrintDeviceCodePrompt(w, verificationURI, userCode)
 }

@@ -26,6 +26,9 @@ type Config struct {
 	// server never said yes. It only decides whether 'alpacon kube' is shown—
 	// the server refuses the endpoints on its own, so this is not a control.
 	KubernetesSurface bool `json:"kubernetes_surface,omitempty"`
+	// Signer caches the command signer's token and what it was issued for;
+	// nil when nothing is cached.
+	Signer *SignerGrant `json:"signer,omitempty"`
 }
 
 // WorkspaceIdentity is the value that names the current workspace to the server

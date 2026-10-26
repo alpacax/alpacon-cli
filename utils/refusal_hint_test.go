@@ -85,10 +85,10 @@ func TestRefusalNextActions(t *testing.T) {
 	}
 }
 
-func TestBuildCliErrorEnvelopeFromErr_CarriesTheServerHint(t *testing.T) {
+func TestNewFailureEnvelope_CarriesTheServerHint(t *testing.T) {
 	t.Parallel()
 	err := fmt.Errorf("failed to grant role: %w", &hintedError{code: "rbac_permission_required", hint: sampleHint})
-	rendered, fmtErr := FormatJSON(buildCliErrorEnvelopeFromErr("role grant", err, "Failed to grant role."))
+	rendered, fmtErr := FormatJSON(newFailureEnvelope(ExitCodeGeneralError, "", "role grant", err, "Failed to grant role."))
 	require.NoError(t, fmtErr)
 
 	assert.JSONEq(t, `{
@@ -101,9 +101,9 @@ func TestBuildCliErrorEnvelopeFromErr_CarriesTheServerHint(t *testing.T) {
 	}`, rendered)
 }
 
-func TestBuildCliErrorEnvelopeFromErr_NoHintNoNextActions(t *testing.T) {
+func TestNewFailureEnvelope_NoHintNoNextActions(t *testing.T) {
 	t.Parallel()
-	env := buildCliErrorEnvelopeFromErr("role grant", &hintedError{code: "rbac_permission_required"}, "Failed to grant role.")
+	env := newFailureEnvelope(ExitCodeGeneralError, "", "role grant", &hintedError{code: "rbac_permission_required"}, "Failed to grant role.")
 
 	rendered, err := FormatJSON(env)
 	require.NoError(t, err)

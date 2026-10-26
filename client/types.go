@@ -18,6 +18,9 @@ type AlpaconClient struct {
 	// verification, so a credential written for another client (a kubeconfig)
 	// can say the same instead of failing where this client succeeds.
 	Insecure bool
+	// noRenewal skips the refresh-token renewal on a 401: it mints a workspace-
+	// audience token, which a client for another audience (the signer) cannot use.
+	noRenewal bool
 
 	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
 	// the field keeps other packages out, token_boundary_test.go keeps this one out.

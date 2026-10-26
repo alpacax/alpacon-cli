@@ -260,6 +260,21 @@ func TestWSListener_ConnectAndListen_ReturnsFalseOnFailedHandshake(t *testing.T)
 	assert.False(t, w.WaitConnected(0), "connected must stay open after a failed dial")
 }
 
+func TestWSListener_ConnectAndListen_ReportsTheHandshakeStatus(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	w := newProvisionedWSListener(nil, provisionURL("ws"+strings.TrimPrefix(server.URL, "http")+"/ws/event/PATHTOKEN123/"), time.Second)
+	var announced error
+	w.onDialFailed = func(err error) { announced = err }
+
+	w.connectAndListen()
+
+	require.EqualError(t, announced, "failed to connect to the event channel: websocket: bad handshake (status 403 Forbidden)")
+}
+
 func TestWSListener_ListenLoop_DoesNotDialWhenAlreadyStopped(t *testing.T) {
 	t.Parallel()
 	var dialed atomic.Int32

@@ -38,11 +38,11 @@ var (
 // walks the AST, so a comment naming config.LoadConfig is not one and an alias is.
 func TestAPILayerNeverReadsConfig(t *testing.T) {
 	t.Parallel()
-	dirs, err := nonTestGoFiles()
+	pkgs, err := nonTestGoFiles("./...")
 	require.NoError(t, err)
 
 	var offenders []string
-	for _, paths := range dirs {
+	for _, paths := range pkgs {
 		for _, path := range paths {
 			file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 			require.NoError(t, err)

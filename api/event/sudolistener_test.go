@@ -659,7 +659,7 @@ func TestSudoListener_HandleSudoMFA_LinkRefusalCarriesTheHint(t *testing.T) {
 			_, _ = w.Write([]byte(`{"count": 1, "results": [{"id": "srv-id", "name": "my-server"}]}`))
 		default:
 			w.WriteHeader(http.StatusForbidden)
-			_, _ = w.Write([]byte(`{"code": "permission_denied", "hint": "` + hint + `"}`))
+			_, _ = w.Write([]byte(`{"code": "permission_\u001b[2Jdenied", "hint": "` + hint + `"}`))
 		}
 	}))
 	defer ts.Close()
@@ -675,6 +675,8 @@ func TestSudoListener_HandleSudoMFA_LinkRefusalCarriesTheHint(t *testing.T) {
 	_, stderr := testutil.CaptureOutput(t, func() { sl.handleSudoMFA(event) })
 
 	assert.Contains(t, stderr, "Failed to get MFA link")
+	assert.Contains(t, stderr, "code: permission_denied")
+	assert.NotContains(t, stderr, "\x1b[2J")
 	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
 	assert.Contains(t, stderr, hint+"\r\n")
 	assert.NotContains(t, stderr, "Opening browser")

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,6 +116,20 @@ func TestNewAlpaconAPIClient_RefusesRedirectOffTheWorkspaceOrigin(t *testing.T) 
 			assert.Contains(t, err.Error(), "refusing redirect from "+workspace.URL+"/api/servers/servers/ to "+target.URL+"/api/servers/servers/")
 		})
 	}
+}
+
+func TestSendGetRequest_RefusedRedirectKeepsStatus(t *testing.T) {
+	target := newRecordingServer(t, false)
+	workspace := redirectingServer(t, http.StatusFound, target.URL)
+	loginWithBearer(t, workspace.URL)
+
+	ac, err := NewAlpaconAPIClient()
+	require.NoError(t, err)
+	_, err = ac.SendGetRequest("/api/servers/servers/")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusFound, utils.HTTPStatusCode(err))
+	assert.Equal(t, "http_302", utils.ClassifyError(err))
 }
 
 // The refresh-token grant is a POST, and Go replays a POST body on a 307 to
