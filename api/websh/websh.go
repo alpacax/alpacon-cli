@@ -324,22 +324,15 @@ func newWebsocketClient(header http.Header) *WebsocketClient {
 }
 
 func (wsClient *WebsocketClient) dial(websocketURL string) error {
-	parsed, err := url.Parse(websocketURL)
-	if err != nil {
-		return utils.WebsocketDialError("websocket connection failed", err, nil)
-	}
 	reconnected := wsClient.conn != nil
-	query := parsed.Query()
-	query.Set("replay_epoch", wsClient.replay.epoch)
-	query.Del("replay")
-	query.Del("replay_from")
+	query := map[string]string{"replay_epoch": wsClient.replay.epoch}
 	if !reconnected {
-		query.Set("replay", "1")
+		query["replay"] = "1"
 	} else if wsClient.replay.epoch != "" {
-		query.Set("replay_from", strconv.FormatUint(wsClient.replay.offset, 10))
+		query["replay_from"] = strconv.FormatUint(wsClient.replay.offset, 10)
 	}
-	parsed.RawQuery = query.Encode()
-	conn, resp, err := websocket.DefaultDialer.Dial(parsed.String(), wsClient.header)
+	dialURL := utils.SetQuery(websocketURL, query, "replay", "replay_from")
+	conn, resp, err := websocket.DefaultDialer.Dial(dialURL, wsClient.header)
 	if err != nil {
 		return utils.WebsocketDialError("websocket connection failed", err, resp)
 	}

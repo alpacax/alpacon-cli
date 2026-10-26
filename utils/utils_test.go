@@ -94,6 +94,62 @@ func TestBuildURL(t *testing.T) {
 	}
 }
 
+func TestSetQuery(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		rawURL string
+		set    map[string]string
+		del    []string
+		want   string
+	}{
+		{
+			name:   "preserves URL components without adding a slash",
+			rawURL: "wss://alice:password@example.com:8443/ws/a%2Fb#part%2Fone",
+			set:    map[string]string{"replay": "1"},
+			want:   "wss://alice:password@example.com:8443/ws/a%2Fb?replay=1#part%2Fone",
+		},
+		{
+			name:   "preserves other keys and repeated values",
+			rawURL: "wss://example.com/ws?empty=&token=keep&tag=one&tag=two",
+			set:    map[string]string{"replay": "1"},
+			want:   "wss://example.com/ws?empty=&replay=1&tag=one&tag=two&token=keep",
+		},
+		{
+			name:   "deletes keys and all their values",
+			rawURL: "wss://example.com/ws?replay=1&replay=2&replay_from=99&token=keep",
+			del:    []string{"replay", "replay_from", "missing"},
+			want:   "wss://example.com/ws?token=keep",
+		},
+		{
+			name:   "sets keys after deleting and encodes values",
+			rawURL: "wss://example.com/ws?k=old&k=older",
+			set:    map[string]string{"k": "a&b c", "replay_epoch": ""},
+			del:    []string{"k"},
+			want:   "wss://example.com/ws?k=a%26b+c&replay_epoch=",
+		},
+		{
+			name:   "replaces repeated values",
+			rawURL: "wss://example.com/ws?k=old&k=older",
+			set:    map[string]string{"k": "new"},
+			want:   "wss://example.com/ws?k=new",
+		},
+		{
+			name:   "parse error returns original URL",
+			rawURL: "wss://example.com/ws/%zz?replay=old",
+			set:    map[string]string{"replay": "1"},
+			del:    []string{"replay"},
+			want:   "wss://example.com/ws/%zz?replay=old",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, SetQuery(tt.rawURL, tt.set, tt.del...))
+		})
+	}
+}
+
 func TestTimeUtils(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
