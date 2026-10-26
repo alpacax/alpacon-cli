@@ -17,6 +17,8 @@ import (
 	tunnelapi "github.com/alpacax/alpacon-cli/api/tunnel"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -549,6 +551,12 @@ func TestExplainDialFailure(t *testing.T) {
 			want:   fallback,
 		},
 		{
+			name:   "an unknown open status falls back",
+			resp:   agentGone,
+			detail: &tunnelapi.TunnelSessionDetail{OpenStatus: "closed"},
+			want:   fallback + " (status 503 Service Unavailable)",
+		},
+		{
 			name: "no detail falls back",
 			resp: agentGone,
 			want: fallback + " (status 503 Service Unavailable)",
@@ -625,14 +633,48 @@ func TestDialTunnelExplainsARefusedDialFromTheSessionDetail(t *testing.T) {
 	assert.Equal(t, int32(1), lookups.Load())
 }
 
+func TestDialTunnelPrintsTheLookupFailureOnlyWithTheDebugSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name, debug, want string
+	}{
+		{name: "debug_on", debug: "1", want: "could not read why the tunnel session did not open"},
+		{name: "debug_off", debug: "", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(utils.DebugEnvVar, tc.debug)
+			ac, session, _ := newRefusingTunnelServer(t, http.StatusServiceUnavailable, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+			})
+
+			var err error
+			_, stderr := testutil.CaptureOutput(t, func() {
+				_, err = dialTunnel(ac, session, "db-1", config.GetSmuxConfig().MaxFrameSize, time.Second)
+			})
+
+			require.EqualError(t, err, "failed to connect to proxy server: websocket: bad handshake (status 503 Service Unavailable)")
+			if tc.want == "" {
+				assert.Empty(t, stderr)
+				return
+			}
+			assert.Contains(t, stderr, tc.want)
+			assert.Contains(t, stderr, "permission denied", "the debug line names why the lookup failed")
+		})
+	}
+}
+
 func TestDialTunnelReportsTheDialErrorWhenTheLookupHangs(t *testing.T) {
 	t.Parallel()
 	ac, session, lookups := newRefusingTunnelServer(t, http.StatusServiceUnavailable, func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second): // a lookup that ignores the timeout fails the elapsed check, not the run
+		}
 	})
 
+	start := time.Now()
 	conn, err := dialTunnel(ac, session, "db-1", config.GetSmuxConfig().MaxFrameSize, 50*time.Millisecond)
 
+	assert.Less(t, time.Since(start), 2*time.Second)
 	assert.Nil(t, conn)
 	require.EqualError(t, err, "failed to connect to proxy server: websocket: bad handshake (status 503 Service Unavailable)")
 	assert.Equal(t, int32(1), lookups.Load())

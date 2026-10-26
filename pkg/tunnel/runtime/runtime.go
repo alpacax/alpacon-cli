@@ -369,7 +369,10 @@ func dialTunnel(ac *client.AlpaconClient, tunnelSession *tunnelapi.TunnelSession
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lookupTimeout)
 	defer cancel()
-	detail, _ := tunnelapi.GetTunnelSession(ctx, ac, tunnelSession.ID)
+	detail, lookupErr := tunnelapi.GetTunnelSession(ctx, ac, tunnelSession.ID)
+	if lookupErr != nil {
+		utils.CliDebug("could not read why the tunnel session did not open: %v", utils.RedactURLError(lookupErr))
+	}
 	return nil, explainDialFailure(serverName, err, resp, detail)
 }
 
@@ -377,21 +380,22 @@ func dialTunnel(ac *client.AlpaconClient, tunnelSession *tunnelapi.TunnelSession
 // and otherwise the dial error with its handshake status.
 func explainDialFailure(serverName string, dialErr error, resp *http.Response, detail *tunnelapi.TunnelSessionDetail) error {
 	if detail != nil {
-		proxyGaveUpOnAgent := resp != nil && resp.StatusCode == http.StatusServiceUnavailable
-		switch {
-		case detail.OpenStatus == tunnelapi.OpenStatusFailed:
+		switch detail.OpenStatus {
+		case tunnelapi.OpenStatusFailed:
 			if reason := oneLineReason(detail.OpenFailure.Result); reason != "" {
 				return fmt.Errorf("failed to open tunnel on %s: %s", serverName, reason)
 			}
 			return fmt.Errorf("failed to open tunnel on %s", serverName)
-		case detail.OpenStatus == tunnelapi.OpenStatusPending && proxyGaveUpOnAgent:
-			return fmt.Errorf("failed to open tunnel on %s: the agent did not respond to the tunnel request", serverName)
+		case tunnelapi.OpenStatusPending:
+			if resp != nil && resp.StatusCode == http.StatusServiceUnavailable {
+				return fmt.Errorf("failed to open tunnel on %s: the agent did not respond to the tunnel request", serverName)
+			}
 		}
 	}
 	return utils.WebsocketDialError("failed to connect to proxy server", dialErr, resp)
 }
 
-// oneLineReason prints agent text on one line. Whitespace becomes a space before the
+// oneLineReason returns agent text as one line. Whitespace becomes a space before the
 // sanitizer runs, which would otherwise drop a tab or line break and join the words around it.
 func oneLineReason(result string) string {
 	spaced := strings.Map(func(r rune) rune {
