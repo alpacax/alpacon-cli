@@ -53,7 +53,11 @@ func retryAfterSeconds(d time.Duration) int {
 	if d <= 0 {
 		return 0
 	}
-	return int((d + time.Second - 1) / time.Second)
+	seconds := d / time.Second
+	if d%time.Second != 0 {
+		seconds++
+	}
+	return int(seconds)
 }
 
 // CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code. An

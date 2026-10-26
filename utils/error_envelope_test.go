@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -95,6 +96,7 @@ func TestRetryAfterSecondsRoundsUp(t *testing.T) {
 		{name: "under a second", in: 200 * time.Millisecond, want: 1},
 		{name: "exact seconds", in: 2 * time.Second, want: 2},
 		{name: "past a second", in: 1500 * time.Millisecond, want: 2},
+		{name: "longest duration does not wrap", in: time.Duration(math.MaxInt64), want: int(math.MaxInt64/int64(time.Second)) + 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
