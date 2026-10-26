@@ -3,7 +3,6 @@ package utils
 import "strings"
 
 // PreScanOutputFormat returns OutputFormatJSON when the last --output before a bare "--" is json, else "".
-// It runs before Cobra parses, so a parse failure can already be reported as an envelope.
 func PreScanOutputFormat(args []string) string {
 	value := ""
 	for i := 0; i < len(args); i++ {
