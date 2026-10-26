@@ -1470,7 +1470,29 @@ func TestReplay_OlderProxyKeepsReconnectWithoutOffset(t *testing.T) {
 	assert.Equal(t, "105", queries[1].Get("replay_from"))
 	assert.Equal(t, []string{""}, queries[2]["replay_epoch"])
 	assert.NotContains(t, queries[2], "replay_from")
-	assert.Equal(t, "1", queries[2].Get("replay"))
+	assert.NotContains(t, queries[2], "replay")
+}
+
+func TestReplay_OlderProxyReconnectDoesNotDuplicateBacklog(t *testing.T) {
+	tests := []struct {
+		name         string
+		firstBacklog string
+	}{
+		{name: "legacy output", firstBacklog: "history"},
+		{name: "no frames"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queries, stdout, _ := runReplaySession(t,
+				replayRound{backlog: tt.firstBacklog, closeCode: websocket.CloseServiceRestart},
+				replayRound{backlog: "history", frames: []replayFrame{{websocket.BinaryMessage, "live"}}},
+			)
+			assert.Equal(t, tt.firstBacklog+"live", stdout)
+			assert.Equal(t, []string{""}, queries[1]["replay_epoch"])
+			assert.NotContains(t, queries[1], "replay")
+			assert.NotContains(t, queries[1], "replay_from")
+		})
+	}
 }
 
 func TestReplay_UnknownTextBeforeOriginIsIgnored(t *testing.T) {
@@ -1555,6 +1577,11 @@ func runReplaySession(t *testing.T, rounds ...replayRound) ([]url.Values, string
 				return
 			}
 			if start < end && !assert.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte(round.backlog[start-round.offset:]))) {
+				return
+			}
+		} else if query.Get("replay") == "1" && round.backlog != "" {
+			// Older proxies replay the whole backlog without an origin frame.
+			if !assert.NoError(t, ws.WriteMessage(websocket.BinaryMessage, []byte(round.backlog))) {
 				return
 			}
 		}

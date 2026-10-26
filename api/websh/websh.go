@@ -327,7 +327,10 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	reconnected := wsClient.conn != nil
 	dialURL := websocketURL
 	if wsClient.reconnect != nil {
-		query := map[string]string{"replay_epoch": wsClient.replay.epoch, "replay": "1"}
+		query := map[string]string{"replay_epoch": wsClient.replay.epoch}
+		if !reconnected || wsClient.replay.epoch != "" {
+			query["replay"] = "1"
+		}
 		if reconnected && wsClient.replay.epoch != "" {
 			query["replay_from"] = strconv.FormatUint(wsClient.replay.offset, 10)
 		}
