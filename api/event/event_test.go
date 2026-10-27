@@ -402,8 +402,9 @@ func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	}))
 	defer ts.Close()
 
+	seams, _ := fakePollClock()
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, pollSeams{})
+	resp, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), time.Second, 5*time.Millisecond, true, seams)
 	require.NoError(t, err)
 	assert.Equal(t, "completed", resp.Status)
 }
@@ -2528,20 +2529,26 @@ func TestPollCommandExecution_SurfacesMFARefusalOnlyWhenAsked(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			var requests atomic.Int32
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = w.Write([]byte(`{"code": "auth_mfa_required", "detail": "MFA required"}`))
 			}))
 			defer ts.Close()
 
+			seams, _ := fakePollClock()
+			seams.surfaceMFA = tc.surfaceMFA
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, pollSeams{surfaceMFA: tc.surfaceMFA})
+			_, err := pollCommandExecution(ac, testPathID(t, "cmd-1"), 50*time.Millisecond, 10*time.Millisecond, false, seams)
 			require.Error(t, err)
 			if tc.wantCode {
 				assert.Equal(t, utils.AuthMFARequired, utils.StructuredErrorCode(err))
+				assert.Equal(t, int32(1), requests.Load())
 				return
 			}
+			assert.Greater(t, requests.Load(), int32(1))
 			var clientTimeout *ClientTimeoutError
 			require.ErrorAs(t, err, &clientTimeout)
 		})
