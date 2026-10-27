@@ -301,10 +301,12 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			}
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
+				// The refusal a timed-out wait ended on, if any, adds its hint.
 				utils.PrintPendingApproval(
 					fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
 					session.ApprovalRequestID,
 					afterApprovalAction(sessionRequesterType, session.ID, account),
+					utils.RefusalNextActions(err)...,
 				)
 				os.Exit(utils.ExitCodePendingApproval)
 			}
@@ -368,9 +370,14 @@ func (e *terminalWaitError) Error() string {
 // retryable and gets answered with a second session.
 type pendingWaitError struct {
 	message string
+	// hint is the server's hint of the refusal the last poll got when the wait
+	// ended on it, so it still prints. Only the hint is kept: the refusal's code
+	// must not reclassify a wait that is still pending.
+	hint string
 }
 
-func (e *pendingWaitError) Error() string { return e.message }
+func (e *pendingWaitError) Error() string     { return e.message }
+func (e *pendingWaitError) ErrorHint() string { return e.hint }
 
 // terminalWaitErrorCtx is the JSON error envelope context for a wait that
 // settled without a grant. WorkSessionID is a structured field here—not only
@@ -595,13 +602,23 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, interval, timeout time.Duration) (*wsapi.WorkSession, error) {
 	start := time.Now()
 	deadline := start.Add(timeout)
-	timedOut := &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout)}
+	// lastRefusal is the refusal (a 429 in practice) the latest poll got, if it
+	// got one: a wait that times out on it keeps it behind the timeout, so its
+	// hint still reaches the output.
+	var lastRefusal error
+	timedOut := func() error {
+		return &pendingWaitError{message: fmt.Sprintf("timed out waiting for approval after %s", timeout), hint: utils.RefusalHint(lastRefusal)}
+	}
 	failures := 0
 	throttles := 0
 	budget := utils.NewThrottleBudget(timeout)
 	lastStatus := ""
 	for {
 		s, err := wsapi.GetWorkSession(ac, id)
+		lastRefusal = nil
+		if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+			lastRefusal = err
+		}
 		if err != nil {
 			if !utils.IsTransientRequestError(err) {
 				return nil, fmt.Errorf("polling failed: %w", err)
@@ -618,7 +635,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 					deadline = newDeadline
 				}
 				if !pollSleep(deadline, delay) {
-					return nil, timedOut
+					return nil, timedOut()
 				}
 				continue
 			}
@@ -626,7 +643,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			// The deadline outranks the cap: once the window is over, "timed out"
 			// is the honest answer even when this poll also filled the cap.
 			if !time.Now().Before(deadline) {
-				return nil, timedOut
+				return nil, timedOut()
 			}
 			if failures >= utils.MaxConsecutivePollFailures {
 				// The session is created and pending, so this exits on the pending
@@ -638,7 +655,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			}
 			utils.CliWarning("Poll failed (%s); still waiting.", err)
 			if !pollSleep(deadline, utils.NextPollBackoff(interval, failures-1, utils.RetryAfter(err))) {
-				return nil, timedOut
+				return nil, timedOut()
 			}
 			continue
 		}
@@ -685,7 +702,7 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 		window := elapsed + time.Until(deadline)
 		utils.CliInfo("%s (%s elapsed of %s)", waitMsg, elapsed.Round(time.Second), window.Round(time.Second))
 		if !pollSleep(deadline, utils.NextPollTick(interval, elapsed)) {
-			return nil, timedOut
+			return nil, timedOut()
 		}
 	}
 }

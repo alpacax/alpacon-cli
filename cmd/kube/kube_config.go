@@ -208,6 +208,11 @@ func exitKubeConfigError(err error, clusterName, workSessionID string) {
 // kubeSessionErrorHint says what to do about a refusal the server names with
 // a kube-session code, or returns "" for any other error.
 func kubeSessionErrorHint(err error, clusterName string) string {
+	// The server's hint is the guidance when the refusal carries one, and the
+	// caller's fallback line prints it under the error.
+	if utils.RefusalHint(err) != "" {
+		return ""
+	}
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case utils.KubeSessionAgentModeNotSupported:

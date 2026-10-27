@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -26,14 +27,15 @@ func newFailureEnvelope(exitCode int, errorCode, operation string, err error, me
 		operation = CommandName
 	}
 	return JSONErrorEnvelope[cliErrorCtx]{
-		OK:         false,
-		ExitCode:   exitCode,
-		ErrorCode:  errorCode,
-		Message:    message,
-		Context:    cliErrorCtx{Operation: operation},
-		HTTPStatus: HTTPStatusCode(err),
-		RetryAfter: retryAfterSeconds(RetryAfter(err)),
-		Server:     serverErrorFields(err),
+		OK:          false,
+		ExitCode:    exitCode,
+		ErrorCode:   errorCode,
+		Message:     message,
+		Context:     cliErrorCtx{Operation: operation},
+		HTTPStatus:  HTTPStatusCode(err),
+		RetryAfter:  retryAfterSeconds(RetryAfter(err)),
+		Server:      serverErrorFields(err),
+		NextActions: RefusalNextActions(err),
 	}
 }
 
@@ -66,15 +68,29 @@ func CliErrorEnvelopeWithExit(operation string, err error, format string, args .
 		CliUsageErrorEnvelopeWithExit(operation, format, args...)
 		return
 	}
-	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...)})
-	CliErrorWithExit(format, args...)
+	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
+	printCliError(refusalGuidance(err, args), format, args...)
+	reportCLIError()
+	os.Exit(ExitCodeGeneralError)
+}
+
+// refusalGuidance is the error whose server hints an envelope helper shows:
+// err, or, when a caller passes nil to keep a code out of the envelope, the
+// refusal among the message's own arguments. The hint is guidance, not the
+// code, so it shows either way.
+func refusalGuidance(err error, args []any) error {
+	if err != nil {
+		return err
+	}
+	return refusalErrorIn(args)
 }
 
 // CliErrorEnvelopeWithExitCode is CliErrorEnvelopeWithExit with a caller-chosen exit
 // code, for refusals a script branches on (e.g. ExitCodeNotApproved).
 func CliErrorEnvelopeWithExitCode(code int, operation string, err error, format string, args ...any) {
-	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...)})
-	CliErrorWithExitCode(code, format, args...)
+	ExitWithFailureJSON(Failure{ExitCode: code, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})
+	printCliError(refusalGuidance(err, args), format, args...)
+	os.Exit(code)
 }
 
 // CliUsageErrorEnvelopeWithExit reports a bad flag or argument and exits 2 with error_code usage_error.

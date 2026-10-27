@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/alpacax/alpacon-cli/api/auth"
 	"github.com/alpacax/alpacon-cli/api/auth0"
@@ -47,7 +48,7 @@ var logoutCmd = &cobra.Command{
 			if validConfig.AccessToken != "" && validConfig.RefreshToken != "" {
 				_, err := ac.SendPostRequest(blacklistURL, nil)
 				if err != nil {
-					utils.CliErrorWithExit("Failed to set black list. Please try again later.")
+					utils.CliErrorWithExit("%s", blacklistFailure(err))
 				}
 			}
 			err = auth0.Logout(httpClient, validConfig)
@@ -67,4 +68,14 @@ func reportLogout(err error) {
 	default:
 		utils.CliSuccess("Logout succeeded!")
 	}
+}
+
+// blacklistFailure words a failed token blacklist. A refusal carrying the
+// server's hint keeps it, printed under the error, in place of the advice to
+// try again later.
+func blacklistFailure(err error) error {
+	if utils.RefusalHint(err) != "" {
+		return utils.Reword(err, fmt.Sprintf("Failed to set black list: %s.", err))
+	}
+	return utils.Reword(err, "Failed to set black list. Please try again later.")
 }

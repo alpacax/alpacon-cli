@@ -10,6 +10,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -308,4 +309,38 @@ func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 	assert.NotContains(t, err.Error(), "timed out", "completion must end the wait, not run it to the deadline")
 	assert.Equal(t, time.Duration(0), polls.WidestGap(),
 		"the first completed read must end the wait rather than schedule another poll")
+}
+
+// A step-up whose completion checks are refused times out with the last
+// refusal behind it, so its hint still prints; the timeout message is unchanged.
+func TestStepUpForSudo_TimeoutOnARefusalKeepsTheHint(t *testing.T) {
+	const tick = 10 * time.Millisecond
+	const hint = "This credential cannot prove an MFA check; verify the sudo request from a console or CLI sign-in instead."
+	ac := &client.AlpaconClient{
+		BaseURL:       testutil.StubBaseURL,
+		WorkspaceName: "pinned-ws",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			switch r.URL.Path {
+			case mfaURL + "/":
+				return http.StatusOK, `{"mfa_url": "https://example.com/mfa"}`
+			case mfaCompletionURL:
+				return http.StatusForbidden, `{"code": "sudo_verify_credential_cannot_prove_mfa", "hint": "` + hint + `"}`
+			default:
+				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
+			}
+		}),
+	}
+
+	var err error
+	synctest.Test(t, func(*testing.T) {
+		err = stepUpForSudo(ac, "my-server", tick, 10*tick+tick/2)
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, "MFA step-up timed out after 105ms", err.Error())
+	assert.Equal(t, hint, utils.RefusalHint(err))
+	// Only the hint goes with the timeout: the refusal's code would read as that
+	// refusal to an MFA retry.
+	assert.Empty(t, utils.StructuredErrorCode(err))
+	assert.Zero(t, utils.HTTPStatusCode(err))
 }

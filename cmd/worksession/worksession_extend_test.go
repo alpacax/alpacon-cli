@@ -63,6 +63,25 @@ func TestExtendErrorMessage(t *testing.T) {
 	}
 }
 
+func TestExtendErrorMessage_DefersToTheServerHint(t *testing.T) {
+	t.Parallel()
+	hinted := &testHintedError{testCodedError: testCodedError{code: utils.WorkSessionAdmissionDenied, msg: "request refused (HTTP 403, code: work_session_admission_denied)"}, hint: "The workspace's admission policy refuses this extension."}
+
+	got := extendErrorMessage("ses-1", hinted)
+	assert.Equal(t, "Failed to extend work session: request refused (HTTP 403, code: work_session_admission_denied).", got)
+	assert.NotContains(t, got, "refuses this extension outright")
+
+	assert.Contains(t, extendErrorMessage("ses-1", &hinted.testCodedError), "refuses this extension outright")
+}
+
+// testHintedError is testCodedError carrying the server's hint.
+type testHintedError struct {
+	testCodedError
+	hint string
+}
+
+func (e *testHintedError) ErrorHint() string { return e.hint }
+
 // testCodedError implements the codedError interface utils.ParseErrorResponse
 // reads (ErrorCode/ErrorSource), without pulling in client.go's unexported
 // apiError type.

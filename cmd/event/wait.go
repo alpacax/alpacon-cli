@@ -175,9 +175,10 @@ func reportOutages(waiter *eventapi.Waiter) {
 	for {
 		select {
 		case err := <-waiter.CatchUpFailed():
-			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", strip(err.Error()))
+			// Reworded rather than flattened, so a refusal's hint still prints.
+			utils.CliWarning("Could not read the current state: %s. Still waiting for an event.", utils.Reword(err, strip(err.Error())))
 		case err := <-waiter.ReconnectFailed():
-			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", strip(err.Error()))
+			utils.CliWarning("Lost the event channel and still reconnecting: %s. No events are being delivered until it recovers.", utils.Reword(err, strip(err.Error())))
 		}
 	}
 }

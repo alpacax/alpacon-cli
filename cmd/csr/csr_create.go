@@ -86,7 +86,7 @@ var csrCreateCmd = &cobra.Command{
 
 		response, err := certApi.CreateSignRequest(alpaconClient, signRequest)
 		if err != nil {
-			utils.CliErrorWithExit("%s", createSignRequestErrorText(err, signRequest.ValidDays))
+			utils.CliErrorWithExit("%s", utils.Reword(err, createSignRequestErrorText(err, signRequest.ValidDays)))
 		}
 
 		csr, err := cert.CreateCSR(response, certPath)
@@ -190,7 +190,9 @@ func parseValidDaysInput(input string) (int, error) {
 // createSignRequestErrorText words a failed sign request; validDays is what the
 // request carried, zero meaning the CA's default.
 func createSignRequestErrorText(err error, validDays int) string {
-	if code, _ := utils.ParseErrorResponse(err); code == certApi.CodeInvalidPeriod {
+	// A server hint is the guidance when the refusal carries one, and the error
+	// output prints it under this line.
+	if code, _ := utils.ParseErrorResponse(err); code == certApi.CodeInvalidPeriod && utils.RefusalHint(err) == "" {
 		if validDays == 0 {
 			return "The CA's default validity exceeds its own maximum (Default and Max Valid Days in " +
 				"'alpacon authority ls'). Request a validity within the maximum, or ask the CA's owner to " +

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	osexec "os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -408,4 +409,60 @@ func TestExecRejectedMidWaitExits6(t *testing.T) {
 
 	assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "a mid-wait rejection is final; stderr: %s", stderr)
 	assert.Contains(t, stderr, "rejected by a reviewer")
+}
+
+// newResultPollRefusalServer accepts the command but refuses every read of its
+// result with a work-session gate code, so the result poll runs into its
+// client timeout with that refusal last seen.
+func newResultPollRefusalServer(hint string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/events/commands/":
+			_, _ = fmt.Fprintf(w, `[{"id":"cmd-1"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/events/commands/cmd-1/":
+			w.WriteHeader(http.StatusForbidden)
+			body := map[string]any{"code": utils.WorkSessionExpired, "source": "command"}
+			if hint != "" {
+				body["hint"] = hint
+			}
+			_ = json.NewEncoder(w).Encode(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
+// A result poll that times out stays a client timeout (exit 1, [client_timeout])
+// even when the reads it timed out on were refused at a work-session gate: only
+// the refusal's hint goes with the timeout, printed once, never its code.
+func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
+	t.Parallel()
+	const hint = "This work session has expired; start a new one or extend it."
+	for _, tt := range []struct {
+		name string
+		hint string
+	}{{name: "with a hint", hint: hint}, {name: "without a hint"}} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ts := newResultPollRefusalServer(tt.hint)
+			defer ts.Close()
+
+			_, stderr, exitCode := runHelperProcess(t, ts.URL,
+				"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
+				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=3s"},
+				[]string{"prod", "--", "uptime"})
+
+			assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
+			assert.Contains(t, stderr, "[client_timeout]")
+			assert.NotContains(t, stderr, "WorkSession", "a timeout must not read as the work-session gate")
+			if tt.hint != "" {
+				assert.Equal(t, 1, strings.Count(stderr, "Hint: "+hint), "stderr: %s", stderr)
+				return
+			}
+			assert.NotContains(t, stderr, "Hint:")
+		})
+	}
 }

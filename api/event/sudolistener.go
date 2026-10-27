@@ -234,7 +234,7 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		if sl.reportCredentialCannotProveMFA(err) {
 			return
 		}
-		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n", err)
+		fmt.Fprintf(os.Stderr, "\r\n\033[31mFailed to get MFA link: %s\033[0m\r\n%s", err, utils.RawTerminalHintLines(err))
 		return
 	}
 
@@ -258,12 +258,22 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 // reportCredentialCannotProveMFA prints the sign-in hint and returns true when
 // err is the server's refusal of a credential that cannot complete sudo MFA.
 // Opening a browser or polling cannot change that, so the caller stops there.
+// The server's hint, when the refusal carries one, replaces the CLI's own.
 func (sl *SudoListener) reportCredentialCannotProveMFA(err error) bool {
 	if code, _ := utils.ParseErrorResponse(err); code != utils.SudoVerifyCredentialCannotProveMFA {
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "\r\n\033[31mSudo MFA cannot be completed with this credential: sign in with `alpacon login` to complete sudo MFA.\033[0m\r\n")
+	fmt.Fprint(os.Stderr, credentialCannotProveMFAText(utils.RefusalHint(err)))
 	return true
+}
+
+// credentialCannotProveMFAText renders the refusal for a websh terminal in raw
+// mode, so every line ends in \r\n.
+func credentialCannotProveMFAText(hint string) string {
+	if hint != "" {
+		return fmt.Sprintf("\r\n\033[31mSudo MFA cannot be completed with this credential.\033[0m\r\nHint: %s\r\n", hint)
+	}
+	return "\r\n\033[31mSudo MFA cannot be completed with this credential: sign in with `alpacon login` to complete sudo MFA.\033[0m\r\n"
 }
 
 // errMFAWaitEnded is what retryVerifyUntilMFA returns when the wait ran out, or

@@ -273,14 +273,67 @@ type retryAfterCarrier interface {
 }
 
 // HTTPStatusCode returns the HTTP status carried by err, or 0 if none—lets callers tell 404 from 401.
+// Along a chain the outermost status wins. An error that joins several (a
+// BatchError, errors.Join, fmt.Errorf with more than one %w) has a status only
+// when the whole tree under it names one: the statuses of every branch, nested
+// joins included, are collected, and one distinct status is the answer while
+// two or more give 0.
 func HTTPStatusCode(err error) int {
-	for e := err; e != nil; e = errors.Unwrap(e) {
-		if sc, ok := e.(statusCoder); ok {
-			return sc.HTTPStatusCode()
-		}
+	statuses := map[int]bool{}
+	collectStatusCodes(err, statuses)
+	if len(statuses) != 1 {
+		return 0
+	}
+	for status := range statuses {
+		return status
 	}
 	return 0
 }
+
+// collectStatusCodes adds the status each branch of err's tree names: the
+// first status along a chain, and every branch of a join.
+func collectStatusCodes(err error, statuses map[int]bool) {
+	for e := err; e != nil; {
+		if sc, ok := e.(statusCoder); ok {
+			if status := sc.HTTPStatusCode(); status != 0 {
+				statuses[status] = true
+			}
+			return
+		}
+		switch wrapped := e.(type) {
+		case interface{ Unwrap() []error }:
+			for _, child := range wrapped.Unwrap() {
+				collectStatusCodes(child, statuses)
+			}
+			return
+		case interface{ Unwrap() error }:
+			e = wrapped.Unwrap()
+		default:
+			return
+		}
+	}
+}
+
+// BatchError joins the failures of independent items, such as the files of a
+// bulk upload. Its message is Header followed by one line per failure. It
+// unwraps to every failure, so each refusal's hint still prints, but no single
+// item's code speaks for the batch: ParseErrorResponse and StructuredErrorCode
+// do not look inside it, so a batch is never classified as one item's refusal
+// (a work-session gate, an MFA step-up) and its per-item results stay in view.
+type BatchError struct {
+	Header   string
+	Failures []error
+}
+
+func (e *BatchError) Error() string {
+	lines := make([]string, len(e.Failures))
+	for i, failure := range e.Failures {
+		lines[i] = failure.Error()
+	}
+	return e.Header + ":\n  " + strings.Join(lines, "\n  ")
+}
+
+func (e *BatchError) Unwrap() []error { return e.Failures }
 
 // RetryAfter returns the delay the server asked for on err, or 0 if it sent none.
 func RetryAfter(err error) time.Duration {
@@ -413,7 +466,7 @@ func ParseErrorResponse(err error) (string, string) {
 		return code, source
 	}
 
-	for e := range errorChain(err) {
+	for e := range codeChain(err) {
 		errStr := e.Error()
 
 		// Try JSON format: {"code": "...", "source": "..."}
@@ -444,7 +497,7 @@ func ParseErrorResponse(err error) (string, string) {
 }
 
 func typedCode(err error, accept func(code, source string) bool) (string, string) {
-	for e := range errorChain(err) {
+	for e := range codeChain(err) {
 		if coded, ok := e.(codedError); ok {
 			code, source := coded.ErrorCode(), coded.ErrorSource()
 			if accept(code, source) {
@@ -455,7 +508,18 @@ func typedCode(err error, accept func(code, source string) bool) (string, string
 	return "", ""
 }
 
+// errorChain walks err and everything it wraps, joined errors included.
 func errorChain(err error) iter.Seq[error] {
+	return walkErrors(err, false)
+}
+
+// codeChain is errorChain without descending into a BatchError: an item's code
+// is not the batch's.
+func codeChain(err error) iter.Seq[error] {
+	return walkErrors(err, true)
+}
+
+func walkErrors(err error, stopAtBatch bool) iter.Seq[error] {
 	return func(yield func(error) bool) {
 		var walk func(error) bool
 		walk = func(current error) bool {
@@ -464,6 +528,9 @@ func errorChain(err error) iter.Seq[error] {
 			}
 			if !yield(current) {
 				return false
+			}
+			if _, isBatch := current.(*BatchError); isBatch && stopAtBatch {
+				return true
 			}
 			switch wrapped := current.(type) {
 			case interface{ Unwrap() []error }:
@@ -487,7 +554,11 @@ const LoginWithoutTokenHint = "'alpacon login' without -t (on a machine without 
 
 // InteractiveOnly rewrites a token's refusal of an action only an interactive login may
 // take; a scope refusal counts, since granting the scope only reaches the next refusal.
+// A refusal carrying the server's hint is returned as it is: the hint is the guidance.
 func InteractiveOnly(err error, action string) error {
+	if RefusalHint(err) != "" {
+		return err
+	}
 	switch code, _ := ParseErrorResponse(err); code {
 	case AuthInteractiveChannelRequiresPresence, AuthMFARequiresHumanPrincipal, APITokenACLNotAllowed, APITokenScopeMissing: // an older server sends APITokenACLNotAllowed for this refusal
 		return fmt.Errorf("a token cannot %s; run %s and try again", action, LoginWithoutTokenHint)

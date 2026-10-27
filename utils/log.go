@@ -47,7 +47,7 @@ func WarnTerminalTextAltered(w io.Writer, indent string) {
 
 // CliError handles all error messages in the CLI.
 func CliError(msg string, args ...any) {
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	reportCLIError()
 }
 
@@ -57,7 +57,7 @@ func CliErrorWithExit(msg string, args ...any) {
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(1, "", msg, args)
 	}
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	reportCLIError()
 	os.Exit(1)
 }
@@ -69,7 +69,7 @@ func CliErrorWithExitCode(code int, msg string, args ...any) {
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(code, "", msg, args)
 	}
-	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printCliError(refusalErrorIn(args), msg, args...)
 	os.Exit(code)
 }
 
@@ -94,6 +94,15 @@ func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 		}
 	}
 	ExitWithFailureJSON(Failure{ExitCode: exitCode, ErrorCode: errorCode, Err: cause, Message: fmt.Sprintf(msg, args...)})
+}
+
+// printCliError writes the red Error line and, under it, the server's guidance
+// for the refusal err carries (RefusalNextActions). The error helpers find err
+// among their own arguments, so every call site that formats a server error
+// into its message prints the server's hint without naming it.
+func printCliError(err error, msg string, args ...any) {
+	_, _ = fmt.Fprintf(TrackedStderr(), "%s: %s\n", Red("Error"), cliMessage(msg, args...))
+	printRefusalNextActions(TrackedStderr(), err)
 }
 
 // DebugEnabled reports whether diagnostic output is turned on.
@@ -137,6 +146,7 @@ func CliInfo(msg string, args ...any) {
 // itself between them.
 func CliWarning(msg string, args ...any) {
 	_, _ = fmt.Fprintf(TrackedStderr(), "%s%s: %s\n", spinnerLineBreak(), Yellow("Warning"), cliMessage(msg, args...))
+	printRefusalNextActions(TrackedStderr(), refusalErrorIn(args))
 }
 
 // spinnerLineBreak returns the newline that moves a message off the line a

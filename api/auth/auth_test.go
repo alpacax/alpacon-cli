@@ -732,3 +732,24 @@ func TestGetAPITokenIDByName_ReturnsOnlyAOneSegmentID(t *testing.T) {
 		})
 	}
 }
+
+// A refused self-hosted logout keeps the refusal in its chain, so the hint and
+// code still reach the error output.
+func TestLogout_RefusalKeepsTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "This account or credential does not have permission for this action."
+	ac := &client.AlpaconClient{
+		BaseURL: testutil.StubBaseURL,
+		Token:   "test-token",
+		HTTPClient: testutil.StubClient(func(r *http.Request) (int, string) {
+			return http.StatusForbidden, `{"code": "permission_denied", "hint": "` + hint + `"}`
+		}),
+	}
+
+	err := Logout(ac, configpkg.Config{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to send post request")
+	assert.Equal(t, hint, utils.RefusalHint(err))
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, "permission_denied", code)
+}

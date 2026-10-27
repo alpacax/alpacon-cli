@@ -71,6 +71,11 @@ func describeRBACError(ac *client.AlpaconClient, gate rbacGate, err error) error
 	if err == nil {
 		return nil
 	}
+	// The server's hint is the guidance for this refusal, and the error output
+	// prints it; a sentence from here would say it a second time.
+	if utils.RefusalHint(err) != "" {
+		return err
+	}
 
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {

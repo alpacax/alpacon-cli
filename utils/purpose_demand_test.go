@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -222,4 +223,36 @@ func TestPurposeDemandLead_SaysWhatSilenceCosts(t *testing.T) {
 	// blocked by the window closing.
 	assert.Contains(t, PurposeDemandLead, "not blocked")
 	assert.Contains(t, PurposeDemandLead, "ordinary path")
+}
+
+// A refused answer whose refusal carries the server's hint leads with the
+// hint in place of the local guess at why; without a hint the guess stays.
+func TestPrintPurposeRefused_ServerHintReplacesTheGuess(t *testing.T) {
+	const hint = "Your account may not act on this command, which it did not request."
+	refusal := &hintedError{code: "event_command_not_requester", hint: hint}
+
+	var out string
+	withFormat(OutputFormatJSON, func() {
+		out = testutil.CaptureStdout(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
+	})
+	var got purposeAnswerSignal
+	require.NoError(t, json.Unmarshal([]byte(out), &got), "stdout: %s", out)
+	assert.Equal(t, "failed to state the purpose for "+purposeTestCommandID+": permission denied.", got.Message)
+	require.Len(t, got.NextActions, 2)
+	assert.Equal(t, NextAction{Description: hint}, got.NextActions[0])
+	assert.Contains(t, got.NextActions[1].Command, "alpacon exec logs")
+
+	var stderr string
+	withFormat(OutputFormatTable, func() {
+		_, stderr = testutil.CaptureOutput(t, func() { PrintPurposeRefused(purposeTestCommandID, refusal) })
+	})
+	assert.Equal(t, 1, strings.Count(stderr, hint), "stderr: %q", stderr)
+	assert.NotContains(t, stderr, "may have expired")
+
+	withFormat(OutputFormatTable, func() {
+		_, stderr = testutil.CaptureOutput(t, func() {
+			PrintPurposeRefused(purposeTestCommandID, &hintedError{code: "event_command_not_requester"})
+		})
+	})
+	assert.Contains(t, stderr, "may have expired")
 }

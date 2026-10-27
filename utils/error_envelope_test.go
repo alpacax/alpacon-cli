@@ -423,3 +423,42 @@ func decodeSingleLineEnvelope(t *testing.T, stderr string) JSONErrorEnvelope[cli
 	require.NoError(t, json.Unmarshal([]byte(trimmed), &env), "stderr: %s", stderr)
 	return env
 }
+
+// A partial success keeps the attach refusal out of error_code but still shows its hint.
+func TestCliErrorEnvelopeWithExit_NilErrorStillShowsTheHint(t *testing.T) {
+	for _, format := range []string{OutputFormatJSON, OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
+			help := exec.Command(os.Args[0], "-test.run=^TestCliErrorEnvelopeWithExitNilErrorHelperProcess$")
+			help.Env = append(os.Environ(), "GO_WANT_NIL_ERROR_ENVELOPE_HELPER="+format)
+			var stderr bytes.Buffer
+			help.Stderr = &stderr
+
+			err := help.Run()
+
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, 1, exitErr.ExitCode())
+			const message = "Work session created (ws-1) but failed to set as active: permission denied. Run 'alpacon work-session use ws-1' to retry."
+			if format == OutputFormatTable {
+				assert.Contains(t, stderr.String(), message+"\nHint: "+sampleHint+"\n")
+				return
+			}
+			var envelope JSONErrorEnvelope[cliErrorCtx]
+			require.NoError(t, json.Unmarshal(stderr.Bytes(), &envelope), "stderr: %s", stderr.String())
+			assert.Equal(t, ErrorCodeCLI, envelope.ErrorCode)
+			assert.Equal(t, message, envelope.Message)
+			assert.Equal(t, []NextAction{{Description: sampleHint}}, envelope.NextActions)
+		})
+	}
+}
+
+func TestCliErrorEnvelopeWithExitNilErrorHelperProcess(t *testing.T) {
+	format := os.Getenv("GO_WANT_NIL_ERROR_ENVELOPE_HELPER")
+	if format == "" {
+		return
+	}
+	OutputFormat = format
+	colorEnabled = false
+	useErr := &hintedError{code: "permission_denied", hint: sampleHint}
+	CliErrorEnvelopeWithExit("create", nil, "Work session created (%s) but failed to set as active: %s. Run 'alpacon work-session use %s' to retry.", "ws-1", useErr, "ws-1")
+}

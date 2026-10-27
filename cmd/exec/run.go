@@ -93,6 +93,11 @@ var (
 // which is why sudoDenialHint falls back to naming a code this table does not
 // carry.
 //
+// The table is the fallback for a server that sends no hint of its own. A
+// server that does has the sudo plugin print it on the line under the denial
+// line, where the user already reads it in the command's output, so a denial
+// line followed by one (serverHintFollows) gets no sentence from here.
+//
 // The codes are UPPERCASE because the plugin only passes [A-Z0-9_]
 // codes through its sanitizer into the user-facing denial line (lowercase
 // values are dropped). Each hint stays at the denial *category* level (what to
@@ -256,6 +261,56 @@ func denialCodePresent(output, code string) bool {
 	return strings.Contains(output, sudoDenialLinePrefix+code+").")
 }
 
+// serverHintFollows reports whether the line after an occurrence of
+// denialLine in output is the server's hint, which the sudo plugin prints
+// right under the denial line when the server sent one. A line counts when it
+// has the shape the plugin's sanitizer leaves it in: non-empty, at most
+// utils.MaxServerHintBytes, and free of control characters. Its wording and
+// punctuation are the server's and are not checked. Another denial line does
+// not count (one command line can run several sudo calls), and neither does
+// sudo's own error, which follows the denial line on a host where the PAM
+// module, not the plugin, decided.
+//
+// From a server that sends no hint, the command's own output landing on that
+// line passes for one and withholds the local sentence. That is accepted: it
+// costs only guidance, never a step-up or a wait, since nothing else is keyed
+// on this.
+func serverHintFollows(output, denialLine string) bool {
+	rest := output
+	for {
+		_, after, found := strings.Cut(rest, denialLine)
+		if !found {
+			return false
+		}
+		rest = after
+		_, next, ok := strings.Cut(after, "\n")
+		if !ok {
+			continue
+		}
+		line, _, _ := strings.Cut(next, "\n")
+		if isServerHintLine(strings.TrimSuffix(line, "\r")) {
+			return true
+		}
+	}
+}
+
+// isServerHintLine reports whether line has the shape serverHintFollows
+// accepts as the server's hint.
+func isServerHintLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || len(trimmed) > utils.MaxServerHintBytes {
+		return false
+	}
+	if utils.SanitizeTerminalText(trimmed) != trimmed {
+		return false
+	}
+	// Every line the plugin opens with this words a denial, coded or not.
+	if strings.HasPrefix(trimmed, strings.TrimSuffix(sudoDenialCodelessLine, ".")) {
+		return false
+	}
+	return !strings.HasPrefix(trimmed, "sudo:") && !strings.HasPrefix(trimmed, "sudo-rs:")
+}
+
 // denialHintLine labels guidance—a table entry's or the unknown-code
 // fallback's—as the user-facing hint.
 func denialHintLine(guidance string) string {
@@ -313,13 +368,22 @@ func isSanitizedDenialCode(code string) bool {
 //
 // A denial carrying no code gets a last, thinner hint: without a category from
 // the server there is only the console to point at.
+//
+// Whichever line answers, a server hint under it (serverHintFollows) already
+// said what to do, so the answer is "" then.
 func sudoDenialHint(output string) string {
 	for _, h := range sudoDenialHints {
 		if denialCodePresent(output, h.code) {
+			if serverHintFollows(output, sudoDenialLinePrefix+h.code+").") {
+				return ""
+			}
 			return denialHintLine(h.guidance)
 		}
 	}
 	if code := firstDenialCode(output); code != "" {
+		if serverHintFollows(output, sudoDenialLinePrefix+code+").") {
+			return ""
+		}
 		return denialHintLine(fmt.Sprintf(
 			"sudo was denied (%s). This build carries no guidance for that code—the server may be newer than the CLI.\n"+
 				"Read the denial in the Alpacon console (web), and update the CLI so a later run explains it.\n", code))
@@ -329,6 +393,9 @@ func sudoDenialHint(output string) string {
 	// forged match reaches no step-up, no --wait loop, and echoes nothing the
 	// command chose. Anchoring harder re-opens the silent denial this closes.
 	if strings.Contains(output, sudoDenialCodelessLine) {
+		if serverHintFollows(output, sudoDenialCodelessLine) {
+			return ""
+		}
 		return denialHintLine(
 			"sudo was denied, and the denial carried no code to explain it.\n" +
 				"Read the denial in the Alpacon console (web).\n")
@@ -370,9 +437,16 @@ func hasSudoApprovalDenial(output string) bool {
 // output, whatever the table order: the classification is identical either way,
 // so answering with the entry that has no way past the wait would drop the only
 // guidance the user could act on.
+//
+// A server hint under that entry's denial line withholds the guidance as in
+// sudoDenialHint; pending is unaffected, since it decides the wait, not a
+// sentence.
 func pendingSudoDenial(output string) (hint string, pending bool) {
 	for _, h := range sudoDenialHints {
 		if h.pendingApproval && h.selfService && denialCodePresent(output, h.code) {
+			if serverHintFollows(output, sudoDenialLinePrefix+h.code+").") {
+				return "", true
+			}
 			return denialHintLine(h.guidance), true
 		}
 	}
@@ -597,15 +671,22 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 	throttles := 0
 	lastRequestID := ""
 	budget := utils.NewThrottleBudget(waitTimeout)
+	// lastRefusal is the refusal (a 429 in practice) the latest status read got,
+	// if it got one, so a wait that times out on it still prints its hint.
+	var lastRefusal error
 	for {
 		select {
 		case <-timer.C:
 			spinner.Stop()
 			// Report only the timeout; the caller's pending-approval message already names --wait-approval.
-			utils.CliWarning("Approval wait timed out after %s; the command is still pending.", waitTimeout)
+			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
 			outcome, requestID, err := pollApprovalOnce(ac, cmdID)
+			lastRefusal = nil
+			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
+				lastRefusal = err
+			}
 			switch {
 			case err != nil && isPollFailure(err):
 				// A 429 says the server is answering, so it is not counted toward
@@ -859,18 +940,15 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 	if err != nil {
 		var remoteErr *event.RemoteCommandError
 		if errors.As(err, &remoteErr) {
-			stderrLine, exitCode := remoteCommandOutcome(remoteErr)
-			if stderrLine != "" {
-				fmt.Fprint(os.Stderr, stderrLine)
-			}
-			if hint := sudoDenialHint(remoteErr.Output); hint != "" {
-				fmt.Fprint(os.Stderr, hint)
-			}
+			stderrText, exitCode := remoteFailureReport(remoteErr)
+			fmt.Fprint(os.Stderr, stderrText)
 			os.Exit(exitCode)
 		}
 		var clientTimeout *event.ClientTimeoutError
 		if errors.As(err, &clientTimeout) {
 			fmt.Fprint(os.Stderr, clientTimeoutLine())
+			// A wait that ended on a refusal (a 429 in practice) keeps its hint.
+			utils.PrintRefusalHints(os.Stderr, clientTimeout)
 			os.Exit(1)
 		}
 		var rejected *event.CommandRejectedError
@@ -887,19 +965,37 @@ func HandleCommandResult(err error, invokedAs Invocation) {
 	}
 }
 
+// remoteFailureReport is what HandleCommandResult writes to stderr for a
+// command that failed on the server, and the exit code it leaves with: the
+// outcome line, then the sudo denial guidance when the output needs one.
+func remoteFailureReport(remoteErr *event.RemoteCommandError) (string, int) {
+	stderrLine, exitCode := remoteCommandOutcome(remoteErr)
+	return stderrLine + sudoDenialHint(remoteErr.Output), exitCode
+}
+
 // reportCodedRefusal is the one way out for a server refusal the CLI has a
 // sentence for: under --output json the envelope carries the server's code and
 // the message; table mode prints the red Error line and the hint. Exits 1.
+// The server's hint, when err carries one, takes the place of the local hint.
 func reportCodedRefusal(operation string, err error, message, hint string) {
 	if utils.OutputFormat == utils.OutputFormatJSON {
 		utils.CliErrorEnvelopeWithExit(operation, err, "%s.", message)
 		return
 	}
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
-	if hint != "" {
+	if hint := codedRefusalHint(err, hint); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
 	os.Exit(1)
+}
+
+// codedRefusalHint is the hint reportCodedRefusal prints: the server's, when
+// err carries one, otherwise the local one it was given.
+func codedRefusalHint(err error, local string) string {
+	if serverHint := utils.RefusalHint(err); serverHint != "" {
+		return denialHintLine(serverHint + "\n")
+	}
+	return local
 }
 
 // propagateCommandError reports errors RunCommandWithRetry must return unchanged

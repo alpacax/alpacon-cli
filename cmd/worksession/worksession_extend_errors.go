@@ -11,6 +11,11 @@ import (
 // utils.ParseErrorResponse), so without this the operator would see only the
 // generic "request failed (code: ...)" fallback and not what to do about it.
 func extendErrorMessage(id string, err error) string {
+	// The server's hint is the guidance when the refusal carries one; the
+	// error output prints it under this line.
+	if utils.RefusalHint(err) != "" {
+		return fmt.Sprintf("Failed to extend work session: %s.", err)
+	}
 	code, _ := utils.ParseErrorResponse(err)
 	switch code {
 	case utils.WorkSessionExtensionReasonRequired:

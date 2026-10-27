@@ -38,6 +38,12 @@ func AgentSessionScope(operation string) string {
 
 type workSessionErrorJSON = JSONErrorEnvelope[workSessionErrorCtx]
 
+// accountSessionCreateDescription is the account-not-approved refusal's
+// pointer to a new session; the server's hint for that refusal already says
+// to request a work session for the account, so workSessionGuidance drops it
+// when a hint is there.
+const accountSessionCreateDescription = "or create a session for this account"
+
 type workSessionErrorCtx struct {
 	AuthMethod         string   `json:"auth_method"`
 	RequiredScope      string   `json:"required_scope"`
@@ -71,15 +77,16 @@ func HandleWorkSessionError(err error, operation, serverName, authMethod, active
 	if !isWorkSessionCode(code) {
 		return
 	}
+	hint := RefusalHint(err)
 	if OutputFormat == OutputFormatJSON {
-		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS))
+		PrintJSONError(os.Stderr, buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS, hint))
 	} else {
-		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS))
+		fmt.Fprintln(os.Stderr, buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS, hint))
 	}
 	os.Exit(ExitCodeWorkSessionDenied)
 }
 
-func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS string) string {
+func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeWS, hint string) string {
 	reason := workSessionReasonMap[code]
 	authDisplay := authMethod
 	if authMethod == "Browser login" {
@@ -99,7 +106,7 @@ func buildWorkSessionDiagnostic(code, operation, serverName, authMethod, activeW
 	}
 	fmt.Fprintln(&sb)
 	fmt.Fprintln(&sb, "Next:")
-	for _, action := range workSessionNextActions(code, operation, serverName, activeWS) {
+	for _, action := range workSessionGuidance(code, operation, serverName, activeWS, hint) {
 		fmt.Fprintf(&sb, "  %s\n", action.PlainText())
 	}
 	fmt.Fprintln(&sb)
@@ -144,7 +151,7 @@ func workSessionTokenNote(operation string) string {
 	return "Note: Tokens issued by Alpacon (service or personal API token) bypass this check."
 }
 
-func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS string) workSessionErrorJSON {
+func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, activeWS, hint string) workSessionErrorJSON {
 	var ws *string
 	if activeWS != "" {
 		ws = &activeWS
@@ -162,8 +169,25 @@ func buildWorkSessionErrorEnvelope(code, operation, serverName, authMethod, acti
 			TargetServers:      targetServerList(serverName),
 			CurrentWorksession: ws,
 		},
-		NextActions: workSessionNextActions(code, operation, serverName, activeWS),
+		NextActions: workSessionGuidance(code, operation, serverName, activeWS, hint),
 	}
+}
+
+// workSessionGuidance is the Next list for a WorkSession refusal: the server's
+// hint first, when the refusal carried one, then the actions built from the
+// code. A code-built description that says what the hint says is dropped, and
+// its command stays.
+func workSessionGuidance(code, operation, serverName, activeWS, hint string) []NextAction {
+	actions := workSessionNextActions(code, operation, serverName, activeWS)
+	if hint == "" {
+		return actions
+	}
+	for i := range actions {
+		if actions[i].Description == accountSessionCreateDescription {
+			actions[i].Description = ""
+		}
+	}
+	return append([]NextAction{{Description: hint}}, actions...)
 }
 
 func targetServerList(serverName string) []string {
@@ -219,7 +243,7 @@ func workSessionNextActions(code, operation, serverName, activeWS string) []Next
 		}
 		return []NextAction{
 			{Command: "alpacon exec" + workSessionFlag(activeWS) + " -u <approved account> " + serverArg + " -- <command>", Description: "pass -u with the session's account (shown by 'alpacon work-session current')"},
-			{Command: accountCreate, Description: "or create a session for this account"},
+			{Command: accountCreate, Description: accountSessionCreateDescription},
 		}
 	case WorkSessionAgentSessionRequired:
 		// The selected session is a person's; only an agent session serves an agent.
