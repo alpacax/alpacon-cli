@@ -162,6 +162,15 @@ secret with --env="KEY" instead. A --file script that carries a credential is
 refused the same way; take the secret out of the script and have the script
 read it on the host at run time. --output json emits an error envelope on
 stderr with error_code command_inline_credential.
+A command whose line carries a script body—a heredoc, a multi-line -c or -e
+body, or a decoded payload piped into a shell—can be refused when the
+workspace approval policy blocks script bodies, with exit code 6 and the code
+use_file_execution. Then save the script to a local file and run it on the
+same server as the same account with --upload --file PATH --file-from
+LOCAL_PATH, which writes it to PATH and runs it in one step, or with --file
+PATH --from-server when the script is already at PATH on the server. Add
+--interpreter ABSOLUTE_PATH for a script /bin/bash does not run, such as a perl
+-e body.
 Requires an active WorkSession when using Browser login (Auth0); Token auth (API token or Service token) bypasses this requirement.`,
 	Example: `  # Simple command execution
   alpacon exec prod-docker docker ps
@@ -352,6 +361,11 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 	if HandlePendingApproval(err, parsed) {
 		return
 	}
+	// The command never ran, so under --output json nothing reaches stdout: the
+	// buffer holds only the server's own wording of the refusal.
+	if HandleUseFileExecutionRefusal(err, parsed) {
+		return
+	}
 	if buf != nil {
 		_, _ = os.Stdout.Write(buf.Bytes())
 	}
@@ -373,6 +387,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // user/group, work-session, or --env keys) so the pending-approval message can
 // tell a human exactly what to re-run once the request is approved. It uses --
 // before the command so remote flags are never re-parsed as alpacon flags.
+// The -u, -g and --work-session values come quoted from runAsFlags, and the
+// server is quoted with argvQuote, as useFileExecutionRefusal quotes it.
 // The Command stays a pure, executable string; when --env keys are present the
 // caveat rides in Description, since the rerun re-reads each value from the
 // shell and a machine consumer replaying Command verbatim would otherwise
@@ -387,16 +403,7 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 // verifies it in place instead of failing on it or rewriting it. It keeps
 // --from-server, since there may be no local copy to read.
 func reRunHint(parsed RemoteExecArgs) utils.NextAction {
-	parts := []string{string(ExecInvocation)}
-	if parsed.Username != "" {
-		parts = append(parts, "-u "+parsed.Username)
-	}
-	if parsed.Groupname != "" {
-		parts = append(parts, "-g "+parsed.Groupname)
-	}
-	if parsed.WorkSessionID != "" {
-		parts = append(parts, "--work-session "+parsed.WorkSessionID)
-	}
+	parts := append([]string{string(ExecInvocation)}, runAsFlags(parsed)...)
 	// Emit env keys only (never values): the rerun re-reads each value from the
 	// shell, so the secret stays off this hint on stderr and out of the logs.
 	keys := make([]string, 0, len(parsed.Env))
@@ -421,7 +428,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 		if parsed.File.ReuseDays > 0 {
 			parts = append(parts, "--reuse-days "+strconv.Itoa(parsed.File.ReuseDays))
 		}
-		parts = append(parts, parsed.Server)
+		parts = append(parts, argvQuote(parsed.Server))
 		if len(parsed.File.Args) > 0 {
 			parts = append(parts, "--")
 			for _, a := range parsed.File.Args {
@@ -429,7 +436,7 @@ func reRunHint(parsed RemoteExecArgs) utils.NextAction {
 			}
 		}
 	} else {
-		parts = append(parts, parsed.Server, "--", parsed.Command)
+		parts = append(parts, argvQuote(parsed.Server), "--", parsed.Command)
 	}
 
 	action := utils.NextAction{Command: strings.Join(parts, " ")}

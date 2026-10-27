@@ -818,7 +818,7 @@ func errorFromDetails(d EventDetails) error {
 		return &PendingApprovalError{CommandID: d.ID, FileSuggestion: d.FileExecutionSuggestion}
 	}
 	if IsRejectedStatus(d.Status) {
-		return &CommandRejectedError{CommandID: d.ID}
+		return &CommandRejectedError{CommandID: d.ID, Cause: d.RejectionCause}
 	}
 	if IsStatusOnlyFailure(d.Status) {
 		phase := ""

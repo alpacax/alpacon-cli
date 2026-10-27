@@ -386,6 +386,56 @@ func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 	assert.Contains(t, err.Error(), "rejected by a reviewer")
 }
 
+// TestErrorFromDetails_UseFileExecutionCarriesCause pins the gate's refusal of
+// a script body on the command line: the cause reaches the error, its text
+// names the code, and ErrorCode hands the code to the --output json envelope.
+func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
+	t.Parallel()
+	var d EventDetails
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"id": "cmd-9",
+		"status": "rejected",
+		"verification_status": "rejected",
+		"rejection_cause": "use_file_execution",
+		"rejection_gate": "approval",
+		"result": "Save the script to a file and run it as a verified file.",
+		"server": {"id": "srv-1", "name": "prod"}
+	}`), &d))
+
+	err := errorFromDetails(d)
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Equal(t, RejectionCauseUseFileExecution, rejected.Cause)
+	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
+	code, _ := utils.ParseErrorResponse(err)
+	assert.Equal(t, RejectionCauseUseFileExecution, code)
+}
+
+// TestCommandRejectedError_OtherCausesHaveNoCode pins that only
+// use_file_execution reaches the envelope as error_code: a reviewer's refusal
+// arrives with rejection_cause approval_rejected, and a cause the CLI has no
+// sentence for keeps the reviewer message and no code.
+func TestCommandRejectedError_OtherCausesHaveNoCode(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		cause string
+	}{
+		{name: "no cause", cause: ""},
+		{name: "reviewer rejection", cause: "approval_rejected"},
+		{name: "unknown cause", cause: "risk_denied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected", RejectionCause: tc.cause})
+			code, _ := utils.ParseErrorResponse(err)
+			assert.Empty(t, code)
+			assert.Equal(t, "command cmd-9 was rejected by a reviewer", err.Error())
+		})
+	}
+}
+
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
 	t.Parallel()
 	// awaiting_approval, then the transient "error" the server emits in the

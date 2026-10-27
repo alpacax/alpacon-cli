@@ -978,15 +978,25 @@ func remoteFailureReport(remoteErr *event.RemoteCommandError) (string, int) {
 // the message; table mode prints the red Error line and the hint. Exits 1.
 // The server's hint, when err carries one, takes the place of the local hint.
 func reportCodedRefusal(operation string, err error, message, hint string) {
-	if utils.OutputFormat == utils.OutputFormatJSON {
-		utils.CliErrorEnvelopeWithExit(operation, err, "%s.", message)
+	reportCodedRefusalWithExit(1, operation, err, message, hint, nil)
+}
+
+// reportCodedRefusalWithExit is reportCodedRefusal with a chosen exit code and
+// the next_actions the JSON envelope carries; table mode shows only the hint,
+// so it should spell out the same actions for a person. Under --output json an
+// ErrInvalidID refusal goes out as a usage error with exit 2, so the envelope's
+// code and the exit code agree.
+func reportCodedRefusalWithExit(code int, operation string, err error, message, hint string, actions []utils.NextAction) {
+	if utils.OutputFormat == utils.OutputFormatJSON && errors.Is(err, utils.ErrInvalidID) {
+		utils.CliUsageErrorEnvelopeWithExit(operation, "%s.", message)
 		return
 	}
+	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint := codedRefusalHint(err, hint); hint != "" {
 		fmt.Fprint(os.Stderr, hint)
 	}
-	os.Exit(1)
+	os.Exit(code)
 }
 
 // codedRefusalHint is the hint reportCodedRefusal prints: the server's, when
