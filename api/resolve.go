@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // ErrBlankName marks a resolver's refusal of a name that trims to empty, so a caller can
@@ -42,7 +43,7 @@ func (e *blankNameError) Is(target error) bool { return target == ErrBlankName }
 func RequireName(name, blankMsg string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", &blankNameError{msg: blankMsg}
+		return "", utils.MarkUsageError(&blankNameError{msg: blankMsg})
 	}
 	return name, nil
 }

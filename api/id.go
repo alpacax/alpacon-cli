@@ -21,9 +21,7 @@ type invalidIDError struct {
 func (e *invalidIDError) Error() string {
 	return fmt.Sprintf("invalid %s ID %q: must be a single path segment", e.what, e.id)
 }
-func (e *invalidIDError) Unwrap() error       { return utils.ErrInvalidID }
-func (e *invalidIDError) ErrorCode() string   { return utils.ErrorCodeUsage }
-func (e *invalidIDError) ErrorSource() string { return "" }
+func (e *invalidIDError) Unwrap() error { return utils.ErrInvalidID }
 
 type unusableResponseIDError struct{ what string }
 
@@ -42,7 +40,7 @@ func (id PathID) String() string { return id.s }
 func RequireID(id, what string) (PathID, error) {
 	id, ok := pathSegmentID(id)
 	if !ok {
-		return PathID{}, &invalidIDError{id: id, what: what}
+		return PathID{}, utils.MarkUsageError(&invalidIDError{id: id, what: what})
 	}
 	return PathID{s: id}, nil
 }

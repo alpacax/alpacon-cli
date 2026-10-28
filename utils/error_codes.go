@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
 )
 
 // Synthetic error_code values: the CLI's own, for failures the server sent no code for.
@@ -53,6 +54,13 @@ func MarkUsageError(err error) error {
 // usage_error code does not count, since only this process knows its command line was wrong.
 func IsUsageError(err error) bool {
 	return errors.As(err, new(usageError))
+}
+
+func usageErrorIn(args []any) bool {
+	return slices.ContainsFunc(args, func(arg any) bool {
+		err, ok := arg.(error)
+		return ok && IsUsageError(err)
+	})
 }
 
 var serverCodeShape = regexp.MustCompile(`^[a-z0-9_]+$`)

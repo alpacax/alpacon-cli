@@ -56,6 +56,7 @@ func CliError(msg string, args ...any) {
 // CliErrorWithExit handles all error messages in the CLI. Under --output json it prints
 // one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
+	ExitIfUsageError(ExitCodeGeneralError, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(1, "", msg, args)
 	}
@@ -68,6 +69,7 @@ func CliErrorWithExit(msg string, args ...any) {
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
+	ExitIfUsageError(code, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(code, "", msg, args)
 	}
@@ -78,6 +80,7 @@ func CliErrorWithExitCode(code int, msg string, args ...any) {
 // CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
 // exit code, so only exit 1 keeps the report footer.
 func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
+	ExitIfUsageError(exitCode, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(exitCode, errorCode, msg, args)
 	}

@@ -3,7 +3,6 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
@@ -487,32 +487,21 @@ func TestReRunHintQuotesServer(t *testing.T) {
 	}
 }
 
-// TestReportCodedRefusalInvalidIDExitCode pins that an ErrInvalidID refusal
-// under --output json exits 2 with error_code usage_error, so the code and
-// the exit code agree, while table mode keeps the caller's exit code.
-func TestReportCodedRefusalInvalidIDExitCode(t *testing.T) {
+func TestReportCodedRefusalOfAnInvalidIDExitsTwoInEitherFormat(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name     string
-		format   string
-		wantExit int
-	}{
-		{name: "json", format: utils.OutputFormatJSON, wantExit: utils.ExitCodeUsageError},
-		{name: "table", format: utils.OutputFormatTable, wantExit: utils.ExitCodeNotApproved},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, format := range []string{utils.OutputFormatJSON, utils.OutputFormatTable} {
+		t.Run(format, func(t *testing.T) {
 			t.Parallel()
 			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalInvalidIDHelperProcess$")
-			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER="+tc.format)
+			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_INVALID_ID_HELPER="+format)
 			var stderr bytes.Buffer
 			helper.Stderr = &stderr
 
 			err := helper.Run()
 			var exitErr *osexec.ExitError
 			require.ErrorAs(t, err, &exitErr)
-			assert.Equal(t, tc.wantExit, exitErr.ExitCode())
-			if tc.format == utils.OutputFormatTable {
+			assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
+			if format == utils.OutputFormatTable {
 				assert.Contains(t, stderr.String(), "work session ID is unusable.")
 				return
 			}
@@ -535,6 +524,6 @@ func TestReportCodedRefusalInvalidIDHelperProcess(t *testing.T) {
 		return
 	}
 	utils.OutputFormat = format
-	err := fmt.Errorf("work session ID: %w", utils.ErrInvalidID)
-	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "work session ID is unusable", "", nil)
+	_, err := api.RequireID("../x", "work session")
+	reportCodedRefusal("command", err, "work session ID is unusable", "")
 }

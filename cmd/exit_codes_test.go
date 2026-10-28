@@ -22,6 +22,7 @@ const (
 	exitHelperUnwritableEnv  = "GO_EXIT_HELPER_UNWRITABLE_STDOUT"
 	exitUserUUID             = "11111111-1111-1111-1111-111111111111"
 	exitMissingRoleUUID      = "22222222-2222-2222-2222-222222222222"
+	exitBadBindingUserUUID   = "33333333-3333-3333-3333-333333333333"
 	exitLargeFileServer      = "big-server"
 	exitLargeFileDownloadURL = "/downloads/big"
 )
@@ -67,9 +68,8 @@ func runExitCases(t *testing.T, cases []exitCase) {
 	}
 }
 
-// exitStubServer answers the lookups commands make before they refuse: the current user, a role
-// named admin, and a download of a file over edit's 10 MB limit from big-server; a role named
-// flaky answers 503, the missing role ID 404, and anything else is an empty list.
+// exitStubServer answers the lookups commands make before they refuse the command line;
+// anything it does not know answers an empty list.
 func exitStubServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,6 +78,10 @@ func exitStubServer() *httptest.Server {
 			_, _ = w.Write([]byte(`{"username":"alice","is_staff":true,"is_superuser":true}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "admin":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitUserUUID + `","name":"admin"}]}`))
+		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "viewer":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitMissingRoleUUID + `","name":"viewer"}]}`))
+		case r.URL.Path == "/api/rbac/user-roles/" && r.URL.Query().Get("user") == exitBadBindingUserUUID:
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"..","role":{"id":"` + exitMissingRoleUUID + `","name":"viewer"}}]}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "flaky":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case r.URL.Path == "/api/rbac/roles/"+exitMissingRoleUUID+"/":
@@ -209,6 +213,19 @@ func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
 	t.Parallel()
 	runExitCases(t, []exitCase{
 		{name: "user role grant whose role lookup fails", args: []string{"user", "role", "grant", "admin", "flaky"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "Failed to resolve the role"},
+		{name: "user role revoke of a binding the server names with an unusable ID", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "the server returned an unusable role binding ID"},
+		{name: "user role revoke of a binding with an unusable ID under json output", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "unusable role binding ID", wantCode: utils.ErrorCodeCLI},
+	})
+}
+
+func TestCommandsExitTwoWhenTheyRefuseAnIDOrNameBeforeAnyRequest(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "note delete with a dot-dot ID", args: []string{"note", "delete", "..", "--yes"}, wantExit: usage, wantStderr: "must be a single path segment"},
+		{name: "note delete with a dot-dot ID under json output", args: []string{"note", "delete", "..", "--yes"}, wantExit: usage, wantStderr: "must be a single path segment", wantCode: utils.ErrorCodeUsage},
+		{name: "user role grant with a blank role", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required"},
+		{name: "user role grant with a blank role under json output", args: []string{"user", "role", "grant", "alice", " "}, wantExit: usage, wantStderr: "role name is required", wantCode: utils.ErrorCodeUsage},
 	})
 }
 
