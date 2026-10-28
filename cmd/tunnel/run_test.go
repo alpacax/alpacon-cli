@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/alpacax/alpacon-cli/client"
 )
 
 type fakeRunRuntime struct {
@@ -250,7 +252,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	tunnelFlags.localPort = "5432"
 	tunnelFlags.remotePort = "invalid"
 
-	exitCode, err := executeTunnelRunWithInvocation("prod-db", []string{"psql"})
+	exitCode, err := executeTunnelRunWithInvocation(&client.AlpaconClient{}, "prod-db", []string{"psql"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

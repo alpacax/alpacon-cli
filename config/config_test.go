@@ -726,6 +726,68 @@ func TestGetActiveWorkSession_FindsSessionStoredUnderTheHostLabel(t *testing.T) 
 	assert.Equal(t, "uuid-old", got, "a session saved before the upgrade stays reachable")
 }
 
+func TestGetActiveWorkSessionFor_ReadsTheNamedWorkspaceNotTheCurrentOne(t *testing.T) {
+	setupTestConfig(t)
+	require.NoError(t, CreateConfig("https://ws-a.example.com", "ws-a", "", "", "", "", "", 0, false))
+	require.NoError(t, SetActiveWorkSession("uuid-A"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-b.example.com", "ws-b", false))
+	require.NoError(t, SetActiveWorkSession("uuid-B"))
+	require.NoError(t, SwitchWorkspace(loadedConfig(t), "https://ws-c.example.com", "ws-c", false))
+	require.NoError(t, SetActiveWorkSession("uuid-C"))
+
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"named workspace that is no longer current", "ws-a", "uuid-A"},
+		{"another named workspace that is no longer current", "ws-b", "uuid-B"},
+		{"current workspace with its own session", "ws-c", "uuid-C"},
+		{"workspace the config never saw", "ws-z", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_HostLabelFallbackOnlyForTheCurrentWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{"current workspace falls back to the host label", "frozen", "uuid-old"},
+		{"another workspace does not", "other", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestConfig(t)
+			require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "", "", "", 0, false))
+			require.NoError(t, SetActiveWorkSession("uuid-old"))
+			require.NoError(t, SetWorkspaceEnv("https://new-slug.us1.alpacon.io", "frozen", false))
+
+			got, err := GetActiveWorkSessionFor(tt.workspace)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetActiveWorkSessionFor_ReportsNoSessionWhenNoConfigExists(t *testing.T) {
+	setupTestConfig(t)
+
+	uuid, err := GetActiveWorkSessionFor("ws-a")
+
+	require.NoError(t, err)
+	assert.Empty(t, uuid)
+}
+
 func TestRestoreWorkspace_PutsBackHostLabelAndSchemaName(t *testing.T) {
 	setupTestConfig(t)
 	require.NoError(t, CreateConfig("https://new-slug.us1.alpacon.io", "new-slug", "", "", "access", "", "alpacon.io", 0, false))

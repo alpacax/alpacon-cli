@@ -70,13 +70,13 @@ redirections, or '&&' will not work.`,
 			utils.CliErrorWithExit("%s", err)
 		}
 
-		workSessionID := worksession.ResolveOrExit(flagWorkSession)
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
+		workSessionID := worksession.ResolveOrExit(alpaconClient, flagWorkSession)
 
 		deps := realEditDeps(alpaconClient, groupname)
 		result, err := runEdit(editOptions{

@@ -25,6 +25,8 @@ var (
 	updateSudoReason  string
 )
 
+const noSessionToUpdate = "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first."
+
 var workSessionUpdateCmd = &cobra.Command{
 	Use:   "update [SESSION_ID]",
 	Short: "Update an existing work session",
@@ -54,15 +56,8 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
   alpacon work-session update ses-abc123 --sudo "systemctl restart nginx"
   alpacon work-session update --sudo "tail -f /var/log/nginx/*.log"`,
 	Run: func(cmd *cobra.Command, args []string) {
-		var sessionID string
-		if len(args) == 1 {
-			sessionID = args[0]
-		} else {
-			resolved, err := Resolve("")
-			if err != nil || resolved == "" {
-				utils.CliUsageErrorEnvelopeWithExit(opUpdate, "No SESSION_ID given and no active work session. Pass an ID, set ALPACON_WORK_SESSION, or run 'alpacon work-session use <id>' first.")
-			}
-			sessionID = resolved
+		if len(args) == 0 && !sessionResolvableBeforeClient("") {
+			utils.CliUsageErrorEnvelopeWithExit(opUpdate, noSessionToUpdate)
 		}
 
 		var req wsapi.WorkSessionUpdateRequest
@@ -138,6 +133,11 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			utils.CliErrorEnvelopeWithExit(opUpdate, err, "Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
 
+		sessionID := updateTargetSession(ac, args)
+		if sessionID == "" {
+			utils.CliUsageErrorEnvelopeWithExit(opUpdate, noSessionToUpdate)
+		}
+
 		if len(serverNames) > 0 {
 			ids, err := server.ResolveServerNames(ac, serverNames)
 			if err != nil {
@@ -161,6 +161,17 @@ ALPACON_WORK_SESSION environment variable, then the workspace's active session
 			utils.CliInfo("Added sudo policies may require approval before they take effect. Re-run your command once the session reflects the change.")
 		}
 	},
+}
+
+func updateTargetSession(ac *client.AlpaconClient, args []string) string {
+	if len(args) == 1 {
+		return args[0]
+	}
+	resolved, err := Resolve(ac, "")
+	if err != nil {
+		return ""
+	}
+	return resolved
 }
 
 // scopes is the effective scope list: req.Scopes when --scope replaces the list, else the session's current scopes.
