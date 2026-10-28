@@ -326,6 +326,24 @@ func TestCliErrorHelpersExitInSubprocess(t *testing.T) {
 			},
 		},
 		{
+			name: "table usage helper exits 2 without the report footer", mode: "usage-no-operation", format: OutputFormatTable, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				assert.Contains(t, stderr, "bad flag --x")
+				assert.NotContains(t, stderr, "report")
+			},
+		},
+		{
+			name: "json usage helper carries usage_error", mode: "usage-no-operation", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
+			check: func(t *testing.T, stderr string) {
+				t.Helper()
+				env := decodeSingleLineEnvelope(t, stderr)
+				assert.Equal(t, ErrorCodeUsage, env.ErrorCode)
+				assert.Equal(t, ExitCodeUsageError, env.ExitCode)
+				assert.Equal(t, "bad flag --x", env.Message)
+			},
+		},
+		{
 			name: "usage helper", mode: "usage", format: OutputFormatJSON, wantExit: ExitCodeUsageError,
 			check: func(t *testing.T, stderr string) {
 				t.Helper()
@@ -397,6 +415,8 @@ func TestCliErrorHelpersHelperProcess(t *testing.T) {
 		CliErrorEnvelopeWithExitCode(6, "", apiErr, "Failed: %s.", apiErr)
 	case "usage":
 		CliUsageErrorEnvelopeWithExit("", "bad flag")
+	case "usage-no-operation":
+		CliUsageErrorWithExit("bad flag --%s", "x")
 	case "prompt-eof":
 		PromptForInput("Username: ")
 	case "failure":

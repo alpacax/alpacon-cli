@@ -85,6 +85,11 @@ func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
 	CliErrorWithExitCode(exitCode, msg, args...)
 }
 
+// CliUsageErrorWithExit reports a flag or argument the command rejected and exits 2 with error_code usage_error.
+func CliUsageErrorWithExit(msg string, args ...any) {
+	CliUsageErrorEnvelopeWithExit("", msg, args...)
+}
+
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {
 	var cause error
 	for _, arg := range args {
