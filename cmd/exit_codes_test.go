@@ -213,6 +213,7 @@ func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
 	t.Parallel()
 	runExitCases(t, []exitCase{
 		{name: "user role grant whose role lookup fails", args: []string{"user", "role", "grant", "admin", "flaky"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "Failed to resolve the role"},
+		{name: "user role grant of a role the server does not have", args: []string{"user", "role", "grant", "alice", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 		{name: "user role revoke of a binding the server names with an unusable ID", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "the server returned an unusable role binding ID"},
 		{name: "user role revoke of a binding with an unusable ID under json output", args: []string{"user", "role", "revoke", exitBadBindingUserUUID, "viewer"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "unusable role binding ID", wantCode: utils.ErrorCodeCLI},
 	})
