@@ -89,11 +89,10 @@ redirections, or '&&' will not work.`,
 		if err != nil {
 			printPreservedTempPath(result)
 			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
-			fail := utils.CliErrorWithExit
 			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
-				fail = utils.CliUsageErrorWithExit
+				err = utils.MarkUsageError(err)
 			}
-			fail("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
+			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
 		}
 
 		if !result.Changed {

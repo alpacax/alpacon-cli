@@ -56,11 +56,10 @@ This command requires staff or superuser privileges.`,
 		}
 
 		if !strings.Contains(email, "@") {
-			fail := utils.CliErrorWithExit
 			if len(args) > 0 {
-				fail = utils.CliUsageErrorWithExit
+				utils.CliUsageErrorWithExit("invalid email address: %s", email)
 			}
-			fail("invalid email address: %s", email)
+			utils.CliErrorWithExit("invalid email address: %s", email)
 		}
 
 		err = iam.InviteUser(alpaconClient, iam.UserInviteRequest{Email: email})
