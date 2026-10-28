@@ -16,12 +16,13 @@ import (
 const configPkgPath = "github.com/alpacax/alpacon-cli/config"
 
 // configReaders answer a question out of the config file, LoadConfig by way of
-// the other three calling it inside. Writes load it too but hand nothing back.
+// the others calling it inside. Writes load it too but hand nothing back.
 var configReaders = map[string]bool{
-	"LoadConfig":           true,
-	"IsSaaS":               true,
-	"GetActiveWorkSession": true,
-	"ResolveAuthMethod":    true,
+	"LoadConfig":              true,
+	"IsSaaS":                  true,
+	"GetActiveWorkSession":    true,
+	"GetActiveWorkSessionFor": true,
+	"ResolveAuthMethod":       true,
 }
 
 // The walk matches on name, so renaming a reader would leave it nothing to find
@@ -30,6 +31,7 @@ var (
 	_ = config.LoadConfig
 	_ = config.IsSaaS
 	_ = config.GetActiveWorkSession
+	_ = config.GetActiveWorkSessionFor
 	_ = config.ResolveAuthMethod
 )
 

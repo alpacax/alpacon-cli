@@ -397,9 +397,19 @@ func SetActiveWorkSessionFor(workspaceName, uuid string) error {
 	})
 }
 
-// GetActiveWorkSession returns the active work-session UUID for the current workspace.
-// Returns "" (no error) when no session is set, the config is missing the map, or no config file exists.
+// GetActiveWorkSession returns the active work-session UUID for the current workspace, or "" when none is set or no config file exists.
+// A caller holding a client uses GetActiveWorkSessionFor with the client's workspace instead.
 func GetActiveWorkSession() (string, error) {
+	return readActiveWorkSession(func(cfg Config) string { return cfg.WorkspaceIdentity() })
+}
+
+// GetActiveWorkSessionFor is GetActiveWorkSession for workspaceName, a parameter rather than a fresh
+// read so another shell's 'alpacon ws use' cannot swap in a foreign session.
+func GetActiveWorkSessionFor(workspaceName string) (string, error) {
+	return readActiveWorkSession(func(Config) string { return workspaceName })
+}
+
+func readActiveWorkSession(workspace func(Config) string) (string, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
 		// errors.Is and not os.IsNotExist: LoadConfig wraps the missing-file
@@ -410,7 +420,7 @@ func GetActiveWorkSession() (string, error) {
 		}
 		return "", err
 	}
-	return activeWorkSessionOn(cfg, cfg.WorkspaceIdentity()), nil
+	return activeWorkSessionOn(cfg, workspace(cfg)), nil
 }
 
 // ClearActiveWorkSessionFor clears workspaceName's active work-session only while it is still uuid,
@@ -494,7 +504,7 @@ func setActiveWorkSessionOn(cfg *Config, workspaceName, uuid string) (bool, erro
 		return false, errors.New("no active workspace; run 'alpacon login' first")
 	}
 	// A session saved before schema_name was recorded sits under the host label,
-	// where GetActiveWorkSession still falls back to it. Every write for the
+	// where a read for the current workspace still falls back to it. Every write for the
 	// current workspace drops it, or an unset would revive that older session.
 	legacyKey := ""
 	if workspaceName == cfg.WorkspaceIdentity() && cfg.WorkspaceName != workspaceName {
