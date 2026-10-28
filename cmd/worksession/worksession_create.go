@@ -162,7 +162,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			}
 			cfg, err := config.LoadConfig()
 			if err != nil || cfg.WorkspaceName == "" {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires an active workspace. Run 'alpacon login' first.")
+				utils.CliErrorEnvelopeWithExit(opCreate, utils.ErrNotLoggedIn, "--use requires an active workspace. Run 'alpacon login' first.")
 			}
 		}
 
@@ -257,7 +257,18 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			}
 		case useDecisionErrorNeedsWait:
 			if !shouldWait {
-				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use requires the session to be active. Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID)
+				if terminal := settledNegatively(session.Status, session.ID); terminal != nil {
+					exitTerminalWait(opCreate, terminal, terminal)
+				}
+				if session.Status != wsapi.StatusPending {
+					utils.CliErrorEnvelopeWithExit(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
+				}
+				utils.PrintPendingApproval(
+					fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web). Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID, session.ID),
+					session.ApprovalRequestID,
+					afterApprovalAction(sessionRequesterType, session.ID, account),
+				)
+				os.Exit(utils.ExitCodePendingApproval)
 			}
 		}
 
@@ -292,12 +303,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			// failure falls through to the general-error code.
 			var terminal *terminalWaitError
 			if errors.As(err, &terminal) {
-				if utils.OutputFormat == utils.OutputFormatJSON {
-					printTerminalWaitErrorJSON(opCreate, terminal, err)
-					os.Exit(utils.ExitCodeNotApproved)
-				}
-				printTerminalWaitError(terminal, err)
-				os.Exit(utils.ExitCodeNotApproved)
+				exitTerminalWait(opCreate, terminal, err)
 			}
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
@@ -590,6 +596,34 @@ func buildSudoPolicies(specs []string, reason string) []wsapi.SudoPolicyInline {
 	return policies
 }
 
+// settledNegatively is the refusal a status stands for once the session can no longer
+// become approved or active; nil for any other status.
+func settledNegatively(status, id string) *terminalWaitError {
+	switch status {
+	case wsapi.StatusRejected:
+		return &terminalWaitError{message: "work session was rejected", sessionID: id}
+	case wsapi.StatusExpired:
+		return &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
+	case wsapi.StatusRevoked:
+		return &terminalWaitError{message: "work session was revoked", sessionID: id}
+	case wsapi.StatusCancelled:
+		return &terminalWaitError{message: "work session was cancelled", sessionID: id}
+	case wsapi.StatusCompleted:
+		return &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
+	}
+	return nil
+}
+
+// exitTerminalWait reports a settled negative outcome and exits 6, in the shape --output selects.
+func exitTerminalWait(operation string, terminal *terminalWaitError, err error) {
+	if utils.OutputFormat == utils.OutputFormatJSON {
+		printTerminalWaitErrorJSON(operation, terminal, err)
+	} else {
+		printTerminalWaitError(terminal, err)
+	}
+	os.Exit(utils.ExitCodeNotApproved)
+}
+
 // pollForApproval polls at interval until the session reaches a terminal state or
 // timeout elapses. untilActive=false returns on approved or active; untilActive=true
 // returns only on active (continues polling on approved until the server
@@ -677,16 +711,9 @@ func pollForApproval(ac *client.AlpaconClient, id string, untilActive bool, inte
 			if !untilActive {
 				return s, nil
 			}
-		case wsapi.StatusRejected:
-			return nil, &terminalWaitError{message: "work session was rejected", sessionID: id}
-		case wsapi.StatusExpired:
-			return nil, &terminalWaitError{message: "work session expired while waiting for approval", sessionID: id}
-		case wsapi.StatusRevoked:
-			return nil, &terminalWaitError{message: "work session was revoked", sessionID: id}
-		case wsapi.StatusCancelled:
-			return nil, &terminalWaitError{message: "work session was cancelled", sessionID: id}
-		case wsapi.StatusCompleted:
-			return nil, &terminalWaitError{message: "work session was completed unexpectedly", sessionID: id}
+		}
+		if terminal := settledNegatively(s.Status, id); terminal != nil {
+			return nil, terminal
 		}
 
 		waitMsg := waitMsgApproval

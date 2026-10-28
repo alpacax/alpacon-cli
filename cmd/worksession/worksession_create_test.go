@@ -869,3 +869,144 @@ func TestPollForApproval_PlainTimeoutCarriesNoHint(t *testing.T) {
 	require.Error(t, err)
 	assert.Empty(t, utils.RefusalNextActions(err))
 }
+
+func TestWorkSessionCreateUseWithoutLoginExitsOneAsNotLoggedIn(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			env := append(agentHelperEnv(), "HOME="+t.TempDir())
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, env, outputFormat, "http://127.0.0.1:1",
+				createArgs("--use")...)
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "--use requires an active workspace")
+			if outputFormat == utils.OutputFormatJSON {
+				var got errorEnvelope
+				require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+				assert.Equal(t, utils.ExitCodeGeneralError, got.ExitCode)
+				assert.Equal(t, utils.ErrorCodeNotLoggedIn, got.ErrorCode)
+			}
+		})
+	}
+}
+
+func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newPendingCreateServer(t)
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodePendingApproval, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			guidance := stderr
+			if outputFormat == utils.OutputFormatJSON {
+				var envelope struct {
+					Status    string `json:"status"`
+					ExitCode  int    `json:"exit_code"`
+					Message   string `json:"message"`
+					RequestID string `json:"request_id"`
+					Context   struct {
+						RequestID string `json:"request_id"`
+					} `json:"context"`
+					NextActions []utils.NextAction `json:"next_actions"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(stdout), &envelope), "stdout: %s", stdout)
+				assert.Equal(t, utils.PendingApprovalStatus, envelope.Status)
+				assert.Equal(t, utils.ExitCodePendingApproval, envelope.ExitCode)
+				assert.Equal(t, "apr-1", envelope.RequestID)
+				assert.Equal(t, "apr-1", envelope.Context.RequestID)
+				require.NotEmpty(t, envelope.NextActions)
+				assert.Equal(t, "alpacon work-session use ses-x", envelope.NextActions[0].Command)
+				guidance = envelope.Message
+			}
+			assert.Contains(t, guidance, "--use requires the session to be active, and work session ses-x is pending")
+			assert.Contains(t, guidance, "A human must approve it in the Alpacon console (web)")
+			assert.Contains(t, guidance, "alpacon work-session use ses-x")
+		})
+	}
+}
+
+func newCreateServerAnswering(t *testing.T, status string) *httptest.Server {
+	t.Helper()
+	session := `{"id":"ses-x","status":"` + status + `","approval_request_id":"apr-1","expires_at":"2026-06-01T12:00:00Z"}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"srv-1","name":"prod"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/work-sessions/sessions/":
+			_, _ = w.Write([]byte(session))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestWorkSessionCreateUseOnASettledNegativeSessionExitsNotApproved(t *testing.T) {
+	t.Parallel()
+	for _, outputFormat := range []string{utils.OutputFormatTable, utils.OutputFormatJSON} {
+		t.Run(outputFormat, func(t *testing.T) {
+			t.Parallel()
+			ts := newCreateServerAnswering(t, "rejected")
+
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), outputFormat, ts.URL,
+				createArgs("--use")...)
+
+			require.Equal(t, utils.ExitCodeNotApproved, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+			assert.Contains(t, stderr, "work session was rejected")
+			if outputFormat == utils.OutputFormatTable {
+				assert.Contains(t, stderr, "alpacon work-session describe ses-x")
+				assert.Contains(t, stderr, "alpacon work-session complete ses-x")
+				return
+			}
+			var got struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Context   struct {
+					WorkSessionID string `json:"work_session_id"`
+				} `json:"context"`
+				NextActions []utils.NextAction `json:"next_actions"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+			assert.Equal(t, utils.ExitCodeNotApproved, got.ExitCode)
+			assert.Equal(t, utils.ErrorCodeNotApproved, got.ErrorCode)
+			assert.Equal(t, "ses-x", got.Context.WorkSessionID)
+			commands := make([]string, 0, len(got.NextActions))
+			for _, action := range got.NextActions {
+				commands = append(commands, action.Command)
+			}
+			assert.Equal(t, []string{"alpacon work-session describe ses-x", "alpacon work-session complete ses-x"}, commands)
+		})
+	}
+}
+
+func TestWorkSessionCreateWithoutUseReportsASettledSessionAsCreated(t *testing.T) {
+	t.Parallel()
+	ts := newCreateServerAnswering(t, "rejected")
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL, createArgs()...)
+
+	assert.Equal(t, 0, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Work session created: ses-x (status: rejected")
+	assert.NotContains(t, stderr, "work session was rejected")
+}
+
+func TestWorkSessionCreateUseOnAnUnknownStatusExitsGeneralError(t *testing.T) {
+	t.Parallel()
+	ts := newCreateServerAnswering(t, "mystery")
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, agentHelperEnv(), utils.OutputFormatTable, ts.URL,
+		createArgs("--use")...)
+
+	require.Equal(t, utils.ExitCodeGeneralError, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
+	assert.Contains(t, stderr, "--use requires the session to be active, but work session ses-x is mystery.")
+}
