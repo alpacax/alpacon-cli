@@ -311,3 +311,23 @@ func TestWebshAndExecParsersExitTwoOnABadCommandLine(t *testing.T) {
 		{name: "websh share with a remote command under json output", args: []string{"websh", "--output", "json", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used", wantCode: utils.ErrorCodeUsage},
 	})
 }
+
+func TestExecAndWebshBoolFlagsDoNotTurnTheServerIntoAFlagValue(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "exec upload before a server and a command named like a subcommand", args: []string{"exec", "--upload", "my-server", "ls"}, wantExit: usage, wantStderr: "--upload requires --file"},
+		{name: "websh share before a server and a command named like a subcommand", args: []string{"websh", "-s", "my-server", "join"}, wantExit: usage, wantStderr: "--share flag cannot be used with remote commands"},
+	})
+}
+
+func TestExecDetachBeforeTheServerSubmitsARemoteCommandNamedLikeASubcommand(t *testing.T) {
+	t.Parallel()
+
+	stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"exec", "--detach", "my-server", "ls", "--output", "json"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	assert.Contains(t, stderr, "Error: failed to submit command on 'my-server'", "the remote --output json must not reach alpacon")
+}

@@ -345,6 +345,12 @@ func init() {
 	WebshCmd.AddCommand(webshInviteCmd)
 	WebshCmd.AddCommand(webshWatchCmd)
 	WebshCmd.AddCommand(webshRecordsCmd)
+
+	// Registered hidden so Cobra's subcommand lookup does not take the server after them for their value.
+	WebshCmd.Flags().BoolP("share", "s", false, "")
+	WebshCmd.Flags().Bool("read-only", false, "")
+	_ = WebshCmd.Flags().MarkHidden("share")
+	_ = WebshCmd.Flags().MarkHidden("read-only")
 }
 
 func extractValue(args []string, i int) (string, int) {
