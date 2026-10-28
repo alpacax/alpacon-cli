@@ -6,19 +6,21 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
-	exitHelperMarker = "exit-helper"
-	exitHelperEnv    = "GO_WANT_EXIT_HELPER"
-	exitUserUUID     = "11111111-1111-1111-1111-111111111111"
-
+	exitHelperMarker         = "exit-helper"
+	exitHelperEnv            = "GO_WANT_EXIT_HELPER"
+	exitHelperUnwritableEnv  = "GO_EXIT_HELPER_UNWRITABLE_STDOUT"
+	exitUserUUID             = "11111111-1111-1111-1111-111111111111"
 	exitMissingRoleUUID      = "22222222-2222-2222-2222-222222222222"
 	exitLargeFileServer      = "big-server"
 	exitLargeFileDownloadURL = "/downloads/big"
@@ -29,6 +31,7 @@ type exitCase struct {
 	args       []string
 	wantExit   int
 	wantStderr string
+	wantCode   string // set: stderr's last line is an envelope with this error_code; args without --output gain --output json
 }
 
 // runExitCases runs each case through the real Execute() in a child process
@@ -39,18 +42,34 @@ func runExitCases(t *testing.T, cases []exitCase) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, tt.args,
+			args := tt.args
+			namesOutput := slices.ContainsFunc(args, func(arg string) bool { return arg == "--output" || strings.HasPrefix(arg, "--output=") })
+			if tt.wantCode != "" && !namesOutput {
+				args = append([]string{"--output", "json"}, args...)
+			}
+
+			stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, args,
 				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
 
 			assert.Equal(t, tt.wantExit, exitCode, "stdout: %s\nstderr: %s", stdout, stderr)
 			assert.Contains(t, stderr, tt.wantStderr)
+			if tt.wantCode != "" {
+				lines := strings.Split(strings.TrimSpace(stderr), "\n")
+				var envelope struct {
+					ErrorCode string `json:"error_code"`
+					ExitCode  int    `json:"exit_code"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &envelope), "stderr: %s", stderr)
+				assert.Equal(t, tt.wantCode, envelope.ErrorCode)
+				assert.Equal(t, tt.wantExit, envelope.ExitCode)
+			}
 		})
 	}
 }
 
 // exitStubServer answers the lookups commands make before they refuse: the current user, a role
-// named admin, and a download of a file over edit's 10 MB limit from big-server; the missing
-// role ID answers 404, and anything else is an empty list.
+// named admin, and a download of a file over edit's 10 MB limit from big-server; a role named
+// flaky answers 503, the missing role ID 404, and anything else is an empty list.
 func exitStubServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -59,6 +78,8 @@ func exitStubServer() *httptest.Server {
 			_, _ = w.Write([]byte(`{"username":"alice","is_staff":true,"is_superuser":true}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "admin":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitUserUUID + `","name":"admin"}]}`))
+		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "flaky":
+			w.WriteHeader(http.StatusServiceUnavailable)
 		case r.URL.Path == "/api/rbac/roles/"+exitMissingRoleUUID+"/":
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"detail":"Not found."}`))
@@ -80,7 +101,6 @@ func exitStubServer() *httptest.Server {
 	}))
 }
 
-// Serial: the child reaches an os.Exit, and the parent's own run returns at once.
 func TestExitCodeHelperProcess(t *testing.T) {
 	if os.Getenv(exitHelperEnv) != "1" {
 		return
@@ -94,7 +114,14 @@ func TestExitCodeHelperProcess(t *testing.T) {
 	if err := writeExitHelperConfig(ts.URL); err != nil {
 		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
+	if os.Getenv(exitHelperUnwritableEnv) == "1" {
+		readOnly, err := os.Open(os.DevNull)
+		if err != nil {
+			os.Exit(99)
+		}
+		os.Stdout = readOnly
+	}
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }
@@ -122,11 +149,13 @@ func writeExitHelperConfig(workspaceURL string) error {
 }
 
 func TestCommandsExitTwoWhenTheyRejectTheirOwnFlagsOrArguments(t *testing.T) {
+	t.Parallel()
 	const usage = utils.ExitCodeUsageError
 	runExitCases(t, []exitCase{
 		{name: "csr create with valid days but no domain or ip", args: []string{"csr", "create", "--valid-days", "5"}, wantExit: usage, wantStderr: "require --domain or --ip"},
 		{name: "csr create with valid days of zero", args: []string{"csr", "create", "--domain", "a.com", "--valid-days", "0"}, wantExit: usage, wantStderr: "--valid-days must be a positive integer"},
 		{name: "csr create with no usable domain or ip", args: []string{"csr", "create", "--domain", ","}, wantExit: usage, wantStderr: "at least one valid domain or IP"},
+		{name: "token delete without yes under json output", args: []string{"token", "delete", "tk"}, wantExit: usage, wantStderr: "This operation requires confirmation", wantCode: utils.ErrorCodeConfirmationRequired},
 		{name: "token acl add without a token", args: []string{"token", "acl", "add", "--command", "ls"}, wantExit: usage, wantStderr: "token name or ID is required"},
 		{name: "token acl add with a blank command", args: []string{"token", "acl", "add", "tk", "--command", ""}, wantExit: usage, wantStderr: "--command is required"},
 		{name: "token acl server add without a server flag", args: []string{"token", "acl", "server", "add", "tk"}, wantExit: usage, wantStderr: "one of --server or --servers is required"},
@@ -153,20 +182,132 @@ func TestCommandsExitTwoWhenTheyRejectTheirOwnFlagsOrArguments(t *testing.T) {
 		{name: "user permission can-i with the arguments transposed", args: []string{"user", "permission", "can-i", "server:update", "bob"}, wantExit: usage, wantStderr: "The user comes first"},
 		{name: "user permission can-i with a non permission", args: []string{"user", "permission", "can-i", "foo"}, wantExit: usage, wantStderr: "is not a permission"},
 		{name: "exec purpose with a job id that is not a uuid", args: []string{"exec", "purpose", "x", "because"}, wantExit: usage, wantStderr: "invalid JOB_ID"},
-		{name: "exec purpose with a blank purpose", args: []string{"exec", "purpose", exitUserUUID, "  "}, wantExit: usage, wantStderr: "PURPOSE"},
+		{name: "exec purpose with a blank purpose", args: []string{"exec", "purpose", exitUserUUID, "  "}, wantExit: usage, wantStderr: "PURPOSE requires a value describing what this command is for"},
 		{name: "exec logs with a job id that is not a uuid", args: []string{"exec", "logs", "x"}, wantExit: usage, wantStderr: "invalid JOB_ID"},
 		{name: "note create with content over the limit", args: []string{"note", "create", "-s", "my-server", "-c", strings.Repeat("a", 513)}, wantExit: usage, wantStderr: "512 character limit"},
 		{name: "login without a target", args: []string{"login"}, wantExit: usage, wantStderr: "login target is required"},
 		{name: "login with a workspace but no region", args: []string{"login", "--workspace", "x"}, wantExit: usage, wantStderr: "--region is required"},
-		{name: "kube config with a bad proxy port", args: []string{"kube", "config", "c", "--proxy-port", "0"}, wantExit: usage, wantStderr: "--proxy-port"},
-		{name: "kube proxy with a bad port", args: []string{"kube", "proxy", "c", "--port", "99999"}, wantExit: usage, wantStderr: "--port"},
+		{name: "kube config with a bad proxy port", args: []string{"kube", "config", "c", "--proxy-port", "0"}, wantExit: usage, wantStderr: "--proxy-port must be a port number from 1 to 65535, not 0."},
+		{name: "kube proxy with a bad port", args: []string{"kube", "proxy", "c", "--port", "99999"}, wantExit: usage, wantStderr: "--port must be a port number from 1 to 65535, not 99999."},
 		{name: "approval ls with an unknown status", args: []string{"approval", "ls", "--status", "bad"}, wantExit: usage, wantStderr: "invalid --status"},
 		{name: "approval ls with an unknown type", args: []string{"approval", "ls", "--type", "bad"}, wantExit: usage, wantStderr: "invalid --type"},
 		{name: "acl entry add with a file and a flag", args: []string{"acl", "entry", "add", "--file", "x", "--command", "ls"}, wantExit: usage, wantStderr: "--file cannot be combined"},
 		{name: "acl entry add without a token", args: []string{"acl", "entry", "add"}, wantExit: usage, wantStderr: "--token is required"},
+		{name: "acl entry add with a bad expiry", args: []string{"acl", "entry", "add", "--token", "tk", "--command", "ls", "--username", "root", "--expires-at", "bad"}, wantExit: usage, wantStderr: `--expires-at must be an RFC 3339 time such as 2027-01-15T10:00:00Z, not "bad"`},
+		{name: "acl entry add with only a blank server", args: []string{"acl", "entry", "add", "--token", "tk", "--command", "ls", "--username", "root", "--server", ","}, wantExit: usage, wantStderr: "a server value is empty; name each server, or leave the scope out on purpose to cover every server"},
 		{name: "acl entry remove with a name", args: []string{"acl", "entry", "remove", "foo"}, wantExit: usage, wantStderr: "is not an entry ID"},
 		{name: "edit with a local path", args: []string{"edit", "foo"}, wantExit: usage, wantStderr: "remote path must be in format"},
 		{name: "edit of a large file without force", args: []string{"edit", exitLargeFileServer + ":/var/log/big.log"}, wantExit: usage, wantStderr: "rerun with --force"},
+		{name: "edit of a large file without force under json output", args: []string{"edit", exitLargeFileServer + ":/var/log/big.log"}, wantExit: usage, wantStderr: "rerun with --force", wantCode: utils.ErrorCodeUsage},
 		{name: "tunnel with an invalid remote port", args: []string{"tunnel", "my-server", "-l", "9000", "-r", "invalid"}, wantExit: usage, wantStderr: "invalid remote port"},
+		{name: "api without an endpoint under json output", args: []string{"api"}, wantExit: usage, wantStderr: "expected one ENDPOINT", wantCode: utils.ErrorCodeUsage},
+		{name: "api with an invalid method under json output", args: []string{"api", "-X", "NOT A METHOD", "/api/x/"}, wantExit: usage, wantStderr: "invalid method", wantCode: utils.ErrorCodeUsage},
+	})
+}
+
+func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
+	t.Parallel()
+	runExitCases(t, []exitCase{
+		{name: "user role grant whose role lookup fails", args: []string{"user", "role", "grant", "admin", "flaky"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "Failed to resolve the role"},
+	})
+}
+
+func TestExecuteExitsOneWhenACompletionScriptCannotBeWritten(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"completion", "bash"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir(), exitHelperUnwritableEnv+"=1")
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+	assert.Contains(t, stderr, "While executing the command")
+}
+
+func TestExecutePrintsACobraParseErrorOnceWithAUsageHint(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"server", "ls", "--bogus"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Equal(t, 1, strings.Count(stderr, "unknown flag: --bogus"), "stderr: %s", stderr)
+	assert.Contains(t, stderr, "Run 'alpacon server ls --help' for usage.")
+	assert.NotContains(t, stderr, "Usage:")
+	assert.NotContains(t, stderr, "While executing the command")
+}
+
+func TestExecuteKeepsTableOutputForACobraParseErrorWhenTheOutputValueIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"server", "ls", "--bogus", "--output", "xml"},
+		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+	assert.Equal(t, "Error: unknown flag: --bogus\nRun 'alpacon server ls --help' for usage.\n", stderr)
+}
+
+func TestExecuteEmitsOneEnvelopeForACobraParseErrorUnderJSONOutput(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"server", "ls", "--bogus", "--output", "json"},
+		{"server", "ls", "--bogus", "--output=json"},
+		{"--output", "json", "server", "ls", "--bogus"},
+	} {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			t.Parallel()
+
+			_, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, args,
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
+			var envelope struct {
+				ExitCode  int    `json:"exit_code"`
+				ErrorCode string `json:"error_code"`
+				Message   string `json:"message"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(stderr), &envelope), "stderr must be one envelope: %s", stderr)
+			assert.Equal(t, utils.ExitCodeUsageError, envelope.ExitCode)
+			assert.Equal(t, utils.ErrorCodeUsage, envelope.ErrorCode)
+			assert.Equal(t, "unknown flag: --bogus", envelope.Message)
+		})
+	}
+}
+
+func TestExecuteExitsTwoWhenTheCommandLineIsMalformed(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "unknown shorthand flag", args: []string{"server", "ls", "-Z"}, wantExit: usage, wantStderr: "unknown shorthand flag"},
+		{name: "unknown command", args: []string{"bogus"}, wantExit: usage, wantStderr: `unknown command "bogus"`},
+		{name: "unknown subcommand of a group", args: []string{"token", "bogus"}, wantExit: usage, wantStderr: "a subcommand is required"},
+		{name: "group without a subcommand", args: []string{"token", "acl"}, wantExit: usage, wantStderr: "a subcommand is required"},
+		{name: "too few arguments", args: []string{"exec", "logs"}, wantExit: usage, wantStderr: "accepts 1 arg(s), received 0"},
+		{name: "bad flag value", args: []string{"websh", "ls", "--tail", "x"}, wantExit: usage, wantStderr: "invalid argument"},
+		{name: "missing required flag", args: []string{"token", "acl", "file", "add", "tk"}, wantExit: usage, wantStderr: "required flag(s)"},
+		{name: "mutually exclusive flags", args: []string{"server", "create", "--token", "a", "--new-token", "b"}, wantExit: usage, wantStderr: "none of the others can be"},
+		{name: "invalid output format", args: []string{"server", "ls", "--output", "xml"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+	})
+}
+
+func TestWebshAndExecParsersExitTwoOnABadCommandLine(t *testing.T) {
+	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "websh flag without its value", args: []string{"websh", "--work-session"}, wantExit: usage, wantStderr: "--work-session requires a value"},
+		{name: "websh without a server", args: []string{"websh"}, wantExit: usage, wantStderr: "Server name is required"},
+		{name: "websh share with a remote command", args: []string{"websh", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used with remote commands"},
+		{name: "websh with an invalid output", args: []string{"websh", "--output", "xml", "my-server"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+		{name: "exec flag without its value", args: []string{"exec", "--work-session"}, wantExit: usage, wantStderr: "flag needs an argument: --work-session"},
+		{name: "exec without a server", args: []string{"exec", "--wait"}, wantExit: usage, wantStderr: "server name is required"},
+		{name: "exec without a command", args: []string{"exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command"},
+		{name: "exec with an invalid output", args: []string{"exec", "--output", "xml", "my-server", "ls"}, wantExit: usage, wantStderr: `invalid --output value "xml" (expected "table" or "json")`},
+		{name: "websh with an unknown flag", args: []string{"websh", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec with an unknown flag", args: []string{"exec", "--bogus", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "websh with a separator before the server", args: []string{"websh", "--", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --"},
+		{name: "websh with an unknown flag after json output", args: []string{"websh", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "websh with an unknown flag before json output", args: []string{"websh", "--bogus", "--output", "json", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "exec with an unknown flag before json output", args: []string{"exec", "--bogus", "--output", "json", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "exec without a command under a leading json output", args: []string{"--output", "json", "exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command", wantCode: utils.ErrorCodeUsage},
+		{name: "exec with an unknown flag after json output", args: []string{"exec", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "websh share with a remote command under json output", args: []string{"websh", "--output", "json", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used", wantCode: utils.ErrorCodeUsage},
 	})
 }

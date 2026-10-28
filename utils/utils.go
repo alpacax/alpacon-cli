@@ -746,7 +746,7 @@ func RequireSubcommand(cmd *cobra.Command, notes ...string) error {
 		return err
 	}
 	parts := append([]string{"a subcommand is required."}, notes...)
-	return fmt.Errorf("%s Run '%s --help' for more information", strings.Join(parts, " "), cmd.CommandPath())
+	return MarkUsageError(fmt.Errorf("%s Run '%s --help' for more information", strings.Join(parts, " "), cmd.CommandPath()))
 }
 
 // ParsePositiveDuration parses a duration flag value, rejecting non-positive ones.

@@ -41,9 +41,11 @@ import (
 var showVersion bool
 
 var RootCmd = &cobra.Command{
-	Use:     "alpacon",
-	Aliases: []string{"ac"},
-	Short:   "Use Alpacon, the AI-native PAM, from the terminal",
+	Use:           "alpacon",
+	Aliases:       []string{"ac"},
+	SilenceErrors: true, // Execute reports every error once, in the --output format
+	SilenceUsage:  true,
+	Short:         "Use Alpacon, the AI-native PAM, from the terminal",
 	Long: `Alpacon CLI is the command-line client for Alpacon, the AI-native PAM.
 Humans, AI agents, and CI/CD run commands—each judged, recorded, and bounded.
 
@@ -65,13 +67,7 @@ agent session refuses; step 3 then names the session before the server:
 
 See 'alpacon work-session --help' for session lifecycle and error codes.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		switch utils.OutputFormat {
-		case utils.OutputFormatTable, utils.OutputFormatJSON:
-			return nil
-		default:
-			return fmt.Errorf("invalid --output value %q (expected %q or %q)",
-				utils.OutputFormat, utils.OutputFormatTable, utils.OutputFormatJSON)
-		}
+		return utils.SetOutputFormat(utils.OutputFormat)
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if showVersion {
@@ -84,9 +80,46 @@ See 'alpacon work-session --help' for session lifecycle and error codes.`,
 
 func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
-	if err := RootCmd.Execute(); err != nil {
+	RootCmd.InitDefaultCompletionCmd()
+	markHookErrors(RootCmd)
+	cmd, err := RootCmd.ExecuteC()
+	switch {
+	case err == nil:
+		return
+	case !errors.As(err, new(hookError)):
+		utils.CliParseErrorWithExit(cmd, os.Args[1:], err.Error())
+	case utils.IsUsageError(err):
+		utils.CliUsageErrorWithExit("%s", err)
+	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.
+type hookError struct{ err error }
+
+func (e hookError) Error() string { return e.err.Error() }
+func (e hookError) Unwrap() error { return e.err }
+
+// markHookErrors wraps what every error-returning hook of c and its subcommands returns.
+func markHookErrors(c *cobra.Command) {
+	for _, hook := range []*func(*cobra.Command, []string) error{
+		&c.PersistentPreRunE, &c.PreRunE, &c.RunE, &c.PostRunE, &c.PersistentPostRunE,
+	} {
+		if run := *hook; run != nil {
+			*hook = func(cmd *cobra.Command, args []string) error { return markHookError(run(cmd, args)) }
+		}
+	}
+	for _, sub := range c.Commands() {
+		markHookErrors(sub)
+	}
+}
+
+func markHookError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return hookError{err: err}
 }
 
 // kubernetesSurfaceEnabled reads the answer the last login or switch recorded;

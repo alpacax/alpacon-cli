@@ -24,6 +24,32 @@ const (
 // Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
 
+// SetOutputFormat applies an --output value, refusing anything but table or json as a usage error.
+func SetOutputFormat(value string) error {
+	if value != OutputFormatTable && value != OutputFormatJSON {
+		return MarkUsageError(fmt.Errorf("invalid --output value %q (expected %q or %q)", value, OutputFormatTable, OutputFormatJSON))
+	}
+	OutputFormat = value
+	return nil
+}
+
+// OutputFormatIn is the last --output value before any "--" in args, for a command line
+// whose parse stopped before reaching it.
+func OutputFormatIn(args []string) string {
+	var format string
+	for i, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if value, ok := strings.CutPrefix(arg, "--output="); ok {
+			format = value
+		} else if arg == "--output" && i+1 < len(args) {
+			format = args[i+1]
+		}
+	}
+	return format
+}
+
 type PartialInfo struct {
 	Count int `json:"count"`
 }

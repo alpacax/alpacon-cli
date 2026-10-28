@@ -34,6 +34,27 @@ func MarkNotLoggedIn(err error) error {
 	return notLoggedInError{err: err}
 }
 
+type usageError struct{ err error }
+
+func (e usageError) Error() string       { return e.err.Error() }
+func (e usageError) Unwrap() error       { return e.err }
+func (e usageError) ErrorCode() string   { return ErrorCodeUsage }
+func (e usageError) ErrorSource() string { return "" }
+
+// MarkUsageError tags err as a command-line mistake, so ClassifyError reports usage_error for it.
+func MarkUsageError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return usageError{err: err}
+}
+
+// IsUsageError reports whether MarkUsageError tagged err or an error it wraps; a server's
+// usage_error code does not count, since only this process knows its command line was wrong.
+func IsUsageError(err error) bool {
+	return errors.As(err, new(usageError))
+}
+
 var serverCodeShape = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 // HTTPErrorCode is the synthetic code for a server or proxy answer that carried none.

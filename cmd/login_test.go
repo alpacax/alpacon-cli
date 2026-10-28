@@ -872,10 +872,8 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 	if !ok {
 		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
-	if err := RootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	os.Args = append([]string{"alpacon"}, args...)
+	Execute()
 	os.Exit(0)
 }
 
