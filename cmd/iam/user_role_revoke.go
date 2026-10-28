@@ -48,7 +48,7 @@ admin. Revoke 'superuser' first, or pass --cascade to that command.`,
 		subj := resolveSubject(alpaconClient, args[:1])
 
 		if cascade && role.Name != rbac.RoleSuperuser {
-			utils.CliErrorWithExit("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
+			utils.CliUsageErrorWithExit("--cascade only applies to the superuser role, which is the only grant that creates a second binding.")
 		}
 
 		bindings, err := rbac.GetUserBindings(alpaconClient, subj.ID)

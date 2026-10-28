@@ -50,13 +50,17 @@ This command requires staff or superuser privileges.`,
 			email = args[0]
 		} else {
 			if !utils.IsInteractiveShell() {
-				utils.CliErrorWithExit("email argument is required in non-interactive mode")
+				utils.CliUsageErrorWithExit("email argument is required in non-interactive mode")
 			}
 			email = utils.PromptForRequiredInput("Email: ")
 		}
 
 		if !strings.Contains(email, "@") {
-			utils.CliErrorWithExit("invalid email address: %s", email)
+			fail := utils.CliErrorWithExit
+			if len(args) > 0 {
+				fail = utils.CliUsageErrorWithExit
+			}
+			fail("invalid email address: %s", email)
 		}
 
 		err = iam.InviteUser(alpaconClient, iam.UserInviteRequest{Email: email})

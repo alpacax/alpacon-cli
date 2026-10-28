@@ -63,7 +63,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 		allowOverwrite := !noOverwrite
 
 		if len(args) < 2 {
-			utils.CliErrorWithExit("You must specify at least two arguments.\n\n" +
+			utils.CliUsageErrorWithExit("You must specify at least two arguments.\n\n" +
 				"Usage examples:\n" +
 				"  • Upload file to server:\n" +
 				"    alpacon cp /local/file.txt server:/remote/path/\n" +
@@ -77,7 +77,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		username, err := normalizeArgs(args, username)
 		if err != nil {
-			utils.CliErrorWithExit("%v", err)
+			utils.CliUsageErrorWithExit("%v", err)
 			return
 		}
 
@@ -86,7 +86,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		// Validate source and destination paths
 		if err := validatePaths(sources, dest); err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliUsageErrorWithExit("%s", err.Error())
 			return
 		}
 
@@ -138,7 +138,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			wrappedSrc := fmt.Sprintf("[%s]", strings.Join(sources, ", "))
 			utils.CliSuccess("Downloaded %s to %s", wrappedSrc, dest)
 		} else {
-			utils.CliErrorWithExit("Invalid combination of source and destination paths.\n\n" +
+			utils.CliUsageErrorWithExit("Invalid combination of source and destination paths.\n\n" +
 				"Valid operations:\n" +
 				"  • Upload (local → remote): alpacon cp /local/file server:/remote/path/\n" +
 				"  • Download (remote → local): alpacon cp server:/remote/file /local/path/\n\n" +

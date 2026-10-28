@@ -23,6 +23,10 @@ var noteCreateCmd = &cobra.Command{
 	alpacon note create -s my-server -c "hello world!" -p true
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
+		failTooLong := utils.CliErrorWithExit
+		if noteRequest.Content != "" {
+			failTooLong = utils.CliUsageErrorWithExit
+		}
 		if noteRequest.Server == "" {
 			noteRequest.Server = utils.PromptForRequiredInput("Server Name: ")
 		}
@@ -31,7 +35,7 @@ var noteCreateCmd = &cobra.Command{
 		}
 
 		if len(noteRequest.Content) > 512 {
-			utils.CliErrorWithExit("Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again", len(noteRequest.Content))
+			failTooLong("Note content exceeds the 512 character limit (current length: %d). Please shorten your note and try again", len(noteRequest.Content))
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()

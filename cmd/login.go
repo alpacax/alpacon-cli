@@ -89,12 +89,12 @@ with the saved target as the default. Non-interactive login requires a HOST or
 	Run: func(cmd *cobra.Command, args []string) {
 		workspaceURL, workspaceName, baseDomain, ok, err := resolveLoginTarget(args, workspaceFlag, regionFlag)
 		if err != nil {
-			utils.CliErrorWithExit("%s", err.Error())
+			utils.CliUsageErrorWithExit("%s", err.Error())
 		}
 
 		if !ok {
 			if err := validateInteractiveLoginTargetPrompt(utils.IsInteractiveShell()); err != nil {
-				utils.CliErrorWithExit("%s", err.Error())
+				utils.CliUsageErrorWithExit("%s", err.Error())
 			}
 			cfg, _ := config.LoadConfig()
 			workspaceURL, workspaceName, baseDomain, err = promptForLoginTarget(cfg)

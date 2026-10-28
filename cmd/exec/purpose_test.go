@@ -63,12 +63,7 @@ func longPurpose() string {
 	return string(b)
 }
 
-// TestExecPurposeRejectsBadArgsWithExit1 pins the exit code for this command's
-// own argument validation. Exit 2 is reserved for work-session, event
-// wait/watch, and utils.RequirePositiveInt (README "Exit codes"); every other
-// command exits 1, `exec logs` included. Exiting 2 here would tell a script this
-// is a usage-error-only surface, which it is not.
-func TestExecPurposeRejectsBadArgsWithExit1(t *testing.T) {
+func TestExecPurposeRejectsBadArgsWithUsageExit(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -86,7 +81,7 @@ func TestExecPurposeRejectsBadArgsWithExit1(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, stderr, exitCode := runExecPurposeHelper(t, ts.URL, tc.args...)
-			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			assert.Contains(t, stderr, tc.want)
 		})
 	}

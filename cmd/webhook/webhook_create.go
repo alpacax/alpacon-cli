@@ -57,7 +57,7 @@ require an owner on create; newer servers ignore it.`,
 		} else {
 			provider = strings.ToLower(strings.TrimSpace(provider))
 			if !isValidProvider(provider) {
-				utils.CliErrorWithExit("Invalid provider %q. Supported: slack, discord, teams, telegram, custom.", provider)
+				utils.CliUsageErrorWithExit("Invalid provider %q. Supported: slack, discord, teams, telegram, custom.", provider)
 			}
 		}
 

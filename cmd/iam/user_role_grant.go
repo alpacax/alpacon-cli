@@ -2,6 +2,7 @@ package iam
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/alpacax/alpacon-cli/api/mfa"
@@ -104,9 +105,9 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 		return role
 	}
 
-	if !errors.Is(err, rbac.ErrBlankName) {
+	if errors.Is(err, rbac.ErrNotFound) || utils.HTTPStatusCode(err) == http.StatusNotFound {
 		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil {
-			utils.CliErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
+			utils.CliUsageErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
 				roleArg, userArg, verb, roleArg, userArg)
 		}
 	}
