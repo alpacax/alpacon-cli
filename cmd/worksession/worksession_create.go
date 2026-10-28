@@ -161,6 +161,9 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 				utils.CliUsageErrorEnvelopeWithExit(opCreate, "--use cannot be combined with an agent session (agent sessions are not workspace-attachable; pass the session ID to each command with --work-session).%s", detectedAgentSuffix(detected))
 			}
 			cfg, err := config.LoadConfig()
+			if err != nil && !errors.Is(err, utils.ErrNotLoggedIn) {
+				utils.CliErrorEnvelopeWithExit(opCreate, err, "Failed to load the config: %s", err)
+			}
 			if err != nil || cfg.WorkspaceName == "" {
 				utils.CliErrorEnvelopeWithExit(opCreate, utils.ErrNotLoggedIn, "--use requires an active workspace. Run 'alpacon login' first.")
 			}

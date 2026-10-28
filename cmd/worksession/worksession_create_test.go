@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -891,6 +893,23 @@ func TestWorkSessionCreateUseWithoutLoginExitsOneAsNotLoggedIn(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkSessionCreateUseWithAnUnreadableConfigReportsTheConfigError(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(home, ".alpacon"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".alpacon", "config.json"), []byte("{not json"), 0o600))
+
+	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, append(agentHelperEnv(), "HOME="+home), utils.OutputFormatJSON,
+		"http://127.0.0.1:1", createArgs("--use")...)
+
+	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+	assert.Empty(t, stdout)
+	var got errorEnvelope
+	require.NoError(t, json.Unmarshal([]byte(stderr), &got), "stderr: %s", stderr)
+	assert.Equal(t, utils.ErrorCodeCLI, got.ErrorCode)
+	assert.Contains(t, got.Message, "failed to decode config file")
 }
 
 func TestWorkSessionCreateUseOnAPendingSessionReportsPendingApproval(t *testing.T) {
