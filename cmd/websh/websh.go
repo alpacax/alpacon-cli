@@ -280,14 +280,14 @@ Note: All flags must be placed before the server name.
 			utils.OutputFormat = parsed.OutputFormat
 		}
 
-		workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
 		authMethod := config.ResolveAuthMethod()
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
 		if err != nil {
 			utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		}
+
+		workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
 
 		session, err := websh.CreateWebshSession(alpaconClient, serverName, username, groupname, share, readOnly, workSessionID)
 

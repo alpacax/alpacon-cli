@@ -350,6 +350,45 @@ func TestParsePort(t *testing.T) {
 	}
 }
 
+func TestValidatePorts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		remotePort string
+		localPort  string
+		wantErr    string
+	}{
+		{name: "valid ports", remotePort: "5432", localPort: "9000"},
+		{name: "empty local port means auto-assign", remotePort: "5432", localPort: ""},
+		{name: "invalid remote port", remotePort: "invalid", localPort: "9000", wantErr: "invalid remote port: "},
+		{name: "remote port zero", remotePort: "0", localPort: "", wantErr: "invalid remote port: "},
+		{name: "invalid local port", remotePort: "5432", localPort: "70000", wantErr: "invalid local port: "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidatePorts(tt.remotePort, tt.localPort)
+
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestStartRefusesANilClient(t *testing.T) {
+	t.Parallel()
+
+	rt, err := Start(StartOptions{ServerName: "my-db", RemotePort: "5432"})
+
+	require.EqualError(t, err, "client is required")
+	assert.Nil(t, rt)
+}
+
 func TestExtractTCPPort(t *testing.T) {
 	t.Parallel()
 	t.Run("tcp address", func(t *testing.T) {

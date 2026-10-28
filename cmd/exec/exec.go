@@ -271,8 +271,6 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		file = &loaded
 	}
 
-	workSessionID := worksession.ResolveOrExit(parsed.WorkSessionID)
-
 	authMethod := config.ResolveAuthMethod()
 
 	alpaconClient, err := client.NewAlpaconAPIClient()
@@ -280,6 +278,8 @@ func RunRemoteExec(parsed RemoteExecArgs) {
 		utils.CliErrorWithExit("Connection to Alpacon API failed: %s. Consider re-logging.", err)
 		return
 	}
+
+	workSessionID := worksession.ResolveOrExit(alpaconClient, parsed.WorkSessionID)
 
 	if file != nil && parsed.File.Upload {
 		uploadFileOrExit(alpaconClient, parsed, *file, workSessionID, authMethod)
