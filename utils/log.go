@@ -89,10 +89,10 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 	CliUsageErrorEnvelopeWithExit("", msg, args...)
 }
 
-// CliParseErrorWithExit reports a command line cmd could not parse and exits 2. The parse can stop
-// before an --output flag, so args are scanned for one; table mode points to cmd's help.
-func CliParseErrorWithExit(cmd *cobra.Command, args []string, msg string) {
-	_ = SetOutputFormat(OutputFormatIn(args))
+// CliParseErrorWithExit reports a command line cmd could not parse and exits 2, applying format, the
+// --output value the parse found (see OutputFormatIn); table mode points to cmd's help.
+func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
+	_ = SetOutputFormat(format)
 	if OutputFormat == OutputFormatJSON {
 		CliUsageErrorWithExit("%s", msg)
 	}

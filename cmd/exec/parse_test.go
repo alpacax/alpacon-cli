@@ -960,3 +960,27 @@ func TestParseRemoteExecArgsPurpose(t *testing.T) {
 		})
 	}
 }
+
+// Serial: it reads ExecCmd's flag set.
+func TestOutputFormatBeforeServerReadsOnlyTheFlagsAheadOfTheServer(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "output ahead of the server", args: []string{"--output", "json", "my-server", "ls"}, want: "json"},
+		{name: "output joined by equals", args: []string{"--output=json", "my-server"}, want: "json"},
+		{name: "output after an unknown flag", args: []string{"--bogus", "--output", "json", "my-server"}, want: "json"},
+		{name: "remote output after an unknown flag and the server", args: []string{"--bogus", "my-server", "kubectl", "get", "pods", "--output", "json"}, want: ""},
+		{name: "remote output after a bool flag and the server", args: []string{"--wait", "my-server", "--output", "json"}, want: ""},
+		{name: "remote output after a value flag and the server", args: []string{"-u", "root", "my-server", "--output", "json"}, want: ""},
+		{name: "remote output after the separator", args: []string{"--output", "json", "my-server", "--", "echo", "--output", "table"}, want: "json"},
+		{name: "attached short value", args: []string{"-uroot", "--output", "json", "my-server"}, want: "json"},
+		{name: "no output", args: []string{"my-server", "ls"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, OutputFormatBeforeServer(ExecCmd, tt.args))
+		})
+	}
+}

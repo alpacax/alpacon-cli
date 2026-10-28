@@ -91,7 +91,7 @@ func Execute() {
 	case err == nil:
 		return
 	case !errors.As(err, new(hookError)):
-		utils.CliParseErrorWithExit(cmd, os.Args[1:], err.Error())
+		utils.CliParseErrorWithExit(cmd, utils.OutputFormatIn(os.Args[1:]), err.Error())
 	case utils.IsUsageError(err):
 		utils.CliUsageErrorWithExit("%s", err)
 	default:

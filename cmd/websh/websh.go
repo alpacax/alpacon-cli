@@ -228,7 +228,7 @@ Note: All flags must be placed before the server name.
 			return
 		}
 		if err != nil {
-			utils.CliParseErrorWithExit(cmd, args, err.Error())
+			utils.CliParseErrorWithExit(cmd, execCmd.OutputFormatBeforeServer(cmd, args), err.Error())
 		}
 		if parsed.OutputFormat != "" {
 			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {

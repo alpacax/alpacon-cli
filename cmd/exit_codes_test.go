@@ -323,6 +323,9 @@ func TestWebshAndExecParsersExitTwoOnABadCommandLine(t *testing.T) {
 		{name: "exec without a command under a leading json output", args: []string{"--output", "json", "exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command", wantCode: utils.ErrorCodeUsage},
 		{name: "exec with an unknown flag after json output", args: []string{"exec", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
 		{name: "websh share with a remote command under json output", args: []string{"websh", "--output", "json", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used", wantCode: utils.ErrorCodeUsage},
+		{name: "websh unknown flag before a remote command naming json output", args: []string{"websh", "--bogus", "my-server", "cat", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec unknown flag before a remote command naming json output", args: []string{"exec", "--bogus", "my-server", "kubectl", "get", "pods", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "exec relative file under json output before a remote command naming table output", args: []string{"exec", "--output", "json", "--file", "relative", "my-server", "--", "echo", "--output", "table"}, wantExit: usage, wantStderr: "--file must be an absolute path", wantCode: utils.ErrorCodeUsage},
 	})
 }
 
