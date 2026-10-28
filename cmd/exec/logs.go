@@ -74,20 +74,18 @@ Run the command again later to check for completion.`,
 			os.Exit(utils.ExitCodePendingApproval)
 		}
 
-		// Exit 6 through the envelope, as exec and work-session create do: retrying only files
-		// another approval request.
-		if event.IsRejectedStatus(details.Status) {
-			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
+		// Exit 6 through the envelope, as exec does: a retry is refused again or
+		// files another approval request.
+		if details.IsRejected() {
+			rejected := details.Rejection()
 			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
-			// The caller already supplied the job ID, so keep the outcome line focused on the refusal.
-			rejected.CommandID = ""
-			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
-				"%s (status: %s)", rejected, details.Status)
+			rejected.CommandID = "" // the caller already named the job
+			reportCommandRejection(rejected, rejected)
 			return
 		}
 

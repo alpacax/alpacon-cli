@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api/event"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -744,17 +745,20 @@ func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
 				requestID := "apr-1"
 				return event.EventDetails{
 					Status:                tc.status,
-					RejectionCause:        tc.cause,
+					CommandRejection:      event.CommandRejection{RejectionCause: types.SentString{Value: tc.cause, Sent: true}},
 					SudoGrantStatus:       &grantStatus,
 					SudoApprovalRequestID: &requestID,
 				}, nil
 			}
 
-			outcome, requestID, cause, err := pollApprovalOnce(nil, "cmd-1")
+			outcome, requestID, rejected, err := pollApprovalOnce(nil, "cmd-1")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, outcome)
 			assert.Equal(t, "apr-1", requestID)
-			assert.Equal(t, tc.cause, cause)
+			assert.Equal(t, tc.cause, rejected.Cause)
+			assert.Equal(t, "cmd-1", rejected.CommandID)
+			assert.True(t, rejected.SudoGrant)
+			assert.True(t, rejected.Expired)
 		})
 	}
 }

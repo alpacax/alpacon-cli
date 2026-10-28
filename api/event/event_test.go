@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/alpacax/alpacon-cli/api"
+	"github.com/alpacax/alpacon-cli/api/types"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
@@ -384,7 +385,7 @@ func TestErrorFromDetails_RejectedReturnsCommandRejectedError(t *testing.T) {
 	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "rejected"})
 	var rejected *CommandRejectedError
 	require.ErrorAs(t, err, &rejected)
-	assert.Contains(t, err.Error(), "rejected by a reviewer")
+	assert.Equal(t, "command cmd-9 was rejected; the server did not record why", err.Error())
 }
 
 // TestErrorFromDetails_UseFileExecutionCarriesCause pins the gate's refusal of
@@ -410,37 +411,7 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	assert.Equal(t, "command cmd-9 was refused because its command line carries a script body (use_file_execution)", err.Error())
 	code, _ := utils.ParseErrorResponse(err)
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
-}
-
-func TestCommandRejectedError_CauseMapping(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		cause string
-		want  string
-	}{
-		{cause: RejectionCauseApprovalExpired, want: "was not approved before the approval request expired"},
-		{cause: RejectionCauseApprovalRejected, want: "was rejected by a reviewer"},
-		{cause: "command_acl_denied", want: "was refused (command_acl_denied)"},
-		{cause: "command_acl_unavailable", want: "was refused (command_acl_unavailable)"},
-		{cause: "risk_denied", want: "was refused (risk_denied)"},
-		{cause: "risk_unavailable", want: "was refused (risk_unavailable)"},
-		{cause: "approval_policy_denied", want: "was refused (approval_policy_denied)"},
-		{cause: "approval_cancelled", want: "was refused (approval_cancelled)"},
-		{cause: "work_session_terminated", want: "was refused (work_session_terminated)"},
-		{cause: "account_bound_to_other_person", want: "was refused (account_bound_to_other_person)"},
-		{cause: "unsigned_file", want: "was refused (unsigned_file)"},
-		{cause: "signature_invalid", want: "was refused (signature_invalid)"},
-		{cause: "future_cause", want: "was refused (future_cause)"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.cause, func(t *testing.T) {
-			t.Parallel()
-			err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "rejected", RejectionCause: tc.cause})
-			code, _ := utils.ParseErrorResponse(err)
-			assert.Equal(t, tc.cause, code)
-			assert.Equal(t, "command cmd-9 "+tc.want, err.Error())
-		})
-	}
+	assert.Nil(t, rejected.NextActions())
 }
 
 func TestPollCommandExecution_WaitApprovalResumesAfterApproval(t *testing.T) {
@@ -2672,4 +2643,103 @@ func TestStreamApprovedCommand_RefusesACommandIDThatIsNotOneSegment(t *testing.T
 	err := StreamApprovedCommand(ac, "../x", io.Discard, time.Second)
 
 	require.ErrorIs(t, err, utils.ErrInvalidID)
+}
+
+func TestGetEventListShowsRejectionInStatusCell(t *testing.T) {
+	t.Parallel()
+	rows := []string{
+		`{"id":"1","status":"rejected","success":null,"rejection_cause":"risk_denied","rejection_gate":"risk","server":{"name":"prod"}}`,
+		`{"id":"2","status":"rejected","success":null,"rejection_cause":null,"rejection_gate":null,"server":{"name":"prod"}}`,
+		`{"id":"3","status":"rejected","success":null,"server":{"name":"prod"}}`,
+		`{"id":"4","status":"completed","success":true,"rejection_cause":null,"rejection_gate":null,"server":{"name":"prod"}}`,
+		`{"id":"5","status":"completed","success":false,"rejection_cause":"signature_invalid","rejection_gate":null,"server":{"name":"prod"}}`,
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"count":5,"results":[` + strings.Join(rows, ",") + `]}`))
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	list, err := GetEventList(ac, 10, "", "")
+
+	require.NoError(t, err)
+	require.Len(t, list, 5)
+	assert.Equal(t, "rejected: risk_denied, gate risk", list[0].StatusCell)
+	assert.Equal(t, "null", list[0].Status)
+	assert.Equal(t, types.SentString{Value: "risk_denied", Sent: true}, list[0].RejectionCause)
+	assert.Equal(t, types.SentString{Value: "risk", Sent: true}, list[0].RejectionGate)
+	assert.Equal(t, "rejected: cause not recorded", list[1].StatusCell)
+	assert.Equal(t, "null", list[1].Status)
+	assert.Equal(t, "rejected: cause not recorded", list[2].StatusCell)
+	assert.False(t, list[2].Reported())
+	assert.Equal(t, "true", list[3].StatusCell)
+	assert.Equal(t, "true", list[3].Status)
+	assert.Equal(t, "rejected: signature_invalid", list[4].StatusCell)
+	assert.Equal(t, "false", list[4].Status)
+}
+
+func TestEventAttributesJSONKeepsStatusAndSentNulls(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		row  EventAttributes
+		want string
+	}{
+		{
+			name: "rejected row keeps status and carries both fields",
+			row: EventAttributes{
+				Status:           "null",
+				StatusCell:       "rejected: risk_denied, gate risk",
+				CommandRejection: rejectionOf(types.SentString{Value: "risk_denied", Sent: true}, types.SentString{Value: "risk", Sent: true}),
+			},
+			want: `{"server":"","shell":"","command":"","result":"","status":"null","operator":"","requested_at":"","rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+		},
+		{
+			name: "sent nulls stay null",
+			row: EventAttributes{
+				Status:           "true",
+				StatusCell:       "true",
+				CommandRejection: rejectionOf(types.SentString{Sent: true}, types.SentString{Sent: true}),
+			},
+			want: `{"server":"","shell":"","command":"","result":"","status":"true","operator":"","requested_at":"","rejection_cause":null,"rejection_gate":null}`,
+		},
+		{
+			name: "older server row has no rejection keys",
+			row:  EventAttributes{Status: "false", StatusCell: "false"},
+			want: `{"server":"","shell":"","command":"","result":"","status":"false","operator":"","requested_at":""}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			raw, err := json.Marshal(tc.row)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(raw))
+		})
+	}
+}
+
+func rejectionOf(cause, gate types.SentString) CommandRejection {
+	return CommandRejection{RejectionCause: cause, RejectionGate: gate}
+}
+
+// TestEventAttributesTableKeepsItsColumns runs serially: PrintTable writes to os.Stdout.
+func TestEventAttributesTableKeepsItsColumns(t *testing.T) {
+	out := testutil.CaptureStdout(t, func() {
+		utils.PrintTable([]EventAttributes{{
+			Server: "prod", Shell: "bash", Command: "uptime", Result: "ok", Status: "null", StatusCell: "rejected: risk_denied, gate risk",
+			Operator: "alice", RequestedAt: "now",
+			CommandRejection: CommandRejection{
+				RejectionCause: types.SentString{Value: "risk_denied", Sent: true},
+				RejectionGate:  types.SentString{Value: "risk", Sent: true},
+			},
+		}})
+	})
+
+	header, _, _ := strings.Cut(out, "\n")
+	assert.Equal(t, []string{"SERVER", "SHELL", "COMMAND", "RESULT", "STATUS", "OPERATOR", "REQUESTED", "AT"}, strings.Fields(header))
+	assert.Contains(t, out, "rejected: risk_denied, gate risk")
+	assert.NotContains(t, out, "null")
+	assert.NotContains(t, out, "REJECTION")
 }
