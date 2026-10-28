@@ -515,3 +515,70 @@ func TestTimelineFailsWhenALaterPageFails(t *testing.T) {
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "Failed to retrieve work session timeline")
 }
+
+func TestTimelineShowsRejectionCauseAndGate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		wire        string
+		wantDetails string
+		wantExtra   string
+	}{
+		{
+			name:        "gated cause",
+			wire:        `{"type":"command","line":"sudo su","denied":true,"rejection_cause":"risk_denied","rejection_gate":"risk"}`,
+			wantDetails: "[rejected: risk_denied, gate risk] sudo su",
+			wantExtra:   `,"rejection_cause":"risk_denied","rejection_gate":"risk"`,
+		},
+		{
+			name:        "signature cause has a null gate",
+			wire:        `{"type":"command","line":"./run.sh","rejection_cause":"unsigned_file","rejection_gate":null}`,
+			wantDetails: "[rejected: unsigned_file] ./run.sh",
+			wantExtra:   `,"rejection_cause":"unsigned_file","rejection_gate":null`,
+		},
+		{
+			name:        "row without the fields is unchanged",
+			wire:        `{"type":"command","line":"sudo su","denied":true}`,
+			wantDetails: "[denied] sudo su",
+			wantExtra:   ``,
+		},
+		{
+			name:        "null cause on a timeline row does not imply a rejection",
+			wire:        `{"type":"command","line":"ls","rejection_cause":null,"rejection_gate":null}`,
+			wantDetails: "[unknown] ls",
+			wantExtra:   `,"rejection_cause":null,"rejection_gate":null`,
+		},
+		{
+			name:        "rejected command with a null cause says the cause was not recorded",
+			wire:        `{"type":"command","line":"sudo su","success":false,"verification_status":"rejected","rejection_cause":null,"rejection_gate":null}`,
+			wantDetails: "[rejected: cause not recorded] sudo su",
+			wantExtra:   `,"rejection_cause":null,"rejection_gate":null`,
+		},
+		{
+			name:        "succeeded command with null fields keeps its status",
+			wire:        `{"type":"command","line":"ls","success":true,"rejection_cause":null,"rejection_gate":null}`,
+			wantDetails: "[ok] ls",
+			wantExtra:   `,"rejection_cause":null,"rejection_gate":null`,
+		},
+		{
+			name:        "denied command with a null cause stays denied",
+			wire:        `{"type":"command","line":"sudo su","denied":true,"rejection_cause":null,"rejection_gate":null}`,
+			wantDetails: "[denied] sudo su",
+			wantExtra:   `,"rejection_cause":null,"rejection_gate":null`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var item wsapi.TimelineItem
+			require.NoError(t, json.Unmarshal([]byte(tc.wire), &item))
+
+			row := projectTimelineAttributes(&item, nil)
+
+			assert.Equal(t, tc.wantDetails, row.Details)
+			raw, err := json.Marshal(row)
+			require.NoError(t, err)
+			assert.JSONEq(t, fmt.Sprintf(`{"timestamp":"","type":"command","server":"","user":"","details":%q%s}`, tc.wantDetails, tc.wantExtra), string(raw))
+		})
+	}
+}
