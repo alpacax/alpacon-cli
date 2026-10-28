@@ -1,4 +1,4 @@
-package worksession_test
+package worksession
 
 import (
 	"encoding/json"
@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,7 +46,7 @@ func TestRunUse_Success_PersistsToConfig(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	desc, err := worksession.RunUse(ac, "ses-abc")
+	desc, err := RunUse(ac, "ses-abc")
 	require.NoError(t, err)
 	assert.Equal(t, "incident-response", desc)
 
@@ -64,7 +63,7 @@ func TestRunUse_NotFound(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	_, err := worksession.RunUse(ac, "ses-missing")
+	_, err := RunUse(ac, "ses-missing")
 	require.Error(t, err)
 
 	got, _ := config.GetActiveWorkSession()
@@ -84,7 +83,7 @@ func TestRunUse_RejectsNonActiveStatus(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	_, err := worksession.RunUse(ac, "ses-pending")
+	_, err := RunUse(ac, "ses-pending")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pending")
 
@@ -112,7 +111,7 @@ func TestRunUse_RejectsAgentSession(t *testing.T) {
 
 	// Agent sessions are not workspace-attachable; even when active they must be
 	// rejected here so an interactive exec/websh never silently runs against one.
-	_, err := worksession.RunUse(ac, "ses-agent")
+	_, err := RunUse(ac, "ses-agent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not workspace-attachable")
 
@@ -124,12 +123,12 @@ func TestRunUnset_Idempotent(t *testing.T) {
 	setupTmpConfig(t)
 
 	// First call on empty
-	err := worksession.RunUnset()
+	err := RunUnset()
 	require.NoError(t, err)
 
 	// Set something, unset, verify clear
 	require.NoError(t, config.SetActiveWorkSession("ses-xyz"))
-	err = worksession.RunUnset()
+	err = RunUnset()
 	require.NoError(t, err)
 	got, _ := config.GetActiveWorkSession()
 	assert.Empty(t, got)
@@ -159,7 +158,7 @@ func TestRunUse_FilesUnderClientWorkspaceWhenConfigSwitchedMidCommand(t *testing
 	require.NoError(t, err)
 	require.NoError(t, config.SwitchWorkspace(before, "https://ws-b.example.com", "ws-b", false))
 
-	_, err = worksession.RunUse(ac, "ses-a")
+	_, err = RunUse(ac, "ses-a")
 	require.NoError(t, err)
 
 	cfg, err := config.LoadConfig()

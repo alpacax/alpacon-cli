@@ -1,4 +1,4 @@
-package worksession_test
+package worksession
 
 import (
 	"encoding/json"
@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/client"
-	"github.com/alpacax/alpacon-cli/cmd/worksession"
 	"github.com/alpacax/alpacon-cli/config"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +22,7 @@ func TestRunCurrent_NoActive_ReturnsEmpty(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.NoError(t, err)
 	assert.Empty(t, uuid)
 	assert.Nil(t, ws)
@@ -44,7 +43,7 @@ func TestRunCurrent_ActiveResolves(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.NoError(t, err)
 	assert.Equal(t, "ses-abc", uuid)
 	require.NotNil(t, ws)
@@ -61,7 +60,7 @@ func TestRunCurrent_StaleUUID_ServerNotFound(t *testing.T) {
 	defer ts.Close()
 	ac := newTestClient(ts)
 
-	uuid, ws, err := worksession.RunCurrent(ac)
+	uuid, ws, err := RunCurrent(ac)
 	require.Error(t, err)
 	assert.Equal(t, "ses-stale", uuid)
 	assert.Nil(t, ws)
@@ -87,7 +86,7 @@ func TestWriteCurrentTable_MarksARunningSessionQuietly(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentTable(ac, "ses-abc")
+		err = WriteCurrentTable(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
@@ -100,7 +99,7 @@ func TestWriteCurrentTable_WarnsAndLeavesAnEndedSessionUnmarked(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentTable(ac, "ses-abc")
+		err = WriteCurrentTable(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
@@ -114,7 +113,7 @@ func TestWriteCurrentRaw_WarnsOnAnEndedSessionAndKeepsTheBody(t *testing.T) {
 
 	var err error
 	stdout, stderr := testutil.CaptureOutput(t, func() {
-		err = worksession.WriteCurrentRaw(ac, "ses-abc")
+		err = WriteCurrentRaw(ac, "ses-abc")
 	})
 
 	require.NoError(t, err)
