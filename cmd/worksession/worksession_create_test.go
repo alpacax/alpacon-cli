@@ -231,22 +231,22 @@ func TestPollForApproval_ThrottleExtendsTheDeadline(t *testing.T) {
 	const interval = 10 * time.Millisecond
 
 	requests := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ac := &client.AlpaconClient{BaseURL: testutil.StubBaseURL, HTTPClient: testutil.StubClient(func(*http.Request) (int, string) {
 		requests++
 		if requests < 4 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+			return http.StatusTooManyRequests, ""
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"ws-uuid","status":"approved"}`))
-	}))
-	defer ts.Close()
+		return http.StatusOK, `{"id":"ws-uuid","status":"approved"}`
+	})}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-
-	start := time.Now()
-	session, err := pollForApproval(ac, "ws-uuid", false, interval, timeout)
-	elapsed := time.Since(start)
+	var session *wsapi.WorkSession
+	var err error
+	var elapsed time.Duration
+	synctest.Test(t, func(*testing.T) {
+		start := time.Now()
+		session, err = pollForApproval(ac, "ws-uuid", false, interval, timeout)
+		elapsed = time.Since(start)
+	})
 
 	require.NoError(t, err)
 	require.NotNil(t, session)
