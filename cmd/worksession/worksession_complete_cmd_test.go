@@ -59,8 +59,6 @@ func completeActiveSessions(t *testing.T, home string) map[string]string {
 	return cfg.Active
 }
 
-// assertCompleteFailure checks the stream each output mode reports a failure on: the
-// envelope in json mode, the plain message in table mode.
 func assertCompleteFailure(t *testing.T, format, stdout, stderr string, exitCode int, errorCode, message string) {
 	t.Helper()
 	assert.Empty(t, stdout)
