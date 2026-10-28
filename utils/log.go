@@ -53,8 +53,8 @@ func CliError(msg string, args ...any) {
 	reportCLIError()
 }
 
-// CliErrorWithExit handles all error messages in the CLI. Under --output json it prints
-// one envelope instead, classified from the first error in args, and no footer.
+// CliErrorWithExit handles all error messages in the CLI and exits 1, or 2 when an argument is a usage
+// error. Under --output json it prints one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
 	ExitIfUsageError(ExitCodeGeneralError, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {

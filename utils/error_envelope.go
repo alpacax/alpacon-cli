@@ -60,7 +60,8 @@ func retryAfterSeconds(d time.Duration) int {
 	return int(seconds)
 }
 
-// CliErrorEnvelopeWithExit reports a failure and exits 1; json mode carries err's code.
+// CliErrorEnvelopeWithExit reports a failure and exits 1, or 2 when err or an argument is a usage error;
+// json mode carries err's code.
 func CliErrorEnvelopeWithExit(operation string, err error, format string, args ...any) {
 	ExitIfUsageError(ExitCodeGeneralError, operation, err, format, args...)
 	ExitWithFailureJSON(Failure{ExitCode: ExitCodeGeneralError, Operation: operation, Err: err, Message: fmt.Sprintf(format, args...), NextActions: RefusalNextActions(refusalGuidance(err, args))})

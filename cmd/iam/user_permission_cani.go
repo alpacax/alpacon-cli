@@ -85,7 +85,7 @@ tell them apart in a script, drop -q and read the allowed field of --output json
 }
 
 func init() {
-	userPermissionCanICmd.Flags().BoolP("quiet", "q", false, "Print nothing; the exit code is the answer (0 allowed, 1 denied or the check failed)")
+	userPermissionCanICmd.Flags().BoolP("quiet", "q", false, "Print nothing; the exit code is the answer (0 allowed, 1 denied or the check failed, 2 a rejected argument)")
 	userPermissionCanICmd.Flags().Bool("explain", false, "Print the server's account of how the decision was reached")
 
 	// --explain answers with an account rather than a boolean, so there is nothing for
