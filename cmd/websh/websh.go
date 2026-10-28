@@ -92,6 +92,8 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			}
 			res.OutputFormat = val
 			i = newI
+		case res.ServerName == "" && strings.HasPrefix(args[i], "-"):
+			return res, fmt.Errorf("unknown flag: %s", args[i])
 		default:
 			if res.ServerName == "" {
 				res.ServerName = args[i]
@@ -219,12 +221,17 @@ Note: All flags must be placed before the server name.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed, err := ParseWebshArgs(args)
+		if errors.Is(err, errHelpRequested) {
+			_ = cmd.Help()
+			return
+		}
 		if err != nil {
-			if errors.Is(err, errHelpRequested) {
-				_ = cmd.Help()
-				return
+			utils.CliParseErrorWithExit(cmd, args, err.Error())
+		}
+		if parsed.OutputFormat != "" {
+			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
+				utils.CliUsageErrorWithExit("%s", err)
 			}
-			utils.CliErrorWithExit("%s", err)
 		}
 
 		username := parsed.Username
@@ -236,11 +243,11 @@ Note: All flags must be placed before the server name.
 		env := parsed.Env
 
 		if serverName == "" {
-			utils.CliErrorWithExit("Server name is required.")
+			utils.CliUsageErrorWithExit("Server name is required.")
 		}
 
 		if share && len(commandArgs) > 0 {
-			utils.CliErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
+			utils.CliUsageErrorWithExit("The --share flag cannot be used with remote commands. Use --share for interactive sessions only.")
 		}
 
 		if strings.Contains(serverName, "@") && !strings.Contains(serverName, ":") {
@@ -263,13 +270,6 @@ Note: All flags must be placed before the server name.
 		// Warn rather than silently drop, since the help frames --env as the secrets channel.
 		if len(env) > 0 {
 			utils.CliWarning("--env has no effect on an interactive websh session; it applies only when running a command")
-		}
-
-		if parsed.OutputFormat != "" {
-			if parsed.OutputFormat != utils.OutputFormatTable && parsed.OutputFormat != utils.OutputFormatJSON {
-				utils.CliErrorWithExit("invalid --output value %q: must be 'table' or 'json'", parsed.OutputFormat)
-			}
-			utils.OutputFormat = parsed.OutputFormat
 		}
 
 		authMethod := config.ResolveAuthMethod()

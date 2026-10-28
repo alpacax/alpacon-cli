@@ -145,7 +145,7 @@ func TestKubeGateEnabledReachesGroup(t *testing.T) {
 	}
 
 	_, stderr, exitCode := runKubeGate(t, home, "kube")
-	assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
+	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 	assert.Contains(t, stderr, "a subcommand is required")
 	assert.NotContains(t, stderr, kubernetes.SurfaceNotEnabledMessage)
 }
@@ -193,9 +193,9 @@ func TestKubeGateHelperProcess(t *testing.T) {
 	}
 	args, ok := helperArgsAfter(os.Args, "kube-gate-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
-	RootCmd.SetArgs(args)
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }

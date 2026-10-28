@@ -70,13 +70,11 @@ func TestCommandParsing(t *testing.T) {
 			expectCommandArgs: []string{"ls", "-l", "/var/www"},
 		},
 		{
-			testName:          "UnrecognizedFlagWithEchoCommand",
-			args:              []string{"-x", "unknown-server", "echo", "Hello World"},
-			expectUsername:    "",
-			expectGroupname:   "",
+			testName:          "UnknownFlagAfterTheServerGoesToTheCommand",
+			args:              []string{"my-server", "-x", "cmd"},
 			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"unknown-server", "echo", "Hello World"},
+			expectServerName:  "my-server",
+			expectCommandArgs: []string{"-x", "cmd"},
 		},
 		{
 			testName:          "AdminSysadminAccessToMultiFlagServer",
@@ -104,33 +102,6 @@ func TestCommandParsing(t *testing.T) {
 			expectEnv:         map[string]string{},
 			expectServerName:  "server-name",
 			expectCommandArgs: []string{"echo", "hello world"},
-		},
-		{
-			testName:          "HelpRequestedViaCombinedFlags",
-			args:              []string{"-rh"},
-			expectUsername:    "",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-rh",
-			expectCommandArgs: nil,
-		},
-		{
-			testName:          "InvalidUsageDetected",
-			args:              []string{"-u", "user", "-x", "unknown-flag", "server-name", "cmd"},
-			expectUsername:    "user",
-			expectGroupname:   "",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"unknown-flag", "server-name", "cmd"},
-		},
-		{
-			testName:          "ValidFlagsFollowedByInvalidFlag",
-			args:              []string{"-u", "user", "-g", "group", "-x", "server-name", "cmd"},
-			expectUsername:    "user",
-			expectGroupname:   "group",
-			expectEnv:         map[string]string{},
-			expectServerName:  "-x",
-			expectCommandArgs: []string{"server-name", "cmd"},
 		},
 		{
 			testName:          "FlagsIntermixedWithCommandArgs",
@@ -358,13 +329,28 @@ func TestParseWebshArgs_EnvErrorHidesSecret(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2", "malformed --env error must not echo the value")
 }
 
-func TestParseWebshArgs_EnvPrefixIsExact(t *testing.T) {
+func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 	t.Parallel()
-	// --env-file must not be swallowed by --env matching; websh has no
-	// unknown-flag rejection, so it falls through to the server-name slot.
-	got, err := ParseWebshArgs([]string{"--env-file=secrets", "ls"})
-	require.NoError(t, err)
-	assert.Equal(t, "--env-file=secrets", got.ServerName)
+	tests := []struct {
+		name string
+		args []string
+		flag string
+	}{
+		{name: "unknown flag", args: []string{"-x", "my-server", "echo", "hi"}, flag: "-x"},
+		{name: "combined short flags", args: []string{"-rh"}, flag: "-rh"},
+		{name: "unknown flag after known ones", args: []string{"-u", "user", "-g", "group", "-x", "my-server", "cmd"}, flag: "-x"},
+		{name: "a flag that only shares the env prefix", args: []string{"--env-file=secrets", "ls"}, flag: "--env-file=secrets"},
+		{name: "a separator, which websh has no use for", args: []string{"--", "my-server", "ls"}, flag: "--"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := ParseWebshArgs(tt.args)
+
+			require.EqualError(t, err, "unknown flag: "+tt.flag)
+		})
+	}
 }
 
 func TestParseWebshArgs_CommandAfterServerNotConsumed(t *testing.T) {
