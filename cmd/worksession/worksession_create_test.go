@@ -580,18 +580,32 @@ func TestDecideUseAction(t *testing.T) {
 	}{
 		{name: "use disabled with pending status", status: "pending", useEnabled: false, want: useDecisionNoop},
 		{name: "use disabled with active status", status: "active", useEnabled: false, want: useDecisionNoop},
-		{name: "use enabled with active status (superuser or post-poll)", status: "active", useEnabled: true, want: useDecisionUseNow},
-		{name: "use enabled with pending status (needs --wait)", status: "pending", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with approved status (scheduled starts_at)", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
-		{name: "use enabled with rejected status (terminal)", status: "rejected", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with expired status (terminal)", status: "expired", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with revoked status (terminal)", status: "revoked", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with completed status (terminal)", status: "completed", useEnabled: true, want: useDecisionErrorNeedsWait},
-		{name: "use enabled with empty status (defensive)", status: "", useEnabled: true, want: useDecisionErrorNeedsWait},
+		{name: "use enabled with active status", status: "active", useEnabled: true, want: useDecisionUseNow},
+		{name: "use enabled with pending status", status: "pending", useEnabled: true, want: useDecisionNeedsApproval},
+		{name: "use enabled with approved status", status: "approved", useEnabled: true, want: useDecisionSkipScheduled},
+		{name: "use enabled with rejected status", status: "rejected", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with expired status", status: "expired", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with revoked status", status: "revoked", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with cancelled status", status: "cancelled", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with completed status", status: "completed", useEnabled: true, want: useDecisionSettled},
+		{name: "use enabled with an unknown status", status: "paused", useEnabled: true, want: useDecisionInactive},
+		{name: "use enabled with an empty status", status: "", useEnabled: true, want: useDecisionInactive},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, decideUseAction(tt.status, tt.useEnabled))
+		})
+	}
+}
+
+func TestSettledNegativelyNamesEveryEndedStatus(t *testing.T) {
+	t.Parallel()
+	for _, status := range wsapi.EndedStatuses() {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			terminal := settledNegatively(status, "ses-x")
+			require.NotNil(t, terminal)
+			assert.Equal(t, "ses-x", terminal.sessionID)
 		})
 	}
 }

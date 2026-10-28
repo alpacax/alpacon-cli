@@ -28,8 +28,10 @@ const (
 const (
 	useDecisionNoop useDecision = iota
 	useDecisionUseNow
-	useDecisionErrorNeedsWait
 	useDecisionSkipScheduled
+	useDecisionNeedsApproval
+	useDecisionSettled
+	useDecisionInactive
 )
 
 var validScopePresets = []string{"command", "editor", "sudo", "tunnel", "webftp", "websh"}
@@ -229,6 +231,11 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			utils.CliSuccess("%s", createSuccessMessage(session))
 		}
 
+		exitPending := func(message string, extra ...utils.NextAction) {
+			utils.PrintPendingApproval(message, session.ApprovalRequestID, afterApprovalAction(sessionRequesterType, session.ID, account), extra...)
+			os.Exit(utils.ExitCodePendingApproval)
+		}
+
 		// Phase 1: post-create decision. Cases without an explicit return delegate to
 		// the --wait branch below (or exit immediately when --wait is not set).
 		switch decideUseAction(session.Status, useAfterCreate) {
@@ -258,20 +265,18 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 				printSessionAdvisories(session)
 				return
 			}
-		case useDecisionErrorNeedsWait:
+		case useDecisionNeedsApproval:
 			if !shouldWait {
-				if terminal := settledNegatively(session.Status, session.ID); terminal != nil {
-					exitTerminalWait(opCreate, terminal, terminal)
-				}
-				if session.Status != wsapi.StatusPending {
-					utils.CliErrorEnvelopeWithExit(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
-				}
-				utils.PrintPendingApproval(
-					fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web). Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID, session.ID),
-					session.ApprovalRequestID,
-					afterApprovalAction(sessionRequesterType, session.ID, account),
-				)
-				os.Exit(utils.ExitCodePendingApproval)
+				exitPending(fmt.Sprintf("--use requires the session to be active, and work session %s is pending. A human must approve it in the Alpacon console (web). Pass --wait (or --wait-approval <duration> for a longer timeout) to wait for approval, or run 'alpacon work-session use %s' after approval.", session.ID, session.ID))
+			}
+		case useDecisionSettled:
+			if !shouldWait {
+				terminal := settledNegatively(session.Status, session.ID)
+				exitTerminalWait(opCreate, terminal, terminal)
+			}
+		case useDecisionInactive:
+			if !shouldWait {
+				utils.CliErrorEnvelopeWithExit(opCreate, nil, "--use requires the session to be active, but work session %s is %s.", session.ID, session.Status)
 			}
 		}
 
@@ -283,12 +288,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			// success. Other statuses (e.g. auto-approved) keep the existing success
 			// output and exit 0.
 			if session.Status == wsapi.StatusPending {
-				utils.PrintPendingApproval(
-					fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID),
-					session.ApprovalRequestID,
-					afterApprovalAction(sessionRequesterType, session.ID, account),
-				)
-				os.Exit(utils.ExitCodePendingApproval)
+				exitPending(fmt.Sprintf("Approval required—work session %s is pending. A human must approve it in the Alpacon console (web).", session.ID))
 			}
 			if utils.OutputFormat == utils.OutputFormatJSON {
 				printWorkSessionMutationJSON(newWorkSessionMutationOutput(opCreate, createSuccessMessage(session), session, nil))
@@ -311,13 +311,7 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 			var pending *pendingWaitError
 			if errors.As(err, &pending) {
 				// The refusal a timed-out wait ended on, if any, adds its hint.
-				utils.PrintPendingApproval(
-					fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err),
-					session.ApprovalRequestID,
-					afterApprovalAction(sessionRequesterType, session.ID, account),
-					utils.RefusalNextActions(err)...,
-				)
-				os.Exit(utils.ExitCodePendingApproval)
+				exitPending(fmt.Sprintf("Work session %s: %s. The outcome is still open.", session.ID, err), utils.RefusalNextActions(err)...)
 			}
 			utils.CliErrorEnvelopeWithExit(opCreate, err, "%s", err)
 		}
@@ -350,9 +344,9 @@ account, so pass it to later commands with -u <account> (for example 'alpacon ex
 	},
 }
 
-// useDecision is what the post-create switch does about --use: nothing, attach
-// now, refuse a session no approval can attach yet unless --wait was passed, or
-// wait out one the server has approved but not activated.
+// useDecision is what the post-create switch does about --use: nothing, attach now, wait out
+// one the server has approved but not activated, or, unless --wait was passed, exit 4 on a
+// pending session, 6 on one that ended (settledNegatively) and 1 on any other status.
 type useDecision int
 
 // terminalWaitError marks a wait that ended in a status the session can never leave.
@@ -510,9 +504,13 @@ func decideUseAction(status string, useEnabled bool) useDecision {
 		return useDecisionUseNow
 	case wsapi.StatusApproved:
 		return useDecisionSkipScheduled
-	default:
-		return useDecisionErrorNeedsWait
+	case wsapi.StatusPending:
+		return useDecisionNeedsApproval
 	}
+	if wsapi.IsEndedStatus(status) {
+		return useDecisionSettled
+	}
+	return useDecisionInactive
 }
 
 // resolveRequesterType picks the session's requester_type. --requester-type
