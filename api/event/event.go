@@ -656,6 +656,7 @@ func streamSubscribed(ac *client.AlpaconClient, listener *CommandOutputListener,
 			_, _ = fmt.Fprint(out, details.Result)
 		}
 		printStandingGrant(details)
+		details.ID = commandID // the checked ID, not the echo, so the error never carries an ID that fails RequireID
 		// Output is already streamed; errorFromDetails keeps it on the error
 		// for inspection (e.g. sudo-denial hint) but cmd/exec never reprints it.
 		return errorFromDetails(details)
@@ -883,6 +884,7 @@ func runCommandFallbackFromID(ac *client.AlpaconClient, cmdID api.PathID, out io
 	// The command's own failure carries the remote exit code the caller
 	// propagates, so it outranks an unreadable output. The warning above names a
 	// lost stream, not a lost output, so it cannot stand in for this error.
+	details.ID = cmdID.String() // the checked ID, not the echo, as in streamSubscribed
 	if err := errorFromDetails(details); err != nil {
 		return err
 	}

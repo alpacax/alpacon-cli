@@ -2502,6 +2502,31 @@ func TestRunCommandFallbackFromID_ChunkFetchFailure(t *testing.T) {
 	}
 }
 
+func TestRunCommandFallbackFromIDNamesTheCheckedIDWhenTheServerEchoesAnUnusableOne(t *testing.T) {
+	t.Parallel()
+	const cmdID = "a1b2c3d4-1234-5678-abcd-000000000000"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/chunks/"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"count":0,"results":[]}`))
+		case r.URL.Path == "/api/events/commands/"+cmdID+"/":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"..","status":"rejected"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
+
+	err := runCommandFallbackFromID(ac, testPathID(t, cmdID), io.Discard, testFallbackDelays.fallbackPollTick, false, fmt.Errorf("websocket dial failed"))
+
+	var rejected *CommandRejectedError
+	require.ErrorAs(t, err, &rejected)
+	assert.Equal(t, cmdID, rejected.CommandID)
+}
+
 // A submission refused for MFA is retried once a second for minutes. The stream
 // keeps its one connected listener across those refusals, so the whole wait
 // opens a single event session, and the accepted submission still streams.
