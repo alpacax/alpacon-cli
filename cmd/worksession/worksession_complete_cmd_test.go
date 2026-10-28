@@ -14,14 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const completePath = "/api/work-sessions/sessions/ses-1/complete/"
-
 var completeFormats = []string{utils.OutputFormatTable, utils.OutputFormatJSON}
 
 func newCompleteServer(t *testing.T, status int, body string) *httptest.Server {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != completePath {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/work-sessions/sessions/ses-1/complete/" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -34,8 +32,7 @@ func newCompleteServer(t *testing.T, status int, body string) *httptest.Server {
 	return ts
 }
 
-// completeHome returns a home whose config holds the given active sessions.
-func completeHome(t *testing.T, serverURL string, active map[string]string) string {
+func completeHomeWithActiveSessions(t *testing.T, serverURL string, active map[string]string) string {
 	t.Helper()
 	home := t.TempDir()
 	writeWorkSessionTestConfig(t, home, serverURL)
@@ -51,7 +48,7 @@ func completeHome(t *testing.T, serverURL string, active map[string]string) stri
 	return home
 }
 
-func activeSessions(t *testing.T, home string) map[string]string {
+func completeActiveSessions(t *testing.T, home string) map[string]string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(home, ".alpacon", "config.json"))
 	require.NoError(t, err)
@@ -62,41 +59,63 @@ func activeSessions(t *testing.T, home string) map[string]string {
 	return cfg.Active
 }
 
-func parseEnvelope(t *testing.T, stderr string) errorEnvelope {
+// assertCompleteFailure checks the stream each output mode reports a failure on: the
+// envelope in json mode, the plain message in table mode.
+func assertCompleteFailure(t *testing.T, format, stdout, stderr string, exitCode int, errorCode, message string) {
 	t.Helper()
-	var env errorEnvelope
-	require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
-	return env
+	assert.Empty(t, stdout)
+	if format == utils.OutputFormatJSON {
+		var env errorEnvelope
+		require.NoError(t, json.Unmarshal([]byte(stderr), &env), "stderr: %s", stderr)
+		assert.False(t, env.OK)
+		assert.Equal(t, exitCode, env.ExitCode)
+		assert.Equal(t, errorCode, env.ErrorCode)
+		assert.Equal(t, opComplete, env.Context.Operation)
+		assert.Contains(t, env.Message, message)
+		return
+	}
+	assert.Contains(t, stderr, message)
+	assert.NotContains(t, stderr, `"error_code"`)
 }
 
 func TestWorkSessionCompleteCmd_ClearsActiveSessionWhenItIsTheCompletedOne(t *testing.T) {
 	t.Parallel()
-	ts := newCompleteServer(t, http.StatusOK, `{}`)
-	home := completeHome(t, ts.URL, map[string]string{"test": "ses-1"})
+	for _, format := range completeFormats {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			ts := newCompleteServer(t, http.StatusOK, `{}`)
+			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1", "other-ws": "ses-1"})
 
-	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
-		utils.OutputFormatTable, ts.URL, "complete", "ses-1")
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+				format, ts.URL, "complete", "ses-1")
 
-	assert.Equal(t, 0, exitCode)
-	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, "Work session ses-1 completed.")
-	assert.Contains(t, stderr, "Active work-session cleared.")
-	assert.NotContains(t, activeSessions(t, home), "test")
+			assert.Equal(t, 0, exitCode)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Work session ses-1 completed.")
+			assert.Contains(t, stderr, "Active work-session cleared.")
+			assert.Equal(t, map[string]string{"other-ws": "ses-1"}, completeActiveSessions(t, home))
+		})
+	}
 }
 
 func TestWorkSessionCompleteCmd_KeepsOtherActiveSession(t *testing.T) {
 	t.Parallel()
-	ts := newCompleteServer(t, http.StatusOK, `{}`)
-	home := completeHome(t, ts.URL, map[string]string{"test": "ses-other"})
+	for _, format := range completeFormats {
+		t.Run(format, func(t *testing.T) {
+			t.Parallel()
+			ts := newCompleteServer(t, http.StatusOK, `{}`)
+			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-other"})
 
-	stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
-		utils.OutputFormatTable, ts.URL, "complete", "ses-1")
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
+				format, ts.URL, "complete", "ses-1")
 
-	assert.Equal(t, 0, exitCode)
-	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, "Work session ses-1 completed.")
-	assert.NotContains(t, stderr, "Active work-session cleared.")
-	assert.Equal(t, map[string]string{"test": "ses-other"}, activeSessions(t, home))
+			assert.Equal(t, 0, exitCode)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, "Work session ses-1 completed.")
+			assert.NotContains(t, stderr, "Active work-session cleared.")
+			assert.Equal(t, map[string]string{"test": "ses-other"}, completeActiveSessions(t, home))
+		})
+	}
 }
 
 func TestWorkSessionCompleteCmd_ServerRefusalFailsAndKeepsActiveSession(t *testing.T) {
@@ -106,25 +125,16 @@ func TestWorkSessionCompleteCmd_ServerRefusalFailsAndKeepsActiveSession(t *testi
 			t.Parallel()
 			ts := newCompleteServer(t, http.StatusForbidden,
 				`{"code":"work_session_not_usable","source":"work_session","detail":"not usable"}`)
-			home := completeHome(t, ts.URL, map[string]string{"test": "ses-1"})
+			home := completeHomeWithActiveSessions(t, ts.URL, map[string]string{"test": "ses-1"})
 
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + home},
 				format, ts.URL, "complete", "ses-1")
 
 			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
-			assert.Empty(t, stdout)
-			assert.Equal(t, map[string]string{"test": "ses-1"}, activeSessions(t, home))
-			if format == utils.OutputFormatJSON {
-				env := parseEnvelope(t, stderr)
-				assert.False(t, env.OK)
-				assert.Equal(t, utils.ExitCodeGeneralError, env.ExitCode)
-				assert.Equal(t, "work_session_not_usable", env.ErrorCode)
-				assert.Equal(t, "complete", env.Context.Operation)
-				assert.Contains(t, env.Message, "Failed to complete work session")
-				return
-			}
-			assert.Contains(t, stderr, "Failed to complete work session")
-			assert.NotContains(t, stderr, `"error_code"`)
+			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeGeneralError,
+				"work_session_not_usable", "Failed to complete work session")
+			assert.Contains(t, stderr, "not usable")
+			assert.Equal(t, map[string]string{"test": "ses-1"}, completeActiveSessions(t, home))
 		})
 	}
 }
@@ -134,23 +144,14 @@ func TestWorkSessionCompleteCmd_NotLoggedInReportsConnectionFailure(t *testing.T
 	for _, format := range completeFormats {
 		t.Run(format, func(t *testing.T) {
 			t.Parallel()
-			ts := testutil.NewNoRequestServer(t)
+			homeWithoutConfig := t.TempDir()
 
-			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + t.TempDir()},
-				format, ts.URL, "complete", "ses-1")
+			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, []string{"HOME=" + homeWithoutConfig},
+				format, "http://127.0.0.1:1", "complete", "ses-1")
 
 			assert.Equal(t, utils.ExitCodeGeneralError, exitCode)
-			assert.Empty(t, stdout)
-			if format == utils.OutputFormatJSON {
-				env := parseEnvelope(t, stderr)
-				assert.False(t, env.OK)
-				assert.Equal(t, utils.ExitCodeGeneralError, env.ExitCode)
-				assert.Equal(t, utils.ErrorCodeNotLoggedIn, env.ErrorCode)
-				assert.Equal(t, "complete", env.Context.Operation)
-				assert.Contains(t, env.Message, "Connection to Alpacon API failed")
-				return
-			}
-			assert.Contains(t, stderr, "Connection to Alpacon API failed")
+			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeGeneralError,
+				utils.ErrorCodeNotLoggedIn, "Connection to Alpacon API failed")
 		})
 	}
 }
@@ -165,16 +166,8 @@ func TestWorkSessionCompleteCmd_InvalidSessionIDIsRefusedBeforeAnyRequest(t *tes
 			stdout, stderr, exitCode := runWorkSessionHelperWithEnv(t, nil, format, ts.URL, "complete", "../x")
 
 			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
-			assert.Empty(t, stdout)
-			if format == utils.OutputFormatJSON {
-				env := parseEnvelope(t, stderr)
-				assert.False(t, env.OK)
-				assert.Equal(t, utils.ExitCodeUsageError, env.ExitCode)
-				assert.Equal(t, utils.ErrorCodeUsage, env.ErrorCode)
-				assert.Equal(t, "complete", env.Context.Operation)
-				return
-			}
-			assert.Contains(t, stderr, "Failed to complete work session")
+			assertCompleteFailure(t, format, stdout, stderr, utils.ExitCodeUsageError,
+				utils.ErrorCodeUsage, "must be a single path segment")
 		})
 	}
 }
