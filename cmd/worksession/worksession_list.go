@@ -49,6 +49,12 @@ func MarkActive(rows []wsapi.WorkSessionAttributes, activeUUID string) {
 	}
 }
 
+// markActiveFor is best effort: a config error leaves the rows unmarked so listing still works.
+func markActiveFor(ac *client.AlpaconClient, sessions []wsapi.WorkSessionAttributes) {
+	activeUUID, _ := config.GetActiveWorkSessionFor(ac.WorkspaceName)
+	MarkActive(sessions, activeUUID)
+}
+
 var workSessionListCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
@@ -87,9 +93,7 @@ var workSessionListCmd = &cobra.Command{
 			utils.CliErrorEnvelopeWithExit(opList, err, "Failed to retrieve work sessions: %s.", err)
 		}
 
-		// Best-effort active-session decoration; ignore config errors so listing still works.
-		activeUUID, _ := config.GetActiveWorkSession()
-		MarkActive(sessions, activeUUID)
+		markActiveFor(ac, sessions)
 
 		utils.PrintTable(sessions)
 	},
