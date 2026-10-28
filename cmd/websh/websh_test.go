@@ -341,6 +341,9 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 		{name: "unknown flag after known ones", args: []string{"-u", "user", "-g", "group", "-x", "my-server", "cmd"}, flag: "-x"},
 		{name: "a flag that only shares the env prefix", args: []string{"--env-file=secrets", "ls"}, flag: "--env-file=secrets"},
 		{name: "a separator, which websh has no use for", args: []string{"--", "my-server", "ls"}, flag: "--"},
+		{name: "a flag that only shares the username prefix", args: []string{"--username-typo", "my-server"}, flag: "--username-typo"},
+		{name: "a flag that only shares the groupname prefix", args: []string{"--groupname-extra", "my-server"}, flag: "--groupname-extra"},
+		{name: "a flag that only shares the read-only prefix", args: []string{"--read-onlyx", "my-server"}, flag: "--read-onlyx"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

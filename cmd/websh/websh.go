@@ -38,8 +38,7 @@ type WebshArgs struct {
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode).
 // Returns errHelpRequested when -h/--help is seen.
 //
-// NOTE: --read-only must be checked before generic -r prefixes, and
-// --work-session before the default fallthrough.
+// NOTE: every named flag must be matched before the unknown-flag case.
 func ParseWebshArgs(args []string) (WebshArgs, error) {
 	res := WebshArgs{Env: map[string]string{}}
 	for i := 0; i < len(args); i++ {
@@ -48,15 +47,15 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 			res.Share = true
 		case args[i] == "-h" || args[i] == "--help":
 			return res, errHelpRequested
-		case strings.HasPrefix(args[i], "-u") || strings.HasPrefix(args[i], "--username"):
+		case isFlag(args[i], "-u", "--username"):
 			res.Username, i = extractValue(args, i)
-		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
+		case isFlag(args[i], "-g", "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
 			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
 				return res, errors.New(errMsg)
 			}
-		case strings.HasPrefix(args[i], "--read-only"):
+		case isFlag(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
 				parts := strings.SplitN(args[i], "=", 2)
 				normalized := strings.TrimSpace(strings.ToLower(parts[1]))
@@ -351,6 +350,16 @@ func init() {
 	WebshCmd.Flags().Bool("read-only", false, "")
 	_ = WebshCmd.Flags().MarkHidden("share")
 	_ = WebshCmd.Flags().MarkHidden("read-only")
+}
+
+// isFlag reports whether arg is one of names, alone or as name=value.
+func isFlag(arg string, names ...string) bool {
+	for _, name := range names {
+		if arg == name || strings.HasPrefix(arg, name+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func extractValue(args []string, i int) (string, int) {
