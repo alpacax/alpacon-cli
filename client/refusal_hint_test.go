@@ -322,3 +322,106 @@ func TestSendRequest_HintedRefusalCodeDisplay(t *testing.T) {
 	assert.Equal(t, "permission_\x1b[2Jdenied", utils.StructuredErrorCode(err))
 	assert.Equal(t, "Retry later.", utils.RefusalHint(err))
 }
+
+func TestSendRequest_RefusalWithGateAndMissingNamesBothInOneLine(t *testing.T) {
+	t.Parallel()
+	const hint = "Ask an admin for the role."
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "403 gate and missing with a hint",
+			status:      http.StatusForbidden,
+			body:        `{"code": "rbac_permission_required", "gate": "role", "missing": ["role", "approval"], "hint": "` + hint + `"}`,
+			wantMessage: "permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role, approval",
+		},
+		{
+			name:        "429 unknown code with a gate",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "future_throttle", "gate": "rate"}`,
+			wantMessage: "request refused by the rate gate (HTTP 429, code: future_throttle)",
+		},
+		{
+			name:        "405 unknown code with a gate and missing",
+			status:      http.StatusMethodNotAllowed,
+			body:        `{"code": "future_denied", "gate": "approval", "missing": "approval"}`,
+			wantMessage: "request refused by the approval gate (HTTP 405, code: future_denied): missing approval",
+		},
+		{
+			name:        "402 non plan gate with an unknown code",
+			status:      http.StatusPaymentRequired,
+			body:        `{"code": "future_denied", "gate": "role", "missing": "role"}`,
+			wantMessage: "request refused by the role gate (HTTP 402, code: future_denied): missing role",
+		},
+		{
+			name:        "a hint on a known code keeps the gate in the line",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited", "gate": "rate", "hint": "` + hint + `"}`,
+			wantMessage: "request refused by the rate gate (HTTP 429, code: api_rate_limited)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, tt.wantMessage, err.Error())
+		})
+	}
+}
+func TestSendRequest_GateOutsideARefusalStatusKeepsTodaysMessage(t *testing.T) {
+	t.Parallel()
+	err := sendRefusal(t, http.StatusConflict, `{"code": "future_conflict", "gate": "role"}`)
+
+	assert.Equal(t, http.StatusConflict, utils.HTTPStatusCode(err))
+	assert.Equal(t, "request failed (code: future_conflict)", err.Error())
+}
+func TestSendRequest_ForbiddenWithGateAndHintLeadsWithTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "Ask an admin for the role."
+	err := sendRefusal(t, http.StatusForbidden, `{"code": "rbac_permission_required", "gate": "role", "missing": "role", "hint": "`+hint+`"}`)
+
+	assert.Equal(t, "permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role", err.Error())
+	assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+}
+func TestSendRequest_OlderServerRefusalsKeepTodaysOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "403 with only a code",
+			status:      http.StatusForbidden,
+			body:        `{"code": "user_no_permission"}`,
+			wantMessage: "permission denied: you do not have the required privileges for this action",
+		},
+		{
+			name:        "429 with only a code",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited"}`,
+			wantMessage: "too many requests—please try again later",
+		},
+		{
+			name:        "429 with an unknown code",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "future_throttle"}`,
+			wantMessage: "request failed (code: future_throttle)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.wantMessage, err.Error())
+			assert.Nil(t, utils.RefusalNextActions(err))
+		})
+	}
+}

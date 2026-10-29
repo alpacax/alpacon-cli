@@ -288,37 +288,46 @@ func authStatusMessage(statusCode int, code, detail string, hasDetail bool, gate
 		// no-raw-code contract that TestSendRequest_403CodeWithoutDetailKeepsCodeSource guards.
 		return "request denied by server"
 	}
-	// A coded 403 with no detail but a stated "missing": name it rather than fall
-	// back to the generic line. A caller with more specific guidance for its own
-	// code (cmd/iam's RBAC gates) overrides this; this is the floor for every
-	// other caller that just surfaces the error as-is. "missing" is not always a
-	// scope—the role gate's "missing" names a permission/role, not a
-	// "scope:..." string—so only the token-scope gate gets scope wording; every
-	// other gate (including an absent one, from a server this CLI does not yet
-	// know) gets gate-neutral wording instead.
+	// A coded 403 with no detail: the token-scope gate names its missing scopes,
+	// any other named gate gets refusalMessage's line, a gateless "missing" is named as is.
+	if gate == serverGateTokenScope && len(missing) > 0 {
+		return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
+	}
+	if gate != "" {
+		return refusalMessage(statusCode, code, gate, missing)
+	}
 	if len(missing) > 0 {
-		if gate == serverGateTokenScope {
-			return fmt.Sprintf("permission denied: missing scope %s", strings.Join(missing, ", "))
-		}
 		return fmt.Sprintf("permission denied: missing %s", strings.Join(missing, ", "))
 	}
 	if serverHint {
-		return hintedRefusalMessage(statusCode, code)
+		return refusalMessage(statusCode, code, "", nil)
 	}
 	return "permission denied: you do not have the required privileges for this action"
 }
 
-// hintedRefusalMessage identifies a refusal whose guidance the server sent as
-// a hint: the status and the code, with no sentence of the CLI's own.
-func hintedRefusalMessage(statusCode int, code string) string {
+// refusalMessage is the one line for a refusal the CLI has no sentence for:
+// status, code, gate and missing, never a bare code or a field dump.
+func refusalMessage(statusCode int, code, gate string, missing []string) string {
 	label := "request refused"
 	if statusCode == http.StatusForbidden {
 		label = "permission denied"
 	}
-	if code == "" {
-		return fmt.Sprintf("%s (HTTP %d)", label, statusCode)
+	if gate != "" {
+		label += " by the " + utils.SanitizeTerminalText(gate) + " gate"
 	}
-	return fmt.Sprintf("%s (HTTP %d, code: %s)", label, statusCode, utils.SanitizeTerminalText(code))
+	status := fmt.Sprintf("HTTP %d", statusCode)
+	if code != "" {
+		status += ", code: " + utils.SanitizeTerminalText(code)
+	}
+	label += " (" + status + ")"
+	if len(missing) == 0 {
+		return label
+	}
+	cleaned := make([]string, len(missing))
+	for i, m := range missing {
+		cleaned[i] = utils.SanitizeTerminalText(m)
+	}
+	return label + ": missing " + strings.Join(cleaned, ", ")
 }
 
 // authStatusCodeMessage maps structured server codes that arrive on a 401/403
@@ -686,7 +695,7 @@ func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspa
 		// rule 3: a feature lock—no axis to name a limit on.
 		lock := featureLockSentence
 		if serverHint {
-			lock = hintedRefusalMessage(http.StatusPaymentRequired, code) + "."
+			lock = refusalMessage(http.StatusPaymentRequired, code, "", nil) + "."
 		}
 		return fmt.Sprintf("%s Upgrade: %s. Talk to us: %s", lock, billingLocation(workspaceURL), talkToUsURL), true
 	default:
@@ -1257,10 +1266,13 @@ func parseAPIError(body []byte, statusCode int) error {
 	err := newAPIError(message, code, source, gate, axis, next, missing)
 	err.hint = utils.ParseRefusalHint(body, statusCode)
 	err.body = body
-	// A message that is codeOnlyMessage's own sentence for the code gives way to
-	// the server's hint, as authStatusMessage's table does.
-	if err.hint != "" && code != "" && message == codeOnlyMessage(code) {
-		err.message = hintedRefusalMessage(statusCode, code)
+	// codeOnlyMessage's sentence gives way to the server's hint, and its bare
+	// default to a refusal that names its gate or what it was missing.
+	if code != "" && utils.IsRefusalStatus(statusCode) && message == codeOnlyMessage(code) {
+		_, known := codeSentence(code)
+		if err.hint != "" || (!known && (gate != "" || len(missing) > 0)) {
+			err.message = refusalMessage(statusCode, code, gate, missing)
+		}
 	}
 	return err
 }
@@ -1468,45 +1480,52 @@ func fieldErrorMessages(raw any) []string {
 	return messages
 }
 
-// codeOnlyMessage renders a code sent with no detail or field errors; a case
-// here names the remedy where the bare code would not.
+// codeOnlyMessage renders a code sent with no detail or field errors.
 func codeOnlyMessage(code string) string {
+	if sentence, known := codeSentence(code); known {
+		return sentence
+	}
+	return fmt.Sprintf("request failed (code: %s)", code)
+}
+
+// codeSentence is the CLI's own sentence for code, naming the remedy where the
+// bare code would not; known is false for a code it has none for.
+func codeSentence(code string) (sentence string, known bool) {
 	switch code {
 	case utils.APINotFound:
-		return "the requested resource was not found"
+		return "the requested resource was not found", true
 	case utils.APIRateLimited:
-		return "too many requests—please try again later"
+		return "too many requests—please try again later", true
 	case utils.APINotAcceptable:
-		return "the server cannot produce a response in the format requested"
+		return "the server cannot produce a response in the format requested", true
 	case utils.APIUnsupportedMediaType:
-		return "the server does not support the request's content type"
+		return "the server does not support the request's content type", true
 	case utils.AuthVerificationUnavailable:
-		return "the server could not verify your credential right now—it was not rejected, so try again in a moment"
+		return "the server could not verify your credential right now—it was not rejected, so try again in a moment", true
 	case utils.APICursorExpired:
-		return "the search snapshot this page was read from expired—read the listing again from the start"
+		return "the search snapshot this page was read from expired—read the listing again from the start", true
 	case utils.APIInvalidCursor:
-		return "the server would not take this page's cursor—read the listing again from the start"
+		return "the server would not take this page's cursor—read the listing again from the start", true
 	case utils.APISearchUnavailable:
-		return "the search backend would not start this read right now—try again in a moment"
+		return "the search backend would not start this read right now—try again in a moment", true
 	case utils.ServerPAMInstallUnsupported:
-		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package"
+		return "alpamon-pam cannot be installed on this server—its operating system or package manager has no alpamon-pam package", true
 	case utils.ServerPAMInstallRequiresSudoWithMFA:
-		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon"
+		return "alpamon-pam needs sudo with MFA—turn on \"Use sudo with MFA\" in the workspace security settings and try again; a deployment that cannot complete the MFA step-up cannot install it from Alpacon", true
 	case utils.ServerPAMInstallInProgress:
-		return "an alpamon-pam install is already pending on this server—wait for it to finish"
+		return "an alpamon-pam install is already pending on this server—wait for it to finish", true
 	case utils.WorkSessionTargetAccountAbsent:
-		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account"
+		return "the account does not exist on at least one target server and will not be created there—drop that server or name a different account with --account", true
 	case utils.WorkSessionTargetAccountNotReachable:
-		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account"
+		return "your roles cannot open that account on at least one target server—ask for a group role on that server, or name an account you can open with --account", true
 	case utils.TargetAccountOtherPerson:
-		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account"
+		return "that account belongs to another person on at least one target server, and no session may run as it—name your own account or a shared one with --account", true
 	case utils.WorkSessionAgentSessionRequired:
-		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session"
+		return "this CLI runs under an AI agent, and the work session is a user session—create an agent session with 'alpacon work-session create' and pass its ID with --work-session", true
 	case utils.CommandACLMoved:
-		return "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger"
-	default:
-		return fmt.Sprintf("request failed (code: %s)", code)
+		return "command ACLs are now managed on the command pre-approval ledger, which this CLI cannot change yet—a Command ACL admin issues or revokes the entry under Pre-approved commands on the service token's page in the web console; a personal API token has no command list on the ledger", true
 	}
+	return "", false
 }
 
 // parseGateAndMissing extracts the optional "gate" and "missing" fields a coded

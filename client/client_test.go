@@ -648,9 +648,7 @@ func TestSendRequest_RefusalBodyWithGateAndMissingIsEnvelopeOnly(t *testing.T) {
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "request failed")
-	assert.NotContains(t, err.Error(), "gate:")
-	assert.NotContains(t, err.Error(), "missing:")
+	assert.Equal(t, "request refused by the g gate (HTTP 402, code: x): missing a", err.Error())
 }
 
 func TestSendRequest_RefusalBodyWithMissingButNoGateIsEnvelopeOnly(t *testing.T) {
@@ -666,8 +664,7 @@ func TestSendRequest_RefusalBodyWithMissingButNoGateIsEnvelopeOnly(t *testing.T)
 	ac := newTestClient(ts.URL)
 	_, err := ac.SendGetRequest("/api/test/")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "request failed")
-	assert.NotContains(t, err.Error(), "missing:")
+	assert.Equal(t, "request refused (HTTP 402, code: x): missing a", err.Error())
 }
 
 func TestSendRequest_RefusalBodyWithStringMissingIsEnvelopeOnly(t *testing.T) {
@@ -989,15 +986,15 @@ func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 			wantCode:    "rbac_permission_required",
 			wantGate:    "role",
 			wantMissing: []string{"role"},
-			wantMessage: "permission denied: missing role",
+			wantMessage: "permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role",
 		},
 		{
-			name:        "role object permission required without missing falls back generically",
+			name:        "role object permission required without missing still names the gate",
 			body:        `{"code": "rbac_object_permission_required", "gate": "role"}`,
 			wantCode:    "rbac_object_permission_required",
 			wantGate:    "role",
 			wantMissing: nil,
-			wantMessage: "permission denied: you do not have the required privileges for this action",
+			wantMessage: "permission denied by the role gate (HTTP 403, code: rbac_object_permission_required)",
 		},
 		{
 			name:        "token scope missing joins a list-form missing",
@@ -1008,12 +1005,12 @@ func TestSendRequest_403CodedRefusalsPreserveGateAndMissing(t *testing.T) {
 			wantMessage: "permission denied: missing scope scope:server:create, scope:server:read",
 		},
 		{
-			name:        "token scope action unresolved without missing falls back generically",
+			name:        "token scope action unresolved without missing still names the gate",
 			body:        `{"code": "api_token_scope_action_unresolved", "gate": "token_scope"}`,
 			wantCode:    "api_token_scope_action_unresolved",
 			wantGate:    "token_scope",
 			wantMissing: nil,
-			wantMessage: "permission denied: you do not have the required privileges for this action",
+			wantMessage: "permission denied by the token_scope gate (HTTP 403, code: api_token_scope_action_unresolved)",
 		},
 		{
 			// No "gate" at all—an unknown future code with a "missing" this CLI
