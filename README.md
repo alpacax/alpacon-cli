@@ -525,6 +525,8 @@ With `--output json`, the same refusal is a structured envelope on stderr—scri
 }
 ```
 
+Any other refused request (HTTP 402, 403, 405 or 429) is reported the same way. When the server names the class of control that refused (`gate`) and what was missing (`missing`), the error line names both, for example `permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role`. `next_actions` then lists the server's own hint first, then `alpacon api <path>` when the server gave a path where the request's state can be read, then `Retry after Ns` when it sent `Retry-After`. The `alpacon api` action only reads: it never requests an approval or a scope. A path that is not plain path segments is left out, so an agent can run the command as it stands.
+
 What each refusal code means and what to do next:
 
 | `error_code` | Meaning | Next |
