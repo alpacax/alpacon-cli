@@ -207,6 +207,18 @@ func TestExecuteTableModeWhenAValueFlagTakesTheOutputToken(t *testing.T) {
 	}
 }
 
+func TestExecuteWarnsOnceForAnUnsetEnvKey(t *testing.T) {
+	t.Parallel()
+	for _, command := range []string{"exec", "websh"} {
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+			_, stderr, _ := runExecuteHelper(t, command, "--env=ALPACON_TEST_UNSET_KEY", "my-server", "ls")
+
+			assert.Equal(t, 1, strings.Count(stderr, "no environment variable found for key 'ALPACON_TEST_UNSET_KEY'"), "stderr: %q", stderr)
+		})
+	}
+}
+
 func TestExecuteJSONHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_EXECUTE_JSON_HELPER") != "1" {
 		return

@@ -66,6 +66,7 @@ type RemoteExecArgs struct {
 	// WebshInvocation, and exec leaves it empty, which the hint reads as exec.
 	InvokedAs    Invocation
 	Env          map[string]string
+	UnsetEnv     []string // bare --env keys the shell does not set; see WarnUnsetEnv
 	WaitApproval time.Duration
 	Detach       bool
 	Wait         bool
@@ -105,6 +106,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		waitApproval                                             time.Duration
 	)
 	env := map[string]string{}
+	var unsetEnv []string
 
 	var stop RemoteExecArgs
 	stopped := false
@@ -189,9 +191,13 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 			}
 			outputFormat = value
 		case arg == "--env" || strings.HasPrefix(arg, "--env="):
-			if errMsg := ParseEnvArg(arg, env); errMsg != "" {
+			unset, errMsg := ParseEnvArg(arg, env)
+			if errMsg != "" {
 				halt(RemoteExecArgs{Err: errMsg})
 				continue
+			}
+			if unset != "" {
+				unsetEnv = append(unsetEnv, unset)
 			}
 		case arg == "--file" || strings.HasPrefix(arg, "--file="):
 			var errMsg string
@@ -353,6 +359,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 
 	if stopped {
 		stop.OutputFormat = outputFormat
+		stop.UnsetEnv = unsetEnv
 		return stop
 	}
 
@@ -372,6 +379,7 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 		Server:        server,
 		Purpose:       purpose,
 		Env:           env,
+		UnsetEnv:      unsetEnv,
 		WaitApproval:  waitApproval,
 		Detach:        detach,
 		Wait:          wait,
@@ -393,9 +401,9 @@ func ParseRemoteExecArgs(args []string) RemoteExecArgs {
 	return parsed
 }
 
-// ParseEnvArg parses a --env token into env. A bare KEY reads the shell value,
-// warning and skipping if unset; malformed input returns an error message.
-func ParseEnvArg(arg string, env map[string]string) string {
+// ParseEnvArg parses a --env token into env. A bare KEY reads the shell value and
+// is returned as unset when there is none; malformed input returns an error message.
+func ParseEnvArg(arg string, env map[string]string) (unset, errMsg string) {
 	body, ok := strings.CutPrefix(arg, "--env=")
 	var key, value string
 	var hasValue bool
@@ -404,19 +412,26 @@ func ParseEnvArg(arg string, env map[string]string) string {
 	}
 	if !ok || key == "" {
 		// Never echo arg: a malformed token like --env="=secret" would leak the value.
-		return "invalid --env argument: use --env=KEY or --env=KEY=VALUE"
+		return "", "invalid --env argument: use --env=KEY or --env=KEY=VALUE"
 	}
 	if hasValue {
 		env[key] = value
-		return ""
+		return "", ""
 	}
 	v, exists := os.LookupEnv(key)
 	if !exists {
-		utils.CliWarning("no environment variable found for key '%s'", key)
-		return ""
+		return key, ""
 	}
 	env[key] = v
-	return ""
+	return "", ""
+}
+
+// WarnUnsetEnv is the caller's half of ParseEnvArg: parsing stays silent because the
+// --output pre-scan parses the same line before the command does.
+func WarnUnsetEnv(keys []string) {
+	for _, key := range keys {
+		utils.CliWarning("no environment variable found for key '%s'", key)
+	}
 }
 
 // WaitTimeout returns the effective approval-wait timeout, or 0 when not waiting.
