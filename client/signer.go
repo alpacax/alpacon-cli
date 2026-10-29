@@ -72,10 +72,11 @@ func SignerAudience() string {
 // renews on a 401 and always verifies the certificate, whatever the workspace chose.
 func NewSignerClient(accessToken string) *AlpaconClient {
 	ac := &AlpaconClient{
-		HTTPClient: httpclient.New(false),
-		BaseURL:    SignerURL(),
-		UserAgent:  utils.GetUserAgent(),
-		noRenewal:  true,
+		HTTPClient:       httpclient.New(false),
+		BaseURL:          SignerURL(),
+		UserAgent:        utils.GetUserAgent(),
+		noRenewal:        true,
+		dropsRefusalNext: true,
 	}
 	ac.SetAccessToken(accessToken)
 	return ac

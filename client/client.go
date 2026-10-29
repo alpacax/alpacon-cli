@@ -53,10 +53,6 @@ const (
 	// the token's MFA state, so only a new login, which runs MFA, can lift it.
 	signInMFAMessage = "multi-factor authentication required at sign-in: please run 'alpacon login' again"
 
-	// gatePlan is the "gate" value the server sends on every 402 plan
-	// refusal, limit or feature lock alike.
-	gatePlan = "plan"
-
 	// axisServer is the one axis whose remedy carries an extra hint: a host that
 	// hit the server cap may be a re-registration of one deleted-but-not-freed
 	// entry rather than a genuinely new one.
@@ -112,12 +108,8 @@ type apiError struct {
 	// to a slice regardless of whether the server sent one scope string or a list.
 	gate    string
 	missing []string
-	// axis and next carry the optional 402 plan-limit fields: axis names which
-	// limit refused the request, and next is a self-relative entitlements-read
-	// path a member-scoped caller can read for the numbers the 402 body never
-	// carries. planLimitMessage reads axis to build the user-facing text; next
-	// is carried for a future programmatic reader, not this CLI's plain-text
-	// rendering.
+	// axis is the 402 plan-limit field; next is the path a refusal says its state
+	// can be read at.
 	axis string
 	next string
 	// hint is the "hint" a coded 402/403/405/429 may send beside "code": the
@@ -235,6 +227,7 @@ func checkAuthStatus(statusCode int, body []byte) error {
 		source:     source,
 		gate:       gate,
 		missing:    missing,
+		next:       utils.ParseRefusalNext(body, statusCode),
 		hint:       hint,
 		apiPayload: isJSONObject(body),
 		body:       body,
@@ -378,11 +371,8 @@ func authStatusCodeMessage(statusCode int, code string) (string, bool) {
 // regardless so the WorkSession gate can route to exit 3 and a coded refusal
 // without either still carries what it can.
 func parseAuthStatusErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, missing []string, ok bool) {
-	// axis/next ride only on the 402 plan-limit envelope (client.go's
-	// planLimitMessage), never on a 401/403; this path ignores them, and
-	// isEnvelopeOnly's own statusCode gate keeps a same-named validation field
-	// from being swallowed regardless.
-	message, code, source, gate, _, _, missing, ok = parseAPIErrorPayload(body, statusCode)
+	// axis is a 402 field and never rides on a 401/403, so it is ignored here.
+	message, code, source, gate, _, missing, ok = parseAPIErrorPayload(body, statusCode)
 	if !ok || message == "" {
 		return "", code, source, gate, missing, false
 	}
@@ -466,7 +456,7 @@ func (ac *AlpaconClient) createRequest(method, url string, body io.Reader) (*htt
 func readJSONResponse(resp *http.Response) ([]byte, error) {
 	body, readErr := io.ReadAll(resp.Body)
 	if err := checkAuthStatus(resp.StatusCode, body); err != nil {
-		return nil, withStatus(err, resp.StatusCode)
+		return nil, withRetryAfter(withStatus(err, resp.StatusCode), resp.Header)
 	}
 	if readErr != nil {
 		// The headers already carried a status; dropping it here would leave a
@@ -637,7 +627,7 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 
 	respBody, err := readJSONResponse(resp)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, ac.withoutForeignNext(err)
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
@@ -645,10 +635,20 @@ func (ac *AlpaconClient) roundTripWithStatus(req *http.Request) ([]byte, int, er
 		if resp.StatusCode == http.StatusPaymentRequired {
 			apiErr = ac.rewritePlanLimitMessage(apiErr)
 		}
-		return nil, resp.StatusCode, apiErr
+		return nil, resp.StatusCode, ac.withoutForeignNext(apiErr)
 	}
 
 	return respBody, resp.StatusCode, nil
+}
+
+// withoutForeignNext drops err's "next" on a client whose host `alpacon api`
+// does not reach.
+func (ac *AlpaconClient) withoutForeignNext(err error) error {
+	var ae *apiError
+	if ac.dropsRefusalNext && errors.As(err, &ae) {
+		ae.next = ""
+	}
+	return err
 }
 
 // rewritePlanLimitMessage replaces err's message with planLimitMessage's
@@ -683,7 +683,7 @@ func (ac *AlpaconClient) rewritePlanLimitMessage(err error) error {
 // where to upgrade.
 func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspaceURL string, serverHint bool) (string, bool) {
 	switch {
-	case gate == gatePlan && axis != "":
+	case gate == utils.GatePlan && axis != "":
 		// rule 1: axis already carried by the modern envelope.
 	case gate == "":
 		mapped, known := legacyPlanLimitAxis[code]
@@ -691,7 +691,7 @@ func planLimitMessage(axis, code, gate string, retryAfter time.Duration, workspa
 			return "", false // rule 4
 		}
 		axis = mapped // rule 2
-	case gate == gatePlan:
+	case gate == utils.GatePlan:
 		// rule 3: a feature lock—no axis to name a limit on.
 		lock := featureLockSentence
 		if serverHint {
@@ -1083,7 +1083,7 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode)
+		return nil, withRetryAfter(withStatus(checkAuthStatus(resp.StatusCode, body), resp.StatusCode), resp.Header)
 	}
 	// A 402, 405 or 429 is a coded refusal too: the shared parser keeps its
 	// code and hint, where the caller would only have the raw body to print.
@@ -1201,6 +1201,10 @@ func (e *apiError) ErrorHint() string {
 	return e.hint
 }
 
+func (e *apiError) ErrorNext() string {
+	return e.next
+}
+
 func (e *apiError) ErrorFields() map[string]any {
 	return errorExtraFields(e.body)
 }
@@ -1259,11 +1263,11 @@ func withRetryAfter(err error, header http.Header) error {
 // parseAPIError extracts a human-readable error message from a JSON API error response.
 // Handles common formats: {"detail": "..."}, {"field": ["error", ...]}, {"non_field_errors": ["..."]},
 // {"field_errors": {"path": [{"code", "message"}, ...]}}
-// statusCode gates whether "axis"/"next" are read as the 402 plan-limit
-// envelope (isEnvelopeOnly) rather than as ordinary validation fields.
+// statusCode gates whether "axis" (402) and "next" (any refusal status) are
+// read as the envelope (isEnvelopeOnly) rather than as ordinary validation fields.
 func parseAPIError(body []byte, statusCode int) error {
-	message, code, source, gate, axis, next, missing, _ := parseAPIErrorPayload(body, statusCode)
-	err := newAPIError(message, code, source, gate, axis, next, missing)
+	message, code, source, gate, axis, missing, _ := parseAPIErrorPayload(body, statusCode)
+	err := newAPIError(message, code, source, gate, axis, utils.ParseRefusalNext(body, statusCode), missing)
 	err.hint = utils.ParseRefusalHint(body, statusCode)
 	err.body = body
 	// codeOnlyMessage's sentence gives way to the server's hint, and its bare
@@ -1293,37 +1297,36 @@ func errorExtraFields(body []byte) map[string]any {
 	return parsed
 }
 
-func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, next string, missing []string, ok bool) {
+func parseAPIErrorPayload(body []byte, statusCode int) (message string, code string, source string, gate string, axis string, missing []string, ok bool) {
 	raw := string(body)
 
 	if strings.TrimSpace(raw) == "" {
-		return "server returned an empty error response", "", "", "", "", "", nil, false
+		return "server returned an empty error response", "", "", "", "", nil, false
 	}
 
 	var parsed map[string]any
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		// Not valid JSON (e.g., HTML error page) — return truncated
-		return truncateBody(raw), "", "", "", "", "", nil, false
+		return truncateBody(raw), "", "", "", "", nil, false
 	}
 
 	code = stringField(parsed, "code")
 	source = stringField(parsed, "source")
 	gate, missing = parseGateAndMissing(parsed)
 	axis = stringField(parsed, "axis")
-	next = stringField(parsed, "next")
 
 	// Case 1: {"detail": "..."}
 	if detail := strings.TrimSpace(stringField(parsed, "detail")); detail != "" {
-		return detail, code, source, gate, axis, next, missing, true
+		return detail, code, source, gate, axis, missing, true
 	}
 
 	// A refusal envelope carries no field errors; gate/axis/next/missing are not validation messages.
 	if code != "" && isEnvelopeOnly(parsed, statusCode) {
-		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
 	}
 
 	if messages := fieldErrorMessages(parsed["field_errors"]); len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 	}
 
 	// Case 2: field validation errors {"field": ["msg1", ...]}. A "code" whose
@@ -1372,24 +1375,19 @@ func parseAPIErrorPayload(body []byte, statusCode int) (message string, code str
 	}
 
 	if len(messages) > 0 {
-		return strings.Join(messages, "; "), code, source, gate, axis, next, missing, true
+		return strings.Join(messages, "; "), code, source, gate, axis, missing, true
 	}
 
 	if code != "" {
-		return codeOnlyMessage(code), code, source, gate, axis, next, missing, true
+		return codeOnlyMessage(code), code, source, gate, axis, missing, true
 	}
 
 	// Fallback: return truncated raw body
-	return truncateBody(raw), code, source, gate, axis, next, missing, true
+	return truncateBody(raw), code, source, gate, axis, missing, true
 }
 
-// isEnvelopeOnly reports whether parsed holds only envelope-shaped values: a
-// string for "code"/"source"/"gate"/"detail", "axis"/"next" the same but only
-// on a 402 (the plan-limit fields—on any other status they are not part of
-// the envelope, so a validation response that happens to have a field named
-// "axis" or "next" still renders as a field error rather than being swallowed
-// into a code-only message), "hint" the same but on any refusal status, and
-// for "missing" either a single scope string or a list of them.
+// isEnvelopeOnly reports whether parsed holds only refusal-envelope values. "axis" and "next"
+// count only on the statuses that send them; elsewhere a field of that name is a request field.
 func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 	for key, value := range parsed {
 		switch key {
@@ -1404,8 +1402,15 @@ func isEnvelopeOnly(parsed map[string]any, statusCode int) bool {
 			if _, ok := value.(string); !ok {
 				return false
 			}
-		case "axis", "next":
+		case "axis":
 			if statusCode != http.StatusPaymentRequired {
+				return false
+			}
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		case "next":
+			if !utils.IsRefusalStatus(statusCode) {
 				return false
 			}
 			if _, ok := value.(string); !ok {

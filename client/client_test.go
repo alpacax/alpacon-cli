@@ -2668,10 +2668,8 @@ func TestSendRequest_PlanLimitGatelessWorkspaceAxisCodeNotReclassified(t *testin
 }
 
 // TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors guards
-// isEnvelopeOnly's statusCode gate: axis/next are 402 plan-limit fields only,
-// so a validation response on any other status that happens to carry
-// same-named fields must still render their messages rather than being
-// swallowed into a bare code-only message.
+// isEnvelopeOnly's statusCode gate: axis is a 402 field and next a refusal one,
+// so a validation response carrying same-named fields still renders them.
 func TestSendRequest_NonPlanLimitStatusKeepsAxisAndNextAsFieldErrors(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
