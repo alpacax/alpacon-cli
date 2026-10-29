@@ -724,6 +724,7 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 		wantErr     bool
 		wantEnv     map[string]string
 		absentEnv   []string
+		wantUnset   []string
 		wantServer  string
 		wantCommand string
 	}{
@@ -765,9 +766,10 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 			wantCommand: "ls",
 		},
 		{
-			name:        "--env=KEY for an unset variable warns and skips",
+			name:        "--env=KEY for an unset variable is reported and skipped",
 			args:        []string{"--env=DEFINITELY_UNSET", "server", "ls"},
 			absentEnv:   []string{"DEFINITELY_UNSET"},
+			wantUnset:   []string{"DEFINITELY_UNSET"},
 			wantServer:  "server",
 			wantCommand: "ls",
 		},
@@ -825,6 +827,7 @@ func TestParseRemoteExecArgs_EnvFlag(t *testing.T) {
 				_, ok := result.Env[k]
 				assert.False(t, ok, "Env[%s] should be absent", k)
 			}
+			assert.Equal(t, tt.wantUnset, result.UnsetEnv)
 			assert.Equal(t, tt.wantServer, result.Server, "Server")
 			assert.Equal(t, tt.wantCommand, result.Command, "Command")
 		})

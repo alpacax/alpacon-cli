@@ -219,6 +219,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed := ParseRemoteExecArgs(args)
+		WarnUnsetEnv(parsed.UnsetEnv)
 
 		if parsed.ShowHelp {
 			_ = cmd.Help()

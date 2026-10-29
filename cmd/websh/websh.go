@@ -33,6 +33,7 @@ type WebshArgs struct {
 	WorkSessionID string
 	OutputFormat  string
 	Env           map[string]string
+	UnsetEnv      []string
 }
 
 // ParseWebshArgs parses raw CLI args for `alpacon websh` (DisableFlagParsing mode). It reads every
@@ -51,8 +52,12 @@ func ParseWebshArgs(args []string) (WebshArgs, error) {
 		case strings.HasPrefix(args[i], "-g") || strings.HasPrefix(args[i], "--groupname"):
 			res.Groupname, i = extractValue(args, i)
 		case args[i] == "--env" || strings.HasPrefix(args[i], "--env="):
-			if errMsg := execCmd.ParseEnvArg(args[i], res.Env); errMsg != "" {
+			unset, errMsg := execCmd.ParseEnvArg(args[i], res.Env)
+			if errMsg != "" {
 				stop = cmp.Or(stop, errors.New(errMsg))
+			}
+			if unset != "" {
+				res.UnsetEnv = append(res.UnsetEnv, unset)
 			}
 		case strings.HasPrefix(args[i], "--read-only"):
 			if strings.Contains(args[i], "=") {
@@ -222,6 +227,7 @@ Note: All flags must be placed before the server name.
 	DisableFlagParsing: true,
 	Run: func(cmd *cobra.Command, args []string) {
 		parsed, err := ParseWebshArgs(args)
+		execCmd.WarnUnsetEnv(parsed.UnsetEnv)
 		if err != nil {
 			if errors.Is(err, errHelpRequested) {
 				_ = cmd.Help()
