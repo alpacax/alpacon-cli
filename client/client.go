@@ -1070,8 +1070,9 @@ func (ac *AlpaconClient) SendGetRequestForDownload(url string) (*http.Response, 
 	return ac.downloadRoundTrip(retry)
 }
 
-// downloadRoundTrip surfaces a 401/403 as an error and leaves the body open on
-// every other status for the caller to stream. The status is tagged onto the
+// downloadRoundTrip surfaces a 401/403 and a coded 402/405/429 as an error, a plan
+// limit worded as the other requests word it, and leaves the body open on every
+// other status for the caller to stream. The status is tagged onto the
 // error so the stale-token retry—and utils.HTTPStatusCode—can read it.
 func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := ac.HTTPClient.Do(req)
@@ -1090,7 +1091,11 @@ func (ac *AlpaconClient) downloadRoundTrip(req *http.Request) (*http.Response, e
 	if utils.IsRefusalStatus(resp.StatusCode) {
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		return nil, withRetryAfter(withStatus(parseAPIError(body, resp.StatusCode), resp.StatusCode), resp.Header)
+		refusal := withRetryAfter(withStatus(parseAPIError(body, resp.StatusCode), resp.StatusCode), resp.Header)
+		if resp.StatusCode == http.StatusPaymentRequired {
+			refusal = ac.rewritePlanLimitMessage(refusal)
+		}
+		return nil, refusal
 	}
 
 	return resp, nil

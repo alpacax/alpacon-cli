@@ -2649,6 +2649,27 @@ func TestSendRequest_PlanLimitMonthlyAxisRendersResetDays(t *testing.T) {
 	assert.Equal(t, 864000*time.Second, utils.RetryAfter(err))
 }
 
+func TestSendGetRequestForDownload_PlanLimitMonthlyAxisRendersResetDays(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "864000")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code": "webftp_limit_exceeded", "gate": "plan", "axis": "webftp"}`))
+	}))
+	defer ts.Close()
+
+	resp, err := newTestClient(ts.URL).SendGetRequestForDownload("/api/test/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
+	assert.Contains(t, err.Error(), "Resets in 10 days.")
+	assert.Equal(t, 864000*time.Second, utils.RetryAfter(err))
+}
+
 func TestSendRequest_PlanLimitGatelessWorkspaceAxisCodeNotReclassified(t *testing.T) {
 	t.Parallel()
 	// workspace_free_limit_exceeded is deliberately excluded from the legacy
