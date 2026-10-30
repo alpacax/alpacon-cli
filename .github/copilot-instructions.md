@@ -28,7 +28,7 @@ Use: "records SESSION_ID"
 - delete → `Aliases: []string{"rm"}`
 - describe → `Aliases: []string{"desc"}`
 - Group commands may have semantic aliases (e.g., `workspace` → `ws`, `server` → `servers`)
-- **Group commands**: `RunE`—returns error to trigger help when no subcommand is given
+- **Group commands**: `RunE` returns `utils.RequireSubcommand(cmd)`, which prints the help and returns a usage error (exit 2) when no subcommand is given
 - **Leaf commands**: `Run` + `utils.CliErrorWithExit` (exit 1), or `utils.CliUsageErrorWithExit` (exit 2) for a flag or argument the command rejects—the message is the command's own; an error returned from `RunE` reaches `cmd.Execute()`, which prints it behind a generic "While executing the command:" prefix and exits 1, or exits 2 without the prefix when it carries `utils.MarkUsageError`
 
 ## Code review guidelines

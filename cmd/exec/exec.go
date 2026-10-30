@@ -264,8 +264,7 @@ func init() {
 }
 
 // OutputFormatBeforeServer is the last --output value among the flags ahead of the server name in
-// args, for a parse that stopped before reaching it; words after the server are the remote command's.
-// A flag cmd does not register as a bool takes the next word as its value unless that word is a flag.
+// args; a flag cmd does not register as a bool takes the next word as its value unless it is a flag.
 func OutputFormatBeforeServer(cmd *cobra.Command, args []string) string {
 	var format string
 	for i := 0; i < len(args); i++ {
@@ -301,8 +300,7 @@ func isBoolFlag(cmd *cobra.Command, arg string) bool {
 }
 
 // RunRemoteExec is the shared post-parse execution path for exec and websh
-// command mode. Requires Server and either Command or File to be set, and
-// the parsed --output applied.
+// command mode. Requires Server, Command or File, and the parsed --output applied.
 func RunRemoteExec(parsed RemoteExecArgs) {
 	// A local script is read before any network call, so a missing or oversized file fails here;
 	// a --from-server script is read once the client exists.
