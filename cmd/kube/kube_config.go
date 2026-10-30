@@ -97,7 +97,7 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 	proxyPort := 0
 	if cmd.Flags().Changed("proxy-port") {
 		if err := validatePort(kubeConfigFlags.proxyPort); err != nil {
-			utils.CliErrorWithExit("--proxy-port %s.", err)
+			utils.CliUsageErrorWithExit("--proxy-port %s.", err)
 		}
 		proxyPort = kubeConfigFlags.proxyPort
 	}

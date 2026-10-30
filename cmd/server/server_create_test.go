@@ -16,6 +16,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api/server"
 	"github.com/alpacax/alpacon-cli/pkg/testutil"
+	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -322,7 +323,7 @@ func TestServerCreate_RejectsAnsibleSuseBeforeAnyRequest(t *testing.T) {
 
 	var exitErr *osexec.ExitError
 	require.ErrorAs(t, err, &exitErr)
-	assert.Equal(t, 1, exitErr.ExitCode())
+	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 	assert.Contains(t, stderr.String(), `"suse" is not supported with the ansible method`)
 	assert.Zero(t, requests.Load())
 }

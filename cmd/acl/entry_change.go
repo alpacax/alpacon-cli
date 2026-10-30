@@ -100,7 +100,7 @@ func setEntryEnabled(entryID string, enabled bool) {
 func requireEntryIDs(ids []string) {
 	for _, id := range ids {
 		if !utils.IsUUID(id) {
-			utils.CliErrorWithExit("%q is not an entry ID. Run 'alpacon acl entry ls' to find it.", id)
+			utils.CliUsageErrorWithExit("%q is not an entry ID. Run 'alpacon acl entry ls' to find it.", id)
 		}
 	}
 }

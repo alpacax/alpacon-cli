@@ -3,6 +3,7 @@ package edit
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,7 +68,7 @@ redirections, or '&&' will not work.`,
 
 		target, err := parseEditTarget(args[0], usernameFlag)
 		if err != nil {
-			utils.CliErrorWithExit("%s", err)
+			utils.CliUsageErrorWithExit("%s", err)
 		}
 
 		authMethod := config.ResolveAuthMethod()
@@ -88,6 +89,9 @@ redirections, or '&&' will not work.`,
 		if err != nil {
 			printPreservedTempPath(result)
 			utils.HandleWorkSessionError(err, utils.OperationWebFTP, target.Server, authMethod, workSessionID)
+			if refusedForWantOfForce(err, utils.IsInteractiveShell()) {
+				err = utils.MarkUsageError(err)
+			}
 			utils.CliErrorWithExit("Failed to edit '%s:%s': %s", target.Server, target.RemotePath, err)
 		}
 
@@ -245,7 +249,7 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 	// an oversized file in the editor rather than saving bandwidth.
 	if downloaded.Size > maxEditPromptSize && !opts.Force && !deps.confirmLarge(downloaded.Size) {
 		cleanupEditTemp(result.TempPath, deps.removeAll)
-		return result, fmt.Errorf("remote file is larger than 10 MB; rerun with --force to edit it")
+		return result, errLargeFile
 	}
 
 	before, err := hashFile(result.TempPath)
@@ -443,6 +447,13 @@ func splitEditorCommand(command string) ([]string, error) {
 		return nil, fmt.Errorf("editor command is empty")
 	}
 	return parts, nil
+}
+
+var errLargeFile = errors.New("remote file is larger than 10 MB; rerun with --force to edit it")
+
+// refusedForWantOfForce reports a large-file refusal that --force would have lifted, with no prompt to answer it.
+func refusedForWantOfForce(err error, interactive bool) bool {
+	return !interactive && errors.Is(err, errLargeFile)
 }
 
 func confirmLargeEdit(size int64) bool {

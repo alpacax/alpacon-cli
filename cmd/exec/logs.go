@@ -24,7 +24,7 @@ Run the command again later to check for completion.`,
 		jobID := args[0]
 
 		if !utils.IsUUID(jobID) {
-			utils.CliErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
+			utils.CliUsageErrorWithExit("invalid JOB_ID %q: must be a UUID (e.g. a1b2c3d4-5678-abcd-ef01-234567890abc)", jobID)
 			return
 		}
 
