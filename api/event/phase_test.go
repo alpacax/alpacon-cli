@@ -48,10 +48,10 @@ func TestNonFilePhasesUnchanged(t *testing.T) {
 func TestStatusOnlyFailureCarriesFilePhaseHint(t *testing.T) {
 	t.Parallel()
 	phase := "file_too_large"
-	err := errorFromDetails(EventDetails{Status: "error", ErrorPhase: &phase})
+	err := errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "error", ErrorPhase: &phase})
 	require.ErrorContains(t, err, "Hint: "+PhaseHint(phase))
 
 	other := "agent_timeout"
-	err = errorFromDetails(EventDetails{Status: "stuck", ErrorPhase: &other})
+	err = errorFromDetails(testPathID(t, "cmd-9"), EventDetails{Status: "stuck", ErrorPhase: &other})
 	assert.NotContains(t, err.Error(), "Hint:")
 }
