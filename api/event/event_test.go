@@ -1005,7 +1005,7 @@ func startStream(t *testing.T, ac *client.AlpaconClient, cmdID, serverID string,
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
-	delays := defaultStreamDelays
+	delays := defaultStreamDelays()
 	delays.pollTick = tick
 	pathID := testPathID(t, cmdID)
 	done := make(chan error, 1)
@@ -1207,7 +1207,7 @@ func TestStreamSubscribed_WaitTimeoutCarriesTheFileSuggestion(t *testing.T) {
 	listener.Start()
 	require.True(t, listener.WaitConnected(commandOutputConnectTimeout), "listener should connect")
 
-	delays := defaultStreamDelays
+	delays := defaultStreamDelays()
 	delays.pollTick = 10 * time.Millisecond
 	pathID := testPathID(t, "cmd-uuid")
 	done := make(chan error, 1)
