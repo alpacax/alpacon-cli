@@ -1427,7 +1427,7 @@ func TestRunCommandStreaming_FallbackDrainsChunks(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			w.WriteHeader(http.StatusInternalServerError) // force fallback
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":
@@ -1471,7 +1471,7 @@ func TestRunCommandStreaming_FallbackOnSessionFailure(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			w.WriteHeader(http.StatusInternalServerError) // force fallback
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":
@@ -1516,7 +1516,7 @@ func TestRunCommandStreaming_FallbackQuietWhenChunksUnavailable(t *testing.T) {
 		case "/api/servers/servers/":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + serverID + `","name":"srv"}]}`))
 		case "/api/events/sessions/":
-			w.WriteHeader(http.StatusInternalServerError) // force fallback
+			w.WriteHeader(http.StatusInternalServerError) // Force the fallback.
 		case "/api/events/commands/":
 			_, _ = w.Write([]byte(`[{"id":"` + cmdID + `"}]`))
 		case "/api/events/commands/" + cmdID + "/chunks/":

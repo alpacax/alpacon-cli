@@ -45,8 +45,8 @@ type RegistrationTokenDetails struct {
 }
 
 // RegistrationTokenAttributes is the table/JSON projection used by 'server token ls'.
-// AllowedGroups lists group names, or the UUIDs that could not be resolved, and ExpiresAt is the
-// raw timestamp or "never".
+// AllowedGroups is one comma-separated string of group names, or the UUIDs that could not be
+// resolved, and ExpiresAt is the raw timestamp or "never".
 type RegistrationTokenAttributes struct {
 	Name          string `json:"name"`
 	AllowedGroups string `json:"allowed_groups" table:"Allowed Groups"`

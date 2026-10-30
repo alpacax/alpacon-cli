@@ -14,7 +14,9 @@ import (
 // empty owner reads to ClassifyPath as a manual install and to Run as permission to overwrite.
 var ErrOwnerUnknown = errors.New("cannot tell which package owns the binary")
 
-var packageQueryTimeout = 5 * time.Second // rpm waits on its database lock while another transaction runs.
+// packageQueryTimeout bounds a package query: rpm waits on its database lock while another
+// transaction runs.
+var packageQueryTimeout = 5 * time.Second
 
 // packageManagerPaths pins where a manager may live. $PATH would otherwise name
 // it, and 'sudo alpacon update'—the command this CLI prints itself—carries the

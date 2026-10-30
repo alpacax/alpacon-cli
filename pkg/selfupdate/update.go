@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 )
 
-var ErrWorkDirUnavailable = errors.New("cannot create the download directory") // Tells the scratch directory's EACCES from the install path's, which sudo fixes.
+// ErrWorkDirUnavailable tells the scratch directory's EACCES from the install path's, which sudo
+// fixes.
+var ErrWorkDirUnavailable = errors.New("cannot create the download directory")
 
 // ErrUnknownVersion refuses a build no release can be placed against: compareVersions reads an
 // unparseable core as 0.0.0, so a dev build would otherwise reinstall the latest release forever.
@@ -34,7 +36,8 @@ type Result struct {
 // release can mean months. A refused lock is somebody else's install.
 func sweepIfPossible(executablePath string) {
 	installDir, binaryName := filepath.Dir(executablePath), filepath.Base(executablePath)
-	if !hasSweepableEntry(installDir, binaryName) { // Taking the lock leaves a lock file; skip it when there is nothing to sweep.
+	// Taking the lock leaves a lock file; skip it when there is nothing to sweep.
+	if !hasSweepableEntry(installDir, binaryName) {
 		return
 	}
 

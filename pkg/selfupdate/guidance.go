@@ -18,5 +18,6 @@ func UpgradeGuidance(kind InstallKind) string {
 	case InstallManual:
 		return ""
 	}
-	return fmt.Sprintf("This binary is managed by its installer (%s). Update it through that tool.", kind) // A kind with no wording yet; "" would read as no guidance needed.
+	// A kind with no wording yet; "" would read as no guidance needed.
+	return fmt.Sprintf("This binary is managed by its installer (%s). Update it through that tool.", kind)
 }

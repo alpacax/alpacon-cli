@@ -202,7 +202,7 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 				lastRefusal = cerr
 			}
 			if cerr != nil || !completed {
-				continue // the endpoint may lag the browser; keep polling
+				continue // The endpoint may lag the browser; keep polling.
 			}
 			spinner.Stop()
 			if rerr := ac.RefreshToken(); rerr != nil {

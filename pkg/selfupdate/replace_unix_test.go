@@ -17,7 +17,8 @@ func TestReplaceBinaryKeepsTheDestinationMode(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "alpacon")
-	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0700)) // Not 0755: only another mode shows the destination's mode is kept.
+	// Not 0755: only another mode shows the destination's mode is kept.
+	require.NoError(t, os.WriteFile(target, []byte("old binary"), 0700))
 	replacement := filepath.Join(dir, "alpacon.new")
 	require.NoError(t, os.WriteFile(replacement, []byte("new binary"), 0600))
 

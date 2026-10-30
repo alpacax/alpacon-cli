@@ -49,8 +49,10 @@ func classifyByPath(executablePath string) InstallKind {
 	return ""
 }
 
-func DetectInstallKind(run CommandRunner, executablePath string) (InstallKind, error) { // Both halves together: asking either alone can give a different verdict.
-	if kind := classifyByPath(executablePath); kind != "" { // Skips the package queries when the path settles it.
+// DetectInstallKind asks both halves together: asking either alone can give a different verdict.
+func DetectInstallKind(run CommandRunner, executablePath string) (InstallKind, error) {
+	// Skips the package queries when the path settles it.
+	if kind := classifyByPath(executablePath); kind != "" {
 		return kind, nil
 	}
 

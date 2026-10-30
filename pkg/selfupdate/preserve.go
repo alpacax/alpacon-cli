@@ -28,7 +28,9 @@ func PreservedName(path string, now time.Time) string {
 	return timestampedName(path, preservedSuffix, now)
 }
 
-func StagedName(path string, now time.Time) string { // A fixed name would reuse a staging file a killed run left.
+// StagedName returns a fresh staging name per run: a fixed name would reuse a staging file a killed
+// run left.
+func StagedName(path string, now time.Time) string {
 	return timestampedName(path, stagedSuffix, now)
 }
 

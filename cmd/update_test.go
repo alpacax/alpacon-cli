@@ -80,7 +80,8 @@ func TestPermissionHint(t *testing.T) {
 
 func TestPermissionHintStillNamesSudoWhenTheLockIsWhatWasRefused(t *testing.T) {
 	t.Parallel()
-	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrLockUnavailable, os.ErrPermission)) // The lock is in the install directory, the command's first write.
+	// The lock is in the install directory, the command's first write.
+	hint := permissionHint(fmt.Errorf("%w: %w", selfupdate.ErrLockUnavailable, os.ErrPermission))
 
 	assert.Contains(t, hint, "install location")
 	if runtime.GOOS == "windows" {

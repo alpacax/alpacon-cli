@@ -10,7 +10,8 @@ func ArchiveName(version, goos, goarch string) string { // Mirrors the archives 
 	return fmt.Sprintf("alpacon-%s-%s-%s.%s", version, goos, goarch, extension)
 }
 
-func BinaryName(goos string) string { // The name inside the archive, whatever the running binary is called on disk.
+// BinaryName returns the name inside the archive, whatever the running binary is called on disk.
+func BinaryName(goos string) string {
 	if goos == "windows" {
 		return "alpacon.exe"
 	}

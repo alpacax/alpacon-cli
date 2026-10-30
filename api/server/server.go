@@ -239,8 +239,8 @@ func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
 }
 
 // GetRegistrationTokenAttributes returns every registration token projected for table/JSON display.
-// Group UUIDs are resolved with one fetch of the group list; if that fails, the UUIDs are shown
-// as-is.
+// Group UUIDs are resolved with one paginated lookup of the group list; if that fails, the UUIDs
+// are shown as-is.
 func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTokenAttributes, error) {
 	tokens, err := ListRegistrationTokens(ac)
 	if err != nil {

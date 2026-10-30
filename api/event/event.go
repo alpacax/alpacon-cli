@@ -845,7 +845,8 @@ func errorFromDetails(d EventDetails) error {
 func runCommandFallback(ac *client.AlpaconClient, submit commandSubmitter, out io.Writer, tick time.Duration, cause error) error {
 	cmdResp, err := submit()
 	if err != nil {
-		return err // unwrapped: the MFA retry reads the utils.MarkSubmission tag off it as returned
+		// Unwrapped: the MFA retry reads the utils.MarkSubmission tag off it as returned.
+		return err
 	}
 	// The command exists now; a failed poll or output read is returned untagged,
 	// so it never submits the command again.

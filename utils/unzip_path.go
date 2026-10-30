@@ -34,9 +34,9 @@ func newZipRoots(names ...string) []zipRoot {
 // here can misplace a file inside the destination but never outside it.
 //
 // os.Root refuses an absolute symlink even when its target is inside the root, so these hops
-// resolve one themselves; permitting it is what they cost, and failing closed instead would take
-// about five lines. They follow it because the destination is a folder the user chose and may
-// have populated, and an archive naming "link" asks for what "link" points at.
+// resolve one themselves. That is a deliberate trade: refusing such links would be simpler and
+// stricter, but the destination is a folder the user chose and may have populated, and an archive
+// naming "link" asks for what "link" points at.
 func resolveZipPath(root *os.Root, roots []zipRoot, name string) (string, error) {
 	if zipPathRooted(name) {
 		return "", fmt.Errorf("zip path is not relative: %s", name)

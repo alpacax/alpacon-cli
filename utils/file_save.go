@@ -14,7 +14,9 @@ import (
 
 const stagingPerm = 0600 // temporary while a replacement write is staged; the real mode lands once it completes
 
-const saveFilePerm = 0666 // os.Create's mode, so the non-secret certs, CRLs and CSRs SaveFile writes stay readable; umask applies
+// saveFilePerm is os.Create's mode, so the non-secret certs, CRLs and CSRs SaveFile writes stay
+// readable; umask applies.
+const saveFilePerm = 0666
 
 var replacementTempPattern = regexp.MustCompile(`^\.alpacon-\d+-\d+-\d+\.tmp$`)
 

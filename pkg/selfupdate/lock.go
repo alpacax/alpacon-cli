@@ -11,7 +11,8 @@ import (
 var (
 	ErrUpdateInProgress = errors.New("another alpacon update is already running")
 
-	ErrLockUnavailable = errors.New("cannot open the update lock") // Names the lock, which no underlying error does.
+	// ErrLockUnavailable names the lock, which no underlying error does.
+	ErrLockUnavailable = errors.New("cannot open the update lock")
 )
 
 // Lock is the advisory lock that keeps two updates off one install path. The
