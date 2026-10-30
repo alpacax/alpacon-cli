@@ -66,7 +66,7 @@ var (
 	closeReasonMessages = map[string]string{
 		"user_request":           "the session was closed",
 		"force_close":            "closed by an administrator",
-		"idle_timeout":           "the session reached its time limit",
+		"idle_timeout":           "closed for inactivity; run the command again to reopen",
 		"agent_disconnected":     "Alpamon on the server disconnected",
 		"server_shutdown":        "the service restarted",
 		"work_session_expired":   "the work session expired",
@@ -316,8 +316,9 @@ func shareCreatedSession(ac *client.AlpaconClient, responseBody []byte, share, r
 
 func newWebsocketClient(header http.Header) *WebsocketClient {
 	return &WebsocketClient{
-		header: header,
-		done:   make(chan struct{}),
+		header:       header,
+		done:         make(chan struct{}),
+		idleWarnings: make(map[time.Time]struct{}),
 	}
 }
 
@@ -340,6 +341,7 @@ func (wsClient *WebsocketClient) dial(websocketURL string) error {
 	}
 	wsClient.conn = newConnection(conn)
 	wsClient.conn.replay = &wsClient.replay
+	wsClient.conn.idleWarnings = wsClient.idleWarnings
 	if wsClient.reconnect != nil {
 		wsClient.conn.reconnected = reconnected
 		wsClient.conn.notice = wsClient.reconnect.notice
@@ -706,12 +708,36 @@ func (c *connection) readFromServer() {
 		switch kind {
 		case websocket.TextMessage:
 			var origin struct {
-				Type      string `json:"type"`
-				Epoch     string `json:"epoch"`
-				Offset    uint64 `json:"offset"`
-				Truncated bool   `json:"truncated"`
+				Type      string          `json:"type"`
+				Epoch     string          `json:"epoch"`
+				Offset    uint64          `json:"offset"`
+				Truncated bool            `json:"truncated"`
+				ClosesAt  json.RawMessage `json:"closes_at"`
 			}
-			if legacy || json.Unmarshal(message, &origin) != nil || origin.Type != "replay_origin" || origin.Epoch == "" {
+			if json.Unmarshal(message, &origin) != nil {
+				continue
+			}
+			if origin.Type == "idle_warning" {
+				var closesAt time.Time
+				if err := json.Unmarshal(origin.ClosesAt, &closesAt); err != nil || !closesAt.After(time.Now()) {
+					continue
+				}
+				closesAt = closesAt.UTC()
+				if _, seen := c.idleWarnings[closesAt]; seen {
+					continue
+				}
+				if c.idleWarnings == nil {
+					c.idleWarnings = make(map[time.Time]struct{})
+				}
+				c.idleWarnings[closesAt] = struct{}{}
+				notice := c.notice
+				if notice == nil {
+					notice = os.Stderr
+				}
+				_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
+				continue
+			}
+			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {
 				continue
 			}
 			originSeen = true

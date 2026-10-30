@@ -588,7 +588,7 @@ func TestFinish_SettlesASingleCloseByItsCode(t *testing.T) {
 		{
 			name:       "session end with a reason",
 			reported:   &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			wantStderr: "\r\nsession closed: closed for inactivity; run the command again to reopen\r\n",
 		},
 		{
 			name:       "session end with no reason",
@@ -732,7 +732,7 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 			name:       "duplicate session end prints once",
 			first:      &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
 			second:     &websocket.CloseError{Code: sessionEndCloseCode, Text: "idle_timeout"},
-			wantStderr: "\r\nsession closed: the session reached its time limit\r\n",
+			wantStderr: "\r\nsession closed: closed for inactivity; run the command again to reopen\r\n",
 		},
 	}
 
