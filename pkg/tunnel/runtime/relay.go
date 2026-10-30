@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"net"
+	"sync"
 	"time"
 
 	basetunnel "github.com/alpacax/alpacon-cli/pkg/tunnel"
@@ -15,15 +16,16 @@ const halfCloseTimeout = 5 * time.Minute
 // cleanly half-closes its destination and gives the other bound to finish; cut reports the bound ended it.
 func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 	errChan := make(chan error, 2)
+	var pipes sync.WaitGroup
 	pipe := func(dst, src net.Conn) {
 		_, err := basetunnel.CopyBuffered(dst, src)
+		errChan <- err // the bound starts at EOF, not after a FIN a stalled transport can hold
 		if err == nil {
-			err = closeWriteSide(dst)
+			closeWriteSide(dst)
 		}
-		errChan <- err
 	}
-	go pipe(remote, local)
-	go pipe(local, remote)
+	pipes.Go(func() { pipe(remote, local) })
+	pipes.Go(func() { pipe(local, remote) })
 
 	if err := <-errChan; err == nil {
 		// A close, not a deadline: smux reads a write deadline only when the write starts.
@@ -45,14 +47,14 @@ func relay(local, remote net.Conn, bound time.Duration) (cut bool) {
 		_ = remote.Close()
 		<-errChan
 	}
+	pipes.Wait()
 	_ = local.Close()
 	_ = remote.Close()
 	return cut
 }
 
-func closeWriteSide(conn net.Conn) error {
+func closeWriteSide(conn net.Conn) {
 	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
-		return cw.CloseWrite()
+		_ = cw.CloseWrite() // a FIN that fails is left to the bound, not a cut of the other direction
 	}
-	return nil
 }

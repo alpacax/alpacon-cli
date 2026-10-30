@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -151,6 +152,19 @@ func startPipeRelay(bound time.Duration) (local, remote net.Conn, run *relayRun)
 	cliStream, remote := net.Pipe()
 	return local, remote, startRelay(cliSide, cliStream, bound)
 }
+
+// finConn answers CloseWrite with closeWrite, standing in for a FIN the transport fails or holds.
+type finConn struct {
+	net.Conn
+	closeWrite func() error
+}
+
+func (c finConn) CloseWrite() error { return c.closeWrite() }
+
+// endedConn reads as a peer that already finished sending, while writes still reach it.
+type endedConn struct{ net.Conn }
+
+func (endedConn) Read([]byte) (int, error) { return 0, io.EOF }
 
 // readAllWithin reads conn to EOF, failing instead of hanging when the relay never ends it.
 func readAllWithin(t *testing.T, conn net.Conn) string {
@@ -327,6 +341,53 @@ func TestRelayCutsLocalClientThatHalfClosedWhenRemoteStaysSilent(t *testing.T) {
 	_, err := io.ReadAll(local)
 	require.Error(t, err, "a cut must reset the local client, not end its stream cleanly")
 	assert.NotErrorIs(t, err, os.ErrDeadlineExceeded)
+}
+
+func TestRelayKeepsReverseDirectionWhenHalfCloseFails(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		local, cliSide := net.Pipe()
+		cliStream, remote := net.Pipe()
+		failingFIN := finConn{cliStream, func() error { return errors.New("fin write timed out") }}
+		run := startRelay(endedConn{cliSide}, failingFIN, time.Minute)
+		synctest.Wait()
+
+		go func() {
+			_, _ = remote.Write([]byte("response"))
+			_ = remote.Close()
+		}()
+
+		data, err := io.ReadAll(local)
+		require.NoError(t, err)
+		assert.Equal(t, "response", string(data))
+		<-run.done
+		assert.False(t, run.cut, "a direction that ended before the bound is not a cut")
+	})
+}
+
+func TestRelayStartsBoundWhenCopyEndsEvenWhileHalfCloseIsHeld(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		held := make(chan struct{})
+		release := sync.OnceFunc(func() { close(held) })
+		defer release()
+		local, cliSide := net.Pipe()
+		cliStream, remote := net.Pipe()
+		heldFIN := finConn{cliSide, func() error { <-held; return nil }}
+		run := startRelay(heldFIN, cliStream, time.Minute)
+
+		require.NoError(t, remote.Close())
+		time.Sleep(time.Minute + time.Millisecond)
+		synctest.Wait()
+		data, err := io.ReadAll(local)
+		require.NoError(t, err)
+		assert.Empty(t, data)
+
+		release()
+		synctest.Wait()
+		require.True(t, run.finished(), "relay waited for the bound again after the FIN was released")
+		assert.True(t, run.cut)
+	})
 }
 
 func TestRelayCutsQuietLocalClientExactlyAtBound(t *testing.T) {
