@@ -192,10 +192,10 @@ func TestLogsCommandOutcome(t *testing.T) {
 	}
 }
 
-// The stderr line bypasses the Cli* helpers, so each case injects into the one
-// field the server controls on that branch: Status must equal a known value to
-// reach the running and failed branches, so ID and ErrorPhase carry the payload
-// there, while the unrecognised-status fallback renders Status itself (#364).
+// The stderr line bypasses the Cli* helpers, so each case injects into the one field the server
+// controls on that branch: Status must equal a known value to reach the running and failed
+// branches, so ID and ErrorPhase carry the payload there, while the unrecognized-status fallback
+// renders Status itself.
 func TestLogsCommandOutcomeSanitizesServerText(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

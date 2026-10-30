@@ -813,11 +813,8 @@ func TestLoginFailureMessages_VerificationUnavailableAsksToRetry(t *testing.T) {
 
 func TestShouldFailOnProfileError(t *testing.T) {
 	t.Parallel()
-	// Browser/password login (no token) → profile failure is fatal.
 	assert.True(t, shouldFailOnProfileError(""))
-	// Any token login → profile failure is non-fatal (credential already validated via
-	// /api/status/). Service tokens skip the preload entirely; these cases cover the
-	// personal-token path and the pure predicate.
+	// Service tokens skip the preload; the alpst case checks the predicate alone.
 	assert.False(t, shouldFailOnProfileError("alpst-x"))
 	assert.False(t, shouldFailOnProfileError("alpat-x"))
 }
@@ -1009,7 +1006,6 @@ func TestPersistWorkspaceEnv_SkipsAnotherWorkspace(t *testing.T) {
 	assert.Contains(t, stderr, "Did not save the workspace identity and Kubernetes support for https://ws.example.com")
 }
 
-// loginRefusal is a coded refusal carrying the server's hint.
 type loginRefusal struct{ code, hint string }
 
 func (e loginRefusal) Error() string       { return "permission denied (HTTP 403, code: " + e.code + ")" }

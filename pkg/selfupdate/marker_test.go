@@ -71,10 +71,9 @@ func TestTheMarkerNameMatchesTheWindowsInstaller(t *testing.T) {
 	script, err := os.ReadFile(filepath.Join("..", "..", "install.ps1"))
 	require.NoError(t, err)
 
-	// The assignment alone, not the whole script: Contains over 500 lines of
-	// PowerShell prints every one of them when it fails. [^\r\n]* rather than
-	// .*$, since git checks the file out with CRLF on Windows and $ leaves the
-	// carriage return inside the match.
+	// The assignment alone, not the whole script: a failing Contains would print all of it.
+	// [^\r\n]* rather than .*$, since a CRLF checkout on Windows leaves the carriage return in the
+	// match.
 	assignment := regexp.MustCompile(`(?m)^\$script:AlpaconVersionMarkerName = [^\r\n]*`).FindString(string(script))
 	assert.Equal(t, "$script:AlpaconVersionMarkerName = '"+installedVersionMarker+"'", assignment)
 }

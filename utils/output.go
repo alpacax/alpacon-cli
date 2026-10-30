@@ -21,7 +21,6 @@ const (
 )
 
 // OutputFormat holds the value of the --output persistent flag.
-// Bound by cmd/root.go; read by PrintTable and PrintJson.
 var OutputFormat string
 
 type PartialInfo struct {
@@ -46,11 +45,9 @@ type JSONErrorEnvelope[T any] struct {
 	NextActions    []NextAction   `json:"next_actions,omitempty"`
 }
 
-// NextAction is one actionable follow-up. Command is a pure, runnable command
-// (no inline comments) for machine consumers; Description carries the human hint.
-// Either may be empty—a pure command needs no hint, and a guidance-only pointer
-// (e.g. "approve it in the console") carries no runnable command—so both fields
-// are omitempty.
+// NextAction is one actionable follow-up: Command is a runnable command with no inline comment,
+// for machine consumers, and Description the human hint. Either may be empty, as a guidance-only
+// pointer carries no command.
 type NextAction struct {
 	Command     string `json:"command,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -201,9 +198,9 @@ func PrintTable(slice any) {
 	for i := range s.Len() {
 		row := make([]string, len(fields))
 		for j, field := range fields {
-			// API values are untrusted: a control sequence here rewrites the reader's terminal.
-			// Newlines drop instead of becoming spaces as in cmd/event/render.go: a cell must
-			// not spill into a second row. --output json returns the value whole.
+			// API values are untrusted, so control sequences are stripped; newlines drop too, not
+			// becoming spaces as in cmd/event/render.go, so a cell cannot spill into a second row.
+			// --output json returns the value whole.
 			row[j] = SanitizeTerminalText(fmt.Sprintf("%v", s.Index(i).Field(field)))
 		}
 		_, _ = fmt.Fprintln(tw, strings.Join(row, "\t"))
@@ -273,7 +270,6 @@ func camelToWords(s string) string {
 
 	for i := 1; i < len(runes); i++ {
 		if unicode.IsUpper(runes[i]) {
-			// Check if this is start of a new word
 			if unicode.IsLower(runes[i-1]) {
 				// "requestedAt" → split before "A"
 				words = append(words, string(runes[start:i]))

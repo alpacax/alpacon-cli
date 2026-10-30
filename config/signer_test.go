@@ -136,8 +136,7 @@ func TestSignerToken_EndsWithTheLogin(t *testing.T) {
 	assert.Error(t, err, "logout removes the file that held the signer token")
 }
 
-// A token cached in the flat layout an earlier build of this branch wrote is
-// ignored, and the next acl command simply authorizes again.
+// A token cached in the older flat layout is ignored, and the next acl command authorizes again.
 func TestSignerToken_IgnoresTheOldFlatCache(t *testing.T) {
 	setupTestConfig(t)
 	dir := filepath.Join(os.Getenv("HOME"), ConfigFileDir)

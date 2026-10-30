@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// generateKey now saves through utils.SaveStreamAtomic (#439); this pins the
-// permissions and round-trip that migration must preserve.
 func TestGenerateKey_WritesOwnerOnlyKeyFile(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

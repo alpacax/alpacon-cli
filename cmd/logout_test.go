@@ -33,7 +33,6 @@ func TestReportLogout(t *testing.T) {
 	}
 }
 
-// blacklistRefusal is a coded refusal of the token blacklist call.
 type blacklistRefusal struct{ hint string }
 
 func (e blacklistRefusal) Error() string {
@@ -51,7 +50,7 @@ func TestBlacklistFailure(t *testing.T) {
 	assert.Equal(t, "Failed to set black list: permission denied (HTTP 403, code: permission_denied).", hinted.Error())
 	assert.Equal(t, hint, utils.RefusalHint(hinted))
 
-	// Without a hint the message is today's, retry advice included.
+	// Without a hint the retry advice stays.
 	plain := blacklistFailure(errors.New("request failed"))
 	assert.Equal(t, "Failed to set black list. Please try again later.", plain.Error())
 	assert.Empty(t, utils.RefusalHint(plain))

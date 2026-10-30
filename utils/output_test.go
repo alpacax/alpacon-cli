@@ -327,8 +327,8 @@ func TestPrintJSONError(t *testing.T) {
 	}`, buf.String())
 }
 
-// Callers write PlainText raw, outside the Cli* helpers, and interpolate
-// server-returned ids into Command (#364).
+// Callers write PlainText raw, outside the Cli* helpers, and interpolate server-returned ids into
+// Command.
 func TestNextActionPlainTextSanitizesTerminalText(t *testing.T) {
 	t.Parallel()
 	const (

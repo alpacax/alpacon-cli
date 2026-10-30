@@ -24,8 +24,9 @@ func (e *notFoundError) Is(target error) bool { return target == ErrNotFound }
 // ErrBlankName), so each resolver keeps its own wording without losing the shared sentinel.
 type blankNameError struct{ msg string }
 
-// ResolveByNameOptions names ResolveByName's parameters so a call site cannot swap two
-// same-typed fields (e.g. blankMsg/notFoundMsg) without the compiler seeing a field name change.
+// ResolveByNameOptions names ResolveByName's parameters so a call site spells out each
+// same-typed field, such as BlankMsg and NotFoundMsg, instead of passing them by position, where
+// a swap would compile silently.
 type ResolveByNameOptions struct {
 	Endpoint    string
 	FilterKey   string

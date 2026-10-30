@@ -184,7 +184,6 @@ func nextActionCommands(actions []NextAction) []string {
 
 func TestBuildWorkSessionErrorEnvelope_ExpiredWithoutActiveWS(t *testing.T) {
 	t.Parallel()
-	// When activeWS is unknown, the placeholder must remain.
 	envelope := buildWorkSessionErrorEnvelope(WorkSessionExpired, "webftp", "srv-2", "Browser login", "", "")
 
 	assert.Contains(t, nextActionCommands(envelope.NextActions), "alpacon work-session extend <ID>")
@@ -201,11 +200,9 @@ func TestBuildWorkSessionErrorEnvelope_RequiredKeepsPlaceholder(t *testing.T) {
 
 func TestHandleWorkSessionError_NoOp(t *testing.T) {
 	t.Parallel()
-	// Non-WorkSession errors must not trigger any exit — just return.
-	// If HandleWorkSessionError calls os.Exit for this error, the test process dies.
+	// If HandleWorkSessionError exits on a non-WorkSession error, the test process dies.
 	err := errors.New("some unrelated error")
 	HandleWorkSessionError(err, "websh", "srv", "Browser login", "")
-	// reaching here means no exit — test passes
 }
 
 func TestHandleWorkSessionError_NilError(t *testing.T) {

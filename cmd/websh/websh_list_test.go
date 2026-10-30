@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// DisableFlagParsing only covers the parent; this pins that a child still routes and parses flags normally.
+// DisableFlagParsing covers only the parent; a child must still route and parse flags normally.
 func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -28,7 +28,8 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 			expectedTail: 50,
 		},
 		{
-			// The parent's hand-rolled -s and -u never reach here, since routing to the subcommand happens first.
+			// The parent's hand-rolled -s and -u never apply: routing to the subcommand comes
+			// first.
 			name:         "short flag",
 			args:         []string{"ls", "-t", "5"},
 			expectedTail: 5,
@@ -46,7 +47,7 @@ func TestWebshLsRoutesAndParsesFlags(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "ls", cmd.Name())
 
-			// Reset from the flag's own default so a prior case cannot leak in and the defaults case still checks what is registered.
+			// Reset to the registered default so a prior case cannot leak in.
 			require.NoError(t, cmd.Flags().Set("tail", cmd.Flags().Lookup("tail").DefValue))
 
 			require.NoError(t, cmd.ParseFlags(flags))
@@ -70,8 +71,8 @@ func TestWebshLsTailZeroExitsWithUsageErrorCode(t *testing.T) {
 	assert.Equal(t, utils.ExitCodeUsageError, exitErr.ExitCode())
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run of this function is a
+// guard that returns at once.
 func TestWebshLsTailZeroHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_WEBSH_LS_TAIL_HELPER") != "1" {
 		return

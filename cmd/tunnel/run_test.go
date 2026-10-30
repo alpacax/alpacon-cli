@@ -185,8 +185,7 @@ func TestExitCodeFromProcessError(t *testing.T) {
 	}
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestExitCodeFromProcessErrorHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
@@ -264,8 +263,7 @@ func TestExecuteTunnelRunWithInvocationInvalidRemotePort(t *testing.T) {
 	}
 }
 
-// Serial: the child process reaches an os.Exit, and the parent's own run of this
-// function is a two-line guard that parallelism buys nothing for.
+// Serial: the child process reaches an os.Exit, and the parent's own run returns at once.
 func TestRunHelperProcess(t *testing.T) {
 	mode, ok := parseRunHelperInvocation(os.Args)
 	if !ok {

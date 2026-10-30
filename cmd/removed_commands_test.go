@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The four paths below were removed from the CLI. The parent groups take no
-// arguments, so each fails as an unknown command with the general error code;
-// an old flag such as -y fails first, as an unknown flag.
+// These paths were removed from the CLI. Their parent groups take no arguments, so
+// each fails as an unknown command with the general error code; an old flag such
+// as -y fails first, as an unknown flag.
 func TestRemovedCommandPathsAreNotCommands(t *testing.T) {
 	t.Parallel()
 	paths := [][]string{

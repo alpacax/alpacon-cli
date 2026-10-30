@@ -99,9 +99,8 @@ func TestFetchAllCursorPages_WalksToTheEndOfTheChain(t *testing.T) {
 	assert.Equal(t, "c", items[2].Name)
 }
 
-// The cursor key goes on the first request with an empty value. A route where
-// paging is an opt-in reads the key as the opt-in, so a first request without
-// it is answered with the whole list and the walk ends after one response.
+// The cursor key goes on the first request with an empty value: a route where paging is opt-in
+// answers a request without it with the whole list.
 func TestFetchCursorPages_NamesAnEmptyCursorOnTheFirstRequest(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}
@@ -213,8 +212,6 @@ func TestFetchCursorPages_NonPositiveLimit(t *testing.T) {
 	}
 }
 
-// servedNames is what a cursor walk yielded, in order, for comparing against the
-// pages a server handed out.
 func servedNames(items []cursorItem) []string {
 	names := make([]string, 0, len(items))
 	for _, item := range items {
@@ -273,12 +270,10 @@ func restartingCursorHandler(rec *requestRecorder, fail cursorFailure) http.Hand
 	})
 }
 
-// failRequest fails only the n-th request.
 func failRequest(n int) func(int, string) bool {
 	return func(got int, _ string) bool { return got == n }
 }
 
-// failCursorPages fails every request that carries a cursor.
 func failCursorPages(_ int, cursor string) bool { return cursor != "" }
 
 // Serial: noRestartDelay writes package state.
@@ -394,7 +389,6 @@ func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
 	assert.GreaterOrEqual(t, elapsed, tick)
 }
 
-// Serial: the subject is a timing window, and noRestartDelay's seam is what it writes.
 func TestFetchCursorPages_RestartHonorsRetryAfter(t *testing.T) {
 	t.Parallel()
 	rec := &requestRecorder{}

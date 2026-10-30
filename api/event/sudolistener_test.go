@@ -166,8 +166,8 @@ func TestSudoListener_VerifySudoGrant_Success(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Contains(t, r.URL.Path, "/api/sudo/grants/grant-123/verify/")
 
-		// Verify carries no payload — the server resolves MFA from the
-		// MFACompletion record, so the body must stay empty.
+		// Verify carries no payload: the server resolves MFA on its own side, so the body
+		// must stay empty.
 		body, err := io.ReadAll(r.Body)
 		assert.NoError(t, err)
 		assert.JSONEq(t, "{}", string(body))

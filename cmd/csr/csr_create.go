@@ -164,7 +164,6 @@ func promptForCert() (certApi.SignRequest, cert.CertificatePath) {
 	return signRequest, certPath
 }
 
-// newSignRequest builds the request body from the non-interactive flags.
 func newSignRequest(domains, ips string, validDays int) certApi.SignRequest {
 	return certApi.SignRequest{
 		DomainList: splitAndTrim(domains),

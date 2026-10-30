@@ -94,7 +94,6 @@ func runEntryAdd(cmd *cobra.Command, args []string) {
 	}
 }
 
-// entryFlagsSet lists the single-entry flags that were given.
 func entryFlagsSet(cmd *cobra.Command) []string {
 	var set []string
 	for _, name := range []string{"token", "command", "username", "groupname", "server", "expires-at", "disabled"} {

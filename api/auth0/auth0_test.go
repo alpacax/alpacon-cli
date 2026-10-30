@@ -26,13 +26,10 @@ import (
 const (
 	testDeviceID = "0f6f3f2e-2a9d-4a1e-8f2b-1c2d3e4f5a6b"
 
-	// refreshSuccessBody and fallbackScope describe the refresh exchange the
-	// scope-negotiation tests below drive.
 	refreshSuccessBody = `{"access_token":"new-access-token","expires_in":3600,"token_type":"Bearer"}`
 	fallbackScope      = "cli org:myws"
 )
 
-// tokenRequest is the part of a token-endpoint exchange those tests care about.
 type tokenRequest struct {
 	GrantType string `json:"grant_type"`
 	Scope     string `json:"scope"`
@@ -297,8 +294,6 @@ func TestExtractSubdomain(t *testing.T) {
 	}
 }
 
-// --- Refresh-token scope negotiation ---------------------------------------
-
 func TestIsRefreshTokenRejected(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -375,7 +370,6 @@ func newRefreshServer(t *testing.T, respond func(tokenRequest) (int, string)) *r
 	return server
 }
 
-// exchanges returns the token exchanges the CLI made, in order.
 func (s *refreshServer) exchanges() []tokenRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -386,10 +380,8 @@ func oauthErrorBody(code, description string) string {
 	return `{"error":"` + code + `","error_description":"` + description + `"}`
 }
 
-// rejectDeviceScopeWith answers the way an authorization server applying RFC
-// 6749 §6 would to a refresh asking for a scope outside the original grant,
-// which is what every installation that logged in before the device scope
-// shipped holds, refusing it under the given error code.
+// rejectDeviceScopeWith refuses, under code, a refresh asking for the device scope, as a server
+// applying RFC 6749 §6 would to a grant made before that scope shipped.
 func rejectDeviceScopeWith(code string) func(tokenRequest) (int, string) {
 	return func(request tokenRequest) (int, string) {
 		if strings.Contains(request.Scope, "device:") {
@@ -412,18 +404,15 @@ func setupRefreshConfig(t *testing.T, server *refreshServer) {
 	))
 }
 
-// captureStderr returns everything fn writes to stderr.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	_, stderr := testutil.CaptureOutput(t, fn)
 	return stderr
 }
 
-// TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected is the whole
-// point of the fallback. Installations that logged in before the device scope
-// shipped hold a refresh token granted without it, so an authorization server
-// following RFC 6749 §6 may refuse the exchange. Without the retry every one of
-// them would be logged out at once the next time its access token expired.
+// TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected: a refresh token granted
+// before the device scope shipped may be refused with it, and without the retry every such
+// installation would be logged out at its next token expiry.
 func TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected(t *testing.T) {
 	server := newRefreshServer(t, rejectDeviceScopeWith("invalid_scope"))
 	setupRefreshConfig(t, server)
@@ -444,12 +433,8 @@ func TestRefreshAccessToken_RetriesWithoutTheDeviceScopeWhenRejected(t *testing.
 	assert.Equal(t, "new-access-token", storedConfig.AccessToken)
 }
 
-// TestRefreshAccessToken_RetriesEveryScopeShapedRefusal walks the codes an
-// authorization server can use to say it will not grant the requested scope.
-// invalid_scope is RFC 6749 §5.2's own name for it; invalid_request is where a
-// server that files an unrecognized scope token as a bad parameter lands
-// instead. Both have to reach the retry, because a scope refusal that is missed
-// degrades presence keying for the whole life of the login.
+// TestRefreshAccessToken_RetriesEveryScopeShapedRefusal walks the codes a server can use to
+// refuse the requested scope: invalid_scope (RFC 6749 §5.2) and invalid_request.
 func TestRefreshAccessToken_RetriesEveryScopeShapedRefusal(t *testing.T) {
 	for _, code := range []string{"invalid_scope", "invalid_request"} {
 		t.Run(code, func(t *testing.T) {
@@ -467,15 +452,10 @@ func TestRefreshAccessToken_RetriesEveryScopeShapedRefusal(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessToken_DoesNotRetryARefusalTheScopeCannotFix is why the retry
-// is an allowlist of scope-shaped codes rather than "anything the server sent
-// back". A rate limit is the case that forced it: retrying there doubles the
-// request rate against an endpoint already throttling the CLI, and the second
-// request cannot succeed because the scope was never what it objected to.
-//
-// Auth0 reports that condition under more than one code—`too_many_requests`,
-// and `access_denied` carrying "Global limit has been reached"—which is exactly
-// why the decision cannot be a list of codes to skip.
+// TestRefreshAccessToken_DoesNotRetryARefusalTheScopeCannotFix: a rate limit is the case that
+// forced the allowlist, since a retry doubles the load on a throttled endpoint and cannot succeed.
+// Auth0 reports it as `too_many_requests` and as `access_denied` with "Global limit has been
+// reached", so the decision cannot be a list of codes to skip.
 func TestRefreshAccessToken_DoesNotRetryARefusalTheScopeCannotFix(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -521,10 +501,8 @@ func TestRefreshAccessToken_DoesNotRetryARefusalTheScopeCannotFix(t *testing.T) 
 	}
 }
 
-// TestRefreshAccessToken_FallbackIsObservable pins that the degrade leaves a
-// trace. A fallback that always succeeds is indistinguishable from the path it
-// replaced, so a permanently broken device scope would look exactly like a
-// working one while presence quietly stopped being attributable.
+// TestRefreshAccessToken_FallbackIsObservable pins that the fallback leaves a trace; otherwise a
+// permanently broken device scope would look exactly like a working one.
 func TestRefreshAccessToken_FallbackIsObservable(t *testing.T) {
 	server := newRefreshServer(t, rejectDeviceScopeWith("invalid_scope"))
 	setupRefreshConfig(t, server)
@@ -539,10 +517,8 @@ func TestRefreshAccessToken_FallbackIsObservable(t *testing.T) {
 	assert.Contains(t, stderr, "invalid_scope", "the server's own refusal code is what makes the line actionable")
 }
 
-// TestRefreshAccessToken_FallbackIsQuietWithoutTheDebugSwitch keeps the retry
-// from becoming permanent noise: it fires on every refresh for installations
-// that predate the scope, which is exactly the population that should not be
-// warned on every command about something they cannot act on.
+// TestRefreshAccessToken_FallbackIsQuietWithoutTheDebugSwitch: the fallback fires on every
+// refresh for installations that predate the scope, and they cannot act on a warning.
 func TestRefreshAccessToken_FallbackIsQuietWithoutTheDebugSwitch(t *testing.T) {
 	server := newRefreshServer(t, rejectDeviceScopeWith("invalid_scope"))
 	setupRefreshConfig(t, server)
@@ -630,11 +606,8 @@ func TestRefreshAccessToken_ReturnsTheTokenWhenItCannotBeSaved(t *testing.T) {
 	}
 }
 
-// TestRefreshAccessToken_ReportsTheFallbackFailure covers a scope refusal that
-// turns out to be sitting on top of a second, unrelated problem—an expired or
-// revoked token. The retry is entitled to run, since the first refusal really
-// was a scope refusal, and the error the user ends up seeing must be the one
-// describing the real problem rather than the scope refusal that triggered it.
+// TestRefreshAccessToken_ReportsTheFallbackFailure: when the retry after a scope refusal fails
+// for another reason, such as a revoked token, the user sees that failure, not the scope refusal.
 func TestRefreshAccessToken_ReportsTheFallbackFailure(t *testing.T) {
 	server := newRefreshServer(t, func(request tokenRequest) (int, string) {
 		if strings.Contains(request.Scope, "device:") {

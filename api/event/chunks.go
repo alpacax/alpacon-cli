@@ -21,18 +21,16 @@ type Chunk struct {
 	Content string `json:"content"`
 }
 
-// getCommandChunks fetches chunks for cmdID with seq in [fromSeq, toSeq],
-// sorted by seq ascending. A negative toSeq (noSeqBound) omits the upper
-// bound. The streaming consumers rely on the order, so we sort defensively
-// in case the server does not honor the ordering param.
+// getCommandChunks fetches chunks for cmdID with seq in [fromSeq, toSeq], sorted by seq
+// ascending even when the server ignores the ordering param. A negative toSeq omits the
+// upper bound.
 func getCommandChunks(ac *client.AlpaconClient, cmdID api.PathID, fromSeq, toSeq int) ([]Chunk, error) {
 	endpoint := api.IDURL(getEventURL, cmdID, "chunks", nil)
 	params := map[string]string{
 		"seq__gte": strconv.Itoa(fromSeq),
 		"ordering": "seq",
 	}
-	// Send seq__lte only when bounded; omit rather than send empty, since the
-	// server's strict integer filter rejects an empty seq__lte.
+	// Omit seq__lte when unbounded: the server's integer filter rejects an empty value.
 	if toSeq >= 0 {
 		params["seq__lte"] = strconv.Itoa(toSeq)
 	}
@@ -45,8 +43,7 @@ func getCommandChunks(ac *client.AlpaconClient, cmdID api.PathID, fromSeq, toSeq
 }
 
 // GetCommandOutput reconstructs the full command output from its chunks in seq
-// order. Empty when no chunks were produced. Used by non-streaming paths (exec
-// logs, polling fallback) where Result is empty under the chunk contract.
+// order. It returns an empty string when no chunks were produced.
 func GetCommandOutput(ac *client.AlpaconClient, cmdID string) (string, error) {
 	pathID, err := api.RequireID(cmdID, "command")
 	if err != nil {
@@ -79,12 +76,11 @@ func resolveCommandOutputByPathID(ac *client.AlpaconClient, pathID api.PathID, r
 	return pickCommandOutput(result, chunked, err)
 }
 
-// pickCommandOutput decides between the two. A chunk fetch failure is fatal only
-// when result carries nothing: a server predating the chunk endpoint answers the
-// legacy field alone, while an empty result leaves nothing to print, and
-// reporting success there describes a command that produced no output. A 404 is
-// that older server saying it has no chunk store at all, so its empty result is
-// the whole output rather than a result nobody could read.
+// pickCommandOutput prefers the chunked output. A chunk fetch failure is fatal only when
+// result is empty and the status is not 404: a server predating the chunk endpoint answers
+// the legacy field alone, while an empty result leaves nothing to print, and reporting success
+// would describe a command that produced no output. A 404 says the server has no chunk store,
+// so its empty result is the whole output.
 func pickCommandOutput(result, chunked string, chunkErr error) (string, error) {
 	if chunkErr != nil {
 		if result != "" || utils.HTTPStatusCode(chunkErr) == http.StatusNotFound {

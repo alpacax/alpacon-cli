@@ -196,7 +196,6 @@ type statusOnly int
 func (s statusOnly) Error() string       { return "status" }
 func (s statusOnly) HTTPStatusCode() int { return int(s) }
 
-// Joined errors have the status their children agree on, or none.
 func TestHTTPStatusCode_JoinedErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -209,7 +208,6 @@ func TestHTTPStatusCode_JoinedErrors(t *testing.T) {
 		{name: "children differ", err: &BatchError{Header: "h", Failures: []error{statusOnly(403), statusOnly(429)}}, want: 0},
 		{name: "no child has one", err: errors.Join(errors.New("a"), errors.New("b")), want: 0},
 		{name: "a wrapped batch", err: fmt.Errorf("upload: %w", &BatchError{Header: "h", Failures: []error{statusOnly(402)}}), want: 402},
-		// A conflict inside a nested join is still a conflict at the top.
 		{name: "nested joins disagree", err: errors.Join(errors.Join(statusOnly(403), statusOnly(429)), statusOnly(403)), want: 0},
 		{name: "nested joins agree", err: errors.Join(errors.Join(statusOnly(403), errors.New("x")), statusOnly(403)), want: 403},
 		{
@@ -237,7 +235,6 @@ func TestHTTPStatusCode_JoinedErrors(t *testing.T) {
 	}
 }
 
-// A batch hides its items' codes, while hints still read through it.
 func TestBatchError_HidesItemCodesButNotHints(t *testing.T) {
 	t.Parallel()
 	batch := &BatchError{Header: "upload failed for 1 file(s)", Failures: []error{

@@ -15,8 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupTestConfig overrides the home directory so tests write to a temp dir.
-// t.Setenv automatically restores the original value when the test finishes.
+// setupTestConfig points HOME at a temp dir so tests write there.
 func setupTestConfig(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -136,7 +135,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Read raw JSON to verify omitempty works
 	homeDir, _ := os.UserHomeDir()
 	data, err := os.ReadFile(filepath.Join(homeDir, ConfigFileDir, ConfigFileName))
 	require.NoError(t, err)
@@ -151,7 +149,6 @@ func TestCreateConfig_BaseDomainOmittedFromJSON(t *testing.T) {
 func TestSwitchWorkspace(t *testing.T) {
 	setupTestConfig(t)
 
-	// Create initial config
 	err := CreateConfig(
 		"https://ws1.us1.alpacon.io", "ws1",
 		"", "", "access-token", "refresh-token",
@@ -159,11 +156,9 @@ func TestSwitchWorkspace(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Switch workspace
 	err = SwitchWorkspace(loadedConfig(t), "https://ws2.us1.alpacon.io", "ws2", false)
 	require.NoError(t, err)
 
-	// Verify only URL and name changed
 	cfg, err := LoadConfig()
 	require.NoError(t, err)
 	assert.Equal(t, "https://ws2.us1.alpacon.io", cfg.WorkspaceURL)
@@ -621,9 +616,7 @@ func TestSaveConfig_ConcurrentWritesNeverLeaveAnUnreadableFile(t *testing.T) {
 
 func TestGetActiveWorkSessionReportsNoSessionWhenNoConfigExists(t *testing.T) {
 	setupTestConfig(t)
-	// LoadConfig wraps the missing-file error with %w, and os.IsNotExist unwraps
-	// only the error types the os package defines—so the promise this makes had
-	// been reporting the absence of a config as a failure to read one.
+	// LoadConfig wraps the missing-file error with %w, which os.IsNotExist does not unwrap.
 	uuid, err := GetActiveWorkSession()
 	require.NoError(t, err)
 	assert.Empty(t, uuid)

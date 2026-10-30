@@ -5,10 +5,8 @@ import (
 	"os"
 )
 
-// pendingApprovalCtx is the machine-readable context for a pending-approval
-// signal. RequestID is the approval request to track; it is omitted when the
-// originating surface cannot surface one (e.g. the exec sudo denial line carries
-// only the denial code, never a request id).
+// pendingApprovalCtx is the machine-readable context for a pending-approval signal. RequestID is
+// omitted when the surface has none, as an exec sudo denial carries only its code.
 type pendingApprovalCtx struct {
 	RequestID string `json:"request_id,omitempty"`
 }
@@ -39,16 +37,11 @@ func pendingApprovalNextActions(retry NextAction, extra ...NextAction) []NextAct
 	return append(actions, extra...)
 }
 
-// PrintPendingApproval emits the structured "pending approval" feedback for an
-// action that requires out-of-band human approval and was not waited on. Under
-// --output json it writes a {"status":"pending_approval", ...} envelope to
-// stdout; otherwise it writes an actionable message to stderr. requestID may be
-// empty when the surface cannot supply one. retry is a surface-specific retry
-// action (e.g. the exact command to re-run); its Command stays a pure,
-// executable string so a machine consumer can run it directly, with any hint in
-// Description. extra follows the generic console pointer.
-// It never exits — the caller owns process exit so the exit-code contract stays
-// in one place.
+// PrintPendingApproval reports an action that awaits out-of-band human approval and was not
+// waited on: a {"status":"pending_approval", ...} envelope on stdout under --output json, else an
+// actionable message on stderr. requestID may be empty. retry leads the next actions and keeps its
+// Command a pure executable string, any hint in Description; extra follows the console pointer.
+// It never exits, so the exit-code contract stays with the caller.
 func PrintPendingApproval(message, requestID string, retry NextAction, extra ...NextAction) {
 	if OutputFormat == OutputFormatJSON {
 		envelope := pendingApprovalJSON{

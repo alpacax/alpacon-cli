@@ -18,11 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// End-to-end reporting of a purpose demand through the real `exec` and
-// `exec logs` commands. The envelope's own shape is pinned next to the code that
-// builds it, in utils/purpose_demand_test.go; `exec purpose` lives in
-// purpose_test.go.
-
 // demandSignal is the slice of the envelope these end-to-end tests branch on.
 // The full contract is asserted in utils/purpose_demand_test.go.
 type demandSignal struct {
@@ -160,14 +155,11 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 	assert.False(t, got.RequiresHumanApproval)
 }
 
-// TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand pins the decision the
-// PR description argues at length.
-//
-// The demand reaches the caller today only because the PendingApprovalError
-// branch and isApprovalDenial both happen to miss AwaitingPurposeError. Fold it
-// into either one and --wait sleeps through the whole ~60s window instead of
-// reporting it—spending the command's single chance on a wait that cannot end
-// well, since the answer was this caller's to give all along.
+// TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand pins that --wait does not wait on a
+// purpose demand. The demand reaches the caller only because the PendingApprovalError branch and
+// isApprovalDenial both miss AwaitingPurposeError; folding it into either would sleep through the
+// demand window and spend the command's single chance on a wait, though the answer was this
+// caller's to give.
 func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		_ = stubApprovalWaitSeams(t, 10*time.Millisecond, "SUDO_APPROVAL_REQUIRED")

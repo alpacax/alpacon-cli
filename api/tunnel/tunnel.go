@@ -14,10 +14,9 @@ const (
 	tunnelSessionURL = "/api/websh/tunnels/"
 )
 
-// CreateTunnelSession creates a new tunnel session for the specified server.
-// It returns the WebSocket URL to connect to.
-// workSessionID, when non-empty, attaches the tunnel to a work-session via the
-// "work_session" body field (omitted when empty thanks to omitempty).
+// CreateTunnelSession creates a tunnel session for the server and returns the
+// WebSocket URL to connect to. A non-empty workSessionID attaches the tunnel to
+// that work session.
 func CreateTunnelSession(ac *client.AlpaconClient, serverName, username, groupname string, targetPort int, workSessionID string) (*TunnelSessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {

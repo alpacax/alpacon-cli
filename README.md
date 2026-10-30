@@ -586,7 +586,7 @@ go test -count=1 ./...
 
 ### End-to-end tests against a live workspace
 
-`sample_test_cli.sh` exercises the major commands (server lookup, exec, websh, cp, tunnel) against a real Alpacon workspace. Copy it, fill in the workspace URL and target server at the top, and run:
+`sample_test_cli.sh` exercises the major commands (server lookup, exec, websh, cp) against a real Alpacon workspace. Copy it, fill in the workspace URL and target server at the top, and run:
 
 ```bash
 cp sample_test_cli.sh test_cli.sh

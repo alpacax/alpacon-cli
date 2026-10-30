@@ -123,7 +123,8 @@ func init() {
 	serverCreateCmd.MarkFlagsMutuallyExclusive("token", "new-token")
 }
 
-// resolveMethod returns the registration method from --method flag or interactively.
+// resolveMethod returns --method, token-install in a non-interactive shell, or the
+// user's choice.
 func resolveMethod(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("method") {
 		if refusal := methodRefusal(createMethod); refusal != "" {
@@ -132,13 +133,11 @@ func resolveMethod(cmd *cobra.Command) string {
 		return createMethod
 	}
 	if !utils.IsInteractiveShell() {
-		// non-interactive: fall back to default token-install
 		return "token-install"
 	}
 	return selectMethod()
 }
 
-// resolvePlatform returns the platform value from --platform flag or interactively.
 func resolvePlatform(cmd *cobra.Command, method string) string {
 	if cmd.Flags().Changed("platform") {
 		if refusal := platformRefusal(method, createPlatform); refusal != "" {
@@ -194,9 +193,8 @@ func platformsForMethod(method string) ([]string, string) {
 	return validPlatforms, validPlatformsList
 }
 
-// resolveName returns the server name from --name flag or interactively.
-// When --token or --new-token is set, the caller is scripting: skip the prompt
-// and let the server fall back to hostname.
+// resolveName returns --name or prompts for one. With --token or --new-token the
+// caller is scripting, so it returns empty and the server falls back to the hostname.
 func resolveName(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("name") {
 		return createName
@@ -207,10 +205,8 @@ func resolveName(cmd *cobra.Command) string {
 	return promptForServerName()
 }
 
-// resolveTokenID returns a token UUID from flags or interactively.
-// --token: look up existing token by name
-// --new-token: create a new token with the given name and show its key
-// (mutual exclusion enforced by Cobra; interactive selection used when neither is set)
+// resolveTokenID returns the UUID of the --token token, of one created for
+// --new-token, or of the user's interactive choice.
 func resolveTokenID(cmd *cobra.Command, ac *client.AlpaconClient) string {
 	if cmd.Flags().Changed("token") {
 		token, err := server.GetRegistrationTokenByName(ac, createTokenName)

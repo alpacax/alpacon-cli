@@ -11,7 +11,9 @@ import (
 
 const lockOpenFlags = os.O_RDWR | os.O_CREATE
 
-const lockFileBytes = 1 // The byte range LockFileEx takes: Windows has no whole-file form, and a range every caller names identically is exclusive all the same.
+// lockFileBytes is one byte: Windows locks byte ranges only, and one range every caller names is
+// exclusive all the same.
+const lockFileBytes = 1
 
 func lockFile(file *os.File) error {
 	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)

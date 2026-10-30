@@ -31,7 +31,6 @@ var usernameSetCmd = &cobra.Command{
 	},
 }
 
-// setUsernameErrorText maps a SetUsername error to the message shown to the user.
 func setUsernameErrorText(err error) string {
 	code, _ := utils.ParseErrorResponse(err)
 	// A server hint is the guidance when the refusal carries one, and the error

@@ -37,7 +37,6 @@ var (
 	now                = time.Now
 )
 
-// openLedger opens a ledger session or exits with the reason it cannot.
 func openLedger() *ledgerSession {
 	session, err := newLedgerSession()
 	if err != nil {
@@ -176,7 +175,6 @@ func (s *ledgerSession) workspaceAPI() (*client.AlpaconClient, error) {
 	return ac, nil
 }
 
-// fail reports a failed ledger call and exits.
 func (s *ledgerSession) fail(action string, err error) {
 	s.dropRefusedToken(err)
 	utils.CliErrorWithExit("%s", s.errorMessage(action, err))

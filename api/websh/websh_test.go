@@ -278,7 +278,6 @@ func TestBuildSessionRequest_OmitsEmptyWorkSession(t *testing.T) {
 	assert.Equal(t, 24, req.Rows)
 	assert.Equal(t, 80, req.Cols)
 
-	// Verify omitempty: the JSON wire form must not include "work_session".
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 	assert.NotContains(t, string(body), "work_session")
@@ -757,9 +756,9 @@ func TestFinish_KeepsTheFirstOutcome(t *testing.T) {
 	}
 }
 
-// The dial succeeds and raw mode then fails, and nothing on that return calls
-// finish. Today every go statement sits below enterRawMode, so none has started
-// and the count holds; this fails if one is ever moved back above it.
+// The dial succeeds and raw mode then fails, with no finish on that return. Every
+// go statement sits below enterRawMode, so none has started; this fails if one
+// moves above it.
 func TestOpenReadOnlyTerminal_LeavesNoGoroutineWhenSetupFails(t *testing.T) {
 	// SetWebsocketHeader sends an Origin, which the default CheckOrigin rejects
 	// as cross-origin against the httptest host.
@@ -960,7 +959,6 @@ func TestEndsSession_SeparatesAnEndFromADrop(t *testing.T) {
 		want bool
 	}{
 		{
-			// What the proxy actually sends at the end of a session.
 			name: "session end",
 			err:  &websocket.CloseError{Code: sessionEndCloseCode},
 			want: true,
@@ -992,7 +990,6 @@ func TestEndsSession_SeparatesAnEndFromADrop(t *testing.T) {
 			err:  &websocket.CloseError{Code: websocket.CloseInternalServerErr},
 		},
 		{
-			// A link that went away without a close frame of any kind.
 			name: "transport failure",
 			err:  errors.New("connection reset by peer"),
 		},
@@ -1223,7 +1220,7 @@ func TestRedial_StopsWhenTheSessionEndsMidWait(t *testing.T) {
 	assert.Zero(t, attempts.Load())
 }
 
-// newTestReconnectClient is a client whose reconnect talks to ts and waits in
+// newTestReconnectClient is a client whose reconnect talks to baseURL and waits in
 // milliseconds rather than seconds.
 func newTestReconnectClient(baseURL string) *WebsocketClient {
 	ac := &client.AlpaconClient{HTTPClient: &http.Client{}, BaseURL: baseURL}

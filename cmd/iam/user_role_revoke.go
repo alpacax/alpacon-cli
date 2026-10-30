@@ -144,9 +144,9 @@ func plannedRevocations(bindings []rbac.UserRoleResponse, roleName string, casca
 	return targets
 }
 
-// The admin-while-superuser case: the server accepts the delete, then re-forces is_staff
-// because is_superuser stands, so both platform flags survive while the account stops
-// registering as an admin.
+// wouldStrandThePlatformFlags reports the admin-while-superuser case: the server accepts the
+// delete, then re-forces is_staff because is_superuser stands, so both platform flags survive
+// while the account stops registering as an admin.
 func wouldStrandThePlatformFlags(bindings []rbac.UserRoleResponse, roleName string, targets []rbac.UserRoleResponse) bool {
 	return roleName == rbac.RoleAdmin &&
 		len(targets) > 0 &&

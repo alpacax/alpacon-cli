@@ -141,10 +141,9 @@ func (w *Waiter) isStopped() bool {
 	}
 }
 
-// startCatchUp runs the read off the wait loop because it is a plain REST call with no
-// deadline of its own: inline, a server that never answers would outlast Timeout and
-// ignore Stop. Returns nil when there is nothing to read—a nil channel blocks forever in
-// a select, which is exactly right here.
+// startCatchUp runs the read off the wait loop because the REST call has no deadline
+// of its own: inline, a server that never answers would outlast Timeout and ignore
+// Stop. It returns nil when there is nothing to read, which blocks forever in a select.
 func (w *Waiter) startCatchUp() <-chan string {
 	if w.opts.CatchUp == nil {
 		return nil

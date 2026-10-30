@@ -213,7 +213,6 @@ func TestValidatePaths(t *testing.T) {
 	}
 }
 
-// Test the SSH parsing logic used in the cp command
 func TestCpCommandSSHParsing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -295,7 +294,6 @@ func TestCpCommandSSHParsing(t *testing.T) {
 	}
 }
 
-// Test scenarios covering the required patterns from the issue
 func TestRequiredCpPatterns(t *testing.T) {
 	t.Parallel()
 	patterns := []struct {
@@ -341,7 +339,6 @@ func TestRequiredCpPatterns(t *testing.T) {
 				sources := pattern.args[:len(pattern.args)-1]
 				dest := pattern.args[len(pattern.args)-1]
 
-				// Test the logic that determines upload vs download
 				isUpload := isLocalPaths(sources) && isRemotePath(dest)
 				isDownload := isRemotePath(sources[0]) && isLocalPath(dest)
 
@@ -455,9 +452,8 @@ func fileRefusal(t *testing.T, body string) error {
 	return err
 }
 
-// The run-as-root advice answers a permission on the server's files. A refusal
-// carrying the server's hint, such as a token's file access rules, is answered
-// by the hint instead, which the caller's error line prints.
+// The run-as-root advice fits a permission on the server's files; a refusal carrying the
+// server's hint, such as a token's file access rules, gets the hint instead.
 func TestWantsPermissionAdvice(t *testing.T) {
 	t.Parallel()
 	const hint = "This token's file access rules do not allow this transfer for this path, account and direction."
@@ -514,10 +510,9 @@ func refusedDownloadClient(status int, body string) *client.AlpaconClient {
 	}
 }
 
-// A download whose final fetch is refused with the server's hint reaches cp's
-// caller with the hint on the error, so its error line prints the hint; cp's
-// own checklist for a failed download, which exits on the spot, stays out of
-// it. A 429 that outlasts the retries counts the same.
+// A download fetch refused with the server's hint reaches cp's caller with the hint on the error,
+// and cp's own failed-download checklist, which exits on the spot, stays out. A 429 that outlasts
+// the retries counts the same.
 func TestDownloadObject_FetchRefusalWithAHintSkipsTheChecklist(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

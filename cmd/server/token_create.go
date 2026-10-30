@@ -85,9 +85,8 @@ func init() {
 	tokenCreateCmd.Flags().Int("expires-in-days", 0, "Number of days until the token expires (0 = the workspace maximum lifetime; a longer one is refused).")
 }
 
-// resolveGroupIDs converts a list of group names or UUIDs to UUIDs.
-// Entries that are already UUIDs pass through unchanged.
-// Entries that look like names are resolved via the IAM API.
+// resolveGroupIDs converts group names or UUIDs to UUIDs, resolving names through
+// the IAM API and skipping blank entries.
 func resolveGroupIDs(ac *client.AlpaconClient, entries []string) ([]string, error) {
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {

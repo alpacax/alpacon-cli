@@ -461,11 +461,9 @@ func narrowConfigFile(path string) error {
 	return file.Close()
 }
 
-// TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide pins what the
-// warning is about. A link is refused a chmod, not a read, and the README calls
-// a config.json kept in a dotfiles tree a supported setup—so warning on the link
-// alone told that user, on every single command, about an exposure that was not
-// there.
+// TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide: a link is refused a chmod,
+// not a read, and a config.json kept in a dotfiles tree is supported, so warning on the link
+// alone would flag a nonexistent exposure on every command.
 func TestLoadConfigWarnsOnASymlinkedConfigFileOnlyWhenItsTargetIsWide(t *testing.T) {
 	// Serial: it sets HOME, swaps os.Stderr, and clears a package-level map.
 	for _, tc := range []struct {

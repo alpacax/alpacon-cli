@@ -119,10 +119,9 @@ func runKubeConfig(cmd *cobra.Command, args []string) {
 	if err != nil {
 		utils.CliErrorWithExit("Failed to open the kubeconfig: %s.", err)
 	}
-	// Every exit below runs through os.Exit, which skips deferred calls, so
-	// each releases the kubeconfig lock first; a lock left behind would block
-	// kubectl's own writes to the file. OnceFunc makes a release from the
-	// interrupt watcher and one from here safe to overlap.
+	// os.Exit skips deferred calls, so every exit below releases the kubeconfig lock first; a lock
+	// left behind would block kubectl's own writes. OnceFunc lets the interrupt watcher and this
+	// path both release it.
 	release := sync.OnceFunc(func() { _ = editor.Close() })
 	defer release()
 	interrupt := watchInterrupt(func() {

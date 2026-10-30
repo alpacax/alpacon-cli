@@ -196,10 +196,9 @@ func resolveEditor(flagValue string) string {
 	return "vi"
 }
 
-// guiEditorWaitWarning returns a warning when the resolved editor is a known GUI
-// editor invoked without a wait flag. Such editors return before the user saves,
-// so the before/after hash is unchanged and edit reports "No changes" and skips
-// the upload—the classic git core.editor footgun.
+// guiEditorWaitWarning returns a warning when the resolved editor is a known GUI editor invoked
+// without a wait flag: it returns before the user saves, so edit would see no change and skip the
+// upload.
 func guiEditorWaitWarning(editor string) string {
 	parts, err := splitEditorCommand(editor)
 	if err != nil || len(parts) == 0 {
@@ -235,18 +234,15 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 		result.TempPath = downloaded.Path
 	}
 
-	// Restrict the downloaded file to the owner; edit handles sensitive remote files.
-	// The containing directories are already 0700, so this is defense-in-depth.
-	// Note: editors that save by writing a new inode and renaming over the file
-	// reset the mode to the process umask, but the 0700 parent still gates access.
+	// Owner-only, since edit handles sensitive remote files. The 0700 parents already gate access,
+	// which also covers an editor that saves through a rename and resets the mode.
 	if err := os.Chmod(result.TempPath, 0600); err != nil {
 		cleanupEditTemp(result.TempPath, deps.removeAll)
 		return result, fmt.Errorf("failed to secure temp file: %w", err)
 	}
 
-	// The size guard runs post-download: it uses the actual bytes written to
-	// disk, which are only known after the fetch, so the guard prevents opening
-	// an oversized file in the editor rather than saving bandwidth.
+	// The size is only known once downloaded, so this guards opening an oversized file in the
+	// editor, not bandwidth.
 	if downloaded.Size > maxEditPromptSize && !opts.Force && !deps.confirmLarge(downloaded.Size) {
 		cleanupEditTemp(result.TempPath, deps.removeAll)
 		return result, errLargeFile
@@ -274,8 +270,8 @@ func runEdit(opts editOptions, deps editDeps) (editResult, error) {
 	result.Changed = before != after
 
 	if editorErr != nil {
-		// The editor failed: preserve the temp only if the user actually changed
-		// it, otherwise it is just an unmodified copy of the remote file.
+		// Keep the temp only if the user changed it; otherwise it is just a copy of the remote
+		// file.
 		if !result.Changed {
 			cleanupEditTemp(result.TempPath, deps.removeAll)
 		}
