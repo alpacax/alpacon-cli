@@ -726,6 +726,39 @@ func TestApprovalOutcomeOf(t *testing.T) {
 	}
 }
 
+func TestPollApprovalOnceLegacyExpiry(t *testing.T) {
+	original := getCommandByID
+	t.Cleanup(func() { getCommandByID = original })
+	cases := []struct {
+		name, status, cause string
+		want                approvalOutcome
+	}{
+		{"legacy rejected command", "rejected", "", outcomeExpired},
+		{"legacy completed command", "completed", "", outcomeExpired},
+		{"explicit reviewer rejection", "rejected", event.RejectionCauseApprovalRejected, outcomeRejected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getCommandByID = func(*client.AlpaconClient, string) (event.EventDetails, error) {
+				grantStatus := "expired"
+				requestID := "apr-1"
+				return event.EventDetails{
+					Status:                tc.status,
+					RejectionCause:        tc.cause,
+					SudoGrantStatus:       &grantStatus,
+					SudoApprovalRequestID: &requestID,
+				}, nil
+			}
+
+			outcome, requestID, cause, err := pollApprovalOnce(nil, "cmd-1")
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, outcome)
+			assert.Equal(t, "apr-1", requestID)
+			assert.Equal(t, tc.cause, cause)
+		})
+	}
+}
+
 // The throttle budget is spent, not re-earned. A successful read of a grant that
 // has not moved is no more progress than the 429 before it, so a wait that keeps
 // being throttled must still end within one timeout of extensions—not gain a

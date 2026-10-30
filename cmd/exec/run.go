@@ -508,10 +508,11 @@ func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, 
 	if details.SudoApprovalRequestID != nil {
 		requestID = *details.SudoApprovalRequestID
 	}
-	if event.IsRejectedStatus(details.Status) {
-		return outcomeRejected, requestID, details.RejectionCause, nil
+	outcome := approvalOutcomeOf(details.SudoGrantStatus)
+	if event.IsRejectedStatus(details.Status) && (details.RejectionCause != "" || outcome != outcomeExpired) {
+		outcome = outcomeRejected
 	}
-	return approvalOutcomeOf(details.SudoGrantStatus), requestID, details.RejectionCause, nil
+	return outcome, requestID, details.RejectionCause, nil
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with

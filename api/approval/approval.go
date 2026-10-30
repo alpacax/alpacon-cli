@@ -117,7 +117,14 @@ func FindCommandApprovalRequestID(ac *client.AlpaconClient, commandID string) (s
 			return "", err
 		}
 		for _, request := range response.Results {
-			if request.Metadata != nil && request.Metadata.CommandID == commandID {
+			if request.Metadata == nil {
+				continue
+			}
+			matchedCommandID := request.Metadata.CommandID
+			if request.Metadata.Command != nil && request.Metadata.Command.CommandID != "" {
+				matchedCommandID = request.Metadata.Command.CommandID
+			}
+			if matchedCommandID == commandID {
 				id, err := api.RequireResponseID(request.ID, "approval request")
 				if err != nil {
 					return "", err
