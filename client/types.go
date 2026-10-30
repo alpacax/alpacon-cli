@@ -21,6 +21,9 @@ type AlpaconClient struct {
 	// noRenewal skips the refresh-token renewal on a 401: it mints a workspace-
 	// audience token, which a client for another audience (the signer) cannot use.
 	noRenewal bool
+	// dropsRefusalNext clears a refusal's "next": it names a path on this host,
+	// and the `alpacon api` action that renders it reads the workspace instead.
+	dropsRefusalNext bool
 
 	// tokenMu guards accessToken, which sendRequest renews mid-flight. Unexporting
 	// the field keeps other packages out, token_boundary_test.go keeps this one out.
