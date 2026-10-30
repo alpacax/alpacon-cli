@@ -4,97 +4,68 @@
 // # What is narrowed
 //
 // `~/.alpacon` is held at 0700 and the files inside it at 0600. Anything found
-// wider is narrowed in place before it is read or written rather than only at
-// the moment it is created, because a file that was already wide when this
-// CLI arrived is exactly the one worth closing. This file decides what to
-// narrow; permissions_unix.go holds the guards it refuses on, and the
-// platform-specific opens live in permissions_darwin.go and
+// wider is narrowed in place before it is read or written, not only at creation,
+// because a file already wide when this CLI arrived is the one worth closing.
+// This file decides what to narrow; permissions_unix.go holds the guards it
+// refuses on, and the platform-specific opens live in permissions_darwin.go and
 // permissions_linux.go.
 //
 // # Handles, not paths
 //
-// Each chmod is bound to an open handle rather than to a path, so nothing can
-// be swapped in between the look and the change. Two path-based reads are
-// left, and neither decides a mode by itself: the pre-check in
-// restrictConfigDirectoryMode that asks whether a directory permitting
-// traversal but not reads has anything to narrow at all—safe because the
-// platform helper behind it re-derives the mode from its own handle and only
-// ever ANDs with 0700—and narrowToPublishedFileMode's os.Stat in device.go,
-// which reads the mode a rename is about to stand in for and intersects it, so
-// it can only take bits away.
+// Each chmod is bound to an open handle, so nothing can be swapped in between the
+// look and the change. Two path-based reads remain, and neither can widen a mode:
+// restrictConfigDirectoryMode's pre-check for a directory permitting traversal but
+// not reads, safe because restrictSearchableDirectory re-derives the mode from its
+// own handle and only ANDs with 0700, and narrowToPublishedFileMode's os.Stat in
+// device.go, which only intersects.
 //
 // # Links
 //
-// openToNarrow refuses a symbolic link instead of following one: the target
-// could be a file the user does not own, and the same run under sudo would
-// take access away from whatever the link named. Which errno says a link was
-// met is the platform's own decision, so symlinkErrnos is declared per OS
-// (ELOOP on Linux and macOS, EMLINK and EFTYPE alongside it on the BSDs,
-// nothing on Windows) rather than assumed.
+// openToNarrow refuses a symbolic link instead of following one: the target could
+// be a file the user does not own, and the same run under sudo would take access
+// away from it. symlinkErrnos is declared per OS, since which errno reports a link
+// is the platform's decision.
 //
-// Reaching a file inside the directory is the one place a link is followed.
-// openConfigDirectory opens ~/.alpacon without O_NOFOLLOW, because pointing it
-// at a dotfiles tree is a supported setup and refusing it would leave that
-// installation with no device id while the same link kept handing LoadConfig
-// the refresh token. Only the directory's own chmod refuses the link, which is
-// the attack this guards: aiming a chmod at a link someone else planted. Every
-// guard on the file itself still runs inside the directory the link resolves
-// to, and the file is reached with openat on that handle, so O_NOFOLLOW covers
-// the last component the link could not.
+// openConfigDirectory follows a link on ~/.alpacon, because pointing it at a
+// dotfiles tree is supported, and refusing it would cost the device id while
+// LoadConfig still reads through the link. Only the directory's own chmod refuses
+// the link, since aiming a chmod at a link someone else planted is the attack.
+// The file is then reached with openat on that handle, so every guard on the file
+// still runs and O_NOFOLLOW covers its last component.
 //
-// A refused chmod is not by itself an exposure, so neither the file nor the
-// directory warns on a link alone. What the link resolves to is read for its
-// mode—the handle LoadConfig already holds for the file, a fresh O_NOFOLLOW open
-// for the directory—and the warning is kept back unless that mode grants another
-// account access. A dotfiles tree usually keeps its config.json at 0600, and a
-// notice on every command there teaches the reader to skip the one that matters.
+// A refused chmod on a link is not by itself an exposure, so the warning is kept
+// back unless what the link resolves to grants another account access.
 //
-// The chmod separately refuses a file that answers to more than one name,
-// because O_NOFOLLOW says nothing about hard links and macOS lets any account
-// link a file it can merely read. That guard sits inside the chmod callback
-// rather than ahead of it, so a file already within the mask passes:
-// publishing the device id leaves a second name on the new file for as long as
-// its temporary copy lives.
+// The chmod also refuses a file with more than one name, because O_NOFOLLOW says
+// nothing about hard links and macOS lets any account link a file it can read.
+// That guard sits inside the chmod callback, so a file already within the mask
+// passes: publishing the device id briefly leaves a second name on the new file.
 //
 // # What a caller must not read past
 //
-// refuseUnsafeConfigFile rejects anything that is not a regular file, since
-// O_NONBLOCK keeps the open off a named pipe but says nothing about the read
-// behind it—os.NewFile hands a non-blocking descriptor to the poller and
-// io.ReadAll then waits there forever—and it rejects a handle on a file this
-// process does not own, because mode bits say nothing there: root can read
-// anything, and a sudo that keeps HOME would otherwise take an unprivileged
-// user's own file as root's device id. Both carry errUnsafeConfigFile, and
-// that is the one narrowing failure LoadConfig refuses rather than warns
-// about, since a config file another account owns names the host the CLI talks
-// to and decides whether its certificate is checked. LoadConfig reads the very
-// handle this narrowed, and falls back to reopening the path only for a
-// symbolic link, which is refused a chmod but not a read—that fallback runs
-// the same refusal on what the link resolves to.
+// refuseUnsafeConfigFile rejects anything that is not a regular file—O_NONBLOCK
+// keeps the open off a named pipe but not the read behind it—and a file this
+// process does not own, since root can read anything and a sudo that keeps HOME
+// would otherwise take a user's own file as root's device id. Both carry
+// errUnsafeConfigFile, the one narrowing failure LoadConfig refuses rather than
+// warns about: a config file another account owns names the host the CLI talks
+// to and decides whether its certificate is checked.
 //
 // # Best effort everywhere else
 //
-// The mode is read back after a chmod that reported success, since a
-// filesystem without permission bits answers the call and keeps the mode; only
-// bits that hand another account access count as a failure, because macOS
-// reports every file on a FAT volume as 0700. A chmod that fails outright is
-// held to the same standard, which is what keeps a Linux vfat mount whose
-// fmask already grants no other account access from being read as an exposure.
-// Everything else is best effort—a read-only mount, a directory another
-// account owns, and a modeless filesystem all refuse the chmod—so
-// warnUnrestricted warns once per subject and cause and the command carries on
-// rather than dying over a mode it cannot change. ~/.alpacon/device_id is the
-// exception in the other direction: it fails closed, because an MFA presence
-// proof binds to whatever identifier readDeviceID returns, so a handle it
-// could not protect is treated as no identifier at all and the server falls
-// back to an IP fingerprint.
+// The mode is read back after every chmod, accepted or refused, since a filesystem
+// without permission bits can keep the mode either way; only bits granting another
+// account access count as a failure, because macOS reports every FAT file as 0700.
+// Any other failure—a read-only mount, a directory another account owns—makes
+// warnUnrestricted warn once per subject and cause, and the command carries on.
+// ~/.alpacon/device_id is the exception: it fails closed, so a handle it could not
+// protect means no identifier and the server falls back to an IP fingerprint.
 //
 // # Windows
 //
-// All of it is Unix only. Windows chmod changes the read-only attribute rather
-// than access permissions, so nothing is repaired there, the two modes above
-// are not enforced, and the symlink, hard-link and owner refusals are
-// stubs—the device id is not protected on Windows either.
+// All of it is Unix only. Windows chmod changes the read-only attribute, so
+// nothing is repaired there, the modes are not enforced, and the symlink,
+// hard-link and owner refusals are stubs—the device id is not protected either.
 package config
 
 import (
@@ -133,14 +104,9 @@ func grantsOtherAccounts(perm os.FileMode) bool {
 	return perm&0077 != 0
 }
 
-// symlinkTargetGrantsOtherAccounts reports whether what a link resolves to hands
-// another account access. A link is refused a chmod but not a read, so whether
-// that refusal is worth telling the user about is a question about the target
-// rather than about the link—and keeping the config in a dotfiles tree, where
-// the file is usually already 0600, is a setup this CLI supports.
-//
-// It answers true when it cannot look. A mode nothing could read is not one
-// anything may vouch for, and the caller's warning is the safe way to be wrong.
+// symlinkTargetGrantsOtherAccounts reports whether what a link resolves to hands another
+// account access. It answers true when it cannot look, so an unreadable mode errs toward the
+// warning.
 func symlinkTargetGrantsOtherAccounts(path string) bool {
 	target, err := filepath.EvalSymlinks(path)
 	if err != nil {
@@ -166,10 +132,8 @@ func symlinkTargetGrantsOtherAccounts(path string) bool {
 // inode state, so one fstat covers them all. The stats inside the chmod
 // callback and the read-back below are the ones that need their own look.
 func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, chmod func(os.FileMode) error) error {
-	// Defense in depth rather than a live branch: every caller returns on GOOS
-	// before reaching here, so nothing on Windows arrives at this line today.
-	// It stays because the next caller might not, and a chmod on Windows would
-	// flip the read-only attribute instead of narrowing anything.
+	// Defense in depth: every caller returns on GOOS first, but a chmod on Windows would flip the
+	// read-only attribute instead of narrowing anything.
 	if runtime.GOOS == "windows" {
 		return nil
 	}
@@ -178,12 +142,9 @@ func restrictOpenFileMode(file *os.File, info os.FileInfo, allowed os.FileMode, 
 		return nil
 	}
 	if err := chmod(perm); err != nil {
-		// A filesystem can refuse a mode it cannot represent while already
-		// granting no other account anything—Linux vfat answers EPERM for any
-		// mode outside the mount's fmask. Hold the refusal to the same standard
-		// as the read-back below rather than reporting an exposure that is not
-		// there; the device id fails closed on this error, so a mount whose
-		// fmask is already narrow would otherwise never yield an identifier.
+		// Linux vfat answers EPERM for any mode outside the mount's fmask, even when that fmask
+		// already grants no other account anything. Judge the refusal like the read-back below, or
+		// the device id, which fails closed, would never be issued on such a mount.
 		kept, statErr := file.Stat()
 		if statErr != nil || grantsOtherAccounts(kept.Mode().Perm()&^allowed) {
 			return err
@@ -266,12 +227,11 @@ func openNarrowedConfigFile(path string) (*os.File, error) {
 		return openNoFollow(path)
 	}
 	dirPath := filepath.Dir(path)
-	// The link is followed here, unlike where the directory's own mode is
-	// narrowed: pointing ~/.alpacon at a dotfiles tree is a setup this supports,
-	// and refusing it would leave that installation with no device id at all
-	// while the same link keeps handing LoadConfig the refresh token. What the
-	// refusal is for is aiming a chmod at a link someone else planted, and every
-	// guard on the file itself still runs inside the directory it resolves to.
+	// The link is followed here, unlike where the directory's own mode is narrowed: pointing
+	// ~/.alpacon at a dotfiles tree is supported, and refusing it would cost the device id while
+	// LoadConfig still reads through the link. The directory's refusal is for aiming a chmod at a
+	// link someone else planted; every guard on the file still runs inside the directory it
+	// resolves to.
 	dir, err := openConfigDirectory(dirPath)
 	// errors.Is and not os.IsPermission throughout this file: these errors are
 	// wrapped, and the os helpers unwrap only the error types the os package
@@ -344,11 +304,9 @@ func restrictConfigDirectoryMode(path string) error {
 		return restrictSearchableDirectory(path)
 	}
 	if errors.Is(err, errSymlink) {
-		// Pointing ~/.alpacon at a dotfiles tree is supported, and the chmod is
-		// refused on the link rather than on what it names—so nothing is exposed
-		// unless the target's own mode says so. Reporting the link either way
-		// warned on every command for a setup that was fine, which is how a user
-		// learns to read past the warning that matters.
+		// The chmod is refused on the link, not its target, so warn only when the target's own mode
+		// exposes something; warning on every command for a fine dotfiles setup trains users to
+		// ignore it.
 		if !symlinkTargetGrantsOtherAccounts(path) {
 			return nil
 		}

@@ -14,21 +14,15 @@ import (
 )
 
 const (
-	// DeviceIDFileName holds the per-installation device identifier. It sits
-	// beside config.json rather than inside it so it is independent of session
-	// state: logout deletes config.json, and the machine has not changed, so the
-	// identifier must outlive it. This mirrors the web client, which keeps its
-	// own identifier in localStorage rather than alongside its session.
+	// DeviceIDFileName holds the per-installation device identifier. It sits beside config.json
+	// rather than inside it because logout deletes config.json and the identifier must outlive it.
 	DeviceIDFileName = "device_id"
 )
 
 var (
-	// deviceIDPattern mirrors the validation the Auth0 `Add Completed MFA
-	// Claim` post-login action applies to the `device:<id>` scope—that action
-	// is the one that consumes the identifier; `CLI Auth` reads `org:<name>`
-	// and never looks at this scope. A value that fails the pattern is ignored
-	// server-side, so the CLI never sends one: a stored value that does not
-	// match is treated as absent and replaced.
+	// deviceIDPattern mirrors the validation the Auth0 post-login action applies to the
+	// `device:<id>` scope. A value that fails it is ignored server-side, so the CLI never sends
+	// one: a stored value that does not match is treated as absent and replaced.
 	deviceIDPattern = regexp.MustCompile(`^[A-Za-z0-9-]{8,64}$`)
 )
 
@@ -38,26 +32,17 @@ func IsValidDeviceID(id string) bool {
 	return deviceIDPattern.MatchString(id)
 }
 
-// GetOrCreateDeviceID returns the stable per-installation device identifier,
-// generating and persisting a new one when the file is missing or holds a
-// malformed value. The identifier lets the server bind an MFA presence proof to
-// the CLI installation that requested the challenge; without it the server has
-// to fall back to an IP-based fingerprint, which two installations behind one
+// GetOrCreateDeviceID returns the stable per-installation device identifier, generating and
+// persisting a new one when the file is missing or holds a malformed value. The server binds an
+// MFA presence proof to it instead of an IP-based fingerprint that installations behind one
 // egress IP would share.
 //
-// It lives in ~/.alpacon/device_id, one line of plain text. That file is per
-// installation rather than per workspace, so every workspace this installation
-// logs in to shares the identifier, and it is untouched by DeleteConfig, so a
-// logout does not orphan the presence proofs bound to it.
+// It lives in ~/.alpacon/device_id, shared by every workspace this installation logs in to and
+// untouched by DeleteConfig, so a logout does not orphan the proofs bound to it.
 //
-// The identifier is not a secret in the sense a password or a token is—knowing
-// it grants nothing to someone who cannot also authenticate as the user—but it
-// is not inert either. It is the value an MFA presence proof binds to, and
-// it identifies this installation to the identity provider,
-// travelling there in OAuth requests where it may be recorded in tenant logs.
-// So it is a stable, security-relevant identifier rather than a throwaway: the
-// file is kept at 0600 inside the 0700 config directory, out of reach of other
-// accounts on a shared machine, and it does not belong in logs or bug reports.
+// The identifier grants nothing on its own, but presence proofs bind to it and it may be recorded
+// in the identity provider's logs, so the file is kept at 0600 and does not belong in logs or bug
+// reports.
 func GetOrCreateDeviceID() (string, error) {
 	path, err := deviceIDPath()
 	if err != nil {
@@ -145,28 +130,18 @@ func createDeviceID(path string) (string, error) {
 		if existing != "" {
 			return existing, nil
 		}
-		// The file blocking the create holds a value the Auth0 action would
-		// reject, so it has to go—but atomically, since a truncate-in-place
-		// would expose an empty file to whoever reads it next.
-		//
-		// Replacing cannot be made exclusive the way creating is: there is no
-		// portable compare-and-swap on a path, so two invocations that both
-		// find a malformed file both replace it and the second overwrites the
-		// first. Only the malformed case is exposed to that—reaching it takes a
-		// hand-edited or truncated file and concurrent invocations at the same
-		// moment—and its cost is one login keyed to a superseded identifier,
-		// which the next login corrects. Creation, the case that happens on
-		// every fresh installation, is exclusive and has no such window.
+		// The file blocking the create holds a malformed value, so replace it atomically: a
+		// truncate in place would expose an empty file. Replacement cannot be exclusive, so
+		// concurrent replacers can overwrite each other; that takes a hand-edited or truncated file
+		// and simultaneous runs, and costs one login keyed to a superseded identifier, which the
+		// next login corrects.
 		if err = replaceDeviceIDFile(path, deviceID); err != nil {
 			return "", err
 		}
 	}
 
-	// Report what the file holds rather than what was generated. Both of the
-	// branches above can lose a race to a concurrent invocation, and the file
-	// is the only thing either process will read on its next run, so the two
-	// must agree on it now rather than authenticate under identifiers that
-	// disagree.
+	// Report what the file holds, not what was generated: either branch above can lose a race, and
+	// every process must agree on the identifier the file will give its next run.
 	stored, err := readDeviceID(path)
 	if err != nil {
 		return "", err
@@ -178,20 +153,13 @@ func createDeviceID(path string) (string, error) {
 	return stored, nil
 }
 
-// createDeviceIDFile publishes deviceID at path, reporting fs.ErrExist when the
-// path is taken, so two concurrent invocations cannot both believe they created
-// the file and the loser cannot end up on an identifier its own installation
-// never sends again.
+// createDeviceIDFile publishes deviceID at path, reporting fs.ErrExist when the path is taken,
+// so two concurrent invocations cannot both believe they created the file.
 //
-// The content lands before the name does: O_EXCL plus a write on the next line
-// leaves the path existing and empty for the length of the write, which
-// readDeviceID reports as absent, so a concurrent invocation judges it malformed
-// and replaces the winner's identifier. Linking rather than renaming keeps the
-// exclusion—rename replaces whatever it lands on—and publishes the temporary
-// file's mode: 0600 from os.CreateTemp less the umask, a free path giving
-// writeDeviceIDTempFile nothing to narrow against. A file that appears there and
-// is gone again before the link leaves that mode narrower still—the one
-// direction this package moves a mode.
+// The content lands before the name: O_EXCL plus a write leaves the path empty for the length
+// of the write, which a concurrent reader judges malformed and replaces. Linking rather than
+// renaming keeps the exclusion, since rename replaces whatever it lands on, and publishes the
+// temporary file's mode: 0600 less the umask on a free path, or narrower.
 func createDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -211,21 +179,13 @@ func createDeviceIDFile(path, deviceID string) error {
 	return createDeviceIDFileWithoutLink(path, deviceID)
 }
 
-// createDeviceIDFileWithoutLink is the fallback for a filesystem that cannot
-// hard-link—FAT, exFAT, some container mounts. It gives the empty window back (a
-// FAT home had 8 concurrent callers disagree in 43 of 50 rounds) and is taken
-// anyway: GetOrCreateDeviceID's only caller drops the error, so failing here is
-// silent and permanent. Any link failure lands here, not only an unsupported
-// one, so an unrelated cause—no permission, no space—surfaces as this error.
+// createDeviceIDFileWithoutLink is the fallback for a filesystem that cannot hard-link—FAT, exFAT,
+// some container mounts. It reopens the empty-file window but is taken anyway, since the caller
+// drops GetOrCreateDeviceID's error and failing here would be silent and permanent. Any link
+// failure lands here, so an unrelated cause—no permission, no space—surfaces as this error.
 //
-// The file this writes still has to survive readDeviceID, which fails closed.
-// Linux vfat answers a chmod outside the mount's fmask with EPERM rather than
-// keeping the mode the way macOS does, so restrictOpenFileMode reads the mode
-// back after a refused chmod as well as after an accepted one: a mount whose
-// fmask already grants no other account access yields an identifier, and one
-// that hands out group or other access yields none. That second case is the
-// trade-off—no device id at all there, and MFA presence checks fall back to a
-// network fingerprint—and remounting with fmask=0077 is what lifts it.
+// On a Linux vfat mount whose fmask grants group or other access, readDeviceID refuses the file
+// this writes, so there is no device id until the mount is remounted with fmask=0077.
 func createDeviceIDFileWithoutLink(path, deviceID string) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -245,13 +205,9 @@ func createDeviceIDFileWithoutLink(path, deviceID string) error {
 	return nil
 }
 
-// replaceDeviceIDFile overwrites the identifier file through a temporary file
-// and a rename, so no reader observes a half-written or empty file.
-//
-// The replacement carries the stricter of its own mode and the mode of the file
-// it replaces—see narrowToPublishedFileMode. Without that a rename would publish
-// whatever os.CreateTemp chose, handing a read-only identifier file back
-// writable: this package widening a mode it only ever promises to narrow.
+// replaceDeviceIDFile overwrites the identifier file through a temporary file and a rename, so
+// no reader observes a half-written or empty file. The replacement keeps the stricter of its own
+// mode and the replaced file's—see narrowToPublishedFileMode.
 func replaceDeviceIDFile(path, deviceID string) error {
 	tempPath, err := writeDeviceIDTempFile(path, deviceID)
 	if err != nil {
@@ -295,16 +251,10 @@ func writeDeviceIDTempFile(path, deviceID string) (string, error) {
 	return tempPath, nil
 }
 
-// narrowToPublishedFileMode drops from file every permission bit the file at
-// path lacks, so publishing over that file cannot widen what it had. Bits are
-// only removed, as in restrictFileMode: of the mode os.CreateTemp chose
-// and the mode being stood in for, the stricter wins.
-//
-// It runs before the caller publishes the file, because a rename publishes
-// whatever mode the file carries at that instant and narrowing afterwards would
-// leave the wider one published in between. Through the open handle rather than
-// the path, as SaveStreamAtomic does—a path-based chmod can be pointed at
-// another file by anyone able to drop a symlink in the config directory.
+// narrowToPublishedFileMode drops from file every permission bit the file at path lacks, so
+// publishing over that file cannot widen its mode. It runs before the publish, since a rename
+// publishes whatever mode the file has at that instant, and chmods the handle rather than the
+// path, which a planted symlink could redirect.
 func narrowToPublishedFileMode(file *os.File, path string) error {
 	if runtime.GOOS == "windows" {
 		// Windows has no Unix mode bits; Chmod there toggles the read-only
@@ -339,7 +289,6 @@ func narrowToPublishedFileMode(file *os.File, path string) error {
 	return nil
 }
 
-// deviceIDPath returns the absolute path of the device identifier file.
 func deviceIDPath() (string, error) {
 	dir, err := configDir()
 	if err != nil {
