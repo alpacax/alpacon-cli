@@ -619,7 +619,7 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	t.Parallel()
 	alwaysServerError := func(int32) int { return http.StatusInternalServerError }
 
-	ts, _, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
+	ts, sessions, _ := newWatcherTestServer(t, alwaysServerError, alwaysUpgrade, alwaysCreated, func(conn *websocket.Conn, _ int32) {})
 
 	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 	sl := NewSudoListener(ac, "my-server", "session-1")
@@ -627,8 +627,10 @@ func TestSudoListener_SurfacesANonFatalCauseAfterTheWaitEnds(t *testing.T) {
 	sl.Start()
 	defer sl.Stop()
 
+	// A second attempt means the first 500 was already recorded and retried.
+	require.Eventually(t, func() bool { return sessions.Load() >= 2 }, 5*time.Second, time.Millisecond)
 	// A 500 is retried, so the wait runs out; websh still has to name the reason.
-	assert.False(t, sl.WaitConnected(500*time.Millisecond), "a listener that never creates a session must not report connected")
+	assert.False(t, sl.WaitConnected(10*time.Millisecond), "a listener that never creates a session must not report connected")
 
 	err := sl.Err()
 	require.Error(t, err)
