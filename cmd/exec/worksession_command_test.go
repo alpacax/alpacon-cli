@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,7 @@ func TestExecCommandWorkSessionGateHelperProcess(t *testing.T) {
 		}
 		approvalWaitPollInterval = d
 	}
+	event.CommandPollTick = 10 * time.Millisecond
 	ExecCmd.Run(ExecCmd, args)
 }
 

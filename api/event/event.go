@@ -22,9 +22,11 @@ const (
 	// Base gap the pacing above multiplies, for the poll running behind a live
 	// stream.
 	streamPollTick = time.Second
-	// The poll that stands in for a stream that never connected.
-	fallbackPollTick = time.Second
 )
+
+// CommandPollTick paces a command poll with no stream behind it. A var so a test's
+// helper process, which no in-process seam reaches, can shorten it.
+var CommandPollTick = time.Second
 
 // streamDelays sit on the stream, not in package variables, so a test can shorten
 // them and stay parallel; synctest cannot, since the stream holds a real socket.
@@ -35,11 +37,13 @@ type streamDelays struct {
 	fallbackPollTick   time.Duration
 }
 
-var defaultStreamDelays = streamDelays{
-	connectTimeout:     commandOutputConnectTimeout,
-	reconnectBaseDelay: wsReconnectBaseDelay,
-	pollTick:           streamPollTick,
-	fallbackPollTick:   fallbackPollTick,
+func defaultStreamDelays() streamDelays {
+	return streamDelays{
+		connectTimeout:     commandOutputConnectTimeout,
+		reconnectBaseDelay: wsReconnectBaseDelay,
+		pollTick:           streamPollTick,
+		fallbackPollTick:   CommandPollTick,
+	}
 }
 
 // maxGapWidth caps enumerated missing seqs (per gap and cumulatively) so a buggy or
@@ -350,7 +354,7 @@ func getCommandByPathID(ac *client.AlpaconClient, pathID api.PathID) (EventDetai
 // typed error, so the caller can wait for MFA and poll again; the poll only
 // reads, so polling again is safe. Any other GET error is retried with backoff.
 func PollCommandExecution(ac *client.AlpaconClient, cmdID api.PathID) (EventDetails, error) {
-	return pollCommandExecution(ac, cmdID, execTimeout(), 1*time.Second, false, pollSeams{surfaceMFA: true})
+	return pollCommandExecution(ac, cmdID, execTimeout(), CommandPollTick, false, pollSeams{surfaceMFA: true})
 }
 
 func execTimeout() time.Duration {
@@ -458,7 +462,7 @@ func RunCommandStreaming(ac *client.AlpaconClient, serverName, command, username
 }
 
 func runCommandStreamingWithWriter(ac *client.AlpaconClient, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
-	return runCommandStreamingWithDelays(ac, defaultStreamDelays, serverName, command, username, groupname, env, workSessionID, purpose, out)
+	return runCommandStreamingWithDelays(ac, defaultStreamDelays(), serverName, command, username, groupname, env, workSessionID, purpose, out)
 }
 
 func runCommandStreamingWithDelays(ac *client.AlpaconClient, delays streamDelays, serverName, command, username, groupname string, env map[string]string, workSessionID, purpose string, out io.Writer) error {
@@ -492,7 +496,7 @@ type CommandStream struct {
 
 // NewCommandStream returns a CommandStream that connects on its first submission.
 func NewCommandStream(ac *client.AlpaconClient) *CommandStream {
-	return &CommandStream{ac: ac, delays: defaultStreamDelays}
+	return &CommandStream{ac: ac, delays: defaultStreamDelays()}
 }
 
 // RunCommand is RunCommandStreaming over this stream's listener.
@@ -556,7 +560,7 @@ func (s *CommandStream) run(submit commandSubmitter, out io.Writer) error {
 // PendingApprovalError; the parked job produced no output yet, so resubscribing
 // loses nothing.
 func StreamApprovedCommand(ac *client.AlpaconClient, cmdID string, out io.Writer, timeout time.Duration) error {
-	return streamApprovedCommandWithDelays(ac, defaultStreamDelays, cmdID, out, timeout)
+	return streamApprovedCommandWithDelays(ac, defaultStreamDelays(), cmdID, out, timeout)
 }
 
 func streamApprovedCommandWithDelays(ac *client.AlpaconClient, delays streamDelays, cmdID string, out io.Writer, timeout time.Duration) error {

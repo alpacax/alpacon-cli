@@ -9,9 +9,11 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alpacax/alpacon-cli/client"
+	"github.com/alpacax/alpacon-cli/pkg/testutil"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -242,12 +244,16 @@ type cursorFailure struct {
 // request fail.when matches.
 func newRestartingCursorServer(t *testing.T, rec *requestRecorder, fail cursorFailure) *httptest.Server {
 	t.Helper()
+	return httptest.NewServer(restartingCursorHandler(rec, fail))
+}
+
+func restartingCursorHandler(rec *requestRecorder, fail cursorFailure) http.Handler {
 	pages := map[string]CursorListResponse[cursorItem]{
 		"":       {Next: "TOKEN2", Results: []cursorItem{{Name: "a"}}},
 		"TOKEN2": {Next: "TOKEN3", Results: []cursorItem{{Name: "b"}}},
 		"TOKEN3": {Results: []cursorItem{{Name: "c"}}},
 	}
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.record(r)
 		w.Header().Set("Content-Type", "application/json")
 		cursor := r.URL.Query().Get("cursor")
@@ -264,7 +270,7 @@ func newRestartingCursorServer(t *testing.T, rec *requestRecorder, fail cursorFa
 			return
 		}
 		_ = json.NewEncoder(w).Encode(pages[cursor])
-	}))
+	})
 }
 
 // failRequest fails only the n-th request.
@@ -390,27 +396,24 @@ func TestFetchCursorPages_PausesBeforeARestart(t *testing.T) {
 
 // Serial: the subject is a timing window, and noRestartDelay's seam is what it writes.
 func TestFetchCursorPages_RestartHonorsRetryAfter(t *testing.T) {
-	noRestartDelay(t)
-	// Small enough that the backoff alone would finish far inside one second, large
-	// enough that the 60-tick cap leaves a one-second Retry-After uncapped.
-	cursorRestartTick = 20 * time.Millisecond
-
+	t.Parallel()
 	rec := &requestRecorder{}
-	ts := newRestartingCursorServer(t, rec, cursorFailure{
+	// Five seconds, where the restart's own backoff would wait one.
+	handler := restartingCursorHandler(rec, cursorFailure{
 		when:       failRequest(1),
 		status:     http.StatusServiceUnavailable,
 		code:       utils.APISearchUnavailable,
-		retryAfter: "1",
+		retryAfter: "5",
 	})
-	defer ts.Close()
+	ac := &client.AlpaconClient{HTTPClient: testutil.HandlerClient(handler), BaseURL: testutil.StubBaseURL}
 
-	ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
-	started := time.Now()
-	_, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
-	elapsed := time.Since(started)
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		_, err := FetchCursorPages[cursorItem](ac, "/api/history/logs/", nil, 10)
 
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, elapsed, time.Second)
+		require.NoError(t, err)
+		assert.Equal(t, 5*time.Second, time.Since(started))
+	})
 }
 
 func TestFetchCursorPages_KeepsPagesReadBeforeAFailure(t *testing.T) {

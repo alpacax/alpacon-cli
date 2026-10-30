@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -118,6 +119,7 @@ func TestExitCodeHelperProcess(t *testing.T) {
 	if !ok {
 		os.Exit(99)
 	}
+	event.CommandPollTick = 10 * time.Millisecond
 	ts := exitStubServer()
 	defer ts.Close()
 	if err := writeExitHelperConfig(ts.URL); err != nil {

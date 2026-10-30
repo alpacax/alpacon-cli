@@ -3,6 +3,7 @@ package testutil
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 )
 
@@ -37,4 +38,21 @@ const StubBaseURL = "http://stub.invalid"
 // StubClient returns an http.Client that answers from fn.
 func StubClient(fn func(*http.Request) (status int, body string)) *http.Client {
 	return &http.Client{Transport: StubTransport{Respond: fn}}
+}
+
+// HandlerClient returns an http.Client that serves every request from h in
+// memory, so a handler that sets headers runs where StubClient's fn cannot.
+// TODO: replace with httptest.NewTestServer once go.mod moves to Go 1.27.
+func HandlerClient(h http.Handler) *http.Client {
+	return &http.Client{Transport: handlerTransport{h}}
+}
+
+type handlerTransport struct{ h http.Handler }
+
+func (t handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	t.h.ServeHTTP(rec, req)
+	resp := rec.Result()
+	resp.Request = req
+	return resp, nil
 }

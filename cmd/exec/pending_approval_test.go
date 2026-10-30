@@ -452,7 +452,7 @@ func TestExecResultPollTimeoutStaysATimeout(t *testing.T) {
 
 			_, stderr, exitCode := runHelperProcess(t, ts.URL,
 				"TestExecCommandWorkSessionGateHelperProcess", execWorkSessionHelperMarker,
-				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=3s"},
+				[]string{"GO_WANT_EXEC_WORKSESSION_HELPER=1", "ALPACON_EXEC_TIMEOUT=300ms"},
 				[]string{"prod", "--", "uptime"})
 
 			assert.Equal(t, 1, exitCode, "stderr: %s", stderr)
