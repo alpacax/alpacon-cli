@@ -308,19 +308,9 @@ func (r *Runtime) handleTCPConnection(tcpConn net.Conn) {
 		utils.CliInfo("Connection opened: %s", tcpConn.RemoteAddr())
 	}
 
-	errChan := make(chan error, 2)
-
-	go func() {
-		_, err := basetunnel.CopyBuffered(stream, tcpConn)
-		errChan <- err
-	}()
-
-	go func() {
-		_, err := basetunnel.CopyBuffered(tcpConn, stream)
-		errChan <- err
-	}()
-
-	<-errChan
+	if relay(tcpConn, stream, halfCloseTimeout) {
+		utils.CliInfo("Closed a half-closed tunnel connection after %v: %s", halfCloseTimeout, tcpConn.RemoteAddr())
+	}
 	if r.verbose {
 		utils.CliInfo("Connection closed: %s", tcpConn.RemoteAddr())
 	}
