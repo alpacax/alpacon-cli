@@ -991,6 +991,7 @@ func reportCodedRefusalWithExit(code int, operation string, err error, message, 
 		utils.CliUsageErrorEnvelopeWithExit(operation, "%s.", message)
 		return
 	}
+	utils.ExitIfUsageError(code, operation, err, "%s.", message)
 	utils.ExitWithFailureJSON(utils.Failure{ExitCode: code, Operation: operation, Err: err, Message: message + ".", NextActions: actions})
 	fmt.Fprintf(os.Stderr, "%s: %s.\n", utils.Red("Error"), message)
 	if hint := codedRefusalHint(err, hint); hint != "" {

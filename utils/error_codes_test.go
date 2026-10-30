@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeAPIError struct {
@@ -76,6 +77,8 @@ func TestClassifyError(t *testing.T) {
 		{name: "no login on disk", err: fmt.Errorf("configuration file not found: %w", ErrNotLoggedIn), want: ErrorCodeNotLoggedIn},
 		{name: "server code wins over a missing login", err: errors.Join(ErrNotLoggedIn, &fakeAPIError{code: "rbac_permission_required", status: 403}), want: "rbac_permission_required"},
 		{name: "context canceled is not a network failure", err: context.Canceled, want: ErrorCodeCLI},
+		{name: "marked usage error", err: MarkUsageError(errors.New("bad flag")), want: ErrorCodeUsage},
+		{name: "marked usage error under a wrapper", err: fmt.Errorf("while running: %w", MarkUsageError(errors.New("bad flag"))), want: ErrorCodeUsage},
 		{name: "url error wrapping cancel is not a network failure", err: &url.Error{Op: "Get", URL: "https://x", Err: context.Canceled}, want: ErrorCodeCLI},
 	}
 	for _, tt := range tests {
@@ -120,6 +123,47 @@ func TestServerErrorFields(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMarkUsageErrorKeepsItsCauseAndMessage(t *testing.T) {
+	t.Parallel()
+	cause := errors.New("bad flag")
+
+	err := fmt.Errorf("while running: %w", MarkUsageError(cause))
+
+	require.ErrorIs(t, err, cause)
+	assert.Equal(t, "while running: bad flag", err.Error())
+}
+
+func TestMarkUsageErrorOfNilIsNil(t *testing.T) {
+	t.Parallel()
+	assert.NoError(t, MarkUsageError(nil))
+}
+
+func TestIsUsageErrorAnswersOnlyForAMarkedError(t *testing.T) {
+	t.Parallel()
+	marked := MarkUsageError(errors.New("bad flag"))
+	server := &fakeAPIError{code: ErrorCodeUsage, status: 400}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "marked", err: marked, want: true},
+		{name: "marked under a wrapper", err: fmt.Errorf("while running: %w", marked), want: true},
+		{name: "marked joined after a server error", err: errors.Join(server, marked), want: true},
+		{name: "marked joined before a server error", err: errors.Join(marked, server), want: true},
+		{name: "a server answer coded usage_error", err: server},
+		{name: "a message that reads usage_error", err: errors.New("code: usage_error; source: x")},
+		{name: "nil", err: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, IsUsageError(tt.err))
 		})
 	}
 }
