@@ -99,11 +99,34 @@ func TestReadFromServer_IdleWarningStaysDeduplicatedOnReconnect(t *testing.T) {
 	assert.Equal(t, "[Idle: this session closes at 15:04:05 unless you type something.]\r\n\r\nConnection lost, reconnecting...\r\n", notices)
 }
 
+func TestReadFromServer_IdleWarningPrunesExpiredHistory(t *testing.T) {
+	expired := time.Now().Add(-time.Hour).UTC()
+	retained := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	next := retained.Add(time.Minute)
+	history := map[time.Time]struct{}{expired: {}, retained: {}}
+
+	conn, stdout, stderr := readIdleFramesWithHistory(t, history,
+		idleWarningFrame(retained), idleWarningFrame(next), idleWarningFrame(expired),
+	)
+
+	assert.Empty(t, stdout)
+	assert.Equal(t, fmt.Sprintf("[Idle: this session closes at %s unless you type something.]\r\n", next.Local().Format("15:04:05")), stderr)
+	assert.NotContains(t, conn.idleWarnings, expired)
+	assert.Contains(t, conn.idleWarnings, retained)
+	assert.Contains(t, conn.idleWarnings, next)
+	assert.Len(t, conn.idleWarnings, 2)
+}
+
 func idleWarningFrame(closesAt time.Time) replayFrame {
 	return replayFrame{websocket.TextMessage, fmt.Sprintf(`{"type":"idle_warning","closes_at":%q,"message":"untrusted server text"}`, closesAt.Format(time.RFC3339))}
 }
 
 func readIdleFrames(t *testing.T, frames ...replayFrame) (*connection, string, string) {
+	t.Helper()
+	return readIdleFramesWithHistory(t, nil, frames...)
+}
+
+func readIdleFramesWithHistory(t *testing.T, history map[time.Time]struct{}, frames ...replayFrame) (*connection, string, string) {
 	t.Helper()
 	upgrader := websocket.Upgrader{}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +146,7 @@ func readIdleFrames(t *testing.T, frames ...replayFrame) (*connection, string, s
 	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http"), nil)
 	require.NoError(t, err)
 	conn := newConnection(ws)
+	conn.idleWarnings = history
 	t.Cleanup(conn.close)
 	stdout, stderr := testutil.CaptureOutput(t, func() {
 		awaitReturn(t, "warning reader did not finish", conn.readFromServer)

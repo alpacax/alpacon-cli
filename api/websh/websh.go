@@ -719,8 +719,14 @@ func (c *connection) readFromServer() {
 			}
 			if origin.Type == "idle_warning" {
 				var closesAt time.Time
-				if err := json.Unmarshal(origin.ClosesAt, &closesAt); err != nil || !closesAt.After(time.Now()) {
+				now := time.Now()
+				if err := json.Unmarshal(origin.ClosesAt, &closesAt); err != nil || !closesAt.After(now) {
 					continue
+				}
+				for deadline := range c.idleWarnings {
+					if !deadline.After(now) {
+						delete(c.idleWarnings, deadline)
+					}
 				}
 				closesAt = closesAt.UTC()
 				if _, seen := c.idleWarnings[closesAt]; seen {
