@@ -192,7 +192,7 @@ func TestKubeGateHelperProcess(t *testing.T) {
 	if !ok {
 		os.Exit(2)
 	}
-	RootCmd.SetArgs(args)
+	os.Args = append([]string{"alpacon"}, args...)
 	Execute()
 	os.Exit(0)
 }
