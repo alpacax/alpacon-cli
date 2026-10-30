@@ -44,6 +44,7 @@ type connection struct {
 	pumps        sync.WaitGroup
 	replay       *replayState
 	reconnected  bool
+	readOnly     bool
 	notice       io.Writer
 	idleWarnings map[time.Time]struct{}
 }

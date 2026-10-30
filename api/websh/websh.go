@@ -469,6 +469,7 @@ func OpenReadOnlyTerminal(ac *client.AlpaconClient, sessionResponse SessionRespo
 	defer restore()
 
 	conn := wsClient.conn
+	conn.readOnly = true
 	go wsClient.watchInterrupt(sigChan)
 	go wsClient.readCtrlC()
 	conn.startReader()
@@ -740,7 +741,11 @@ func (c *connection) readFromServer() {
 				if notice == nil {
 					notice = os.Stderr
 				}
-				_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
+				if c.readOnly {
+					_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s.]\r\n", closesAt.Local().Format("15:04:05"))
+				} else {
+					_, _ = fmt.Fprintf(notice, "[Idle: this session closes at %s unless you type something.]\r\n", closesAt.Local().Format("15:04:05"))
+				}
 				continue
 			}
 			if legacy || origin.Type != "replay_origin" || origin.Epoch == "" {
