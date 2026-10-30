@@ -255,7 +255,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 }
 
 // Cobra's subcommand lookup takes an unknown flag to need a value, so "exec --wait my-server ls"
-// would run ls; registered hidden, the parser's bool flags take none.
+// would run the subcommand "exec ls"; registered hidden, the parser's bool flags take none.
 func init() {
 	for _, name := range []string{"wait", "detach", "upload", "overwrite", "from-server"} {
 		ExecCmd.Flags().Bool(name, false, "")

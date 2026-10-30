@@ -41,7 +41,8 @@ attempt to argue the verdict down is reported in its own right and denied.
 Prefer stating it up front with 'alpacon exec --purpose': the assessor then
 judges on the first pass and no demand is issued at all.
 
-Exit code 2 means the JOB_ID is not a UUID or the PURPOSE is blank or too long.
+Exit code 2 means the argument count is wrong, the JOB_ID is not a UUID, or the PURPOSE
+is blank or too long.
 Exit code 1 covers every refusal from the server. A settled command and an answer
 from the wrong principal share one server error, so this cannot report which
 happened; read the command's state with 'alpacon exec logs JOB_ID' rather than
