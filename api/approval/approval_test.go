@@ -182,3 +182,30 @@ func TestApprovalCallsTrimAValidIDIntoOnePathSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestFindCommandApprovalRequestIDEarlyStop(t *testing.T) {
+	t.Parallel()
+	var pages atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages.Add(1)
+		assert.Equal(t, myRequestsURL, r.URL.Path)
+		assert.Equal(t, "pending", r.URL.Query().Get("status"))
+		assert.Equal(t, "command_exec", r.URL.Query().Get("request_type"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "1":
+			_, _ = w.Write([]byte(`{"next":2,"results":[{"id":"other","metadata":{"command_id":"other-command"}}]}`))
+		case "2":
+			_, _ = w.Write([]byte(`{"next":3,"results":[{"id":"apr-1","metadata":{"command_id":"cmd-1"}}]}`))
+		default:
+			t.Error("lookup requested a page after the match")
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer ts.Close()
+
+	id, err := FindCommandApprovalRequestID(newTestClient(ts), "cmd-1")
+	require.NoError(t, err)
+	assert.Equal(t, "apr-1", id)
+	assert.EqualValues(t, 2, pages.Load())
+}

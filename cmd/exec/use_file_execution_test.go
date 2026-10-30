@@ -10,6 +10,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alpacax/alpacon-cli/api/event"
@@ -125,8 +126,14 @@ func newRejectedCommandServer(cause string) *httptest.Server {
 // newRejectedCommandServerAs is newRejectedCommandServer with the detail's
 // account; an empty username or groupname leaves the field out.
 func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Server {
+	ts, _ := newRejectedCommandSequenceServer(cause, username, groupname, false, "")
+	return ts
+}
+
+func newRejectedCommandSequenceServer(cause, username, groupname string, wait bool, grantStatus string) (*httptest.Server, *atomic.Int64) {
 	const cmdID = rejectedCommandID
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var reads atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/servers/servers/":
@@ -142,13 +149,24 @@ func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Ser
 				"server":              map[string]any{"id": "srv-1", "name": "prod"},
 				"work_session":        map[string]any{"id": "ses-1"},
 			}
+			read := reads.Add(1)
+			if wait {
+				detail["sudo_grant_status"] = grantStatus
+				if read <= 2 {
+					detail["status"] = "completed"
+					detail["success"] = false
+					detail["exit_code"] = 1
+					detail["result"] = denialLine("SUDO_APPROVAL_REQUIRED")
+					detail["sudo_grant_status"] = "pending_approval"
+				}
+			}
 			if username != "" {
 				detail["username"] = username
 			}
 			if groupname != "" {
 				detail["groupname"] = groupname
 			}
-			if cause != "" {
+			if cause != "" && (!wait || read > 2) {
 				detail["rejection_cause"] = cause
 				detail["rejection_gate"] = "approval"
 			}
@@ -157,6 +175,7 @@ func newRejectedCommandServerAs(cause, username, groupname string) *httptest.Ser
 			http.NotFound(w, r)
 		}
 	}))
+	return ts, &reads
 }
 
 // cliErrorEnvelope is the --output json error envelope on stderr.
@@ -239,10 +258,13 @@ func TestExecReviewerRejectionKeepsItsSentence(t *testing.T) {
 
 // Expiry and human rejection share exit 6 but carry distinct messages and JSON codes.
 func TestApprovalRejectionCauseMessages(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
-		name   string
-		format string
-		run    func(t *testing.T, serverURL, format string) (string, int)
+		name        string
+		format      string
+		wait        bool
+		grantStatus string
+		run         func(t *testing.T, serverURL, format string) (string, int)
 	}{
 		{
 			name:   "exec table",
@@ -263,20 +285,24 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 			},
 		},
 		{
-			name:   "exec wait table",
-			format: utils.OutputFormatTable,
+			name:        "exec wait table",
+			grantStatus: "rejected",
+			wait:        true,
+			format:      utils.OutputFormatTable,
 			run: func(t *testing.T, serverURL, _ string) (string, int) {
 				t.Helper()
-				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--wait", "prod", "--", "uptime")
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--wait", "--wait-approval", "300ms", "prod", "--", "uptime")
 				return stderr, exitCode
 			},
 		},
 		{
-			name:   "exec wait json",
-			format: utils.OutputFormatJSON,
+			name:        "exec wait json",
+			grantStatus: "pending_approval",
+			wait:        true,
+			format:      utils.OutputFormatJSON,
 			run: func(t *testing.T, serverURL, _ string) (string, int) {
 				t.Helper()
-				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--output", "json", "--wait", "prod", "--", "uptime")
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--output", "json", "--wait", "--wait-approval", "300ms", "prod", "--", "uptime")
 				return stderr, exitCode
 			},
 		},
@@ -299,21 +325,28 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 			},
 		},
 	}
-	for _, cause := range []string{"approval_expired", "approval_rejected"} {
-		t.Run(cause, func(t *testing.T) {
+	causes := []struct {
+		name, cause, code, message string
+	}{
+		{name: "expired", cause: event.RejectionCauseApprovalExpired, code: event.RejectionCauseApprovalExpired, message: "was not approved before the approval request expired"},
+		{name: "reviewer", cause: event.RejectionCauseApprovalRejected, code: event.RejectionCauseApprovalRejected, message: "was rejected by a reviewer"},
+		{name: "other", cause: "risk_denied", code: "risk_denied", message: "was refused (risk_denied)"},
+		{name: "older server", code: "not_approved", message: "was rejected by a reviewer"},
+	}
+	for _, cause := range causes {
+		t.Run(cause.name, func(t *testing.T) {
+			t.Parallel()
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					ts := newRejectedCommandServer(cause)
+					t.Parallel()
+					ts, reads := newRejectedCommandSequenceServer(cause.cause, "root", "wheel", tc.wait, tc.grantStatus)
 					defer ts.Close()
 
 					stderr, exitCode := tc.run(t, ts.URL, tc.format)
 					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
-					if cause == "approval_expired" {
-						assert.Contains(t, stderr, "was not approved before the approval request expired")
-						assert.NotContains(t, stderr, "rejected by a reviewer")
-					} else {
-						assert.Contains(t, stderr, "was rejected by a reviewer")
-						assert.NotContains(t, stderr, "request expired")
+					assert.Contains(t, stderr, cause.message)
+					if tc.wait {
+						assert.EqualValues(t, 3, reads.Load(), "submission read, pending poll, then terminal poll")
 					}
 					assert.NotContains(t, stderr, "--file")
 					if tc.format != utils.OutputFormatJSON {
@@ -326,7 +359,7 @@ func TestApprovalRejectionCauseMessages(t *testing.T) {
 					var envelope cliErrorEnvelope
 					require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
 					assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
-					assert.Equal(t, cause, envelope.ErrorCode)
+					assert.Equal(t, cause.code, envelope.ErrorCode)
 				})
 			}
 		})

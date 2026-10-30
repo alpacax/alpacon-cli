@@ -499,16 +499,19 @@ func isApprovalDenial(err error) bool {
 
 // pollApprovalOnce reads the grant the denial left behind. The command it names
 // already ran and was blocked, so this is a status read, not a re-attempt.
-func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, error) {
+func pollApprovalOnce(ac *client.AlpaconClient, cmdID string) (approvalOutcome, string, string, error) {
 	details, err := getCommandByID(ac, cmdID)
 	if err != nil {
-		return outcomePending, "", err
+		return outcomePending, "", "", err
 	}
 	requestID := ""
 	if details.SudoApprovalRequestID != nil {
 		requestID = *details.SudoApprovalRequestID
 	}
-	return approvalOutcomeOf(details.SudoGrantStatus), requestID, nil
+	if event.IsRejectedStatus(details.Status) {
+		return outcomeRejected, requestID, details.RejectionCause, nil
+	}
+	return approvalOutcomeOf(details.SudoGrantStatus), requestID, details.RejectionCause, nil
 }
 
 // RunExecWithApprovalWait runs a command via RunExecWithPresenceStepUp and, when it is denied with
@@ -606,7 +609,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			utils.CliWarning("%s", utils.HintOnly(fmt.Sprintf("Approval wait timed out after %s; the command is still pending.", waitTimeout), lastRefusal))
 			return pendingWithRequestID(pendingDenial, lastRequestID)
 		case <-poll.C:
-			outcome, requestID, err := pollApprovalOnce(ac, cmdID)
+			outcome, requestID, cause, err := pollApprovalOnce(ac, cmdID)
 			lastRefusal = nil
 			if err != nil && utils.IsRefusalStatus(utils.HTTPStatusCode(err)) {
 				lastRefusal = err
@@ -661,7 +664,7 @@ func runWithApprovalWait(ac *client.AlpaconClient, run commandRun, waitTimeout t
 			case outcomeRejected, outcomeExpired:
 				spinner.Stop()
 				// Settled without a grant; CommandRejectedError carries it to ExitCodeNotApproved.
-				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired}
+				return &event.CommandRejectedError{CommandID: cmdID, Expired: outcome == outcomeExpired, Cause: cause}
 			}
 			// A fixed gap over a 30m wait outspends the server's service-token
 			// throttle, so the gap widens as the wait ages.

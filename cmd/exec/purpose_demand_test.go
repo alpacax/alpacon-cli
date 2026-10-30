@@ -215,7 +215,7 @@ func TestExecLogsAfterPurposeLapse(t *testing.T) {
 				case "/api/events/commands/" + purposeJobID + "/":
 					_ = json.NewEncoder(w).Encode(map[string]any{
 						"id": purposeJobID, "status": tc.status, "rejection_cause": tc.cause,
-						"result": tc.result, "purpose": "", "purpose_expires_at": nil,
+						"result": tc.result, "purpose": "", "purpose_expires_at": "2026-10-01T12:00:00Z",
 					})
 				case "/api/approvals/approvals/-/":
 					assert.Equal(t, "pending", r.URL.Query().Get("status"))

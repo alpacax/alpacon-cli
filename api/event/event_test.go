@@ -415,8 +415,8 @@ func TestCommandRejectedError_CauseMapping(t *testing.T) {
 		cause string
 		want  string
 	}{
-		{cause: "approval_expired", want: "was not approved before the approval request expired"},
-		{cause: "approval_rejected", want: "was rejected by a reviewer"},
+		{cause: RejectionCauseApprovalExpired, want: "was not approved before the approval request expired"},
+		{cause: RejectionCauseApprovalRejected, want: "was rejected by a reviewer"},
 		{cause: "command_acl_denied", want: "was refused (command_acl_denied)"},
 		{cause: "command_acl_unavailable", want: "was refused (command_acl_unavailable)"},
 		{cause: "risk_denied", want: "was refused (risk_denied)"},

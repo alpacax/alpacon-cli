@@ -84,6 +84,7 @@ Run the command again later to check for completion.`,
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
+			// The caller already supplied the job ID, so keep the outcome line focused on the refusal.
 			rejected.CommandID = ""
 			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
 				"%s (status: %s)", rejected, details.Status)
@@ -113,7 +114,7 @@ Run the command again later to check for completion.`,
 		}
 
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
-		if exitCode == 0 && stderrLine == "" {
+		if exitCode == 0 && stderrLine == "" && details.PurposeExpiresAt != nil {
 			stderrLine = fmt.Sprintf("command finished (status: %s).\n", utils.SanitizeTerminalText(details.Status))
 		}
 		// The command's own failure carries the remote exit code this command

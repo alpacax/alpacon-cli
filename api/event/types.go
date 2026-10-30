@@ -117,6 +117,11 @@ type CommandRejectedError struct {
 // command, so it covers one server even when the same script went to several.
 const RejectionCauseUseFileExecution = "use_file_execution"
 
+const (
+	RejectionCauseApprovalExpired  = "approval_expired"
+	RejectionCauseApprovalRejected = "approval_rejected"
+)
+
 // AwaitingPurposeError is returned when the server parked a command at the
 // "awaiting_purpose" status: instead of queuing it for a human, the gate asks the
 // requester what the command is for. Nobody has been notified, so the answer is the
@@ -314,9 +319,9 @@ func (e *CommandRejectedError) Error() string {
 	switch {
 	case e.Cause == RejectionCauseUseFileExecution:
 		reason = "was refused because its command line carries a script body (" + RejectionCauseUseFileExecution + ")"
-	case e.Cause == "approval_expired" || e.Expired:
+	case e.Cause == RejectionCauseApprovalExpired || e.Expired:
 		reason = "was not approved before the approval request expired"
-	case e.Cause != "" && e.Cause != "approval_rejected":
+	case e.Cause != "" && e.Cause != RejectionCauseApprovalRejected:
 		reason = "was refused (" + utils.SanitizeTerminalText(e.Cause) + ")"
 	}
 	if e.CommandID == "" {
@@ -328,10 +333,13 @@ func (e *CommandRejectedError) Error() string {
 // ErrorCode preserves the rejection cause for callers that distinguish expiry,
 // a reviewer's decision, and other refusals without parsing the message.
 func (e *CommandRejectedError) ErrorCode() string {
-	if e.Expired {
-		return "approval_expired"
+	if e.Cause != "" {
+		return e.Cause
 	}
-	return e.Cause
+	if e.Expired {
+		return RejectionCauseApprovalExpired
+	}
+	return ""
 }
 
 // ErrorSource completes the coded error the envelope reads; a rejection names
