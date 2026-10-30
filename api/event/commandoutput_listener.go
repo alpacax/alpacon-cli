@@ -58,10 +58,9 @@ type commandOutputEnvelope struct {
 	} `json:"payload"`
 }
 
-// NewCommandOutputListener constructs a listener without connecting. ac may be nil
-// only for a test that never calls Start, because provisioning a session dereferences
-// it. The targets are set later via setTargets, because SubmitCommand must run once
-// the WS is already connected.
+// NewCommandOutputListener constructs a listener without connecting. ac may be nil only
+// for a test that never calls Start. Targets are set later by subscribeTo, because the
+// command is submitted only once the WebSocket is connected.
 func NewCommandOutputListener(ac *client.AlpaconClient) *CommandOutputListener {
 	return newCommandOutputListener(ac, commandOutputConnectTimeout)
 }
@@ -91,9 +90,8 @@ func (l *CommandOutputListener) provisionSession() (*EventSessionResponse, error
 	if err != nil {
 		l.stateMu.Lock()
 		l.err = err
-		// Before the first subscribe a fatal 4xx only burns the caller's connect budget
-		// before it falls back to polling anyway. Once the command is streaming, giving
-		// up would cost the rest of the run its live output, so every status is retried.
+		// Before the first subscribe a fatal 4xx gives up, since the caller falls back to polling
+		// anyway. Once streaming, every status is retried so the run keeps its live output.
 		fatal := !l.subscribed && isFatalRequestError(err)
 		l.stateMu.Unlock()
 
@@ -118,11 +116,9 @@ func (l *CommandOutputListener) subscribeTo(commandID, serverID string) error {
 }
 
 func (l *CommandOutputListener) subscribe() error {
-	// A fatal session failure can stop the listener between the caller's WaitConnected
-	// and its subscribeTo. Subscribing then succeeds against a channel nothing reads,
-	// so the caller would stream from a dead listener instead of falling back. Checking
-	// again once the subscriptions are in narrows the window to their round trips rather
-	// than closing it: a Stop landing after the second check still goes unnoticed.
+	// A fatal session failure can stop the listener between WaitConnected and subscribeTo,
+	// and a subscription on its channel would succeed with nothing reading it. Checking again
+	// after subscribing narrows that window but does not close it.
 	if err := l.halted(); err != nil {
 		return err
 	}
@@ -162,9 +158,8 @@ func (l *CommandOutputListener) subscribe() error {
 	return nil
 }
 
-// halted reports why the listener stopped, or nil while it is live. provisionSession
-// records the reason on its way out, and carrying it here is what keeps the caller's
-// fallback warning naming the server's own refusal rather than the halt.
+// halted reports why the listener stopped, or nil while it is live. It wraps the reason
+// provisionSession recorded, so the caller's fallback warning names the server's refusal.
 func (l *CommandOutputListener) halted() error {
 	select {
 	case <-l.done:

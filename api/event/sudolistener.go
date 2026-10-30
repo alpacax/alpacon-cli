@@ -33,7 +33,6 @@ const (
 	defaultMFAPollTimeout = 60 * time.Second
 )
 
-// sudoMFAEvent represents the MFA request payload from the event WebSocket.
 type sudoMFAEvent struct {
 	Payload struct {
 		Type        string `json:"type"`
@@ -48,9 +47,9 @@ type sudoMFAEvent struct {
 // SudoListener listens for sudo MFA events on the event WebSocket
 // and handles the browser-based MFA flow.
 //
-// The AlpaconClient (ac) is shared with the terminal WebSocket goroutines.
-// http.Client is concurrency-safe. Token refresh and grant verification are
-// serialized by mfaMu so only one MFA flow runs at a time.
+// ac is shared with the terminal WebSocket goroutines, which is safe because
+// http.Client is concurrency-safe and mfaMu serializes token refresh and grant
+// verification, so only one MFA flow runs at a time.
 //
 // Event channel tokens are single-use, so every dial provisions its own session
 // and re-subscribes once connected.
@@ -136,11 +135,10 @@ func (sl *SudoListener) announceOutage(cause error) {
 }
 
 // fail decides what a failed connect attempt means. Before the first subscribe a fatal
-// 4xx is a bad session or an expired login: the listener stops, carrying the reason for
-// websh to report, and says nothing itself. After it, the same failure is an outage
-// announced once, in CRLF because websh holds the terminal in raw mode, then left to
-// the reconnect loop. Every cause is recorded either way, so a caller reading Err()
-// after a timeout gets the transport's own words rather than nothing.
+// 4xx is a bad session or an expired login: the listener stops silently, carrying the
+// reason for websh to report. After it, the failure is an outage announced once, in CRLF
+// for the raw-mode terminal, and left to the reconnect loop. Every cause is recorded, so
+// Err() after a timeout gives the transport's own words.
 func (sl *SudoListener) fail(cause error) error {
 	sl.stateMu.Lock()
 	sl.err = cause
@@ -179,10 +177,8 @@ func (sl *SudoListener) handleMessage(message []byte) {
 		return
 	}
 
-	// Handle MFA in a separate goroutine so the read loop can continue
-	// processing WebSocket pings and other messages during the polling wait.
-	// mfaMu ensures only one MFA flow runs at a time to avoid concurrent
-	// token refresh and duplicate approval calls.
+	// Handle MFA on its own goroutine so the read loop keeps answering pings during
+	// the wait; mfaMu keeps it to one flow at a time.
 	go sl.handleSudoMFA(event)
 }
 
@@ -192,7 +188,6 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		return
 	}
 
-	// Check if shutdown was requested before acquiring the lock or doing side effects
 	select {
 	case <-sl.done:
 		return
@@ -226,9 +221,8 @@ func (sl *SudoListener) handleSudoMFA(event sudoMFAEvent) {
 		return
 	}
 
-	// Slow path: open browser for MFA verification.
-	// Use the CLI-specific MFA URL (location=cli): completing it credits the
-	// MFA to this client, which the retried verification is checked against.
+	// The CLI-specific MFA link (location=cli) credits the MFA to this client, which
+	// the retried verification is checked against.
 	mfaURL, err := mfa.GetMFALinkByServerName(sl.ac, sl.serverName)
 	if err != nil {
 		if sl.reportCredentialCannotProveMFA(err) {
@@ -281,17 +275,14 @@ func credentialCannotProveMFAText(hint string) string {
 var errMFAWaitEnded = errors.New("MFA verification did not complete in time")
 
 // retryVerifyUntilMFA retries the grant verification until the server stops
-// refusing it for MFA. The step-up link names this client, so completing MFA
-// in the browser credits the client this listener's requests come from: the
-// next verification passes on the same access token, with no completion probe
-// or token refresh in between.
+// refusing it for MFA. The step-up link names this client, so once MFA is done in
+// the browser the next verification passes on the same access token, with no
+// completion probe or token refresh in between.
 //
-// A typed auth_mfa_required keeps the wait going, never one read out of message
-// text, and so does a verification the server never acted on
-// (utils.IsUnprocessedRequestError), up to utils.MaxConsecutivePollFailures in a
-// row; a Retry-After on that answer holds the next attempt back, capped like any
-// poll backoff. Any other answer is returned as is. The attempts are bounded by
-// pollTimeout / pollInterval.
+// Only a typed auth_mfa_required keeps the wait going, plus up to
+// utils.MaxConsecutivePollFailures attempts in a row the server never acted on
+// (utils.IsUnprocessedRequestError), whose Retry-After holds the next attempt back up
+// to the poll backoff cap. Any other answer is returned as is. pollTimeout bounds the wait.
 func (sl *SudoListener) retryVerifyUntilMFA(grantID string) error {
 	// A fixed interval, not utils.NextPollTick: the buffer defaultMFAPollTimeout
 	// keeps over the server's pending-grant expiry is what this wait is built on,

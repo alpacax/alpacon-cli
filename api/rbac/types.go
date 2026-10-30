@@ -20,7 +20,8 @@ type RoleNested struct {
 	Name string `json:"name"`
 }
 
-// Only a workspace-wide binding makes someone an admin or a superuser.
+// UserRoleResponse is a role binding. Only a workspace-wide binding makes someone an admin or a
+// superuser.
 type UserRoleResponse struct {
 	ID          string            `json:"id"`
 	User        types.UserSummary `json:"user"`
@@ -42,9 +43,9 @@ type RoleScopeResource struct {
 	ACL     []string `json:"acl"`
 }
 
-// The only surface carrying the justification and the actor—a binding read carries
-// neither. Role, Principal and ChangedBy answer null where there is nothing left to
-// name, so the row keeps value snapshots like RoleName.
+// RoleAuditLogResponse is the only surface carrying the justification and the actor—a binding read
+// carries neither. Role, Principal and ChangedBy answer null where there is nothing left to name,
+// so the row keeps value snapshots like RoleName.
 type RoleAuditLogResponse struct {
 	ID          string          `json:"id"`
 	RecordClass string          `json:"record_class"`
@@ -69,8 +70,8 @@ type AuditActor struct {
 	Label string  `json:"label"`
 }
 
-// User and Role are scalars on purpose: more than one value in any of the three fields
-// flips the server onto a bulk path that answers 201 with an empty body even when it
+// BindingCreateRequest keeps User and Role scalar on purpose: more than one value in any of the
+// three fields flips the server onto a bulk path that answers 201 with an empty body even when it
 // created nothing, and never reports a duplicate.
 // ContentType and ObjectID are unset for now, kept for later object-scoped writes.
 type BindingCreateRequest struct {
@@ -81,8 +82,8 @@ type BindingCreateRequest struct {
 	Reason      string   `json:"reason,omitempty"`
 }
 
-// The justification rides the DELETE body, not a query parameter, so it stays out of
-// access and proxy logs.
+// BindingRevokeRequest carries the justification in the DELETE body, not a query parameter, so it
+// stays out of access and proxy logs.
 type BindingRevokeRequest struct {
 	Reason string `json:"reason"`
 }
@@ -119,8 +120,8 @@ type RoleAuditAttributes struct {
 	At        string `json:"at"`
 }
 
-// Roles omits object-scoped bindings: their number grows with the number of objects, so
-// the payload would be unbounded.
+// EffectivePermissionsResponse omits object-scoped bindings from Roles: their number grows with the
+// number of objects, so the payload would be unbounded.
 type EffectivePermissionsResponse struct {
 	User        types.UserSummary  `json:"user"`
 	Summary     EffectiveSummary   `json:"summary"`
@@ -149,18 +150,21 @@ type GroupNested struct {
 	DisplayName string `json:"display_name"`
 }
 
-// ObjectScoped says the user holds the pattern somewhere, never on what object.
+// PermissionPatternsResponse splits patterns by scope; ObjectScoped says the user holds the pattern
+// somewhere, never on what object.
 type PermissionPatternsResponse struct {
 	Global       []string `json:"global"`
 	ObjectScoped []string `json:"object_scoped"`
 }
 
-// GET /api/iam/users/{id}/permissions/ answers this when a permission query parameter is sent.
+// PermissionCheckResponse is what GET /api/iam/users/{id}/permissions/ answers when a permission
+// query parameter is sent.
 type PermissionCheckResponse struct {
 	Allowed bool `json:"allowed"`
 }
 
-// POST /api/rbac/troubleshoot/ reads rather than writes, despite the verb.
+// TroubleshootRequest is the body of POST /api/rbac/troubleshoot/, which reads rather than writes,
+// despite the verb.
 type TroubleshootRequest struct {
 	UserID     string `json:"user_id"`
 	Permission string `json:"permission"`
@@ -178,13 +182,14 @@ type PermissionPatternAttributes struct {
 	Scope      string `json:"scope"`
 }
 
-// An unscoped binding answers null or an empty ObjectID, so a nil check alone would miss one.
+// IsWorkspaceWide reports whether b is unscoped. An unscoped binding answers null or an empty
+// ObjectID, so a nil check alone would miss one.
 func (b UserRoleResponse) IsWorkspaceWide() bool {
 	return b.ContentType == nil && (b.ObjectID == nil || *b.ObjectID == "")
 }
 
-// Content types print as their numeric id: the CLI grants nothing object-scoped yet, so
-// resolving names via /api/rbac/content-types/ would not earn a request.
+// ScopeLabel prints content types as their numeric id: the CLI grants nothing object-scoped yet,
+// so resolving names via /api/rbac/content-types/ would not earn a request.
 func (b UserRoleResponse) ScopeLabel() string {
 	if b.IsWorkspaceWide() {
 		return "workspace"

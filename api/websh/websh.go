@@ -30,17 +30,15 @@ const (
 	ctrlC              = 0x03
 	writeFlushInterval = 5 * time.Millisecond
 
-	// sessionEndCloseCode is how the proxy closes a user channel at the end of a
-	// session; alpamon sends the same 4000 for the same meaning. A websh session
-	// never ends with 1000, so without this every normal end would be reported
-	// as a failure.
+	// sessionEndCloseCode is how the proxy, and Alpamon, close a user channel at the
+	// end of a session. A websh session never ends with 1000, so without it every
+	// normal end would be reported as a failure.
 	sessionEndCloseCode = 4000
 
-	// A close that does not mean the session ended is a dropped link—a restarted
-	// service, a network interruption—and the session it was carrying is still
-	// running on the server, so the client dials a new channel onto it instead of
-	// ending the shell. The budget bounds a server that keeps accepting a channel
-	// and dropping it: roughly 30s of waiting before the session is given up.
+	// A close that does not end the session is a dropped link (a restarted service, a
+	// network interruption); the session still runs on the server, so the client dials
+	// a new channel onto it. The budget, about 30s of waiting, bounds a server that
+	// keeps accepting a channel and dropping it.
 	maxReconnectAttempts   = 5
 	reconnectBaseDelay     = 1 * time.Second
 	reconnectMaxDelay      = 15 * time.Second
@@ -247,8 +245,7 @@ func JoinWebshSession(ac *client.AlpaconClient, sharedURL, password string) (Ses
 	return response, nil
 }
 
-// BuildSessionRequest assembles the JSON body for a websh session create call.
-// Empty workSessionID is omitted from the wire request via omitempty on the field.
+// BuildSessionRequest assembles the JSON body for a Websh session create call.
 func BuildSessionRequest(serverID, username, groupname string, rows, cols int, workSessionID string) *SessionRequest {
 	return &SessionRequest{
 		Server:      serverID,
@@ -260,7 +257,8 @@ func BuildSessionRequest(serverID, username, groupname string, rows, cols int, w
 	}
 }
 
-// Create new websh session
+// CreateWebshSession creates a Websh session on the server and, with share, asks
+// for its share link.
 func CreateWebshSession(ac *client.AlpaconClient, serverName, username, groupname string, share, readOnly bool, workSessionID string) (SessionResponse, error) {
 	serverID, err := server.GetServerIDByName(ac, serverName)
 	if err != nil {
@@ -370,7 +368,6 @@ func (c *connection) close() {
 	c.pumps.Wait()
 }
 
-// startReader reads server output for as long as the connection lasts.
 func (c *connection) startReader() {
 	c.pumps.Go(func() {
 		c.readFromServer()
@@ -386,7 +383,6 @@ func (c *connection) startWriter(inputChan <-chan string) {
 	})
 }
 
-// closeConn releases the current connection, if the session ever had one.
 func (wsClient *WebsocketClient) closeConn() {
 	if wsClient.conn != nil {
 		wsClient.conn.close()
@@ -428,10 +424,9 @@ func printCloseReason(err error) {
 }
 
 // endsSession reports whether a connection error means the session itself ended:
-// the proxy's session-end code, or one of the two normal WebSocket closes. Every
-// other ending—1012 on a restarted service, 1006 on a link that went away, a
-// transport error with no close frame at all—leaves the session running on the
-// server, so it is a connection to re-dial rather than a shell to close.
+// the proxy's session-end code or a normal WebSocket close. Any other ending (1012,
+// 1006, a transport error with no close frame) leaves the session running on the
+// server, so the connection is re-dialed.
 func endsSession(err error) bool {
 	if err == nil {
 		return true
@@ -495,7 +490,7 @@ func (wsClient *WebsocketClient) watchInterrupt(sigChan <-chan os.Signal) {
 	}
 }
 
-// readCtrlC ends the session on Ctrl+C — raw mode suppresses SIGINT, so it only
+// readCtrlC ends the session on Ctrl+C—raw mode suppresses SIGINT, so it only
 // ever arrives as a byte. Once anything else has ended the session it stops
 // consuming stdin, though not before the read it is already parked in returns.
 func (wsClient *WebsocketClient) readCtrlC() {
@@ -651,10 +646,8 @@ func (wsClient *WebsocketClient) redial() bool {
 		if err := wsClient.dial(websocketURL); err != nil {
 			continue
 		}
-		// Before the pumps, so the redraw the resize provokes lands on a socket
-		// that is already being read. A size the server would not take is not
-		// worth ending a working session over—the shell is usable, if possibly
-		// drawn at the width it had before.
+		// Before the pumps, so the redraw the resize provokes lands on a socket already
+		// being read. A refused size is not worth ending a working session over.
 		if r.resendSize != nil {
 			_ = r.resendSize()
 		}
@@ -744,13 +737,11 @@ func (c *connection) readFromServer() {
 }
 
 // readUserInput cannot be released mid-read: a goroutine parked in ReadRune stays
-// there until the next keystroke, and only closing stdin would change that. That
-// is why one reader serves the whole session rather than one per connection—a
-// reader left over from a dropped connection would race the next one for the
-// user's keystrokes.
+// there until the next keystroke. So one reader serves the whole session; one left
+// from a dropped connection would race the next for the user's keystrokes.
 //
-// Between connections nothing is draining inputChan, so this parks on the send
-// until the session either reconnects or ends. Nothing is buffered on its behalf.
+// Between connections nothing drains inputChan, so this parks on the send until
+// the session reconnects or ends. Nothing is buffered on its behalf.
 func (wsClient *WebsocketClient) readUserInput(inputChan chan<- string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -781,9 +772,8 @@ func (c *connection) writeToServer(inputChan <-chan string) {
 	for {
 		select {
 		case <-c.ended:
-			// Whatever is still buffered goes with the connection: nothing here
-			// re-sends it, so input typed as the link dropped is lost. Replaying it
-			// would submit lines to a shell the user could no longer see.
+			// Buffered input goes with the connection: replaying it would submit lines to a
+			// shell the user could no longer see.
 			return
 		case input := <-inputChan:
 			inputBuffer = append(inputBuffer, []rune(input)...)
@@ -801,7 +791,6 @@ func (c *connection) writeToServer(inputChan <-chan string) {
 }
 
 func sharingInfo(response ShareResponse) {
-	// Sanitize credentials display based on environment
 	displayPassword := response.Password
 	hideCredentials := os.Getenv("ALPACON_HIDE_CREDENTIALS") == "true"
 	if hideCredentials {

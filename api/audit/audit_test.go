@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Regression for #274: a cursor-token next crashed the old int-typed unmarshal.
+// Regression: a cursor-token next crashed the old int-typed unmarshal.
 func TestGetAuditLogList_FollowsCursor(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

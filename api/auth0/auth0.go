@@ -36,8 +36,7 @@ const (
 var (
 	requestAccessTokenFunc = requestAccessToken
 
-	// deviceTokenClient carries every device-code poll of one login; it
-	// verifies TLS as the default client did.
+	// deviceTokenClient carries every device-code poll of one login and always verifies TLS.
 	deviceTokenClient = httpclient.New(false)
 )
 
@@ -108,11 +107,8 @@ func FetchAuthEnv(workspaceURL string, httpClient *http.Client) (*AuthEnvRespons
 	return &env, nil
 }
 
-// resolveOrgName returns the Auth0 organization hint used in OAuth scopes.
-// It prefers the server-provided schema name—the frozen workspace identity
-// that equals the Auth0 organization name—so logins keep working after a
-// workspace URL label changes. Older servers omit the field; fall back to
-// the caller-derived label.
+// resolveOrgName returns the Auth0 organization name for the org scope: the server's schema
+// name, which survives a workspace URL rename, or fallback when an older server omits it.
 func resolveOrgName(envInfo *AuthEnvResponse, fallback string) string {
 	if envInfo != nil && envInfo.Auth0.SchemaName != "" {
 		return envInfo.Auth0.SchemaName
@@ -120,21 +116,14 @@ func resolveOrgName(envInfo *AuthEnvResponse, fallback string) string {
 	return fallback
 }
 
-// appendDeviceScope appends a `device:<id>` scope identifying this CLI
-// installation, so the server can bind an MFA presence proof to the client that
-// requested the challenge instead of falling back to an IP-based fingerprint
-// that two installations behind one egress IP would share.
+// appendDeviceScope appends a `device:<id>` scope so the server can bind an MFA presence proof
+// to this installation instead of an IP-based fingerprint that installations behind one egress IP
+// would share. It travels as a scope because /oauth/device/code accepts only client_id, scope
+// and audience.
 //
-// It travels as a scope because /oauth/device/code accepts only client_id,
-// scope and audience—there is no other field to put it in—and encoding a value
-// as a scope is Auth0's documented answer for this flow. The `org:<name>` scope
-// already reaches the `CLI Auth` action the same way.
-//
-// A malformed or empty identifier is dropped rather than sent. The `Add
-// Completed MFA Claim` action ignores anything failing config.IsValidDeviceID
-// and falls back to the fingerprint, so sending one would cost the hardening
-// signal and gain nothing—and a value carrying a space would inject a second
-// scope on the way. Existing scopes are never reordered or rewritten.
+// A malformed or empty identifier is dropped: the server ignores one failing
+// config.IsValidDeviceID, and a value carrying a space would inject a second scope. Existing
+// scopes are never reordered or rewritten.
 func appendDeviceScope(scope, deviceID string) string {
 	if !config.IsValidDeviceID(deviceID) {
 		return scope
@@ -142,14 +131,12 @@ func appendDeviceScope(scope, deviceID string) string {
 	return scope + " device:" + deviceID
 }
 
-// deviceCodeScope composes the scope string for the device-code request.
 func deviceCodeScope(orgName, deviceID string) string {
 	return appendDeviceScope(fmt.Sprintf("openid profile email offline_access cli org:%s", orgName), deviceID)
 }
 
-// refreshScope composes the scope string for the refresh-token grant. Auth0
-// re-runs post-login actions on a refresh exchange, so the device identifier
-// has to be present there too or the action loses it on every token refresh.
+// refreshScope composes the scope for the refresh-token grant. Auth0 re-runs post-login actions
+// on a refresh, so the device identifier must be sent there too.
 func refreshScope(orgName, deviceID string) string {
 	return appendDeviceScope(fmt.Sprintf("cli org:%s", orgName), deviceID)
 }
@@ -283,7 +270,6 @@ var (
 	ErrDeviceCodeExpired  = errors.New("authentication session expired. Please run 'alpacon login' again")
 )
 
-// mapAuth0Error converts OAuth error codes to user-friendly messages.
 func mapAuth0Error(err error) error {
 	errStr := err.Error()
 	switch {
@@ -323,30 +309,16 @@ func RefreshAccessToken(workspaceURL string, httpClient *http.Client, refreshTok
 	return tokenRes, nil
 }
 
-// refreshWithDeviceScopeFallback runs the refresh-token grant with the device
-// scope and retries once without it when the server refuses that scope. See
-// isDeviceScopeRefusal for which refusals count.
+// refreshWithDeviceScopeFallback runs the refresh-token grant with the device scope and retries
+// once without it when the server refuses that scope (see isDeviceScopeRefusal).
 //
-// Every installation that logged in before the device scope shipped holds a
-// refresh token granted against a scope set that never contained
-// `device:<id>`, and the identifier is minted on the first run after the
-// upgrade. RFC 6749 §6 tells an authorization server to reject a refresh whose
-// requested scope is not within the original grant, and what Auth0 does with
-// this particular pseudo-scope on that exchange is not something the CLI can
-// establish ahead of time. If it rejects, an unconditional request locks out
-// every logged-in installation at once.
-//
-// Dropping the scope on refresh instead is not open to the CLI. The post-login
-// action partitions the stored MFA claim by how the identifier was supplied:
-// `mfa_c_<id>` when the client sent one, `mfa_<fingerprint>` when it did not,
-// and its refresh branch restores the claim from that same key. A login that
-// sends the identifier and a refresh that does not therefore resolve to
-// different partitions, and presence is lost on every refresh.
-//
-// So the fallback runs per exchange rather than being decided once: an
-// installation that predates the scope pays one extra round-trip and degrades
-// to the fingerprint keying it already had, and one that logged in after the
-// upgrade never reaches the retry. The worst case is today's behavior.
+// A login made before the device scope shipped holds a refresh token granted without
+// `device:<id>`, and RFC 6749 §6 lets the server reject a refresh asking for more than the
+// original grant, so an unconditional device scope could lock out every such installation.
+// Never sending it on refresh fails too: the server keys the stored MFA claim by whether the
+// identifier was sent, so a login with it and a refresh without it lose presence. The fallback
+// therefore runs per exchange and costs one extra round-trip only when the server refuses the
+// scope.
 func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.Client, refreshToken, orgName string) (*TokenResponse, error) {
 	scope := refreshScope(orgName, currentDeviceID())
 	fallbackScope := refreshScope(orgName, "")
@@ -373,47 +345,24 @@ func refreshWithDeviceScopeFallback(envInfo *AuthEnvResponse, httpClient *http.C
 	return requestRefreshedToken(envInfo, httpClient, refreshToken, fallbackScope)
 }
 
-// isDeviceScopeRefusal reports whether an OAuth error code is the authorization
-// server declining the requested scope—the one refusal dropping `device:<id>`
-// can fix.
+// isDeviceScopeRefusal reports whether an OAuth error code is the server declining the requested
+// scope—the one refusal dropping `device:<id>` can fix.
 //
-// It is an allowlist, not a list of codes to skip, because the codes worth
-// skipping are not enumerable from here. Auth0 reports a token-endpoint rate
-// limit as `too_many_requests`, but has also been seen reporting the same
-// condition as `access_denied` with "Global limit has been reached". A skip
-// list would have to guess every such alias, and each one it missed would turn
-// a throttled endpoint into one taking twice the requests. An allowlist only
-// has to name the refusals a narrower scope can actually resolve.
+// It is an allowlist because the codes to skip are not enumerable: Auth0 reports a rate limit as
+// `too_many_requests` and also as `access_denied` with "Global limit has been reached", and a
+// retry against a throttled endpoint doubles its load.
 //
-// The two that qualify:
+//   - invalid_scope is RFC 6749 §5.2's name for a scope exceeding the original grant.
+//   - invalid_request covers a server that treats an unknown scope token as a bad parameter. It is
+//     speculative, kept because a needless retry costs one request while a missed refusal
+//     degrades presence keying for the whole login.
 //
-//   - invalid_scope is the spec's own name for this. RFC 6749 §5.2 defines it
-//     as the requested scope being "invalid, unknown, malformed, or exceed[ing]
-//     the scope granted by the resource owner", which is precisely §6's rule
-//     that a refresh may not ask for more than the original grant—the position
-//     every installation that logged in before `device:<id>` shipped is in.
-//   - invalid_request catches a server that treats an unrecognized scope token
-//     as a bad parameter rather than a scope decision: §5.2 files a request
-//     that "includes an unsupported parameter value (other than grant type)"
-//     under this code.
-//
-// Everything else is left alone. invalid_grant, invalid_client,
-// unauthorized_client and unsupported_grant_type describe the refresh token,
-// the client or the grant type, so a different scope cannot change the answer.
-// server_error and temporarily_unavailable are transient, and an immediate
-// second request is the wrong response to both. access_denied is excluded on
-// purpose even though a post-login action rejecting the identifier could
-// surface as one: it is also how Auth0 reports policy denials and, per above,
-// sometimes rate limiting—and retrying without the identifier could turn a deny
-// made because of the device into a success, which is the opposite of what the
-// identifier exists for.
-//
-// The set is deliberately erring on the broad side; invalid_request is here for
-// that reason alone. A scope refusal not retried degrades presence keying to
-// the shared IP-based fingerprint silently and for the whole life of the login,
-// whereas a retry that should not have run costs one request that fails exactly
-// as the first did. So add a code here if it is observed refusing this scope in
-// the field—but not merely because retrying on it looks harmless.
+// access_denied stays out: it also carries policy denials, and retrying without the identifier
+// could turn a denial made because of the device into a success. Transient codes (server_error,
+// temporarily_unavailable) and codes a scope cannot change (invalid_grant, invalid_client,
+// unauthorized_client, unsupported_grant_type) stay out too. Add a code only once it is observed
+// refusing this scope; a missed one silently degrades presence keying to the IP fingerprint for
+// the life of the login.
 func isDeviceScopeRefusal(code string) bool {
 	switch code {
 	case "invalid_scope", "invalid_request":

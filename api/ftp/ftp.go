@@ -51,8 +51,7 @@ const (
 	bulkPollConcurrency   = 8 // status polls are lightweight, allow more
 )
 
-// A brief blip recovers sooner than the flat one-second retry did, while
-// downloadMaxAttempts still spans roughly the same ~99s.
+// A brief blip recovers fast, while downloadMaxAttempts still spans ~99s.
 // var, not const, so tests can shorten them.
 var (
 	initialDownloadRetryDelay = 250 * time.Millisecond
@@ -71,7 +70,6 @@ func backoffDelay(attempt int, initial, limit time.Duration) time.Duration {
 	return d
 }
 
-// transferKind names an upload or a download and the route its transfers live under.
 type transferKind struct{ name, apiURL string }
 
 var (
@@ -79,7 +77,6 @@ var (
 	downloadTransfer = transferKind{name: "download", apiURL: downloadAPIURL}
 )
 
-// transferStatusURL is the status endpoint of an upload or download transfer.
 func transferStatusURL(kind transferKind, id api.PathID) string {
 	return api.IDURL(kind.apiURL, id, "status", nil)
 }
@@ -139,7 +136,6 @@ func pollTransferStatus(ac *client.AlpaconClient, kind transferKind, id api.Path
 	}
 
 	timedOut := fmt.Sprintf("transfer status polling timed out after %v", timeout)
-	// Only the throttle's hint goes with the timeout, not its status or code.
 	return false, "", utils.HintOnly(timedOut, lastThrottle)
 }
 
@@ -171,7 +167,6 @@ func uploadToS3(httpClient *http.Client, uploadURL string, file io.Reader, size 
 	return nil
 }
 
-// osFileFrom unwraps readOnly to recover the underlying *os.File.
 func osFileFrom(r io.Reader) (*os.File, bool) {
 	switch v := r.(type) {
 	case *os.File:
@@ -349,7 +344,6 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		return &utils.BatchError{Header: fmt.Sprintf("upload failed for %d file(s)", len(uploadFailures)), Failures: uploadFailures}
 	}
 
-	// Trigger server-side processing
 	triggerRequest := &BulkUploadTriggerRequest{IDs: ids}
 	if err := transferStep(ac, serverID, func() error {
 		_, err := ac.SendPostRequest(uploadBulkTriggerURL, triggerRequest)
@@ -358,7 +352,6 @@ func completeBulkUpload(ac *client.AlpaconClient, serverID string, respBody []by
 		return err
 	}
 
-	// Poll transfer status for each upload
 	var totalBytes int64
 	for _, s := range sizes {
 		totalBytes += s
@@ -484,9 +477,8 @@ func UploadFile(ac *client.AlpaconClient, src []string, dest, username, groupnam
 	return executeBulkUpload(ac, request, readers, sizes)
 }
 
-// UploadLocalFileAs uploads one local file to the exact remote file path.
-// It preserves the remote basename instead of deriving the destination name
-// from the local temp file name.
+// UploadLocalFileAs uploads one local file to the exact remote file path, whatever the local
+// file is named.
 func UploadLocalFileAs(ac *client.AlpaconClient, localPath, serverName, remotePath, username, groupname, workSessionID string) error {
 	// A bad remote path is the caller's to fix whatever the local file holds.
 	if _, _, err := splitRemoteFilePath(remotePath); err != nil {
@@ -540,8 +532,8 @@ func uploadToExactPath(ac *client.AlpaconClient, serverName, remotePath string, 
 	return executeSingleUpload(ac, request, body, size)
 }
 
-// splitRemoteFilePath splits an exact remote file path into the name and the
-// directory an upload request carries, the directory ending in a slash.
+// splitRemoteFilePath splits an exact remote file path into the name and the directory an
+// upload request carries: empty for a bare name, otherwise ending in a slash.
 func splitRemoteFilePath(remotePath string) (name, dir string, err error) {
 	name, err = utils.RemoteFileName(remotePath)
 	if err != nil {
@@ -586,8 +578,7 @@ func UploadFolder(ac *client.AlpaconClient, src []string, dest, username, groupn
 		return err
 	}
 
-	// Folder uploads always target a directory; ensure trailing slash so the
-	// server recognises the path as a directory.
+	// The server reads the path as a directory only with a trailing slash.
 	if !strings.HasSuffix(remotePath, "/") {
 		remotePath += "/"
 	}
@@ -755,8 +746,8 @@ func fetchFromURL(httpClient *http.Client, url string, maxAttempts int) (*http.R
 }
 
 func downloadedFilePath(dest, remotePath string) (string, error) {
-	// If dest is an existing directory or ends with a separator, append the remote filename.
-	// Otherwise treat dest as the target file path directly (cp-style rename semantics).
+	// cp semantics: an existing directory or a trailing separator takes the remote name;
+	// anything else is the target file path.
 	info, err := os.Stat(dest)
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("failed to access destination %q: %w", dest, err)
@@ -789,7 +780,8 @@ func reserveDownloadArchiveTempPath(dest string) (string, error) {
 	return name, nil
 }
 
-// saveDownloadedURL writes the downloaded content and returns the resolved local path.
+// saveDownloadedURL saves the file at url under dest, extracting it there when recursive,
+// and returns the local path and the bytes written.
 func saveDownloadedURL(httpClient *http.Client, url, dest, remotePath string, recursive bool, maxAttempts int) (string, int64, error) {
 	if recursive {
 		filePath, err := reserveDownloadArchiveTempPath(dest)
@@ -876,8 +868,8 @@ func completeSingleDownload(ac *client.AlpaconClient, serverID string, postBody 
 	if err != nil {
 		return DownloadedFile{}, err
 	}
-	// Report the bytes actually written to disk; the edit size guard must reflect
-	// the local file, not a possibly stale or incorrect server-reported size.
+	// Size is what reached disk, not the server's possibly stale size; the edit size guard
+	// reads it.
 	return DownloadedFile{Path: localPath, Size: written}, nil
 }
 
@@ -1022,7 +1014,6 @@ func DownloadFile(ac *client.AlpaconClient, sources []string, dest, username, gr
 		return err
 	}
 
-	// Extract remote paths and validate all sources are on the same server
 	remotePaths := make([]string, 0, len(sources))
 	remotePaths = append(remotePaths, strings.Trim(firstPath, "\""))
 	for _, src := range sources[1:] {
@@ -1093,8 +1084,7 @@ func DownloadFileContent(ac *client.AlpaconClient, serverName, remotePath, usern
 	return content, nil
 }
 
-// calcPollTimeout returns a dynamic poll timeout based on file count and total size.
-// Base 30s + 10s per file + 5s per MB.
+// calcPollTimeout scales the poll timeout with the file count and total size.
 func calcPollTimeout(fileCount int, totalBytes int64) time.Duration {
 	timeout := basePollTimeout +
 		time.Duration(fileCount)*perFilePollTimeout +
@@ -1232,11 +1222,8 @@ func transferStepProbed(ac *client.AlpaconClient, serverID string, refusedAt tim
 			// The retried request was the step itself, and it went through.
 			return nil
 		}
-		// The wait that ran only proved MFA through the probe, or another
-		// request's successful wait covered this refusal. Run the step again
-		// through the same refusal handling: if MFA lapsed since, the refusal
-		// starts after that wait and gets a wait of its own. Each further wait
-		// needs the user to complete MFA, and a failed one returns above.
+		// Only the probe proved MFA, or another request's wait covered this refusal. Run the step
+		// again: a refusal from a lapse since then postdates that wait and gets one of its own.
 		refusedAt = time.Now()
 	}
 }

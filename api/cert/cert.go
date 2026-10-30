@@ -125,9 +125,8 @@ func GetAuthorityList(ac *client.AlpaconClient) ([]AuthorityAttributes, error) {
 	return authorityList, nil
 }
 
-// GetAuthorityIDByName resolves an authority name to its ID by fetching all
-// authorities and matching by name. If name is already a UUID, it is returned
-// as-is without making any API call, so callers may pass either a name or an ID.
+// GetAuthorityIDByName resolves an authority name to its ID. A UUID is returned
+// as-is without an API call.
 func GetAuthorityIDByName(ac *client.AlpaconClient, name string) (string, error) {
 	if uuidRegex.MatchString(name) {
 		return name, nil

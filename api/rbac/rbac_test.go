@@ -531,9 +531,8 @@ func TestIAMHostedReadsHitTheRightPaths(t *testing.T) {
 	}
 }
 
-// Nothing else in the repo asserts these rendered timestamps: a changed timeLayout, a
-// dropped .Local(), or a null added_at all render silently. The zone is pinned rather than
-// read, so the UTC instant below has one correct rendering on every machine, and a render
+// A changed timeLayout, a dropped .Local(), or a null added_at would otherwise render silently.
+// The zone is pinned so the UTC instant below has one correct rendering on every machine; a render
 // that skipped the conversion prints 03:04 instead.
 func TestAttributesFrom_RenderTimesInTheLocalZone(t *testing.T) {
 	restore := time.Local

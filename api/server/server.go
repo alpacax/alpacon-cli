@@ -16,8 +16,7 @@ const (
 	registrationTokenURL = "/api/servers/registration-tokens/"
 	tokenInstallGuideURL = "/api/servers/registration-methods/token-install/guide/"
 	ansibleGuideURL      = "/api/servers/registration-methods/ansible/guide/"
-	// iamGroupURL is duplicated from api/iam so this package can build a lean
-	// UUID→name projection without pulling in the full iam.GroupResponse type.
+	// Duplicated from api/iam; see groupSummary.
 	iamGroupURL = "/api/iam/groups/"
 )
 
@@ -32,8 +31,8 @@ const (
 // ErrRegistrationTokenNotFound is returned when no registration token matches the given name.
 var ErrRegistrationTokenNotFound = errors.New("no registration token found with the given name")
 
-// groupSummary is a minimal projection used to build a UUID→name map for group display.
-// Keeping it local avoids importing api/iam and pulling in its heavier GroupResponse type.
+// groupSummary is the id and name of an IAM group, kept local so this package need not import
+// api/iam and its heavier GroupResponse type.
 type groupSummary struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -121,7 +120,7 @@ func serverPathIDByName(ac *client.AlpaconClient, serverName string) (api.PathID
 	return api.RequireResponseID(result.ID, "server")
 }
 
-// ResolveServerNames converts a list of server names to their UUIDs via sequential API calls (one per name).
+// ResolveServerNames converts server names to their UUIDs, one request per name.
 func ResolveServerNames(ac *client.AlpaconClient, names []string) ([]string, error) {
 	ids := make([]string, 0, len(names))
 	for _, name := range names {
@@ -210,9 +209,8 @@ func ListRegistrationTokens(ac *client.AlpaconClient) ([]RegistrationTokenDetail
 	return api.FetchAllPages[RegistrationTokenDetails](ac, registrationTokenURL, nil)
 }
 
-// buildGroupUUIDToNameMap fetches all IAM groups and returns a UUID→name map.
-// On failure it emits a one-time warning and returns an empty map so callers
-// never block on a group-lookup error; the list still renders with raw UUIDs.
+// buildGroupUUIDToNameMap maps every IAM group's UUID to its name. On failure it warns and returns
+// an empty map, so the list still renders with raw UUIDs.
 func buildGroupUUIDToNameMap(ac *client.AlpaconClient) map[string]string {
 	groups, err := api.FetchAllPages[groupSummary](ac, iamGroupURL, nil)
 	if err != nil {
@@ -240,9 +238,9 @@ func DeleteRegistrationToken(ac *client.AlpaconClient, tokenName string) error {
 	return err
 }
 
-// GetRegistrationTokenAttributes returns all registration tokens projected for table/JSON display.
-// Group UUIDs are resolved to group names using a single batched lookup; on lookup failure,
-// UUIDs are shown as-is and the overall list is not blocked.
+// GetRegistrationTokenAttributes returns every registration token projected for table/JSON display.
+// Group UUIDs are resolved with one fetch of the group list; if that fails, the UUIDs are shown
+// as-is.
 func GetRegistrationTokenAttributes(ac *client.AlpaconClient) ([]RegistrationTokenAttributes, error) {
 	tokens, err := ListRegistrationTokens(ac)
 	if err != nil {

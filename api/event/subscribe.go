@@ -19,8 +19,8 @@ const (
 	// comparable to EventType.
 	EventTypeSudo          = "sudo"
 	EventTypeCommandOutput = "command_output"
-	// Subscribed with a server id, not a command id: that is the channel
-	// the server publishes it on.
+	// EventTypeCommandFin is subscribed with a server id, not a command id: that is
+	// the channel the server publishes it on.
 	EventTypeCommandFin = "command_fin"
 
 	// eventSessionCloseTimeout bounds one close attempt; a token renewal inside it is not bounded.

@@ -96,7 +96,7 @@ func TestGetMFALink_ReturnsTheURLAndScopesItToTheServer(t *testing.T) {
 	assert.Equal(t, "my-workspace", query.Get("workspace"))
 }
 
-// It used to yield ("", nil), so callers opened a browser on a blank link.
+// A malformed body must not yield ("", nil): callers would open a browser on a blank link.
 func TestGetMFALink_MalformedBodyIsAnError(t *testing.T) {
 	t.Parallel()
 	ac, _ := mfaLinkServer(t, `not json`)
@@ -186,8 +186,7 @@ func TestGetMFALink_EmptyWorkspaceIsAnErrorBeforeAnyRequest(t *testing.T) {
 }
 
 func TestGetMFALinkByServerName_NamesTheWorkspaceTheClientIsPinnedTo(t *testing.T) {
-	// A regression guard, not a claim about today's code: an empty HOME leaves
-	// no config, so a second read finding its way back in fails here.
+	// Regression guard: an empty HOME leaves no config, so a second config read fails here.
 	t.Setenv("HOME", t.TempDir())
 
 	var query url.Values
@@ -252,7 +251,6 @@ func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 				polls.Record()
 				return http.StatusOK, `{"completed": false}`
 			default:
-				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
 				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
 			}
 		}),
@@ -270,11 +268,9 @@ func TestStepUpForSudo_PollsAtAFixedInterval(t *testing.T) {
 		"no poll may sit out longer than the base tick")
 }
 
-// Completion has to end the wait on the poll that sees it, and the token refresh
-// that follows is what makes the step-up visible to the retry. HOME points at an
-// empty dir so the refresh has no stored token to spend—which is exactly the
-// failure whose wording a user reads when a step-up completes but the session
-// cannot be renewed.
+// Completion ends the wait on the poll that sees it, and the token refresh after it
+// is what the retry sees. HOME is an empty dir so the refresh has no stored token:
+// the failure a user reads when a step-up completes but the session cannot renew.
 func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 	const tick = 10 * time.Millisecond
 	const waitFor = 125*tick + tick/2
@@ -293,7 +289,6 @@ func TestStepUpForSudo_CompletionEndsTheWaitAndRefreshesTheToken(t *testing.T) {
 				polls.Record()
 				return http.StatusOK, `{"completed": true}`
 			default:
-				// The server-name lookup GetMFALinkByServerName runs before the MFA link fetch.
 				return http.StatusOK, `{"count": 1, "results": [{"id": "server-id"}]}`
 			}
 		}),

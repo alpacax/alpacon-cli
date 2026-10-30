@@ -22,11 +22,9 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 	t.Parallel()
 	var requestCount atomic.Int32
 
-	// mock server: 150 servers total (page1=100, page2=50)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count := requestCount.Add(1)
 
-		// more than 3 requests means infinite loop
 		if count > 3 {
 			t.Errorf("infinite loop detected: request #%d (page param: %s)", count, r.URL.Query().Get("page"))
 			return
@@ -37,7 +35,7 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 
 		var results []ServerDetails
 		switch page {
-		case "1", "": // page=1 or unspecified
+		case "1", "":
 			for i := range 100 {
 				results = append(results, ServerDetails{
 					ID:       fmt.Sprintf("id-%d", i),
@@ -87,7 +85,6 @@ func TestGetServerList_PaginationBug(t *testing.T) {
 	t.Logf("total requests: %d", totalRequests)
 	t.Logf("returned servers: %d", len(servers))
 
-	// expected: page1(100) + page2(50) = 150 items, 2 requests
 	if totalRequests != 2 {
 		t.Errorf("expected 2 requests, got %d (pagination not working correctly)", totalRequests)
 	}
@@ -342,7 +339,6 @@ func TestGetRegistrationTokenAttributes_MapsGroupNames(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
-		// registration tokens
 		resp := api.ListResponse[RegistrationTokenDetails]{
 			Count: 1,
 			Results: []RegistrationTokenDetails{
@@ -523,7 +519,6 @@ func TestDeleteServer(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "name=") {
-			// GetServerIDByName
 			resp := api.ListResponse[ServerDetails]{
 				Count:   1,
 				Results: []ServerDetails{{ID: serverID, Name: "target-server"}},

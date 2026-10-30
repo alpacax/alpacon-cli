@@ -19,9 +19,8 @@ const (
 	mfaCompletionURL = "/api/auth0/mfa/completion/"
 )
 
-// stepUpPollInterval and stepUpTimeout bound the StepUpForSudo wait. They
-// mirror the websh sudo listener (api/event/sudolistener.go) so the step-up
-// feel is consistent across the two terminals.
+// stepUpPollInterval and stepUpTimeout bound the StepUpForSudo wait. They match the
+// websh sudo listener (api/event/sudolistener.go) so both terminals behave alike.
 const (
 	stepUpPollInterval = 500 * time.Millisecond
 	stepUpTimeout      = 60 * time.Second
@@ -65,10 +64,8 @@ func HandleMFAErrorForServerID(ac *client.AlpaconClient, serverID string) error 
 }
 
 // CheckMFACompletion reports whether the server has recorded a fresh MFA for
-// this client. Only the exec sudo step-up still polls it: the request that
-// failed there is a command that already ran, so re-running it to find out
-// would repeat its side effects. Every other MFA wait retries the refused
-// request instead (utils.HandleCommonErrors, the websh sudo listener).
+// this client. Only the exec sudo step-up polls it: the refused request there is
+// a command that already ran, so re-running it would repeat its side effects.
 func CheckMFACompletion(ac *client.AlpaconClient) (bool, error) {
 	responseBody, err := ac.SendGetRequest(mfaCompletionURL)
 	if err != nil {
@@ -119,12 +116,11 @@ func WorkspaceErrorCallbacks(ac *client.AlpaconClient, retry func() error) utils
 	}
 }
 
-// GetMFALinkByServerName is for callers holding a name, not an ID. It runs at the
-// MFA prompt, which an editor session or a long transfer puts minutes after the
-// client was built—config by then can name another workspace.
+// GetMFALinkByServerName is GetMFALink for a caller holding a server name. The link
+// names the client's workspace, not the config's, which can change in the minutes an
+// editor session or a long transfer puts between building the client and the prompt.
 func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string, error) {
-	// Before the lookup, so no workspace costs no round trip and the error names
-	// the workspace rather than a lookup that failed after it.
+	// Checked before the lookup so a missing workspace fails without a round trip.
 	if err := requireWorkspace(ac); err != nil {
 		return "", err
 	}
@@ -139,25 +135,21 @@ func GetMFALinkByServerName(ac *client.AlpaconClient, serverName string) (string
 
 // StepUpForSudo runs an interactive MFA step-up for an exec-sudo presence denial
 // (SUDO_PRESENCE_REQUIRED). It prints the verification link, opens the browser
-// when the user presses Enter, and polls until the server records the MFA
-// completion. It returns nil once presence is fresh, or an error on timeout.
+// when the user presses Enter, and polls until the server records the MFA. It
+// returns nil once presence is fresh, or an error on timeout.
 //
-// The Enter prompt opens the browser as a convenience but never gates progress:
-// the poll runs regardless, so a user who opens the link manually still
-// completes, and an absent human or a misconfigured agent always terminates at
-// the bounded timeout rather than wedging the command. Callers should still gate
-// this on an interactive terminal, since scripts, CI, and AI agents never
-// receive a presence denial in the first place.
+// Enter never gates progress: the poll runs regardless, so a link opened by hand
+// still completes and an absent user ends at the timeout. Callers should still
+// gate this on an interactive terminal; scripts, CI, and AI agents never receive
+// a presence denial.
 func StepUpForSudo(ac *client.AlpaconClient, serverName string) error {
 	return stepUpForSudo(ac, serverName, stepUpPollInterval, stepUpTimeout)
 }
 
-// stepUpForSudo takes its pacing as arguments rather than off package vars a test
-// would overwrite: the poll runs alongside the stdin goroutine this function
-// starts, so a shared knob written mid-suite is a race waiting for a slow runner.
+// stepUpForSudo takes its pacing as arguments, not package vars a test would
+// overwrite: the poll runs beside a stdin goroutine, so a var written mid-suite races.
 func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, timeout time.Duration) error {
-	// Use the CLI-scoped sudo MFA URL (location=cli) so the mfa-success page
-	// notifies the backend, letting CheckMFACompletion observe completion.
+	// The location=cli link is what lets CheckMFACompletion observe the completion.
 	stepUpURL, err := GetMFALinkByServerName(ac, serverName)
 	if err != nil {
 		return fmt.Errorf("failed to get the MFA step-up link: %w", err)
@@ -166,11 +158,9 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	fmt.Fprintf(os.Stderr, "\nsudo needs a recent MFA to proceed. Open this link to verify:\n%s\n", stepUpURL)
 	fmt.Fprintf(os.Stderr, "Press Enter to open it in your browser, or open the link manually.\n")
 
-	// Open the browser on Enter without blocking the poll. The done guard makes a
-	// late Enter—pressed after the step-up already completed or timed out—a no-op,
-	// so the browser never opens unexpectedly later in the command flow. EOF or a
-	// closed stdin simply skips the auto-open; it never aborts the flow. The
-	// goroutine ends at process exit if Enter is never pressed.
+	// Open the browser on Enter without blocking the poll. The done guard makes a late
+	// Enter a no-op, EOF on stdin just skips the auto-open, and the goroutine lives
+	// until process exit if Enter never comes.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -187,19 +177,15 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 	spinner := utils.NewSpinner("Waiting for MFA verification...")
 	spinner.Start()
 
-	// Mirror the websh sudo listener: a precise deadline plus a fixed-interval
-	// ticker (api/event/sudolistener.go). This one wait does not widen with age:
-	// it is a person finishing MFA in a browser inside a single 60s window, so a
-	// widened tail turns a half-second detection lag into five and can miss a
-	// completion at t=56s entirely. The quota utils.NextPollTick paces for is a
-	// service token's, and by this function's own contract no script or agent
-	// reaches a step-up.
+	// A fixed tick, as in the websh sudo listener: a person finishes MFA in a browser
+	// inside one 60s window, so a widened tail would turn a half-second detection lag
+	// into five and could miss a late completion. utils.NextPollTick paces for a
+	// service token's quota, and no script or agent reaches a step-up.
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	// lastRefusal is the refusal the latest completion check got, if it got one:
-	// a step-up that times out on it keeps it behind the timeout, so its hint
-	// still reaches the output.
+	// lastRefusal is the latest completion check's refusal, if any, so a timeout
+	// still carries its hint.
 	var lastRefusal error
 	for {
 		select {
@@ -216,11 +202,9 @@ func stepUpForSudo(ac *client.AlpaconClient, serverName string, pollInterval, ti
 				lastRefusal = cerr
 			}
 			if cerr != nil || !completed {
-				// Non-fatal: the endpoint may lag the browser; keep polling.
-				continue
+				continue // the endpoint may lag the browser; keep polling
 			}
 			spinner.Stop()
-			// Refresh the token before the command is re-run.
 			if rerr := ac.RefreshToken(); rerr != nil {
 				return fmt.Errorf(
 					"failed to refresh token after MFA; run 'alpacon login' to re-authenticate: %w",

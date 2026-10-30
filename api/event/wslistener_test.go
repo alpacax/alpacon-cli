@@ -57,7 +57,6 @@ func TestWSListener_WaitConnected_Success(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w := newProvisionedWSListener(nil, provisionURL(""), 0)
 
-		// Simulate connection after short delay
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 			close(w.connected)
@@ -360,7 +359,6 @@ func TestWSListener_ProvisionCalledPerDialAttempt(t *testing.T) {
 
 	require.True(t, w.WaitConnected(2*time.Second))
 
-	// The listener reconnects on its own; wait for the second dial.
 	deadline := time.After(5 * time.Second)
 	for conns.Load() < 2 {
 		select {

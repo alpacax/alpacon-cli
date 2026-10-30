@@ -56,7 +56,7 @@ func CreateNote(ac *client.AlpaconClient, noteRequest NoteCreateRequest) error {
 	}
 
 	noteRequest.Server = serverID
-	noteRequest.Pinned = false // The default value for the alpacon API server is currently false
+	noteRequest.Pinned = false
 
 	_, err = ac.SendPostRequest(noteURL, noteRequest)
 	if err != nil {

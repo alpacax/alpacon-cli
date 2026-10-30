@@ -144,7 +144,6 @@ func TestExecuteBulkUpload(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/webftp/uploads/bulk/":
 			_ = json.NewDecoder(r.Body).Decode(&bulkReq)
-			// Return upload responses with presigned URLs pointing back to this server
 			responses := []UploadResponse{
 				{ID: "id-1", Name: "file1.txt", UploadURL: "http://" + r.Host + "/s3/file1"},
 				{ID: "id-2", Name: "file2.txt", UploadURL: "http://" + r.Host + "/s3/file2"},
@@ -447,7 +446,6 @@ func TestDownloadBulk(t *testing.T) {
 			})
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/commands/"):
-			// Mock event.PollCommandExecution response
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"id":     "cmd-1",
 				"status": "completed",
@@ -474,13 +472,11 @@ func TestDownloadBulk(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify request body
 	assert.Equal(t, []string{"/path/file1.txt", "/path/file2.txt"}, bulkReq.Path)
 	assert.Equal(t, "server-id", bulkReq.Server)
 	assert.Equal(t, "admin", bulkReq.Username)
 	assert.Equal(t, "developers", bulkReq.Groupname)
 
-	// Verify extracted files exist
 	content1, err := os.ReadFile(filepath.Join(dest, "file1.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, "hello", string(content1))
@@ -489,7 +485,6 @@ func TestDownloadBulk(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "world", string(content2))
 
-	// Verify temp zip was cleaned up
 	_, err = os.Stat(filepath.Join(dest, "archive.zip"))
 	assert.True(t, os.IsNotExist(err))
 }
@@ -785,7 +780,6 @@ func TestPollTransferStatus_Timeout(t *testing.T) {
 	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// Always return nil success (pending state)
 		_ = json.NewEncoder(w).Encode(TransferStatusResponse{Success: nil, Message: "pending"})
 	}))
 	defer ts.Close()
@@ -938,8 +932,7 @@ func TestDownloadFile_InputValidation(t *testing.T) {
 
 func TestDownloadFile_SpaceInPath(t *testing.T) {
 	t.Parallel()
-	// Verify that a path with spaces is preserved as a single path,
-	// not split by whitespace (the old strings.Fields bug).
+	// A path with spaces stays one path, not split on whitespace.
 	serverResp := api.ListResponse[server.ServerDetails]{
 		Count:   1,
 		Results: []server.ServerDetails{{ID: "srv-123", Name: "my-server"}},
@@ -951,12 +944,10 @@ func TestDownloadFile_SpaceInPath(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(serverResp)
 		case r.URL.Path == "/api/webftp/downloads/" && r.Method == http.MethodPost:
-			// The download API should receive the full path with spaces
 			var req DownloadRequest
 			body, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(body, &req)
 			assert.Equal(t, "/path/my file.txt", req.Path)
-			// Return an error to stop the flow — we only care about path parsing
 			w.WriteHeader(http.StatusBadRequest)
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -970,8 +961,7 @@ func TestDownloadFile_SpaceInPath(t *testing.T) {
 	}
 
 	sources := []string{"my-server:/path/my file.txt"}
-	// Error expected since the mock doesn't complete the full flow,
-	// but the key assertion is that the path was not split.
+	// The mock ends the flow early, so the error is expected.
 	_ = DownloadFile(ac, sources, "/tmp/dest", "", "", false, "")
 }
 
@@ -1221,9 +1211,8 @@ func TestExecuteBulkUpload_WorkSession(t *testing.T) {
 	}
 }
 
-// TestDownloadFile_WorkSession verifies the WorkSession field is sent on both
-// single- and bulk-download create-requests when DownloadFile is invoked with
-// a non-empty workSessionID, and omitted when the ID is empty.
+// TestDownloadFile_WorkSession verifies the WorkSession field is sent on single and bulk
+// download create requests when set, and omitted when empty.
 func TestDownloadFile_WorkSession(t *testing.T) {
 	t.Parallel()
 	serverResp := api.ListResponse[server.ServerDetails]{
@@ -1293,8 +1282,6 @@ func TestDownloadFile_WorkSession(t *testing.T) {
 
 			ac := &client.AlpaconClient{HTTPClient: ts.Client(), BaseURL: ts.URL}
 
-			// Error expected because the mock short-circuits after capturing the body;
-			// we only assert on the captured request body.
 			_ = DownloadFile(ac, tt.sources, "/tmp/dest", "", "", false, tt.workSessionID)
 
 			v, present := rawBody["work_session"]

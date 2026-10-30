@@ -24,7 +24,6 @@ const (
 	testServerID    = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 )
 
-// recordedRequest is what the stub signer saw of one request.
 type recordedRequest struct {
 	Method string
 	Path   string
@@ -33,7 +32,6 @@ type recordedRequest struct {
 	Auth   string
 }
 
-// stubSigner answers every request with respond and records what it was sent.
 type stubSigner struct {
 	mu       sync.Mutex
 	requests []recordedRequest
@@ -409,7 +407,6 @@ func TestIssueEntries_SendsEveryEntryAsAServiceTokens(t *testing.T) {
 	assert.Nil(t, entries[0].ServerIDs, "the caller's slice is left as it was")
 }
 
-// Listing and revoking keep working for api_token entries already held.
 func TestListAndRevoke_KeepAPITokenEntries(t *testing.T) {
 	t.Parallel()
 	ac, _ := newStubSigner(t, func(r *http.Request) (int, string) {
@@ -426,8 +423,6 @@ func TestListAndRevoke_KeepAPITokenEntries(t *testing.T) {
 	require.NoError(t, RevokeEntry(ac, testEntryID))
 }
 
-// A workspace listed beside a false flag is not a grant: both halves of the
-// answer have to agree.
 func TestCapability_AdministersNeedsTheFlag(t *testing.T) {
 	t.Parallel()
 	capability := Capability{IsLedgerAdmin: false, WorkspaceIDs: []string{testWorkspaceID}}
