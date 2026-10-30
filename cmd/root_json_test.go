@@ -156,25 +156,26 @@ func TestExecuteJSONExecWebshAndCpArgumentFailuresAreUsageEnvelopes(t *testing.T
 	tests := []struct {
 		name        string
 		args        []string
+		wantCode    int
 		wantCommand string
 		wantMessage string
 	}{
-		{"exec unknown flag", []string{"exec", "--output", "json", "--bogus", "srv", "uptime"}, "exec", "unknown flag: --bogus"},
-		{"exec unknown flag with output last", []string{"exec", "--bogus", "--output=json"}, "exec", "unknown flag: --bogus"},
-		{"websh missing flag value", []string{"websh", "--output=json", "--work-session"}, "websh", "--work-session requires a value"},
-		{"websh flag after the server", []string{"websh", "my-server", "--output", "json", "--read-only=maybe"}, "websh", "--read-only value must be either"},
-		{"exec flag combination", []string{"exec", "--output", "json", "--detach", "--wait", "my-server", "--", "true"}, "exec", "--wait and --detach cannot be combined"},
-		{"exec flag without value", []string{"exec", "--output", "json", "--purpose"}, "exec", "flag needs an argument: --purpose"},
-		{"websh empty output keeps the earlier json", []string{"websh", "--output=json", "--output"}, "websh", "--output requires a value"},
-		{"websh without a server", []string{"websh", "--output", "json", "-s"}, "websh", "Server name is required"},
-		{"cp output after a bool bundle", []string{"cp", "-r", "--output", "json", "onlyone"}, "cp", "at least two arguments"},
+		{"exec unknown flag", []string{"exec", "--output", "json", "--bogus", "srv", "uptime"}, utils.ExitCodeGeneralError, "exec", "unknown flag: --bogus"},
+		{"exec unknown flag with output last", []string{"exec", "--bogus", "--output=json"}, utils.ExitCodeGeneralError, "exec", "unknown flag: --bogus"},
+		{"websh missing flag value", []string{"websh", "--output=json", "--work-session"}, utils.ExitCodeGeneralError, "websh", "--work-session requires a value"},
+		{"websh flag after the server", []string{"websh", "my-server", "--output", "json", "--read-only=maybe"}, utils.ExitCodeGeneralError, "websh", "--read-only value must be either"},
+		{"exec flag combination", []string{"exec", "--output", "json", "--detach", "--wait", "my-server", "--", "true"}, utils.ExitCodeGeneralError, "exec", "--wait and --detach cannot be combined"},
+		{"exec flag without value", []string{"exec", "--output", "json", "--purpose"}, utils.ExitCodeGeneralError, "exec", "flag needs an argument: --purpose"},
+		{"websh empty output keeps the earlier json", []string{"websh", "--output=json", "--output"}, utils.ExitCodeGeneralError, "websh", "--output requires a value"},
+		{"websh without a server", []string{"websh", "--output", "json", "-s"}, utils.ExitCodeGeneralError, "websh", "Server name is required"},
+		{"cp output after a bool bundle", []string{"cp", "-r", "--output", "json", "onlyone"}, utils.ExitCodeUsageError, "cp", "at least two arguments"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr, code := runExecuteHelper(t, tt.args...)
 
-			assert.Equal(t, utils.ExitCodeGeneralError, code)
+			assert.Equal(t, tt.wantCode, code)
 			assert.Empty(t, stdout)
 			env := lastEnvelopeOfStderr(t, stderr)
 			assert.Equal(t, utils.ErrorCodeUsage, env["error_code"])
@@ -193,7 +194,7 @@ func TestExecuteTableModeWhenAValueFlagTakesTheOutputToken(t *testing.T) {
 		wantMessage string
 	}{
 		{"event wait type value", []string{"event", "wait", "--type", "--output=json", "--timeout", "0"}, utils.ExitCodeUsageError, "--timeout must be positive"},
-		{"cp bundle ending in a value flag", []string{"cp", "-ru", "--output=json", "onlyone"}, utils.ExitCodeGeneralError, "You must specify at least two arguments"},
+		{"cp bundle ending in a value flag", []string{"cp", "-ru", "--output=json", "onlyone"}, utils.ExitCodeUsageError, "You must specify at least two arguments"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

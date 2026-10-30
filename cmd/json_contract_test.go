@@ -92,10 +92,10 @@ func TestJSONContractFailuresThatAreNotBadFlags(t *testing.T) {
 		{"exec flag without value", []string{"exec", "-u"}, 1, "exec", "usage_error"},
 		{"websh without a server", []string{"websh"}, 1, "websh", "usage_error"},
 		{"websh share with a remote command", []string{"websh", "--share", "my-server", "uptime"}, 1, "websh", "usage_error"},
-		{"cp without arguments", []string{"cp"}, 1, "cp", "usage_error"},
-		{"cp with two local paths", []string{"cp", "a", "b"}, 1, "cp", "usage_error"},
-		{"cp with two users", []string{"cp", "alice@my-server:/a", "bob@my-server:/b", "out"}, 1, "cp", "usage_error"},
-		{"cp mixing local and remote sources", []string{"cp", "a", "my-server:/b", "my-server:/c"}, 1, "cp", "usage_error"},
+		{"cp without arguments", []string{"cp"}, 2, "cp", "usage_error"},
+		{"cp with two local paths", []string{"cp", "a", "b"}, 2, "cp", "usage_error"},
+		{"cp with two users", []string{"cp", "alice@my-server:/a", "bob@my-server:/b", "out"}, 2, "cp", "usage_error"},
+		{"cp mixing local and remote sources", []string{"cp", "a", "my-server:/b", "my-server:/c"}, 2, "cp", "usage_error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
