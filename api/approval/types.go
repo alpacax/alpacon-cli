@@ -21,6 +21,7 @@ type ApprovalRequest struct {
 
 // ApprovalMetadata is the part of an approval's metadata the CLI renders.
 type ApprovalMetadata struct {
+	CommandID   string            `json:"command_id"`
 	Command     *CommandDetail    `json:"command"`
 	Sudo        *SudoDetail       `json:"sudo"`
 	Intent      string            `json:"intent"`

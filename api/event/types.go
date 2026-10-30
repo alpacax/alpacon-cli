@@ -8,6 +8,7 @@ import (
 
 	"github.com/alpacax/alpacon-cli/api"
 	"github.com/alpacax/alpacon-cli/api/types"
+	"github.com/alpacax/alpacon-cli/utils"
 )
 
 // phaseDescriptions humanizes server-classified error_phase identifiers.
@@ -171,8 +172,7 @@ type EventDetails struct {
 	// FileExecutionSuggestion is set on a held command line the server reads as
 	// a script on the target; absent otherwise and on older servers.
 	FileExecutionSuggestion *FileExecutionSuggestion `json:"file_execution_suggestion"`
-	// RejectionCause says why a rejected command was refused when the gate,
-	// not a reviewer, decided it; empty otherwise and on older servers.
+	// RejectionCause says why a rejected command was refused; empty on older servers.
 	RejectionCause string `json:"rejection_cause"`
 	// The account the command ran as and the work session it ran under, so a
 	// re-run printed from the detail repeats them. WorkSession is null when the
@@ -314,8 +314,10 @@ func (e *CommandRejectedError) Error() string {
 	switch {
 	case e.Cause == RejectionCauseUseFileExecution:
 		reason = "was refused because its command line carries a script body (" + RejectionCauseUseFileExecution + ")"
-	case e.Expired:
-		reason = "was not approved before the request expired"
+	case e.Cause == "approval_expired" || e.Expired:
+		reason = "was not approved before the approval request expired"
+	case e.Cause != "" && e.Cause != "approval_rejected":
+		reason = "was refused (" + utils.SanitizeTerminalText(e.Cause) + ")"
 	}
 	if e.CommandID == "" {
 		return "command " + reason
@@ -323,14 +325,13 @@ func (e *CommandRejectedError) Error() string {
 	return fmt.Sprintf("command %s %s", e.CommandID, reason)
 }
 
-// ErrorCode returns use_file_execution for the --output json envelope; every
-// other refusal returns "" until the CLI has a sentence for its cause, since
-// Error() still reads it as a reviewer's.
+// ErrorCode preserves the rejection cause for callers that distinguish expiry,
+// a reviewer's decision, and other refusals without parsing the message.
 func (e *CommandRejectedError) ErrorCode() string {
-	if e.Cause == RejectionCauseUseFileExecution {
-		return e.Cause
+	if e.Expired {
+		return "approval_expired"
 	}
-	return ""
+	return e.Cause
 }
 
 // ErrorSource completes the coded error the envelope reads; a rejection names

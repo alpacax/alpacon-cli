@@ -89,3 +89,27 @@ func CancelRequest(ac *client.AlpaconClient, id string) error {
 	_, err = ac.SendPostRequest(api.IDURL(approvalURL, pathID, "cancel", nil), struct{}{})
 	return err
 }
+
+// FindCommandApprovalRequestID reads the requester's pending command approvals:
+// the command detail does not carry the approval request's id.
+func FindCommandApprovalRequestID(ac *client.AlpaconClient, commandID string) (string, error) {
+	if _, err := api.RequireID(commandID, "command"); err != nil {
+		return "", err
+	}
+	requests, err := api.FetchAllPages[ApprovalRequest](ac, myRequestsURL, map[string]string{
+		"status": "pending", "request_type": "command_exec",
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, request := range requests {
+		if request.Metadata != nil && request.Metadata.CommandID == commandID {
+			id, err := api.RequireResponseID(request.ID, "approval request")
+			if err != nil {
+				return "", err
+			}
+			return id.String(), nil
+		}
+	}
+	return "", nil
+}

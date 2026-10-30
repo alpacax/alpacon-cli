@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/alpacax/alpacon-cli/api/approval"
 	"github.com/alpacax/alpacon-cli/api/event"
 	"github.com/alpacax/alpacon-cli/client"
 	"github.com/alpacax/alpacon-cli/config"
@@ -57,9 +58,17 @@ Run the command again later to check for completion.`,
 
 		// Exit 0 would read as a command that finished with nothing to show.
 		if event.IsAwaitingApprovalStatus(details.Status) {
+			requestID, lookupErr := approval.FindCommandApprovalRequestID(alpaconClient, details.ID)
+			if lookupErr != nil {
+				utils.CliWarning("failed to read approval request: %s", lookupErr)
+			}
+			message := fmt.Sprintf("Approval required—this command is awaiting human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status)
+			if requestID != "" {
+				message = fmt.Sprintf("Approval required—this command is awaiting human approval (approval request: %s) in the Alpacon console (web); status %s. It runs automatically once approved.", utils.SanitizeTerminalText(requestID), details.Status)
+			}
 			utils.PrintPendingApproval(
-				fmt.Sprintf("Approval required—this command is held for human approval in the Alpacon console (web); status %s. It runs automatically once approved.", details.Status),
-				"", // the command detail carries no approval request id
+				message,
+				requestID,
 				utils.NextAction{Command: fmt.Sprintf("alpacon exec logs %s", details.ID)},
 			)
 			os.Exit(utils.ExitCodePendingApproval)
@@ -69,15 +78,15 @@ Run the command again later to check for completion.`,
 		// another approval request.
 		if event.IsRejectedStatus(details.Status) {
 			rejected := &event.CommandRejectedError{CommandID: details.ID, Cause: details.RejectionCause}
-			// The gate refused a script body on the command line: the reviewer
-			// sentence below would send the user to the wrong place.
+			// A script-body refusal has file-execution guidance of its own.
 			if rejected.Cause == event.RejectionCauseUseFileExecution {
 				accountFlags, accountNote := logsAccountFlags(details)
 				reportUseFileExecution(rejected, details.Server.Name, accountFlags, false, accountNote)
 				return
 			}
+			rejected.CommandID = ""
 			utils.CliErrorEnvelopeWithExitCode(utils.ExitCodeNotApproved, "command", rejected,
-				"command was rejected by a reviewer (status: %s)", details.Status)
+				"%s (status: %s)", rejected, details.Status)
 			return
 		}
 
@@ -104,6 +113,9 @@ Run the command again later to check for completion.`,
 		}
 
 		stdoutLine, stderrLine, exitCode := logsCommandOutcome(details)
+		if exitCode == 0 && stderrLine == "" {
+			stderrLine = fmt.Sprintf("command finished (status: %s).\n", utils.SanitizeTerminalText(details.Status))
+		}
 		// The command's own failure carries the remote exit code this command
 		// propagates, so it outranks an unreadable output—the order
 		// runCommandFallbackFromID keeps on the polling path.

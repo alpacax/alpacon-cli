@@ -227,7 +227,7 @@ func TestRunExecWithApprovalWait_RejectionEndsTheWaitWithoutAGrant(t *testing.T)
 		message string
 	}{
 		{"rejected", "rejected", "was rejected by a reviewer"},
-		{"expired", "expired", "was not approved before the request expired"},
+		{"expired", "expired", "was not approved before the approval request expired"},
 	}
 
 	for _, tt := range tests {

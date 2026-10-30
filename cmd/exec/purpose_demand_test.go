@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -189,4 +190,47 @@ func TestAwaitingPurposeStatusIsNotAnApproval(t *testing.T) {
 	// Not a running state either: treating it as one would poll a command that
 	// is waiting on this caller, until the window closed.
 	assert.False(t, event.IsRunningStatus("awaiting_purpose"))
+}
+
+func TestExecLogsAfterPurposeLapse(t *testing.T) {
+	cases := []struct {
+		name   string
+		status string
+		cause  string
+		result string
+		want   string
+		exit   int
+	}{
+		{name: "running", status: "running", want: "command is still running (status: running)", exit: 0},
+		{name: "finished", status: "completed", want: "command finished", exit: 0},
+		{name: "finished with output", status: "completed", result: "done", want: "command finished", exit: 0},
+		{name: "awaiting human approval", status: "awaiting_approval", want: "awaiting human approval (approval request: apr-1)", exit: utils.ExitCodePendingApproval},
+		{name: "refused", status: "rejected", cause: "risk_denied", want: "command was refused (risk_denied)", exit: utils.ExitCodeNotApproved},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/events/commands/" + purposeJobID + "/":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"id": purposeJobID, "status": tc.status, "rejection_cause": tc.cause,
+						"result": tc.result, "purpose": "", "purpose_expires_at": nil,
+					})
+				case "/api/approvals/approvals/-/":
+					assert.Equal(t, "pending", r.URL.Query().Get("status"))
+					assert.Equal(t, "command_exec", r.URL.Query().Get("request_type"))
+					_, _ = fmt.Fprintf(w, `{"count":2,"results":[{"id":"other","metadata":{"command_id":"other-command"}},{"id":"apr-1","metadata":{"command_id":%q}}]}`, purposeJobID)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+			stdout, stderr, exitCode := runExecLogsHelper(t, ts.URL, utils.OutputFormatTable, purposeJobID)
+			assert.Equal(t, tc.exit, exitCode, "stderr: %s", stderr)
+			assert.Equal(t, tc.result, strings.TrimSpace(strings.TrimSuffix(stdout, "PASS\n")))
+			assert.Contains(t, stderr, tc.want)
+			assert.NotContains(t, stderr, "Purpose required")
+		})
+	}
 }

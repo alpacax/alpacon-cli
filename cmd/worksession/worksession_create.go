@@ -54,6 +54,9 @@ var workSessionCreateCmd = &cobra.Command{
 	Short: "Create a new work session",
 	Long: `Create a new work session.
 
+The session purpose is what the assessor judges each command against. An agent
+should pass --purpose with each command, which skips the purpose demand entirely.
+
 Set the session lifetime with --expires-in (relative, e.g. 2h) or --expires-at
 (absolute RFC3339); one is required in non-interactive mode.
 

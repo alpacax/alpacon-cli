@@ -237,12 +237,8 @@ func TestExecReviewerRejectionKeepsItsSentence(t *testing.T) {
 	assert.NotContains(t, stderr, "--file")
 }
 
-// TestReviewerRejectionCauseKeepsItsSentence pins that the approval_rejected
-// cause a reviewer's refusal carries stays off the file lane on both exec and
-// exec logs: exit 6, the reviewer sentence, no --file guidance, and the
-// envelope's not_approved code rather than use_file_execution.
-func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
-	t.Parallel()
+// Expiry and human rejection share exit 6 but carry distinct messages and JSON codes.
+func TestApprovalRejectionCauseMessages(t *testing.T) {
 	cases := []struct {
 		name   string
 		format string
@@ -267,6 +263,24 @@ func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
 			},
 		},
 		{
+			name:   "exec wait table",
+			format: utils.OutputFormatTable,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--wait", "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
+			name:   "exec wait json",
+			format: utils.OutputFormatJSON,
+			run: func(t *testing.T, serverURL, _ string) (string, int) {
+				t.Helper()
+				_, stderr, exitCode := runExecWaitHelper(t, serverURL, "--output", "json", "--wait", "prod", "--", "uptime")
+				return stderr, exitCode
+			},
+		},
+		{
 			name:   "exec logs table",
 			format: utils.OutputFormatTable,
 			run: func(t *testing.T, serverURL, format string) (string, int) {
@@ -285,27 +299,36 @@ func TestReviewerRejectionCauseKeepsItsSentence(t *testing.T) {
 			},
 		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			ts := newRejectedCommandServer("approval_rejected")
-			defer ts.Close()
+	for _, cause := range []string{"approval_expired", "approval_rejected"} {
+		t.Run(cause, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					ts := newRejectedCommandServer(cause)
+					defer ts.Close()
 
-			stderr, exitCode := tc.run(t, ts.URL, tc.format)
-			assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
-			assert.Contains(t, stderr, "rejected by a reviewer")
-			assert.NotContains(t, stderr, "--file")
-			if tc.format != utils.OutputFormatJSON {
-				return
+					stderr, exitCode := tc.run(t, ts.URL, tc.format)
+					assert.Equal(t, utils.ExitCodeNotApproved, exitCode, "stderr: %s", stderr)
+					if cause == "approval_expired" {
+						assert.Contains(t, stderr, "was not approved before the approval request expired")
+						assert.NotContains(t, stderr, "rejected by a reviewer")
+					} else {
+						assert.Contains(t, stderr, "was rejected by a reviewer")
+						assert.NotContains(t, stderr, "request expired")
+					}
+					assert.NotContains(t, stderr, "--file")
+					if tc.format != utils.OutputFormatJSON {
+						return
+					}
+					// exec may print a polling-fallback warning ahead of the envelope,
+					// so the envelope starts at the last line that opens with a brace.
+					start := strings.LastIndex("\n"+stderr, "\n{")
+					require.GreaterOrEqual(t, start, 0, "stderr: %s", stderr)
+					var envelope cliErrorEnvelope
+					require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
+					assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
+					assert.Equal(t, cause, envelope.ErrorCode)
+				})
 			}
-			// exec may print a polling-fallback warning ahead of the envelope,
-			// so the envelope starts at the last line that opens with a brace.
-			start := strings.LastIndex("\n"+stderr, "\n{")
-			require.GreaterOrEqual(t, start, 0, "stderr: %s", stderr)
-			var envelope cliErrorEnvelope
-			require.NoError(t, json.Unmarshal([]byte(stderr[start:]), &envelope), "stderr: %s", stderr)
-			assert.Equal(t, utils.ExitCodeNotApproved, envelope.ExitCode)
-			assert.Equal(t, utils.ErrorCodeNotApproved, envelope.ErrorCode)
 		})
 	}
 }

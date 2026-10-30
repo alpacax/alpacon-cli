@@ -409,27 +409,33 @@ func TestErrorFromDetails_UseFileExecutionCarriesCause(t *testing.T) {
 	assert.Equal(t, RejectionCauseUseFileExecution, code)
 }
 
-// TestCommandRejectedError_OtherCausesHaveNoCode pins that only
-// use_file_execution reaches the envelope as error_code: a reviewer's refusal
-// arrives with rejection_cause approval_rejected, and a cause the CLI has no
-// sentence for keeps the reviewer message and no code.
-func TestCommandRejectedError_OtherCausesHaveNoCode(t *testing.T) {
+func TestCommandRejectedError_CauseMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name  string
 		cause string
+		want  string
 	}{
-		{name: "no cause", cause: ""},
-		{name: "reviewer rejection", cause: "approval_rejected"},
-		{name: "unknown cause", cause: "risk_denied"},
+		{cause: "approval_expired", want: "was not approved before the approval request expired"},
+		{cause: "approval_rejected", want: "was rejected by a reviewer"},
+		{cause: "command_acl_denied", want: "was refused (command_acl_denied)"},
+		{cause: "command_acl_unavailable", want: "was refused (command_acl_unavailable)"},
+		{cause: "risk_denied", want: "was refused (risk_denied)"},
+		{cause: "risk_unavailable", want: "was refused (risk_unavailable)"},
+		{cause: "approval_policy_denied", want: "was refused (approval_policy_denied)"},
+		{cause: "approval_cancelled", want: "was refused (approval_cancelled)"},
+		{cause: "work_session_terminated", want: "was refused (work_session_terminated)"},
+		{cause: "account_bound_to_other_person", want: "was refused (account_bound_to_other_person)"},
+		{cause: "unsigned_file", want: "was refused (unsigned_file)"},
+		{cause: "signature_invalid", want: "was refused (signature_invalid)"},
+		{cause: "future_cause", want: "was refused (future_cause)"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.cause, func(t *testing.T) {
 			t.Parallel()
 			err := errorFromDetails(EventDetails{ID: "cmd-9", Status: "rejected", RejectionCause: tc.cause})
 			code, _ := utils.ParseErrorResponse(err)
-			assert.Empty(t, code)
-			assert.Equal(t, "command cmd-9 was rejected by a reviewer", err.Error())
+			assert.Equal(t, tc.cause, code)
+			assert.Equal(t, "command cmd-9 "+tc.want, err.Error())
 		})
 	}
 }
