@@ -42,6 +42,7 @@ func StubClient(fn func(*http.Request) (status int, body string)) *http.Client {
 
 // HandlerClient returns an http.Client that serves every request from h in
 // memory, so a handler that sets headers runs where StubClient's fn cannot.
+// TODO: replace with httptest.NewTestServer once go.mod moves to Go 1.27.
 func HandlerClient(h http.Handler) *http.Client {
 	return &http.Client{Transport: handlerTransport{h}}
 }
