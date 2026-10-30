@@ -59,7 +59,7 @@ var csrCreateCmd = &cobra.Command{
 
 		nonInteractive := cmd.Flags().Changed("domain") || cmd.Flags().Changed("ip")
 		if !nonInteractive && (cmd.Flags().Changed("valid-days") || cmd.Flags().Changed("key") || cmd.Flags().Changed("out")) {
-			utils.CliErrorWithExit("--valid-days, --key, and --out require --domain or --ip to be specified.")
+			utils.CliUsageErrorWithExit("--valid-days, --key, and --out require --domain or --ip to be specified.")
 		}
 		if nonInteractive {
 			if cmd.Flags().Changed("valid-days") {
@@ -67,7 +67,7 @@ var csrCreateCmd = &cobra.Command{
 			}
 			signRequest = newSignRequest(csrFlags.domains, csrFlags.ips, csrFlags.validDays)
 			if len(signRequest.DomainList) == 0 && len(signRequest.IpList) == 0 {
-				utils.CliErrorWithExit("You must provide at least one valid domain or IP address.")
+				utils.CliUsageErrorWithExit("You must provide at least one valid domain or IP address.")
 			}
 			commonName := firstOf(signRequest.DomainList, signRequest.IpList)
 			certPath.PrivateKeyPath = csrFlags.keyPath

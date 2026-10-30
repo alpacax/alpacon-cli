@@ -189,9 +189,9 @@ const (
 
 	// ExitCodeUsageError is the process exit code for a flag or argument a command
 	// rejected in its own validation. It is distinct from ExitCodeGeneralError (1):
-	// 1 means the request failed (network, server), 2 means the invocation itself
-	// was wrong. Scripts and AI agents branch on it to fix the command line rather
-	// than retry unchanged.
+	// 1 means a command line that passed those checks failed (network, server,
+	// environment), 2 means the invocation itself was wrong. Scripts and AI agents
+	// branch on it to fix the command line rather than retry unchanged.
 	ExitCodeUsageError = 2
 
 	// ExitCodeWorkSessionDenied is the process exit code for WorkSession gate refusals.

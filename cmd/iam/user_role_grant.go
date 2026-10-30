@@ -2,8 +2,10 @@ package iam
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
+	"github.com/alpacax/alpacon-cli/api/iam"
 	"github.com/alpacax/alpacon-cli/api/mfa"
 	"github.com/alpacax/alpacon-cli/api/rbac"
 	"github.com/alpacax/alpacon-cli/client"
@@ -104,15 +106,26 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 		return role
 	}
 
-	if !errors.Is(err, rbac.ErrBlankName) {
-		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil {
-			utils.CliErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
+	missingID := utils.IsUUID(strings.TrimSpace(roleArg)) && utils.HTTPStatusCode(err) == http.StatusNotFound
+	if errors.Is(err, rbac.ErrNotFound) || missingID {
+		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil && !mayNameAUser(ac, userArg) {
+			utils.CliUsageErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
 				roleArg, userArg, verb, roleArg, userArg)
 		}
 	}
 
 	utils.CliErrorWithExit("Failed to resolve the role: %s.", describeRBACError(ac, gateRoleRead, err))
 	return nil
+}
+
+// mayNameAUser is false only when the lookup answered that no user has this name, so the
+// order is certain; a role ID given first names no user.
+func mayNameAUser(ac *client.AlpaconClient, arg string) bool {
+	if utils.IsUUID(strings.TrimSpace(arg)) {
+		return false
+	}
+	_, err := iam.GetUserIDByName(ac, arg)
+	return !errors.Is(err, rbac.ErrNotFound)
 }
 
 // Trim once, so the value warnMissingReason judges is the value the server records.

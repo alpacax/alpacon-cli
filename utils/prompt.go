@@ -140,7 +140,7 @@ func PromptForListInput(promptText string) []string {
 // Returns on confirm; exits the program on decline.
 func ConfirmAction(msg string, args ...any) {
 	if !IsInteractiveShell() {
-		CliErrorWithExit("This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
+		CliErrorWithCode(ExitCodeUsageError, ErrorCodeConfirmationRequired, "This operation requires confirmation. Use --yes (-y) to skip the prompt in non-interactive mode.")
 	}
 	if !PromptForBool(confirmPrompt(msg, args...)) {
 		CliInfoWithExit("Operation cancelled.")

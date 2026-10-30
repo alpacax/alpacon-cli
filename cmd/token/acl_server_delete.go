@@ -50,7 +50,7 @@ func runServerAclDelete(cmd *cobra.Command, args []string) {
 
 		names := utils.SplitAndTrim(serversCSV, ",")
 		if len(names) == 0 {
-			utils.CliErrorWithExit("--servers must contain at least one server name.")
+			utils.CliUsageErrorWithExit("--servers must contain at least one server name.")
 		}
 		serverIDs, err := resolveServerIDs(alpaconClient, names)
 		if err != nil {

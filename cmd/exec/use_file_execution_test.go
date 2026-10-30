@@ -3,6 +3,7 @@ package exec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -537,4 +538,45 @@ func TestReportCodedRefusalInvalidIDHelperProcess(t *testing.T) {
 	utils.OutputFormat = format
 	err := fmt.Errorf("work session ID: %w", utils.ErrInvalidID)
 	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "work session ID is unusable", "", nil)
+}
+
+func TestReportCodedRefusalOfAUsageErrorExitsTwoOnlyInPlaceOfOne(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		code     string
+		wantExit int
+	}{
+		{name: "exit code 1 becomes 2", code: "1", wantExit: utils.ExitCodeUsageError},
+		{name: "a chosen exit code other than 1 is kept", code: "6", wantExit: utils.ExitCodeNotApproved},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			helper := osexec.Command(os.Args[0], "-test.run=^TestReportCodedRefusalUsageErrorHelperProcess$")
+			helper.Env = append(os.Environ(), "GO_WANT_CODED_REFUSAL_USAGE_HELPER="+tc.code)
+			var stderr bytes.Buffer
+			helper.Stderr = &stderr
+
+			err := helper.Run()
+
+			var exitErr *osexec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			assert.Equal(t, tc.wantExit, exitErr.ExitCode())
+			assert.Contains(t, stderr.String(), "the flag is unusable.")
+		})
+	}
+}
+
+func TestReportCodedRefusalUsageErrorHelperProcess(t *testing.T) {
+	code := os.Getenv("GO_WANT_CODED_REFUSAL_USAGE_HELPER")
+	if code == "" {
+		return
+	}
+	utils.OutputFormat = utils.OutputFormatTable
+	err := utils.MarkUsageError(errors.New("bad flag"))
+	if code == "1" {
+		reportCodedRefusal("command", err, "the flag is unusable", "")
+	}
+	reportCodedRefusalWithExit(utils.ExitCodeNotApproved, "command", err, "the flag is unusable", "", nil)
 }

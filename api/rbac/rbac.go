@@ -36,6 +36,9 @@ const (
 // ordinary not-found.
 var ErrBlankName = api.ErrBlankName
 
+// ErrNotFound is re-exported for the same reason: ResolveRole's miss, told from a failed request.
+var ErrNotFound = api.ErrNotFound
+
 // auto_assigned asks the server which roles it counts as assigned on its own; false is not
 // a list of what the caller may grant. Which roles count differs by Alpacon release and the
 // response carries no such field, so only the server can tell.

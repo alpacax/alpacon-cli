@@ -51,9 +51,10 @@ func CliError(msg string, args ...any) {
 	reportCLIError()
 }
 
-// CliErrorWithExit handles all error messages in the CLI. Under --output json it prints
-// one envelope instead, classified from the first error in args, and no footer.
+// CliErrorWithExit handles all error messages in the CLI and exits 1, or 2 when an argument is a usage
+// error. Under --output json it prints one envelope instead, classified from the first error in args, and no footer.
 func CliErrorWithExit(msg string, args ...any) {
+	ExitIfUsageError(ExitCodeGeneralError, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(1, "", msg, args)
 	}
@@ -66,6 +67,7 @@ func CliErrorWithExit(msg string, args ...any) {
 // Unlike CliErrorWithExit it omits the "report an issue" footer—use it for expected,
 // machine-distinguishable refusals (e.g. a busy server) that scripts branch on by exit code.
 func CliErrorWithExitCode(code int, msg string, args ...any) {
+	ExitIfUsageError(code, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(code, "", msg, args)
 	}
@@ -76,6 +78,7 @@ func CliErrorWithExitCode(code int, msg string, args ...any) {
 // CliErrorWithCode names the json error_code (an ErrorCode* constant); table mode follows the
 // exit code, so only exit 1 keeps the report footer.
 func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
+	ExitIfUsageError(exitCode, "", nil, msg, args...)
 	if OutputFormat == OutputFormatJSON {
 		exitWithEnvelope(exitCode, errorCode, msg, args)
 	}
@@ -83,6 +86,11 @@ func CliErrorWithCode(exitCode int, errorCode string, msg string, args ...any) {
 		CliErrorWithExit(msg, args...)
 	}
 	CliErrorWithExitCode(exitCode, msg, args...)
+}
+
+// CliUsageErrorWithExit reports a flag or argument the command rejected and exits 2 with error_code usage_error.
+func CliUsageErrorWithExit(msg string, args ...any) {
+	CliUsageErrorEnvelopeWithExit("", msg, args...)
 }
 
 func exitWithEnvelope(exitCode int, errorCode, msg string, args []any) {

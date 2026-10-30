@@ -27,7 +27,7 @@ The token key is displayed once at creation time and cannot be retrieved again.`
 		expiresInDays, _ := cmd.Flags().GetInt("expires-in-days")
 
 		if expiresInDays < 0 {
-			utils.CliErrorWithExit("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
+			utils.CliUsageErrorWithExit("--expires-in-days must be 0 (the workspace maximum) or a positive number, got %d.", expiresInDays)
 		}
 
 		interactive := name == ""

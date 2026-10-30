@@ -571,7 +571,7 @@ func TestLoginNonInteractiveNoTargetCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, stderr, exitCode := runLoginCommandHelper(t, tt.args)
 
-			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, utils.ExitCodeUsageError, exitCode)
 			assert.Contains(t, stderr, "login target is required in non-interactive mode")
 			assert.Contains(t, stderr, "--workspace and --region")
 			assert.NotContains(t, stderr, "Using saved workspace")
@@ -870,7 +870,7 @@ func TestLoginCommandHelperProcess(t *testing.T) {
 	}
 	args, ok := helperArgsAfter(os.Args, "login-helper")
 	if !ok {
-		os.Exit(2)
+		os.Exit(99)
 	}
 	RootCmd.SetArgs(args)
 	if err := RootCmd.Execute(); err != nil {

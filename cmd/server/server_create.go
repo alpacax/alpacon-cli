@@ -65,7 +65,7 @@ var serverCreateCmd = &cobra.Command{
 	`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if refusal := flagRefusal(cmd, utils.IsInteractiveShell()); refusal != "" {
-			utils.CliErrorWithExit("%s", refusal)
+			utils.CliUsageErrorWithExit("%s", refusal)
 		}
 
 		alpaconClient, err := client.NewAlpaconAPIClient()
@@ -127,7 +127,7 @@ func init() {
 func resolveMethod(cmd *cobra.Command) string {
 	if cmd.Flags().Changed("method") {
 		if refusal := methodRefusal(createMethod); refusal != "" {
-			utils.CliErrorWithExit("%s", refusal)
+			utils.CliUsageErrorWithExit("%s", refusal)
 		}
 		return createMethod
 	}
@@ -142,7 +142,7 @@ func resolveMethod(cmd *cobra.Command) string {
 func resolvePlatform(cmd *cobra.Command, method string) string {
 	if cmd.Flags().Changed("platform") {
 		if refusal := platformRefusal(method, createPlatform); refusal != "" {
-			utils.CliErrorWithExit("%s", refusal)
+			utils.CliUsageErrorWithExit("%s", refusal)
 		}
 		return createPlatform
 	}
@@ -249,7 +249,7 @@ func selectMethod() string {
 func selectPlatform(method string) string {
 	allowed, list := platformsForMethod(method)
 	if !utils.IsInteractiveShell() {
-		utils.CliErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
+		utils.CliUsageErrorWithExit("Non-interactive mode requires --platform. Valid values: %s.", list)
 	}
 	return promptPlatform(allowed, list, utils.PromptForInput)
 }
@@ -276,7 +276,7 @@ func promptForServerName() string {
 // or create a new one. Returns the selected or newly created token UUID.
 func selectOrCreateToken(ac *client.AlpaconClient) string {
 	if !utils.IsInteractiveShell() {
-		utils.CliErrorWithExit("Non-interactive mode requires --token or --new-token.")
+		utils.CliUsageErrorWithExit("Non-interactive mode requires --token or --new-token.")
 	}
 	tokens, err := server.ListRegistrationTokens(ac)
 	if err != nil {
