@@ -69,7 +69,8 @@ func runExitCases(t *testing.T, cases []exitCase) {
 
 // exitStubServer answers the lookups commands make before they refuse: the current user, a role
 // named admin, and a download of a file over edit's 10 MB limit from big-server; a role named
-// flaky answers 503, one named gone and the missing role ID 404, and anything else is an empty list.
+// flaky answers 503, one named gone and the missing role ID 404, operator names both a role and a
+// user, and anything else is an empty list.
 func exitStubServer() *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,6 +79,10 @@ func exitStubServer() *httptest.Server {
 			_, _ = w.Write([]byte(`{"username":"alice","is_staff":true,"is_superuser":true}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "admin":
 			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitUserUUID + `","name":"admin"}]}`))
+		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "operator":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitMissingRoleUUID + `","name":"operator"}]}`))
+		case r.URL.Path == "/api/iam/users/" && r.URL.Query().Get("username") == "operator":
+			_, _ = w.Write([]byte(`{"count":1,"results":[{"id":"` + exitUserUUID + `","username":"operator"}]}`))
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "flaky":
 			w.WriteHeader(http.StatusServiceUnavailable)
 		case r.URL.Path == "/api/rbac/roles/" && r.URL.Query().Get("name") == "gone":
@@ -207,6 +212,8 @@ func TestCommandsExitOneWhenAValidCommandLineFails(t *testing.T) {
 	runExitCases(t, []exitCase{
 		{name: "user role grant whose role lookup fails", args: []string{"user", "role", "grant", "admin", "flaky"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "Failed to resolve the role"},
 		{name: "user role grant whose role lookup by name answers 404", args: []string{"user", "role", "grant", "admin", "gone"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "Failed to resolve the role"},
+		{name: "user role grant to a user who shares a role name", args: []string{"user", "role", "grant", "operator", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
+		{name: "user role revoke from a user who shares a role name", args: []string{"user", "role", "revoke", "operator", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 		{name: "user role grant of a role the server does not have", args: []string{"user", "role", "grant", "alice", "ghost"}, wantExit: utils.ExitCodeGeneralError, wantStderr: `no role named "ghost" is visible to you`},
 	})
 }
