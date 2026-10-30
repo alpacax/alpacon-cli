@@ -78,7 +78,7 @@ func FetchAllCursorPages[T any](ac *client.AlpaconClient, endpoint string, param
 }
 
 // FetchCursorPages follows the Elasticsearch cursor contract, accumulating up to limit items.
-// A walk that fails on an error isRestartableCursorError accepts is started again from the first
+// A walk that fails with an error accepted by isRestartableCursorError restarts from the first
 // page, up to cursorRestartLimit times.
 //
 // On failure the items collected so far come back alongside the error. They are one

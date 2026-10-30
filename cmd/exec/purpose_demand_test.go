@@ -158,7 +158,7 @@ func TestExecLogsAwaitingPurposeExits7(t *testing.T) {
 // TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand pins that --wait does not wait on a
 // purpose demand. The demand reaches the caller only because the PendingApprovalError branch and
 // isApprovalDenial both miss AwaitingPurposeError; folding it into either would sleep through the
-// ~60s window and spend the command's single chance on a wait, though the answer was this
+// demand window and spend the command's single chance on a wait, though the answer was this
 // caller's to give.
 func TestRunExecWithApprovalWait_DoesNotWaitOnAPurposeDemand(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

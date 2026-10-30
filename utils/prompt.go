@@ -183,7 +183,8 @@ func promptForBool(r io.Reader, prompt string) bool {
 // PrintDeviceCodePrompt prints the device code prompt and returns the URL it printed, the one the
 // browser must open, so the operator lands on the address they read. Both values come from the
 // authorization server: each is sanitized as a single line, since a newline would let the server
-// write its own line into the prompt, and before Blue and Bold, whose highlight sanitizing strips.
+// write its own line into the prompt. Sanitizing runs before Blue and Bold, since sanitizing
+// afterward would strip their escape sequences.
 func PrintDeviceCodePrompt(w io.Writer, verificationURI, userCode string) (printedURI string) {
 	uri, uriAltered := SanitizeTerminalLine(verificationURI)
 	code, codeAltered := SanitizeTerminalLine(userCode)

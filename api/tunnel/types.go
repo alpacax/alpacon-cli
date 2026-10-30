@@ -7,8 +7,8 @@ type TunnelSessionRequest struct {
 	TargetPort  int    `json:"target_port"`
 	Username    string `json:"username"`
 	Groupname   string `json:"groupname"`
-	ClientType  string `json:"client_type"`
-	WorkSession string `json:"work_session,omitempty"`
+	ClientType  string `json:"client_type"`            // cli, web or proxy (default: cli)
+	WorkSession string `json:"work_session,omitempty"` // Work-session UUID; omitted when empty
 }
 
 type TunnelSessionResponse struct {
