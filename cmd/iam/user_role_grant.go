@@ -105,7 +105,8 @@ func resolveRoleForBinding(ac *client.AlpaconClient, verb, userArg, roleArg stri
 		return role
 	}
 
-	if errors.Is(err, rbac.ErrNotFound) || utils.HTTPStatusCode(err) == http.StatusNotFound {
+	missingID := utils.IsUUID(strings.TrimSpace(roleArg)) && utils.HTTPStatusCode(err) == http.StatusNotFound
+	if errors.Is(err, rbac.ErrNotFound) || missingID {
 		if _, swapErr := rbac.ResolveRole(ac, userArg); swapErr == nil {
 			utils.CliUsageErrorWithExit("No role named %q, but %q is one. The user comes first: 'alpacon user role %s %s %s'.",
 				roleArg, userArg, verb, roleArg, userArg)
