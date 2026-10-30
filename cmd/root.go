@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/alpacax/alpacon-cli/cmd/acl"
 	"github.com/alpacax/alpacon-cli/cmd/agent"
@@ -86,6 +88,7 @@ func Execute() {
 	kube.ApplySurfaceGate(RootCmd, kubernetesSurfaceEnabled())
 	RootCmd.InitDefaultCompletionCmd()
 	markHookErrors(RootCmd)
+	keepWithOwnParser(RootCmd, os.Args[1:])
 	cmd, err := RootCmd.ExecuteC()
 	switch {
 	case err == nil:
@@ -97,6 +100,37 @@ func Execute() {
 	default:
 		utils.CliErrorWithExit("While executing the command: %s", err)
 	}
+}
+
+// keepWithOwnParser detaches the subcommands of a command that parses its own flags when a flag Cobra
+// does not know comes before the subcommand's name: Cobra took the server for that flag's value.
+func keepWithOwnParser(root *cobra.Command, args []string) {
+	cmd, _, err := root.Find(args)
+	if err != nil || !cmd.HasParent() || cmd.Parent() == root {
+		return
+	}
+	parent := cmd.Parent()
+	if parent.Parent() != root || !parent.DisableFlagParsing {
+		return
+	}
+	at := slices.IndexFunc(args, func(arg string) bool { return arg == parent.Name() || parent.HasAlias(arg) })
+	for _, arg := range args[at+1:] {
+		if arg == cmd.Name() || cmd.HasAlias(arg) {
+			return
+		}
+		if strings.HasPrefix(arg, "-") && !knownFlag(parent, arg) {
+			parent.RemoveCommand(parent.Commands()...)
+			return
+		}
+	}
+}
+
+func knownFlag(c *cobra.Command, arg string) bool {
+	if name, ok := strings.CutPrefix(arg, "--"); ok {
+		name, _, _ = strings.Cut(name, "=")
+		return c.Flags().Lookup(name) != nil
+	}
+	return len(arg) == 2 && c.Flags().ShorthandLookup(arg[1:]) != nil
 }
 
 // hookError marks an error a command's own hook returned; any other error is Cobra rejecting the command line.

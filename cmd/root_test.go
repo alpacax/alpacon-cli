@@ -261,3 +261,46 @@ func TestMarkHookErrorsKeepsTheCause(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 	assert.EqualError(t, err, "boom")
 }
+
+func newOwnParserTree() *cobra.Command {
+	root := &cobra.Command{Use: "tool"}
+	root.PersistentFlags().String("output", "table", "")
+	run := &cobra.Command{Use: "run", DisableFlagParsing: true, Run: func(*cobra.Command, []string) {}}
+	ls := &cobra.Command{Use: "ls", Aliases: []string{"list"}, Run: func(*cobra.Command, []string) {}}
+	ls.Flags().String("server", "", "")
+	run.AddCommand(ls)
+	root.AddCommand(run)
+	return root
+}
+
+func TestKeepWithOwnParserHandsAnUnknownFlagBeforeASubcommandToTheParent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "subcommand alone", args: []string{"run", "ls"}, want: "ls"},
+		{name: "subcommand alias", args: []string{"run", "list"}, want: "ls"},
+		{name: "subcommand flag after its name", args: []string{"run", "ls", "--server", "my-server"}, want: "ls"},
+		{name: "known flag before the subcommand", args: []string{"run", "--output", "json", "ls"}, want: "ls"},
+		{name: "known flag ahead of the parent", args: []string{"--output", "json", "run", "ls"}, want: "ls"},
+		{name: "unknown flag that took the server", args: []string{"run", "--bogus", "my-server", "ls"}, want: "run"},
+		{name: "subcommand flag before its name", args: []string{"run", "--server", "my-server", "ls"}, want: "run"},
+		{name: "unknown flag joined by equals", args: []string{"run", "--bogus=x", "ls"}, want: "run"},
+		{name: "unknown shorthand", args: []string{"run", "-s", "my-server", "list"}, want: "run"},
+		{name: "unknown flag after a leading known one", args: []string{"--output", "json", "run", "--bogus", "my-server", "ls"}, want: "run"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := newOwnParserTree()
+
+			keepWithOwnParser(root, tt.args)
+
+			cmd, _, err := root.Find(tt.args)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cmd.Name())
+		})
+	}
+}

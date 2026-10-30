@@ -228,7 +228,7 @@ Note: All flags must be placed before the server name.
 			return
 		}
 		if err != nil {
-			utils.CliParseErrorWithExit(cmd, execCmd.OutputFormatBeforeServer(cmd, args), err.Error())
+			utils.CliParseErrorWithExit(cmd, parsed.OutputFormat, err.Error())
 		}
 		if parsed.OutputFormat != "" {
 			if err := utils.SetOutputFormat(parsed.OutputFormat); err != nil {
@@ -338,12 +338,6 @@ func init() {
 	WebshCmd.AddCommand(webshInviteCmd)
 	WebshCmd.AddCommand(webshWatchCmd)
 	WebshCmd.AddCommand(webshRecordsCmd)
-
-	// Registered hidden so Cobra's subcommand lookup does not take the server after them for their value.
-	WebshCmd.Flags().BoolP("share", "s", false, "")
-	WebshCmd.Flags().Bool("read-only", false, "")
-	_ = WebshCmd.Flags().MarkHidden("share")
-	_ = WebshCmd.Flags().MarkHidden("read-only")
 }
 
 // isFlag reports whether arg is one of names, alone or as name=value.

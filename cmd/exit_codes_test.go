@@ -243,10 +243,7 @@ func TestExecutePrintsACobraParseErrorOnceWithAUsageHint(t *testing.T) {
 		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
 
 	assert.Equal(t, utils.ExitCodeUsageError, exitCode)
-	assert.Equal(t, 1, strings.Count(stderr, "unknown flag: --bogus"), "stderr: %s", stderr)
-	assert.Contains(t, stderr, "Run 'alpacon server ls --help' for usage.")
-	assert.NotContains(t, stderr, "Usage:")
-	assert.NotContains(t, stderr, "While executing the command")
+	assert.Equal(t, "Error: unknown flag: --bogus\nRun 'alpacon server ls --help' for usage.\n", stderr)
 }
 
 func TestExecuteKeepsTableOutputForACobraParseErrorWhenTheOutputValueIsInvalid(t *testing.T) {
@@ -318,8 +315,9 @@ func TestWebshAndExecParsersExitTwoOnABadCommandLine(t *testing.T) {
 		{name: "exec with an unknown flag", args: []string{"exec", "--bogus", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
 		{name: "websh with a separator before the server", args: []string{"websh", "--", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --"},
 		{name: "websh with an unknown flag after json output", args: []string{"websh", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
-		{name: "websh with an unknown flag before json output", args: []string{"websh", "--bogus", "--output", "json", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
-		{name: "exec with an unknown flag before json output", args: []string{"exec", "--bogus", "--output", "json", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
+		{name: "websh with an unknown flag before json output stops before reading it", args: []string{"websh", "--bogus", "--output", "json", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon websh --help' for usage."},
+		{name: "exec with an unknown flag before json output stops before reading it", args: []string{"exec", "--bogus", "--output", "json", "my-server", "uptime"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "exec attached short value and unknown flag before a remote command naming json output", args: []string{"exec", "-uroot", "--bogus", "my-server", "--output", "json"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
 		{name: "exec without a command under a leading json output", args: []string{"--output", "json", "exec", "my-server"}, wantExit: usage, wantStderr: "You must specify a command", wantCode: utils.ErrorCodeUsage},
 		{name: "exec with an unknown flag after json output", args: []string{"exec", "--output", "json", "--bogus", "my-server"}, wantExit: usage, wantStderr: "unknown flag: --bogus", wantCode: utils.ErrorCodeUsage},
 		{name: "websh share with a remote command under json output", args: []string{"websh", "--output", "json", "--share", "my-server", "whoami"}, wantExit: usage, wantStderr: "--share flag cannot be used", wantCode: utils.ErrorCodeUsage},
@@ -334,17 +332,39 @@ func TestExecAndWebshBoolFlagsDoNotTurnTheServerIntoAFlagValue(t *testing.T) {
 	const usage = utils.ExitCodeUsageError
 	runExitCases(t, []exitCase{
 		{name: "exec upload before a server and a command named like a subcommand", args: []string{"exec", "--upload", "my-server", "ls"}, wantExit: usage, wantStderr: "--upload requires --file"},
+		{name: "exec overwrite before a server and a command named like a subcommand", args: []string{"exec", "--overwrite", "my-server", "ls"}, wantExit: usage, wantStderr: "--overwrite requires --upload"},
+		{name: "exec from-server before a server and a command named like a subcommand", args: []string{"exec", "--from-server", "my-server", "ls"}, wantExit: usage, wantStderr: "--from-server requires --file"},
 		{name: "websh share before a server and a command named like a subcommand", args: []string{"websh", "-s", "my-server", "join"}, wantExit: usage, wantStderr: "--share flag cannot be used with remote commands"},
+		{name: "websh read-only before a server and a command named like a subcommand", args: []string{"websh", "--read-only", "my-server", "join"}, wantExit: utils.ExitCodeGeneralError, wantStderr: "failed to execute command on 'my-server' server"},
 	})
 }
 
-func TestExecDetachBeforeTheServerSubmitsARemoteCommandNamedLikeASubcommand(t *testing.T) {
+func TestExecAndWebshRefuseAnUnknownFlagThatWouldTakeTheServerAsItsValue(t *testing.T) {
 	t.Parallel()
+	const usage = utils.ExitCodeUsageError
+	runExitCases(t, []exitCase{
+		{name: "exec value flag it does not have before a server and a subcommand name", args: []string{"exec", "--server", "my-server", "ls"}, wantExit: usage, wantStderr: "unknown flag: --server\nRun 'alpacon exec --help' for usage."},
+		{name: "exec unknown flag before a server and a subcommand name", args: []string{"exec", "--bogus", "my-server", "logs"}, wantExit: usage, wantStderr: "unknown flag: --bogus\nRun 'alpacon exec --help' for usage."},
+		{name: "websh unknown flag before a server and a subcommand alias", args: []string{"websh", "--wrongflag", "my-server", "list"}, wantExit: usage, wantStderr: "unknown flag: --wrongflag\nRun 'alpacon websh --help' for usage."},
+		{name: "exec unknown flag under json output before a server and a subcommand name", args: []string{"exec", "--output", "json", "--server", "my-server", "ls"}, wantExit: usage, wantStderr: "unknown flag: --server", wantCode: utils.ErrorCodeUsage},
+	})
+}
 
-	stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"exec", "--detach", "my-server", "ls", "--output", "json"},
-		exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+func TestExecBoolFlagBeforeTheServerSubmitsARemoteCommandNamedLikeASubcommand(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ flag, wantStderr string }{
+		{flag: "--detach", wantStderr: "Error: failed to submit command on 'my-server'"},
+		{flag: "--wait", wantStderr: "Error: failed to execute command on 'my-server' server"},
+	} {
+		t.Run(tt.flag, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
-	assert.Empty(t, stdout)
-	assert.Contains(t, stderr, "Error: failed to submit command on 'my-server'", "the remote --output json must not reach alpacon")
+			stdout, stderr, exitCode := runHelperProcess(t, "TestExitCodeHelperProcess", exitHelperMarker, []string{"exec", tt.flag, "my-server", "ls", "--output", "json"},
+				exitHelperEnv+"=1", homeEnvVar()+"="+t.TempDir())
+
+			assert.Equal(t, utils.ExitCodeGeneralError, exitCode, "stderr: %s", stderr)
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, tt.wantStderr, "the remote --output json must not reach alpacon")
+		})
+	}
 }

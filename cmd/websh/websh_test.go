@@ -362,6 +362,7 @@ func TestParseWebshArgsRejectsAnUnknownFlagBeforeTheServer(t *testing.T) {
 		{name: "a flag that only shares the username prefix", args: []string{"--username-typo", "my-server"}, flag: "--username-typo"},
 		{name: "a flag that only shares the groupname prefix", args: []string{"--groupname-extra", "my-server"}, flag: "--groupname-extra"},
 		{name: "a flag that only shares the read-only prefix", args: []string{"--read-onlyx", "my-server"}, flag: "--read-onlyx"},
+		{name: "a short username with its value attached", args: []string{"-uadmin", "my-server"}, flag: "-uadmin"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -534,5 +535,28 @@ func TestSetupSudoListener_WarningCarriesTheServerHint(t *testing.T) {
 	assert.Contains(t, stderr, hint+"\r\n")
 	for line := range strings.SplitSeq(strings.TrimSuffix(stderr, "\n"), "\n") {
 		assert.True(t, strings.HasSuffix(line, "\r"), "line: %q", line)
+	}
+}
+
+func TestParseWebshArgsRefusalCarriesTheOutputReadBeforeIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "output ahead of an unknown flag", args: []string{"--output", "json", "--bogus", "my-server"}, want: "json"},
+		{name: "output after an unknown flag", args: []string{"--bogus", "--output", "json", "my-server"}},
+		{name: "output after read-only false and an unknown flag", args: []string{"--read-only", "false", "--bogus", "--output", "json", "my-server"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			parsed, err := ParseWebshArgs(tt.args)
+
+			require.Error(t, err)
+			assert.Equal(t, tt.want, parsed.OutputFormat)
+		})
 	}
 }

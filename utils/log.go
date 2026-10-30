@@ -90,7 +90,7 @@ func CliUsageErrorWithExit(msg string, args ...any) {
 }
 
 // CliParseErrorWithExit reports a command line cmd could not parse and exits 2 in format, the --output
-// value its caller scanned from the arguments; table mode points to cmd's help.
+// value its caller found before the parse stopped; table mode points to cmd's help.
 func CliParseErrorWithExit(cmd *cobra.Command, format, msg string) {
 	if format != "" {
 		_ = SetOutputFormat(format) // an invalid value keeps the current format

@@ -230,7 +230,7 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 			return
 		}
 		if parsed.Err != "" {
-			utils.CliParseErrorWithExit(cmd, OutputFormatBeforeServer(cmd, args), parsed.Err)
+			utils.CliParseErrorWithExit(cmd, parsed.OutputFormat, parsed.Err)
 			return
 		}
 		if parsed.OutputFormat != "" {
@@ -252,51 +252,6 @@ Requires an active WorkSession when using Browser login (Auth0); Token auth (API
 
 		RunRemoteExec(parsed)
 	},
-}
-
-// Cobra's subcommand lookup takes an unknown flag to need a value, so "exec --wait my-server ls"
-// would run the subcommand "exec ls"; registered hidden, the parser's bool flags take none.
-func init() {
-	for _, name := range []string{"wait", "detach", "upload", "overwrite", "from-server"} {
-		ExecCmd.Flags().Bool(name, false, "")
-		_ = ExecCmd.Flags().MarkHidden(name)
-	}
-}
-
-// OutputFormatBeforeServer is the last --output value among the flags ahead of the server name in
-// args; a flag cmd does not register as a bool takes the next word as its value unless it is a flag.
-func OutputFormatBeforeServer(cmd *cobra.Command, args []string) string {
-	var format string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" || !strings.HasPrefix(arg, "-") {
-			break
-		}
-		if value, ok := strings.CutPrefix(arg, "--output="); ok {
-			format = value
-			continue
-		}
-		if strings.Contains(arg, "=") || isBoolFlag(cmd, arg) || i+1 == len(args) || strings.HasPrefix(args[i+1], "-") {
-			continue
-		}
-		if arg == "--output" {
-			format = args[i+1]
-		}
-		i++
-	}
-	return format
-}
-
-func isBoolFlag(cmd *cobra.Command, arg string) bool {
-	name, long := strings.CutPrefix(arg, "--")
-	flag := cmd.Flags().Lookup(name)
-	if !long {
-		if len(arg) != 2 { // ShorthandLookup panics on a name longer than one letter
-			return false
-		}
-		flag = cmd.Flags().ShorthandLookup(arg[1:])
-	}
-	return flag != nil && flag.Value.Type() == "bool"
 }
 
 // RunRemoteExec is the shared post-parse execution path for exec and websh
