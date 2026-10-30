@@ -7,10 +7,9 @@ import (
 	"strings"
 )
 
-// StubTransport answers every request from fn, with no socket and no server
-// goroutine. A poll loop under testing/synctest needs that: the fake clock only
-// advances while every goroutine in the bubble is durably blocked, and a real
-// network read never counts as durably blocked.
+// StubTransport answers every request from Respond, with no socket and no server goroutine. A
+// poll loop under testing/synctest needs that: the fake clock only advances while every goroutine
+// in the bubble is durably blocked, and a real network read never counts as durably blocked.
 type StubTransport struct {
 	Respond func(*http.Request) (status int, body string)
 }

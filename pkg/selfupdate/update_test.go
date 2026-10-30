@@ -128,7 +128,7 @@ func TestRunRefusesWhileAnotherUpdateHoldsTheLock(t *testing.T) {
 
 func TestRunSweepsWhatAnEarlierUpdateCouldNotDelete(t *testing.T) {
 	opts, executable := updateFixture(t, noOwnerRunner)
-	installDir := filepath.Dir(executable) // Windows leaves the running executable behind on every update, so this sweep is the only thing that ever removes it.
+	installDir := filepath.Dir(executable) // Windows leaves the replaced executable behind; only this sweep removes it.
 	leftovers := []string{"alpacon.old.1735689600000000000", "alpacon.staged.1735689600000000000"}
 	for _, name := range leftovers {
 		require.NoError(t, os.WriteFile(filepath.Join(installDir, name), []byte("x"), 0600))

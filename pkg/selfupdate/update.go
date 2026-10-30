@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 )
 
-var ErrWorkDirUnavailable = errors.New("cannot create the download directory") // Separates the download's scratch directory from the install path: both refuse with EACCES, and sudo answers only one of them.
+var ErrWorkDirUnavailable = errors.New("cannot create the download directory") // Tells the scratch directory's EACCES from the install path's, which sudo fixes.
 
-// compareVersions reads an unparseable core as 0.0.0, so an importer that skips
-// IsUnknownVersion would have a dev build reinstall the latest release forever.
+// ErrUnknownVersion refuses a build no release can be placed against: compareVersions reads an
+// unparseable core as 0.0.0, so a dev build would otherwise reinstall the latest release forever.
 var ErrUnknownVersion = errors.New("the running build's version matches no release")
 
 type Options struct {
@@ -34,7 +34,7 @@ type Result struct {
 // release can mean months. A refused lock is somebody else's install.
 func sweepIfPossible(executablePath string) {
 	installDir, binaryName := filepath.Dir(executablePath), filepath.Base(executablePath)
-	if !hasSweepableEntry(installDir, binaryName) { // The lock file stays behind, and an install another tool owns never has anything to sweep.
+	if !hasSweepableEntry(installDir, binaryName) { // Taking the lock leaves a lock file; skip it when there is nothing to sweep.
 		return
 	}
 
@@ -77,9 +77,9 @@ func Run(opts Options) (Result, error) {
 		return Result{Kind: kind, Guidance: UpgradeGuidance(kind)}, nil
 	}
 
-	// The lock comes after every question that needs no write. It lives in the
-	// install directory, which for a deb or an rpm belongs to root, so taking it
-	// first turned "run apt-get instead" into "not writable, re-run with sudo".
+	// The lock comes after every question that needs no write: it lives in the install directory,
+	// which root owns for a deb or rpm, so taking it first would answer "not writable" instead of
+	// "run apt-get".
 	lock, err := AcquireLock(LockPath(opts.ExecutablePath))
 	if err != nil {
 		return Result{Kind: kind}, err

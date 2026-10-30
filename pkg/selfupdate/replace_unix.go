@@ -14,7 +14,7 @@ import (
 
 var writeReplacement = utils.SaveStreamAtomic
 
-func ReplaceBinary(targetPath, newBinaryPath string) error { // The 0755 handed to utils.SaveStreamAtomic is only a fallback for a target that does not exist: an installed binary keeps its own permission mode.
+func ReplaceBinary(targetPath, newBinaryPath string) error { // The 0755 below applies only to a missing target; an installed binary keeps its mode.
 	if err := refuseSymlinkTarget(targetPath); err != nil { // Before the copy, so a swapped target is not read at all.
 		return err
 	}

@@ -10,12 +10,11 @@ import (
 	"time"
 )
 
-// ErrOwnerUnknown separates "no package owns this" from "the query could not
-// answer". Both used to arrive as the empty string, which ClassifyPath reads as
-// a manual install and Run reads as permission to overwrite the file.
+// ErrOwnerUnknown separates "the query could not answer" from "no package owns this": an
+// empty owner reads to ClassifyPath as a manual install and to Run as permission to overwrite.
 var ErrOwnerUnknown = errors.New("cannot tell which package owns the binary")
 
-var packageQueryTimeout = 5 * time.Second // rpm takes a read lock on its database, so a package transaction running elsewhere would otherwise stall the update for as long as it lasts.
+var packageQueryTimeout = 5 * time.Second // rpm waits on its database lock while another transaction runs.
 
 // packageManagerPaths pins where a manager may live. $PATH would otherwise name
 // it, and 'sudo alpacon update'—the command this CLI prints itself—carries the

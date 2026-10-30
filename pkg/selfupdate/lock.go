@@ -11,7 +11,7 @@ import (
 var (
 	ErrUpdateInProgress = errors.New("another alpacon update is already running")
 
-	ErrLockUnavailable = errors.New("cannot open the update lock") // One shape for every way the lock can fail to open, and it names the lock, which no underlying message does.
+	ErrLockUnavailable = errors.New("cannot open the update lock") // Names the lock, which no underlying error does.
 )
 
 // Lock is the advisory lock that keeps two updates off one install path. The
@@ -29,10 +29,9 @@ func LockPath(executablePath string) string {
 }
 
 func AcquireLock(path string) (*Lock, error) {
-	// 0666, not 0600: the file holds nothing and the kernel is what makes the
-	// lock exclusive. A mode only its creator can open would shut every other
-	// account out of a group-writable install directory, and one
-	// 'sudo alpacon update' would leave a root-owned lock behind for good.
+	// 0666, not 0600: the kernel makes the lock exclusive. A creator-only mode would shut other
+	// accounts out of a group-writable install directory, and one 'sudo alpacon update' would
+	// leave a root-owned lock behind for good.
 	lock, err := filelock.Acquire(path, 0666)
 	if errors.Is(err, filelock.ErrLocked) {
 		return nil, ErrUpdateInProgress

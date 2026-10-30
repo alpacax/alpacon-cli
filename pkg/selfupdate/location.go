@@ -49,8 +49,8 @@ func classifyByPath(executablePath string) InstallKind {
 	return ""
 }
 
-func DetectInstallKind(run CommandRunner, executablePath string) (InstallKind, error) { // Keeps the two halves together: a caller that asks only one of them gets a different verdict from the other's.
-	if kind := classifyByPath(executablePath); kind != "" { // Two subprocess spawns, up to packageQueryTimeout each, for an answer the path already gave.
+func DetectInstallKind(run CommandRunner, executablePath string) (InstallKind, error) { // Both halves together: asking either alone can give a different verdict.
+	if kind := classifyByPath(executablePath); kind != "" { // Skips the package queries when the path settles it.
 		return kind, nil
 	}
 
