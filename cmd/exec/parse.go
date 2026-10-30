@@ -77,8 +77,8 @@ type RemoteExecArgs struct {
 	File *FileExecArgs
 }
 
-// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling. Flags are recognized
-// only before the server name, and all of them are read even on an error or -h, so OutputFormat holds the last --output.
+// ParseRemoteExecArgs parses raw CLI arguments with manual flag handling. Flags are recognized only
+// before the server name, and all are read even on an error or -h, so OutputFormat holds the last --output.
 //
 // The -- separator has two roles depending on position:
 //   - After the server name: everything after it is the remote command, with no further flag
