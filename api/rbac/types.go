@@ -188,8 +188,8 @@ func (b UserRoleResponse) IsWorkspaceWide() bool {
 	return b.ContentType == nil && (b.ObjectID == nil || *b.ObjectID == "")
 }
 
-// ScopeLabel prints content types as their numeric id: the CLI grants nothing object-scoped yet,
-// so resolving names via /api/rbac/content-types/ would not earn a request.
+// ScopeLabel prints content types as their numeric id: no CLI command grants an object-scoped
+// role, so resolving names via /api/rbac/content-types/ would not earn a request.
 func (b UserRoleResponse) ScopeLabel() string {
 	if b.IsWorkspaceWide() {
 		return "workspace"

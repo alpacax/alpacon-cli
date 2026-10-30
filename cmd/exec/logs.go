@@ -96,7 +96,7 @@ Run the command again later to check for completion.`,
 		}
 
 		// The stated purpose goes to stderr ahead of the outcome, keeping stdout the command's
-		// output. Sanitized here: text one principal wrote now reaches another principal's
+		// output. It is sanitized because text one principal wrote reaches another principal's
 		// terminal.
 		if details.Purpose != "" {
 			fmt.Fprintf(os.Stderr, "Stated purpose: %s\n",
